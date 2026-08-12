@@ -597,14 +597,9 @@ namespace MWGui
         if (stats.isDead() || stats.getAiSequence().isInCombat())
             return;
 
-        // A model assigned directly to the NPC record is the Construction Set
-        // mechanism used by Animated Morrowind-style actors (fishers, workers,
-        // etc.). Their authored controller owns both pose and facing, so do not
-        // inject dialogue gestures or rotate them toward the player.
-        const MWWorld::LiveCellRef<ESM::NPC>* npc = mPtr.get<ESM::NPC>();
-        if (npc && !npc->mBase->mModel.empty())
-            return;
-
+        // NPCs with an authored Construction Set model keep their custom pose
+        // controller, but they still participate in dialogue facing. Gesture
+        // injection for them is filtered in playDynamicDialogueAnimation().
         MWRender::Animation* animation = MWBase::Environment::get().getWorld()->getAnimation(mPtr);
         if (!animation)
             return;
@@ -612,7 +607,7 @@ namespace MWGui
         mDynamicDialogueActorActive = true;
         mDynamicDialogueActorHasOriginalYaw = true;
         mDynamicDialogueActorOriginalYaw = mPtr.getRefData().getPosition().rot[2];
-        mDynamicDialogueActorAnimationTimer = 0.2f;
+        mDynamicDialogueActorAnimationTimer = 0.1f;
         mDynamicDialogueActorTransitionTimer = 0.f;
         mDynamicDialogueActorSpeechCooldown = 0.f;
         mDynamicDialogueActorAnimationEnding = false;
@@ -629,6 +624,15 @@ namespace MWGui
         if (!mDynamicDialogueActorActive || mPtr.isEmpty()
             || !Settings::Manager::getBool("dynamic dialogue actor animations", "GUI"))
             return;
+
+        const MWWorld::LiveCellRef<ESM::NPC>* npc = mPtr.get<ESM::NPC>();
+        if (npc && !npc->mBase->mModel.empty())
+        {
+            // Preserve authored Animated-Morrowind-style controllers, while the
+            // dialogue facing code remains active for this actor.
+            mDynamicDialogueActorAnimationTimer = 2.f;
+            return;
+        }
 
         MWMechanics::CreatureStats& stats = mPtr.getClass().getCreatureStats(mPtr);
         if (stats.isDead() || stats.getAiSequence().isInCombat()
@@ -656,11 +660,11 @@ namespace MWGui
             if (mDynamicDialogueActorSpeechCooldown > 0.f)
                 return;
 
-            // Keep normal conversations restrained: voice playback does not need a new
-            // gesture for every sentence. Guards/arrest openings get their own stronger pool.
-            if (Misc::Rng::rollProbability() > 0.38f)
+            // Most voiced replies now receive a subtle gesture. Keep a small
+            // no-gesture chance so conversations still have natural pauses.
+            if (Misc::Rng::rollProbability() > 0.72f)
             {
-                mDynamicDialogueActorSpeechCooldown = randomRange(5.f, 9.f);
+                mDynamicDialogueActorSpeechCooldown = randomRange(2.f, 4.f);
                 return;
             }
         }
@@ -670,6 +674,10 @@ namespace MWGui
             { "IdleSpeak_handhip", MWRender::Animation::BlendMask_UpperBody, 0.88f, 0 },
             { "IdleSpeak_ready", MWRender::Animation::BlendMask_UpperBody, 0.88f, 0 },
             { "IdleSpeak", MWRender::Animation::BlendMask_UpperBody, 0.88f, 0 },
+            { "ArmsGesture", MWRender::Animation::BlendMask_UpperBody, 0.90f, 1 },
+            { "ArmsGesture_greet", MWRender::Animation::BlendMask_UpperBody, 0.90f, 1 },
+            { "sdppreachattentiveleft", MWRender::Animation::BlendMask_UpperBody, 0.94f, 1 },
+            { "sdppreachattentiveright", MWRender::Animation::BlendMask_UpperBody, 0.94f, 1 },
         };
         static const DialogueAnimation sIdleAnimations[] = {
             { "ArmsAkimbo", MWRender::Animation::BlendMask_UpperBody, 0.66f, 10 },
@@ -683,6 +691,10 @@ namespace MWGui
             { "Idle7_copy", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
             { "Idle8_copy", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
             { "ArmsGesture", MWRender::Animation::BlendMask_UpperBody, 0.88f, 1 },
+            { "ArmsGesture_greet", MWRender::Animation::BlendMask_UpperBody, 0.88f, 1 },
+            { "sdppreachattentive", MWRender::Animation::BlendMask_UpperBody, 0.90f, 2 },
+            { "sdppreachattentiveleft", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
+            { "sdppreachattentiveright", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
             { "ArmsSunShield", MWRender::Animation::BlendMask_UpperBody, 0.65f, 1 },
         };
         static const DialogueAnimation sGuardOpeningAnimations[] = {
@@ -694,11 +706,15 @@ namespace MWGui
         };
         static const DialogueAnimation sGuardSpeechAnimations[] = {
             { "sdppreachadmonish", MWRender::Animation::BlendMask_UpperBody, 1.00f, 1 },
+            { "sdppreachcommand01", MWRender::Animation::BlendMask_UpperBody, 1.00f, 1 },
             { "sdppreachcommand02", MWRender::Animation::BlendMask_UpperBody, 1.00f, 1 },
+            { "sdppreachcommand03", MWRender::Animation::BlendMask_UpperBody, 1.00f, 1 },
             { "sdppreachcommand04", MWRender::Animation::BlendMask_UpperBody, 1.00f, 1 },
             { "ArmsGesture", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
             { "IdleSpeak_ready", MWRender::Animation::BlendMask_UpperBody, 0.90f, 0 },
             { "IdleSpeak", MWRender::Animation::BlendMask_UpperBody, 0.90f, 0 },
+            { "sdppreachattentiveleft", MWRender::Animation::BlendMask_UpperBody, 0.94f, 1 },
+            { "sdppreachattentiveright", MWRender::Animation::BlendMask_UpperBody, 0.94f, 1 },
         };
         static const DialogueAnimation sGuardIdleAnimations[] = {
             { "sdpGuardPose", MWRender::Animation::BlendMask_UpperBody, 0.88f, 3 },
@@ -706,19 +722,30 @@ namespace MWGui
             { "sdpGuardPose3", MWRender::Animation::BlendMask_UpperBody, 0.88f, 3 },
             { "ArmsAtBack", MWRender::Animation::BlendMask_UpperBody, 0.68f, 8 },
             { "ReadyPose", MWRender::Animation::BlendMask_UpperBody, 0.70f, 6 },
+            { "sdppreachattentive", MWRender::Animation::BlendMask_UpperBody, 0.90f, 2 },
+            { "sdppreachattentiveleft", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
+            { "sdppreachattentiveright", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
             { "sdppreachscan", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
         };
         static const DialogueAnimation sReligiousSpeechAnimations[] = {
             { "sdppreachaddressspeakleft", MWRender::Animation::BlendMask_UpperBody, 0.94f, 1 },
             { "sdppreachaddressspeakright", MWRender::Animation::BlendMask_UpperBody, 0.94f, 1 },
+            { "sdppreachaddressspeak", MWRender::Animation::BlendMask_UpperBody, 0.94f, 1 },
+            { "sdppreachattentiveleft", MWRender::Animation::BlendMask_UpperBody, 0.94f, 1 },
+            { "sdppreachattentiveright", MWRender::Animation::BlendMask_UpperBody, 0.94f, 1 },
             { "sdppreachadmonish", MWRender::Animation::BlendMask_UpperBody, 0.96f, 1 },
+            { "sdppreachcommand01", MWRender::Animation::BlendMask_UpperBody, 0.96f, 1 },
             { "sdppreachcommand02", MWRender::Animation::BlendMask_UpperBody, 0.96f, 1 },
+            { "sdppreachcommand03", MWRender::Animation::BlendMask_UpperBody, 0.96f, 1 },
             { "IdleSpeak", MWRender::Animation::BlendMask_UpperBody, 0.88f, 0 },
         };
         static const DialogueAnimation sReligiousIdleAnimations[] = {
             { "sdppreachformal01", MWRender::Animation::BlendMask_UpperBody, 0.82f, 4 },
             { "sdppreachformal02", MWRender::Animation::BlendMask_UpperBody, 0.82f, 4 },
             { "sdppreachattentive", MWRender::Animation::BlendMask_UpperBody, 0.88f, 3 },
+            { "sdppreachattentiveleft", MWRender::Animation::BlendMask_UpperBody, 0.90f, 1 },
+            { "sdppreachattentiveright", MWRender::Animation::BlendMask_UpperBody, 0.90f, 1 },
+            { "sdppreachaddressidle", MWRender::Animation::BlendMask_UpperBody, 0.86f, 2 },
             { "armsAlmaPray", MWRender::Animation::BlendMask_UpperBody, 0.72f, 6 },
             { "PoseAlma3", MWRender::Animation::BlendMask_UpperBody, 0.80f, 4 },
             { "ArmsAtBack", MWRender::Animation::BlendMask_UpperBody, 0.68f, 6 },
@@ -726,7 +753,11 @@ namespace MWGui
         static const DialogueAnimation sFormalSpeechAnimations[] = {
             { "sdppreachaddressspeakleft", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
             { "sdppreachaddressspeakright", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
+            { "sdppreachaddressspeak", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
+            { "sdppreachattentiveleft", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
+            { "sdppreachattentiveright", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
             { "sdppreachcommand01", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
+            { "sdppreachcommand03", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
             { "ArmsGesture", MWRender::Animation::BlendMask_UpperBody, 0.86f, 1 },
             { "IdleSpeak", MWRender::Animation::BlendMask_UpperBody, 0.86f, 0 },
         };
@@ -734,6 +765,9 @@ namespace MWGui
             { "sdppreachformal01", MWRender::Animation::BlendMask_UpperBody, 0.78f, 5 },
             { "sdppreachformal02", MWRender::Animation::BlendMask_UpperBody, 0.78f, 5 },
             { "sdppreachattentive", MWRender::Animation::BlendMask_UpperBody, 0.84f, 3 },
+            { "sdppreachattentiveleft", MWRender::Animation::BlendMask_UpperBody, 0.88f, 1 },
+            { "sdppreachattentiveright", MWRender::Animation::BlendMask_UpperBody, 0.88f, 1 },
+            { "sdppreachaddressidle", MWRender::Animation::BlendMask_UpperBody, 0.82f, 2 },
             { "ArmsAtBack", MWRender::Animation::BlendMask_UpperBody, 0.64f, 8 },
             { "ArmsFolded", MWRender::Animation::BlendMask_UpperBody, 0.64f, 6 },
         };
@@ -801,7 +835,7 @@ namespace MWGui
 
         if (available.empty())
         {
-            mDynamicDialogueActorAnimationTimer = speaking ? 3.f : 12.f;
+            mDynamicDialogueActorAnimationTimer = speaking ? 2.f : 6.f;
             return;
         }
 
@@ -818,9 +852,9 @@ namespace MWGui
                 if (mDynamicDialogueActorOpening)
                     mDynamicDialogueActorOpening = false;
                 mDynamicDialogueActorAnimationTimer
-                    = speaking ? randomRange(7.f, 11.f) : randomRange(22.f, 40.f);
+                    = speaking ? randomRange(4.f, 7.f) : randomRange(10.f, 18.f);
                 if (speaking)
-                    mDynamicDialogueActorSpeechCooldown = randomRange(10.f, 18.f);
+                    mDynamicDialogueActorSpeechCooldown = randomRange(4.f, 7.f);
                 return;
             }
 
@@ -851,7 +885,7 @@ namespace MWGui
             mDynamicDialogueActorAnimation.clear();
             mDynamicDialogueActorLeftArmProtected = false;
             mDynamicDialogueActorAnimationSpeech = false;
-            mDynamicDialogueActorAnimationTimer = speaking ? 5.f : 14.f;
+            mDynamicDialogueActorAnimationTimer = speaking ? 2.5f : 6.f;
             return;
         }
 
@@ -867,9 +901,9 @@ namespace MWGui
         mDynamicDialogueActorAnimationEnding = false;
         mDynamicDialogueActorTransitionTimer = 0.f;
         mDynamicDialogueActorAnimationTimer
-            = speaking ? randomRange(7.f, 11.f) : randomRange(22.f, 40.f);
+            = speaking ? randomRange(4.f, 7.f) : randomRange(10.f, 18.f);
         if (speaking)
-            mDynamicDialogueActorSpeechCooldown = randomRange(10.f, 18.f);
+            mDynamicDialogueActorSpeechCooldown = randomRange(4.f, 7.f);
     }
 
     void DialogueWindow::updateDynamicDialogueActor(float dt)
@@ -904,11 +938,16 @@ namespace MWGui
                     const float targetYaw = std::atan2(delta.x(), delta.y());
                     const ESM::Position& position = mPtr.getRefData().getPosition();
                     const float difference = normalizeAngle(targetYaw - position.rot[2]);
-                    const float easedStep = difference * (1.f - std::exp(-4.5f * dt));
-                    const float maxStep = osg::DegreesToRadians(105.f) * dt;
-                    const float step = std::max(-maxStep, std::min(maxStep, easedStep));
-                    if (std::abs(step) > 0.0001f)
+                    if (std::abs(difference) <= osg::DegreesToRadians(1.5f))
                     {
+                        MWBase::Environment::get().getWorld()->rotateObject(
+                            mPtr, position.rot[0], position.rot[1], targetYaw);
+                    }
+                    else
+                    {
+                        const float easedStep = difference * (1.f - std::exp(-7.f * dt));
+                        const float maxStep = osg::DegreesToRadians(150.f) * dt;
+                        const float step = std::max(-maxStep, std::min(maxStep, easedStep));
                         MWBase::Environment::get().getWorld()->rotateObject(mPtr,
                             position.rot[0], position.rot[1], normalizeAngle(position.rot[2] + step));
                     }
@@ -984,7 +1023,7 @@ namespace MWGui
             mDynamicDialogueActorAnimation.clear();
             mDynamicDialogueActorLeftArmProtected = false;
             mDynamicDialogueActorAnimationSpeech = false;
-            mDynamicDialogueActorAnimationTimer = randomRange(6.f, 12.f);
+            mDynamicDialogueActorAnimationTimer = randomRange(3.f, 6.f);
         }
 
         if (speaking)

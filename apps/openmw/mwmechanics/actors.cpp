@@ -177,6 +177,24 @@ bool hasConstructionSetAnimation(const MWWorld::Ptr& ptr)
     return npc && !npc->mBase->mModel.empty();
 }
 
+void faceDialogueActorToPlayer(const MWWorld::Ptr& actor, const MWWorld::Ptr& player)
+{
+    if (actor.isEmpty() || player.isEmpty() || !actor.getClass().isNpc())
+        return;
+
+    const osg::Vec3f delta = player.getRefData().getPosition().asVec3()
+        - actor.getRefData().getPosition().asVec3();
+    if (delta.x() * delta.x() + delta.y() * delta.y() <= 1.f)
+        return;
+
+    // Dialogue in ArenaMW does not pause AI globally. Keep writing the desired
+    // yaw into the movement controller every mechanics frame so a Wander/Travel
+    // package cannot win the facing direction on alternate frames.
+    MWMechanics::Movement& movement = actor.getClass().getMovementSettings(actor);
+    movement.mRotation[2] = 0.f;
+    MWMechanics::zTurn(actor, std::atan2(delta.x(), delta.y()), osg::DegreesToRadians(1.f));
+}
+
 bool isContextualGuard(const MWWorld::Ptr& ptr)
 {
     if (ptr.isEmpty() || !ptr.getClass().isNpc())
@@ -687,7 +705,7 @@ namespace MWMechanics
             state.mEnding = false;
             state.mTransitionTimeout = 0.f;
             state.mLeftArmProtected = false;
-            state.mTimer = randomRange(5.f, 11.f);
+            state.mTimer = randomRange(2.f, 5.f);
             return;
         }
 
@@ -779,7 +797,7 @@ namespace MWMechanics
                 state.mAnimation.clear();
                 state.mEnding = false;
                 state.mTransitionTimeout = 0.f;
-                state.mTimer = randomRange(4.f, 9.f);
+                state.mTimer = randomRange(1.5f, 4.f);
             }
             return;
         }
@@ -821,7 +839,7 @@ namespace MWMechanics
                     dynamicIdleBlendMask(state.mLeftArmProtected), 1.f, 1, true);
                 state.mAnimation.clear();
                 state.mLeftArmProtected = false;
-                state.mTimer = randomRange(5.f, 12.f);
+                state.mTimer = randomRange(2.f, 5.f);
                 return;
             }
 
@@ -845,7 +863,7 @@ namespace MWMechanics
             && Misc::Rng::rollDice(100) < ambientHabitChance
             && ArenaMW::tryStartAmbientNpcHabit(ptr))
         {
-            state.mTimer = randomRange(18.f, 34.f);
+            state.mTimer = randomRange(9.f, 17.f);
             return;
         }
 
@@ -855,7 +873,7 @@ namespace MWMechanics
         // preaching to an empty room.
         bool nearbyNpc = false;
         std::vector<MWWorld::Ptr> nearbyObjects;
-        getObjectsInRange(ptr.getRefData().getPosition().asVec3(), 520.f, nearbyObjects);
+        getObjectsInRange(ptr.getRefData().getPosition().asVec3(), 720.f, nearbyObjects);
         for (const MWWorld::Ptr& other : nearbyObjects)
         {
             if (other == ptr || other.isEmpty() || !other.getClass().isNpc()
@@ -893,15 +911,22 @@ namespace MWMechanics
             { "petit", 0.90f, 1, 1 },
 
             // Casual social gestures are only used when there is actually someone nearby.
-            { "sdppreachattentive", 0.96f, 2, 2, true },
+            { "sdppreachattentive", 0.96f, 2, 3, true },
+            { "sdppreachattentiveleft", 0.96f, 1, 2, true },
+            { "sdppreachattentiveright", 0.96f, 1, 2, true },
+            { "sdppreachaddressspeak", 0.96f, 1, 2, true },
             { "sdppreachbeckon", 0.96f, 1, 1, true },
-            { "ArmsGesture_greet", 0.90f, 1, 1, true },
+            { "ArmsGesture_greet", 0.90f, 1, 2, true },
 
             // Guards get disciplined/formal poses rather than random prayer/preaching.
             { "sdpGuardPose", 0.88f, 3, 5, false, true, false },
             { "sdpGuardPose2", 0.88f, 3, 5, false, true, false },
             { "sdpGuardPose3", 0.88f, 3, 5, false, true, false },
             { "sdppreachscan", 0.92f, 1, 3, false, true, false },
+            { "sdppreachattentiveleft", 0.94f, 1, 2, false, true, false },
+            { "sdppreachattentiveright", 0.94f, 1, 2, false, true, false },
+            { "sdppreachcommand01", 0.96f, 1, 2, true, true, false },
+            { "sdppreachcommand03", 0.96f, 1, 2, true, true, false },
             { "sdppreachhold", 0.96f, 1, 1, true, true, false },
 
             // Temple staff / religious interiors can use the prayer and formal assets that
@@ -912,14 +937,26 @@ namespace MWMechanics
             { "prayer2", 0.82f, 2, 3, false, false, true },
             { "sdppreachformal01", 0.92f, 2, 4, false, false, true },
             { "sdppreachformal02", 0.92f, 2, 4, false, false, true },
+            { "sdppreachaddressidle", 0.90f, 2, 3, false, false, true },
+            { "sdppreachaddressspeak", 0.94f, 1, 2, true, false, true },
+            { "sdppreachattentiveleft", 0.92f, 1, 2, false, false, true },
+            { "sdppreachattentiveright", 0.92f, 1, 2, false, false, true },
             { "sdppreachadmonish", 0.96f, 1, 1, true, false, true },
+            { "sdppreachcommand01", 0.96f, 1, 1, true, false, true },
             { "sdppreachcommand02", 0.96f, 1, 1, true, false, true },
+            { "sdppreachcommand03", 0.96f, 1, 1, true, false, true },
             { "sdppreachcommand04", 0.96f, 1, 1, true, false, true },
 
             // Nobles/officials and formal interiors use restrained address/formal gestures.
             { "sdppreachformal01", 0.82f, 3, 5, false, false, false, true },
             { "sdppreachformal02", 0.82f, 3, 5, false, false, false, true },
             { "sdppreachattentive", 0.88f, 2, 3, false, false, false, true },
+            { "sdppreachattentiveleft", 0.90f, 1, 2, false, false, false, true },
+            { "sdppreachattentiveright", 0.90f, 1, 2, false, false, false, true },
+            { "sdppreachaddressidle", 0.84f, 2, 3, false, false, false, true },
+            { "sdppreachaddressspeak", 0.90f, 1, 2, true, false, false, true },
+            { "sdppreachcommand01", 0.90f, 1, 1, true, false, false, true },
+            { "sdppreachcommand03", 0.90f, 1, 1, true, false, false, true },
             { "ArmsAtBack", 0.66f, 6, 4, false, false, false, true },
             { "ArmsFolded", 0.66f, 6, 3, false, false, false, true },
         };
@@ -941,7 +978,7 @@ namespace MWMechanics
 
         if (available.empty())
         {
-            state.mTimer = randomRange(12.f, 22.f);
+            state.mTimer = randomRange(5.f, 10.f);
             return;
         }
 
@@ -980,7 +1017,7 @@ namespace MWMechanics
         {
             state.mAnimation = selected->mGroup;
             state.mLeftArmProtected = leftArmProtected;
-            state.mTimer = randomRange(15.f, 28.f);
+            state.mTimer = randomRange(9.f, 18.f);
             // animation->play receives an extra-loop count; the MP interaction
             // payload stores a total play count, hence +1 here.
             queueDynamicNpcInteraction(ptr, selected->mGroup, blendMask,
@@ -989,7 +1026,7 @@ namespace MWMechanics
         else
         {
             state.mLeftArmProtected = false;
-            state.mTimer = randomRange(8.f, 16.f);
+            state.mTimer = randomRange(3.f, 7.f);
         }
     }
 
@@ -2939,6 +2976,9 @@ namespace MWMechanics
 
                                 if (!isActiveDialogueTarget(iter->first))
                                     updateGreetingState(iter->first, *iter->second, timerUpdateHello > 0);
+                                if (isActiveDialogueTarget(iter->first)
+                                    && Settings::Manager::getBool("dynamic dialogue actor turning", "GUI"))
+                                    faceDialogueActorToPlayer(iter->first, player);
                                 playIdleDialogue(iter->first);
                                 updateMovementSpeed(iter->first);
                             }
@@ -2956,6 +2996,8 @@ namespace MWMechanics
                             movement.mRotation[0] = 0.f;
                             movement.mRotation[1] = 0.f;
                             movement.mRotation[2] = 0.f;
+                            if (Settings::Manager::getBool("dynamic dialogue actor turning", "GUI"))
+                                faceDialogueActorToPlayer(iter->first, player);
                         }
                         else
                             stats.getAiSequence().execute(
