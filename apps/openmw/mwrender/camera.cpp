@@ -100,6 +100,8 @@ namespace MWRender
       mShowCrosshairInThirdPersonMode(false),
       mHeadBobbingEnabled(Settings::Manager::getBool("head bobbing", "Camera")),
       mImmersiveFirstPersonEnabled(Settings::Manager::getBool("immersive first person", "Camera")),
+      mImmersiveFirstPersonForwardOffset(
+          Settings::Manager::getFloat("immersive first person forward offset", "Camera")),
       mHeadBobbingOffset(0.f),
       mHeadBobbingRoll(0.f),
       mHeadBobbingWeight(0.f),
@@ -171,6 +173,17 @@ namespace MWRender
             // beginning of a view transition.
             if (isFirstPerson())
                 position.z() += mHeadBobbingOffset;
+
+            // With the immersive body enabled the stock Camera/Head node sits a little too
+            // far back inside the upper torso on several skeletons. Move the eye slightly
+            // forward on the horizontal facing axis only: pitching down must not drive the
+            // camera into the chest.
+            if (mImmersiveFirstPersonEnabled && mImmersiveFirstPersonForwardOffset != 0.f)
+            {
+                const osg::Quat yawOrientation(mYaw, osg::Vec3d(0.0, 0.0, 1.0));
+                position += yawOrientation
+                    * osg::Vec3d(0.0, mImmersiveFirstPersonForwardOffset, 0.0);
+            }
         }
         else
         {
@@ -464,6 +477,8 @@ namespace MWRender
         const bool immersiveFirstPersonChanged
             = immersiveFirstPersonEnabled != mImmersiveFirstPersonEnabled;
         mImmersiveFirstPersonEnabled = immersiveFirstPersonEnabled;
+        mImmersiveFirstPersonForwardOffset
+            = Settings::Manager::getFloat("immersive first person forward offset", "Camera");
         mHeadBobbingEnabled = Settings::Manager::getBool("head bobbing", "Camera");
         mDynamicCameraEnabled = Settings::Manager::getBool("dynamic camera", "Camera");
         mDynamicCameraStrafeRollStrength = Settings::Manager::getFloat("dynamic camera strafe roll", "Camera");

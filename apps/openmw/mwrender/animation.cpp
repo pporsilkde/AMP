@@ -1,9 +1,12 @@
 #include "animation.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <iomanip>
 #include <limits>
+#include <sstream>
 
+#include <osg/Math>
 #include <osg/MatrixTransform>
 #include <osg/BlendFunc>
 #include <osg/Material>
@@ -20,6 +23,7 @@
 
 #include <components/misc/constants.hpp>
 #include <components/misc/resourcehelpers.hpp>
+#include <components/misc/stringops.hpp>
 
 #include <components/sceneutil/attach.hpp>
 #include <components/sceneutil/keyframe.hpp>
@@ -51,6 +55,213 @@
 
 namespace
 {
+    struct SimpleAnimBlendRule
+    {
+        std::string mFromGroup;
+        std::string mFromKey;
+        std::string mToGroup;
+        std::string mToKey;
+        float mDuration = 0.f;
+        std::string mEasing = "sineout";
+    };
+
+    std::string trimBlendValue(std::string value)
+    {
+        const std::string whitespace = " \t\r\n";
+        const std::size_t first = value.find_first_not_of(whitespace);
+        if (first == std::string::npos)
+            return std::string();
+        const std::size_t last = value.find_last_not_of(whitespace);
+        value = value.substr(first, last - first + 1);
+        if (value.size() >= 2 && ((value.front() == '\"' && value.back() == '\"')
+            || (value.front() == '\'' && value.back() == '\'')))
+            value = value.substr(1, value.size() - 2);
+        Misc::StringUtils::lowerCaseInPlace(value);
+        return value;
+    }
+
+    std::pair<std::string, std::string> splitBlendEndpoint(const std::string& value)
+    {
+        // Strip the YAML quotes before looking for the optional group:key delimiter.
+        // Otherwise a value such as "*:loop start" leaves quote characters in both
+        // pieces and never matches the 0.51 rule semantics.
+        const std::string normalized = trimBlendValue(value);
+        const std::size_t delimiter = normalized.find(':');
+        if (delimiter == std::string::npos)
+            return std::make_pair(normalized, std::string());
+        return std::make_pair(trimBlendValue(normalized.substr(0, delimiter)),
+            trimBlendValue(normalized.substr(delimiter + 1)));
+    }
+
+    bool wildcardBlendMatch(const std::string& value, const std::string& pattern)
+    {
+        if (pattern == "*")
+            return true;
+        if (pattern.empty())
+            return value.empty();
+        if (value == pattern)
+            return true;
+        if (pattern.size() > 1 && pattern.front() == '*')
+        {
+            const std::string suffix = pattern.substr(1);
+            return value.size() >= suffix.size()
+                && value.compare(value.size() - suffix.size(), suffix.size(), suffix) == 0;
+        }
+        if (pattern.size() > 1 && pattern.back() == '*')
+        {
+            const std::string prefix = pattern.substr(0, pattern.size() - 1);
+            return value.size() >= prefix.size() && value.compare(0, prefix.size(), prefix) == 0;
+        }
+        return false;
+    }
+
+    bool blendEndpointMatches(const std::string& group, const std::string& key,
+        const std::string& ruleGroup, const std::string& ruleKey)
+    {
+        return wildcardBlendMatch(group, ruleGroup)
+            && (ruleKey.empty() || wildcardBlendMatch(key, ruleKey));
+    }
+
+    std::vector<SimpleAnimBlendRule> loadSimpleAnimBlendRules(
+        const VFS::Manager* vfs, const std::string& kfname)
+    {
+        std::vector<SimpleAnimBlendRule> rules;
+        if (!vfs || kfname.size() < 3)
+            return rules;
+
+        std::string path = kfname;
+        const std::size_t dot = path.find_last_of('.');
+        if (dot == std::string::npos)
+            return rules;
+        path.replace(dot + 1, std::string::npos, "yaml");
+        vfs->normalizeFilename(path);
+        if (!vfs->exists(path))
+            return rules;
+
+        try
+        {
+            Files::IStreamPtr stream = vfs->get(path);
+            std::string line;
+            SimpleAnimBlendRule current;
+            bool haveRule = false;
+            auto commit = [&]()
+            {
+                if (haveRule && (!current.mFromGroup.empty() || !current.mToGroup.empty()))
+                {
+                    if (!current.mToGroup.empty() && current.mDuration >= 0.f)
+                        rules.push_back(current);
+                }
+                current = SimpleAnimBlendRule();
+                haveRule = false;
+            };
+
+            while (std::getline(*stream, line))
+            {
+                std::string value = trimBlendValue(line);
+                if (value.empty() || value[0] == '#')
+                    continue;
+
+                if (value.compare(0, 7, "- from:") == 0)
+                {
+                    commit();
+                    haveRule = true;
+                    const auto endpoint = splitBlendEndpoint(value.substr(7));
+                    current.mFromGroup = endpoint.first;
+                    current.mFromKey = endpoint.second;
+                }
+                else if (value.compare(0, 5, "from:") == 0)
+                {
+                    haveRule = true;
+                    const auto endpoint = splitBlendEndpoint(value.substr(5));
+                    current.mFromGroup = endpoint.first;
+                    current.mFromKey = endpoint.second;
+                }
+                else if (value.compare(0, 3, "to:") == 0)
+                {
+                    haveRule = true;
+                    const auto endpoint = splitBlendEndpoint(value.substr(3));
+                    current.mToGroup = endpoint.first;
+                    current.mToKey = endpoint.second;
+                }
+                else if (value.compare(0, 9, "duration:") == 0)
+                {
+                    haveRule = true;
+                    std::istringstream parser(value.substr(9));
+                    parser >> current.mDuration;
+                }
+                else if (value.compare(0, 7, "easing:") == 0)
+                {
+                    haveRule = true;
+                    current.mEasing = trimBlendValue(value.substr(7));
+                }
+            }
+            commit();
+        }
+        catch (const std::exception& e)
+        {
+            Log(Debug::Warning) << "Unable to parse animation blend rules '" << path << "': " << e.what();
+        }
+        return rules;
+    }
+
+    float applyPoseEasing(float t, const std::string& easing)
+    {
+        const std::string lower = Misc::StringUtils::lowerCase(easing);
+        if (lower == "linear")
+            return t;
+        if (lower == "sineout")
+            return std::sin(t * osg::PI_2);
+        if (lower == "sinein")
+            return 1.f - std::cos(t * osg::PI_2);
+        if (lower == "sineinout")
+            return -(std::cos(osg::PI * t) - 1.f) * 0.5f;
+        if (lower == "cubicout")
+        {
+            const float u = 1.f - t;
+            return 1.f - u * u * u;
+        }
+        if (lower == "cubicin")
+            return t * t * t;
+        if (lower == "cubicinout")
+        {
+            if (t < 0.5f)
+                return 4.f * t * t * t;
+            const float u = -2.f * t + 2.f;
+            return 1.f - (u * u * u) / 2.f;
+        }
+        if (lower == "quartout")
+        {
+            const float u = 1.f - t;
+            return 1.f - u * u * u * u;
+        }
+        if (lower == "quartin")
+            return t * t * t * t;
+        if (lower == "quartinout")
+        {
+            if (t < 0.5f)
+                return 8.f * t * t * t * t;
+            const float u = -2.f * t + 2.f;
+            return 1.f - (u * u * u * u) / 2.f;
+        }
+
+        float springLambda = 0.f;
+        if (lower == "springoutweak")
+            springLambda = 4.f;
+        else if (lower == "springoutmed")
+            springLambda = 3.f;
+        else if (lower == "springoutstrong")
+            springLambda = 2.f;
+        else if (lower == "springouttoomuch")
+            springLambda = 1.f;
+        if (springLambda > 0.f)
+        {
+            const float frequency = 1.5f * osg::PI;
+            return 1.f - std::exp(-springLambda * t) * std::cos(frequency * t);
+        }
+
+        // OpenMW 0.51 falls back to sineOut when an easing name is unknown.
+        return std::sin(t * osg::PI_2);
+    }
 
     class PoseTransitionCallback : public osg::NodeCallback
     {
@@ -80,10 +291,10 @@ namespace
             float t = static_cast<float>((now - mState->mStartTime) / duration);
             t = std::max(0.f, std::min(1.f, t));
 
-            // Smoothstep avoids a visible kick both at the start and at the end
-            // of the hand-off. The keyframe controller has already written the
-            // destination pose when this callback runs.
-            const float blend = t * t * (3.f - 2.f * t);
+            // The destination KF has already written its pose. Blend from the
+            // previously rendered transform using the easing requested by the
+            // animation's 0.51-style YAML rule (or our safe fallback).
+            const float blend = applyPoseEasing(t, mState->mEasing);
             const osg::Matrixf target = transform->getMatrix();
 
             const osg::Vec3f fromPos = mState->mFrom.getTrans();
@@ -606,8 +817,36 @@ namespace MWRender
         typedef std::map<std::string, osg::ref_ptr<SceneUtil::KeyframeController> > ControllerMap;
 
         ControllerMap mControllerMap[Animation::sNumBlendMasks];
+        std::vector<SimpleAnimBlendRule> mBlendRules;
 
         const SceneUtil::TextKeyMap& getTextKeys() const;
+
+        bool findBlendRule(const std::string& fromGroup, const std::string& fromKey,
+            const std::string& toGroup, const std::string& toKey, float& duration, std::string& easing) const
+        {
+            const std::string lowerFromGroup = Misc::StringUtils::lowerCase(fromGroup);
+            const std::string lowerFromKey = Misc::StringUtils::lowerCase(fromKey);
+            const std::string lowerToGroup = Misc::StringUtils::lowerCase(toGroup);
+            const std::string lowerToKey = Misc::StringUtils::lowerCase(toKey);
+
+            // Same precedence as OpenMW 0.51: rules at the bottom of a YAML file override earlier ones.
+            for (std::vector<SimpleAnimBlendRule>::const_reverse_iterator it = mBlendRules.rbegin();
+                 it != mBlendRules.rend(); ++it)
+            {
+                const bool fromMatches = blendEndpointMatches(
+                    lowerFromGroup, lowerFromKey, it->mFromGroup, it->mFromKey);
+                const bool sameGroupTarget = it->mToGroup == "$" && lowerToGroup == lowerFromGroup;
+                const bool toMatches = (sameGroupTarget || wildcardBlendMatch(lowerToGroup, it->mToGroup))
+                    && (it->mToKey.empty() || wildcardBlendMatch(lowerToKey, it->mToKey));
+                if (fromMatches && toMatches)
+                {
+                    duration = it->mDuration;
+                    easing = it->mEasing;
+                    return true;
+                }
+            }
+            return false;
+        }
     };
 
     void UpdateVfxCallback::operator()(osg::Node* node, osg::NodeVisitor* nv)
@@ -821,6 +1060,9 @@ namespace MWRender
         if (!animsrc->mKeyframes || animsrc->mKeyframes->mTextKeys.empty() || animsrc->mKeyframes->mKeyframeControllers.empty())
             return;
 
+        if (Settings::Manager::getBool("smooth animation transitions", "Game"))
+            animsrc->mBlendRules = loadSimpleAnimBlendRules(mResourceSystem->getVFS(), kfname);
+
         const NodeMap& nodeMap = getNodeMap();
 
         for (SceneUtil::KeyframeHolder::KeyframeControllerMap::const_iterator it = animsrc->mKeyframes->mKeyframeControllers.begin();
@@ -867,7 +1109,12 @@ namespace MWRender
         mPoseTransitions.clear();
 
         for(size_t i = 0;i < sNumBlendMasks;i++)
+        {
             mAnimationTimePtr[i]->setTimePtr(std::shared_ptr<float>());
+            mActiveGroupNames[i].clear();
+            mActiveStartKeys[i].clear();
+            mActiveGroupSources[i].reset();
+        }
 
         mAccumCtrl = nullptr;
 
@@ -960,19 +1207,24 @@ namespace MWRender
             return;
         }
 
+        // Backport the 0.51 hand-off ordering: preserve the requested group if it is already
+        // playing, then remove only competing states at the same priority. The 0.47 order
+        // erased the group itself first and could create a one-frame pose snap.
+        AnimStateMap::iterator foundstateiter = mStates.find(groupname);
+        if (foundstateiter != mStates.end())
+            foundstateiter->second.mPriority = priority;
+
         AnimStateMap::iterator stateiter = mStates.begin();
         while(stateiter != mStates.end())
         {
-            if(stateiter->second.mPriority == priority)
-                mStates.erase(stateiter++);
+            if(stateiter->second.mPriority == priority && stateiter->first != groupname)
+                stateiter = mStates.erase(stateiter);
             else
                 ++stateiter;
         }
 
-        stateiter = mStates.find(groupname);
-        if(stateiter != mStates.end())
+        if(foundstateiter != mStates.end())
         {
-            stateiter->second.mPriority = priority;
             resetActiveGroups();
             return;
         }
@@ -992,6 +1244,7 @@ namespace MWRender
                 state.mPriority = priority;
                 state.mBlendMask = blendMask;
                 state.mAutoDisable = autodisable;
+                state.mStartKey = start;
                 mStates[groupname] = state;
 
                 if (state.mPlaying)
@@ -1120,6 +1373,60 @@ namespace MWRender
 
     void Animation::resetActiveGroups()
     {
+        // Backport the important part of OpenMW 0.51's AnimBlendController behaviour without
+        // replacing the 0.47 scene graph: detect every bone-group hand-off, capture the currently
+        // rendered pose, and then let the incoming KF blend from that pose according to its YAML.
+        const bool smoothTransitions = Settings::Manager::getBool("smooth animation transitions", "Game");
+        if (smoothTransitions && !mRagdollMode)
+        {
+            for (size_t blendMask = 0; blendMask < sNumBlendMasks; ++blendMask)
+            {
+                AnimStateMap::const_iterator active = mStates.end();
+                for (AnimStateMap::const_iterator state = mStates.begin(); state != mStates.end(); ++state)
+                {
+                    if (!(state->second.mBlendMask & (1 << blendMask)))
+                        continue;
+                    if (active == mStates.end()
+                        || active->second.mPriority[(BoneGroup)blendMask]
+                            < state->second.mPriority[(BoneGroup)blendMask])
+                        active = state;
+                }
+
+                const std::string newGroup = active == mStates.end() ? std::string() : active->first;
+                const std::string newStartKey = active == mStates.end() ? std::string() : active->second.mStartKey;
+                const std::shared_ptr<AnimSource> newSource
+                    = active == mStates.end() ? std::shared_ptr<AnimSource>() : active->second.mSource;
+
+                if (!mActiveGroupNames[blendMask].empty() && !newGroup.empty()
+                    && (mActiveGroupNames[blendMask] != newGroup
+                        || mActiveStartKeys[blendMask] != newStartKey
+                        || mActiveGroupSources[blendMask] != newSource))
+                {
+                    float duration = 0.f;
+                    std::string easing = "sineout";
+                    bool hasRule = false;
+                    if (newSource)
+                    {
+                        hasRule = newSource->findBlendRule(mActiveGroupNames[blendMask],
+                            mActiveStartKeys[blendMask], newGroup, newStartKey, duration, easing);
+                    }
+
+                    // The supplied ArenaMW VFS already contains 0.51-style YAML for most custom
+                    // animations. For legacy KFs that have no rule, use a conservative fallback so
+                    // old dialogue/script animation paths no longer snap in a single frame.
+                    if (!hasRule)
+                    {
+                        duration = blendMask == BoneGroup_LowerBody ? 0.14f : 0.18f;
+                        easing = "sineout";
+                    }
+
+                    duration = std::max(0.f, duration);
+                    if (duration > 0.f)
+                        beginBoneTransition(1 << blendMask, duration, easing);
+                }
+            }
+        }
+
         // remove all previous external controllers from the scene graph
         for (auto it = mActiveControllers.begin(); it != mActiveControllers.end(); ++it)
         {
@@ -1180,6 +1487,10 @@ namespace MWRender
                     }
                 }
             }
+
+            mActiveGroupNames[blendMask] = active == mStates.end() ? std::string() : active->first;
+            mActiveStartKeys[blendMask] = active == mStates.end() ? std::string() : active->second.mStartKey;
+            mActiveGroupSources[blendMask] = active == mStates.end() ? std::shared_ptr<AnimSource>() : active->second.mSource;
         }
         if (!mRagdollMode)
         {
@@ -1187,10 +1498,18 @@ namespace MWRender
             addPoseTransitions();
         }
         else
+        {
             mPoseTransitions.clear();
+            for (size_t blendMask = 0; blendMask < sNumBlendMasks; ++blendMask)
+            {
+                mActiveGroupNames[blendMask].clear();
+                mActiveStartKeys[blendMask].clear();
+                mActiveGroupSources[blendMask].reset();
+            }
+        }
     }
 
-    void Animation::beginBoneTransition(int blendMask, float duration)
+    void Animation::beginBoneTransition(int blendMask, float duration, const std::string& easing)
     {
         if (mRagdollMode || blendMask == 0 || duration <= 0.f || !mObjectRoot)
             return;
@@ -1206,9 +1525,16 @@ namespace MWRender
             if ((blendMask & (1 << group)) == 0)
                 continue;
 
+            // A caller such as the interaction/locomotion system may already have captured a
+            // better hand-off pose in this same mechanics tick. Do not replace that origin.
+            PoseTransitionMap::iterator existing = mPoseTransitions.find(it->first);
+            if (existing != mPoseTransitions.end() && existing->second && !existing->second->mFinished)
+                continue;
+
             std::shared_ptr<AnimationPoseTransitionState> transition(new AnimationPoseTransitionState);
             transition->mFrom = node->getMatrix();
             transition->mDuration = duration;
+            transition->mEasing = easing;
             mPoseTransitions[it->first] = transition;
         }
     }

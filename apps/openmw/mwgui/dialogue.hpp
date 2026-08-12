@@ -249,6 +249,8 @@ namespace MWGui
         bool mDynamicDialogueActorPendingSpeaking;
         bool mDynamicDialogueActorWasSpeaking;
         bool mDynamicDialogueActorLeftArmProtected;
+        bool mDynamicDialogueActorOpening;
+        bool mDynamicDialogueActorAnimationSpeech;
         std::string mDynamicDialogueActorAnimation;
 
         std::unique_ptr<ResponseCallback> mCallback;

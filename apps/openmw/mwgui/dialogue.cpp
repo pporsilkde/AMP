@@ -20,7 +20,9 @@
 #include <components/esm/loadarmo.hpp>
 #include <components/esm/loadligh.hpp>
 #include <components/esm/loadnpc.hpp>
+#include <components/esm/loadgmst.hpp>
 #include <components/misc/rng.hpp>
+#include <components/misc/stringops.hpp>
 #include <components/settings/settings.hpp>
 #include <components/widgets/list.hpp>
 #include <components/translation/translation.hpp>
@@ -33,6 +35,9 @@
 #include "../mwmp/Main.hpp"
 #include "../mwmp/Networking.hpp"
 #include "../mwmp/ObjectList.hpp"
+#include "../mwmp/CellController.hpp"
+#include "../mwmp/LocalActor.hpp"
+#include "../mwmp/InteractionAnimationSync.hpp"
 #include <components/openmw-mp/TimedLog.hpp>
 /*
     End of tes3mp addition
@@ -49,8 +54,10 @@
 #include "../mwworld/containerstore.hpp"
 #include "../mwworld/inventorystore.hpp"
 #include "../mwworld/esmstore.hpp"
+#include "../mwworld/cellstore.hpp"
 
 #include "../mwmechanics/creaturestats.hpp"
+#include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/actorutil.hpp"
 #include "../mwmechanics/character.hpp"
 
@@ -74,9 +81,9 @@ namespace
     float normalizeAngle(float angle)
     {
         while (angle > osg::PI)
-            angle -= osg::PI * 2.f;
+            angle -= static_cast<float>(osg::PI) * 2.f;
         while (angle < -osg::PI)
-            angle += osg::PI * 2.f;
+            angle += static_cast<float>(osg::PI) * 2.f;
         return angle;
     }
 
@@ -103,6 +110,129 @@ namespace
 
         const std::string& type = carried->getTypeName();
         return type == typeid(ESM::Armor).name() || type == typeid(ESM::Light).name();
+    }
+    bool isDynamicDialogueGuard(const MWWorld::Ptr& ptr)
+    {
+        if (ptr.isEmpty() || !ptr.getClass().isNpc())
+            return false;
+
+        if (ptr.getClass().isClass(ptr, "Guard"))
+            return true;
+
+        const ESM::NPC* npc = ptr.get<ESM::NPC>()->mBase;
+        if (!npc)
+            return false;
+        const std::string npcClass = Misc::StringUtils::lowerCase(npc->mClass);
+        const std::string id = Misc::StringUtils::lowerCase(npc->mId);
+        const std::string name = Misc::StringUtils::lowerCase(npc->mName);
+        return npcClass.find("guard") != std::string::npos
+            || npcClass.find("crusader") != std::string::npos
+            || npcClass.find("master-at-arms") != std::string::npos
+            || id.find("ordinator") != std::string::npos
+            || name.find("ordinator") != std::string::npos;
+    }
+
+    bool isDynamicDialogueReligious(const MWWorld::Ptr& ptr)
+    {
+        if (ptr.isEmpty() || !ptr.getClass().isNpc())
+            return false;
+
+        const ESM::NPC* npc = ptr.get<ESM::NPC>()->mBase;
+        if (!npc)
+            return false;
+        const std::string npcClass = Misc::StringUtils::lowerCase(npc->mClass);
+        const std::string faction = Misc::StringUtils::lowerCase(npc->mFaction);
+        if (faction.find("temple") != std::string::npos
+            || faction.find("cult") != std::string::npos
+            || faction.find("tribunal") != std::string::npos)
+            return true;
+        static const char* sReligiousClasses[] = {
+            "priest", "monk", "healer", "wise woman", "cult", "cleric", "shaman", "oracle", "pilgrim"
+        };
+        for (const char* token : sReligiousClasses)
+            if (npcClass.find(token) != std::string::npos)
+                return true;
+
+        if (ptr.getCell() && ptr.getCell()->getCell())
+        {
+            const std::string cellName = Misc::StringUtils::lowerCase(ptr.getCell()->getCell()->mName);
+            static const char* sReligiousCells[] = { "temple", "shrine", "chapel", "monastery", "sanctuary" };
+            for (const char* token : sReligiousCells)
+                if (cellName.find(token) != std::string::npos)
+                    return true;
+        }
+        return false;
+    }
+
+    bool isDynamicDialogueFormal(const MWWorld::Ptr& ptr)
+    {
+        if (ptr.isEmpty() || !ptr.getClass().isNpc())
+            return false;
+
+        const ESM::NPC* npc = ptr.get<ESM::NPC>()->mBase;
+        if (!npc)
+            return false;
+
+        const std::string npcClass = Misc::StringUtils::lowerCase(npc->mClass);
+        static const char* sFormalClasses[] = {
+            "noble", "knight", "council", "steward", "magistrate", "official", "diplomat", "duke"
+        };
+        for (const char* token : sFormalClasses)
+            if (npcClass.find(token) != std::string::npos)
+                return true;
+
+        if (ptr.getCell() && ptr.getCell()->getCell())
+        {
+            const std::string cellName = Misc::StringUtils::lowerCase(ptr.getCell()->getCell()->mName);
+            static const char* sFormalCells[] = { "palace", "manor", "council", "embassy", "castle", "estate" };
+            for (const char* token : sFormalCells)
+                if (cellName.find(token) != std::string::npos)
+                    return true;
+        }
+        return false;
+    }
+
+    bool isDynamicDialogueArrest(const MWWorld::Ptr& ptr)
+    {
+        if (!isDynamicDialogueGuard(ptr))
+            return false;
+
+        const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+        if (player.isEmpty() || !player.getClass().isNpc())
+            return false;
+
+        const MWWorld::ESMStore& store = MWBase::Environment::get().getWorld()->getStore();
+        static const int cutoff = store.get<ESM::GameSetting>().find("iCrimeThreshold")->mValue.getInteger();
+        return player.getClass().getNpcStats(player).getBounty() >= cutoff;
+    }
+
+    void queueDialogueNpcInteraction(const MWWorld::Ptr& actor, const std::string& group,
+        int blendMask, float speed, int loops, bool stop)
+    {
+        if (actor.isEmpty() || group.empty() || blendMask == 0)
+            return;
+        mwmp::CellController* cellController = mwmp::Main::get().getCellController();
+        if (!cellController || !cellController->isLocalActor(actor))
+            return;
+        mwmp::LocalActor* localActor = cellController->getLocalActor(actor);
+        if (!localActor)
+            return;
+
+        mwmp::InteractionAnimationData data;
+        data.group = group;
+        data.blendMask = blendMask;
+        data.speed = speed;
+        data.loops = std::max(1, loops);
+        data.duration = stop ? 0.1f : 60.f;
+        data.stop = stop;
+        const std::string encoded = mwmp::encodeInteractionAnimation(data);
+        if (!encoded.empty())
+        {
+            localActor->animation.groupname = encoded;
+            localActor->animation.mode = 0;
+            localActor->animation.count = 1;
+            localActor->animation.persist = false;
+        }
     }
 }
 
@@ -294,6 +424,8 @@ namespace MWGui
         , mDynamicDialogueActorPendingSpeaking(false)
         , mDynamicDialogueActorWasSpeaking(false)
         , mDynamicDialogueActorLeftArmProtected(false)
+        , mDynamicDialogueActorOpening(false)
+        , mDynamicDialogueActorAnimationSpeech(false)
         , mCallback(new ResponseCallback(this))
         , mGreetingCallback(new ResponseCallback(this, false))
     {
@@ -487,6 +619,8 @@ namespace MWGui
         mDynamicDialogueActorPendingSpeaking = false;
         mDynamicDialogueActorWasSpeaking = false;
         mDynamicDialogueActorLeftArmProtected = false;
+        mDynamicDialogueActorOpening = true;
+        mDynamicDialogueActorAnimationSpeech = false;
         mDynamicDialogueActorAnimation.clear();
     }
 
@@ -511,13 +645,19 @@ namespace MWGui
             return;
         }
 
-        if (speaking && !force)
+        const bool contextualAnimations = Settings::Manager::getBool("contextual npc animations", "GUI");
+        const bool guard = contextualAnimations && isDynamicDialogueGuard(mPtr);
+        const bool arrestOpening = guard && mDynamicDialogueActorOpening && isDynamicDialogueArrest(mPtr);
+        const bool religious = contextualAnimations && !guard && isDynamicDialogueReligious(mPtr);
+        const bool formal = contextualAnimations && !guard && !religious && isDynamicDialogueFormal(mPtr);
+
+        if (speaking && !force && !arrestOpening)
         {
             if (mDynamicDialogueActorSpeechCooldown > 0.f)
                 return;
 
-            // A voiced line should not force a new gesture every time. Most lines keep the
-            // current pose, while occasional lines receive a speaking gesture.
+            // Keep normal conversations restrained: voice playback does not need a new
+            // gesture for every sentence. Guards/arrest openings get their own stronger pool.
             if (Misc::Rng::rollProbability() > 0.38f)
             {
                 mDynamicDialogueActorSpeechCooldown = randomRange(5.f, 9.f);
@@ -526,46 +666,137 @@ namespace MWGui
         }
 
         static const DialogueAnimation sSpeechAnimations[] = {
-            { "idlespeak_idlef", MWRender::Animation::BlendMask_UpperBody, 0.88f, 0 },
-            { "idlespeak_handhip", MWRender::Animation::BlendMask_UpperBody, 0.88f, 0 },
-            { "idlespeak_ready", MWRender::Animation::BlendMask_UpperBody, 0.88f, 0 },
-            { "idlespeak", MWRender::Animation::BlendMask_UpperBody, 0.88f, 0 },
+            { "IdleSpeak_idleF", MWRender::Animation::BlendMask_UpperBody, 0.88f, 0 },
+            { "IdleSpeak_handhip", MWRender::Animation::BlendMask_UpperBody, 0.88f, 0 },
+            { "IdleSpeak_ready", MWRender::Animation::BlendMask_UpperBody, 0.88f, 0 },
+            { "IdleSpeak", MWRender::Animation::BlendMask_UpperBody, 0.88f, 0 },
         };
         static const DialogueAnimation sIdleAnimations[] = {
-            { "armsakimbo", MWRender::Animation::BlendMask_UpperBody, 0.66f, 10 },
-            { "armsfolded", MWRender::Animation::BlendMask_UpperBody, 0.66f, 10 },
-            { "armsatback", MWRender::Animation::BlendMask_UpperBody, 0.66f, 10 },
-            { "armsalmapray", MWRender::Animation::BlendMask_UpperBody, 0.72f, 6 },
-            { "handhippose", MWRender::Animation::BlendMask_UpperBody, 0.60f, 10 },
-            { "readypose", MWRender::Animation::BlendMask_UpperBody, 0.66f, 8 },
-            { "posealma3", MWRender::Animation::BlendMask_UpperBody, 0.80f, 4 },
-            { "idle2_copy", MWRender::Animation::BlendMask_UpperBody, 0.88f, 1 },
-            { "idle3_copy", MWRender::Animation::BlendMask_UpperBody, 0.78f, 1 },
-            { "idle6_copy", MWRender::Animation::BlendMask_UpperBody, 0.72f, 1 },
-            { "idle7_copy", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
-            { "idle8_copy", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
-            { "armsgesture", MWRender::Animation::BlendMask_UpperBody, 0.88f, 1 },
-            { "armssunshield", MWRender::Animation::BlendMask_UpperBody, 0.65f, 1 },
+            { "ArmsAkimbo", MWRender::Animation::BlendMask_UpperBody, 0.66f, 10 },
+            { "ArmsFolded", MWRender::Animation::BlendMask_UpperBody, 0.66f, 10 },
+            { "ArmsAtBack", MWRender::Animation::BlendMask_UpperBody, 0.66f, 10 },
+            { "HandHipPose", MWRender::Animation::BlendMask_UpperBody, 0.60f, 10 },
+            { "ReadyPose", MWRender::Animation::BlendMask_UpperBody, 0.66f, 8 },
+            { "Idle2_copy", MWRender::Animation::BlendMask_UpperBody, 0.88f, 1 },
+            { "Idle3_copy", MWRender::Animation::BlendMask_UpperBody, 0.78f, 1 },
+            { "Idle6_copy", MWRender::Animation::BlendMask_UpperBody, 0.72f, 1 },
+            { "Idle7_copy", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
+            { "Idle8_copy", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
+            { "ArmsGesture", MWRender::Animation::BlendMask_UpperBody, 0.88f, 1 },
+            { "ArmsSunShield", MWRender::Animation::BlendMask_UpperBody, 0.65f, 1 },
+        };
+        static const DialogueAnimation sGuardOpeningAnimations[] = {
+            // "Stop there" / warning gestures for a guard that has caught the player.
+            { "sdppreachhold", MWRender::Animation::BlendMask_UpperBody, 1.00f, 1 },
+            { "sdppreachadmonish", MWRender::Animation::BlendMask_UpperBody, 1.00f, 1 },
+            { "sdppreachcommand02", MWRender::Animation::BlendMask_UpperBody, 1.00f, 1 },
+            { "ArmsGesture_greet", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
+        };
+        static const DialogueAnimation sGuardSpeechAnimations[] = {
+            { "sdppreachadmonish", MWRender::Animation::BlendMask_UpperBody, 1.00f, 1 },
+            { "sdppreachcommand02", MWRender::Animation::BlendMask_UpperBody, 1.00f, 1 },
+            { "sdppreachcommand04", MWRender::Animation::BlendMask_UpperBody, 1.00f, 1 },
+            { "ArmsGesture", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
+            { "IdleSpeak_ready", MWRender::Animation::BlendMask_UpperBody, 0.90f, 0 },
+            { "IdleSpeak", MWRender::Animation::BlendMask_UpperBody, 0.90f, 0 },
+        };
+        static const DialogueAnimation sGuardIdleAnimations[] = {
+            { "sdpGuardPose", MWRender::Animation::BlendMask_UpperBody, 0.88f, 3 },
+            { "sdpGuardPose2", MWRender::Animation::BlendMask_UpperBody, 0.88f, 3 },
+            { "sdpGuardPose3", MWRender::Animation::BlendMask_UpperBody, 0.88f, 3 },
+            { "ArmsAtBack", MWRender::Animation::BlendMask_UpperBody, 0.68f, 8 },
+            { "ReadyPose", MWRender::Animation::BlendMask_UpperBody, 0.70f, 6 },
+            { "sdppreachscan", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
+        };
+        static const DialogueAnimation sReligiousSpeechAnimations[] = {
+            { "sdppreachaddressspeakleft", MWRender::Animation::BlendMask_UpperBody, 0.94f, 1 },
+            { "sdppreachaddressspeakright", MWRender::Animation::BlendMask_UpperBody, 0.94f, 1 },
+            { "sdppreachadmonish", MWRender::Animation::BlendMask_UpperBody, 0.96f, 1 },
+            { "sdppreachcommand02", MWRender::Animation::BlendMask_UpperBody, 0.96f, 1 },
+            { "IdleSpeak", MWRender::Animation::BlendMask_UpperBody, 0.88f, 0 },
+        };
+        static const DialogueAnimation sReligiousIdleAnimations[] = {
+            { "sdppreachformal01", MWRender::Animation::BlendMask_UpperBody, 0.82f, 4 },
+            { "sdppreachformal02", MWRender::Animation::BlendMask_UpperBody, 0.82f, 4 },
+            { "sdppreachattentive", MWRender::Animation::BlendMask_UpperBody, 0.88f, 3 },
+            { "armsAlmaPray", MWRender::Animation::BlendMask_UpperBody, 0.72f, 6 },
+            { "PoseAlma3", MWRender::Animation::BlendMask_UpperBody, 0.80f, 4 },
+            { "ArmsAtBack", MWRender::Animation::BlendMask_UpperBody, 0.68f, 6 },
+        };
+        static const DialogueAnimation sFormalSpeechAnimations[] = {
+            { "sdppreachaddressspeakleft", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
+            { "sdppreachaddressspeakright", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
+            { "sdppreachcommand01", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
+            { "ArmsGesture", MWRender::Animation::BlendMask_UpperBody, 0.86f, 1 },
+            { "IdleSpeak", MWRender::Animation::BlendMask_UpperBody, 0.86f, 0 },
+        };
+        static const DialogueAnimation sFormalIdleAnimations[] = {
+            { "sdppreachformal01", MWRender::Animation::BlendMask_UpperBody, 0.78f, 5 },
+            { "sdppreachformal02", MWRender::Animation::BlendMask_UpperBody, 0.78f, 5 },
+            { "sdppreachattentive", MWRender::Animation::BlendMask_UpperBody, 0.84f, 3 },
+            { "ArmsAtBack", MWRender::Animation::BlendMask_UpperBody, 0.64f, 8 },
+            { "ArmsFolded", MWRender::Animation::BlendMask_UpperBody, 0.64f, 6 },
         };
 
         std::vector<const DialogueAnimation*> available;
-        const DialogueAnimation* begin = speaking ? std::begin(sSpeechAnimations) : std::begin(sIdleAnimations);
-        const DialogueAnimation* end = speaking ? std::end(sSpeechAnimations) : std::end(sIdleAnimations);
-        for (const DialogueAnimation* entry = begin; entry != end; ++entry)
-        {
-            if (animation->hasAnimation(entry->mGroup)
-                && (mDynamicDialogueActorAnimation.empty()
-                    || mDynamicDialogueActorAnimation != entry->mGroup))
-                available.push_back(entry);
-        }
-
-        if (available.empty())
+        auto appendAvailable = [&](const DialogueAnimation* begin, const DialogueAnimation* end)
         {
             for (const DialogueAnimation* entry = begin; entry != end; ++entry)
             {
-                if (animation->hasAnimation(entry->mGroup))
+                if (animation->hasAnimation(entry->mGroup)
+                    && (mDynamicDialogueActorAnimation.empty()
+                        || mDynamicDialogueActorAnimation != entry->mGroup))
                     available.push_back(entry);
             }
+        };
+        auto appendAll = [&](const DialogueAnimation* begin, const DialogueAnimation* end)
+        {
+            for (const DialogueAnimation* entry = begin; entry != end; ++entry)
+                if (animation->hasAnimation(entry->mGroup))
+                    available.push_back(entry);
+        };
+
+        const DialogueAnimation* poolBegin = nullptr;
+        const DialogueAnimation* poolEnd = nullptr;
+        if (arrestOpening)
+        {
+            poolBegin = std::begin(sGuardOpeningAnimations);
+            poolEnd = std::end(sGuardOpeningAnimations);
+        }
+        else if (guard)
+        {
+            poolBegin = speaking ? std::begin(sGuardSpeechAnimations) : std::begin(sGuardIdleAnimations);
+            poolEnd = speaking ? std::end(sGuardSpeechAnimations) : std::end(sGuardIdleAnimations);
+        }
+        else if (religious)
+        {
+            poolBegin = speaking ? std::begin(sReligiousSpeechAnimations) : std::begin(sReligiousIdleAnimations);
+            poolEnd = speaking ? std::end(sReligiousSpeechAnimations) : std::end(sReligiousIdleAnimations);
+        }
+        else if (formal)
+        {
+            poolBegin = speaking ? std::begin(sFormalSpeechAnimations) : std::begin(sFormalIdleAnimations);
+            poolEnd = speaking ? std::end(sFormalSpeechAnimations) : std::end(sFormalIdleAnimations);
+        }
+        else
+        {
+            poolBegin = speaking ? std::begin(sSpeechAnimations) : std::begin(sIdleAnimations);
+            poolEnd = speaking ? std::end(sSpeechAnimations) : std::end(sIdleAnimations);
+        }
+
+        appendAvailable(poolBegin, poolEnd);
+        if (available.empty())
+            appendAll(poolBegin, poolEnd);
+
+        // Role-specific resources are optional. Fall back to the generic pool instead of
+        // leaving a modded NPC completely static if its skeleton lacks the formal gestures.
+        if (available.empty() && (guard || religious || formal))
+        {
+            poolBegin = speaking ? std::begin(sSpeechAnimations) : std::begin(sIdleAnimations);
+            poolEnd = speaking ? std::end(sSpeechAnimations) : std::end(sIdleAnimations);
+            appendAvailable(poolBegin, poolEnd);
+            if (available.empty())
+                appendAll(poolBegin, poolEnd);
         }
 
         if (available.empty())
@@ -574,14 +805,18 @@ namespace MWGui
             return;
         }
 
-        const DialogueAnimation& selected
-            = *available[Misc::Rng::rollDice(static_cast<int>(available.size()))];
+        // The arrest opener should read as an intentional stop gesture, not as a dice roll.
+        const DialogueAnimation& selected = arrestOpening
+            ? *available.front()
+            : *available[Misc::Rng::rollDice(static_cast<int>(available.size()))];
 
         if (!mDynamicDialogueActorAnimation.empty()
             && animation->isPlaying(mDynamicDialogueActorAnimation))
         {
             if (mDynamicDialogueActorAnimation == selected.mGroup)
             {
+                if (mDynamicDialogueActorOpening)
+                    mDynamicDialogueActorOpening = false;
                 mDynamicDialogueActorAnimationTimer
                     = speaking ? randomRange(7.f, 11.f) : randomRange(22.f, 40.f);
                 if (speaking)
@@ -589,17 +824,8 @@ namespace MWGui
                 return;
             }
 
-            if (!force)
-            {
-                // OpenMW 0.47 has no transform cross-fade. Let the current KF leave its
-                // loop through the authored stop segment, then start the next pose.
-                animation->setLoopingEnabled(mDynamicDialogueActorAnimation, false);
-                mDynamicDialogueActorAnimationEnding = true;
-                mDynamicDialogueActorPendingSpeaking = speaking;
-                mDynamicDialogueActorTransitionTimer = 2.5f;
-                return;
-            }
-
+            // The animation core now has the 0.51-style hand-off backport, so switching
+            // immediately is smoother than waiting up to 2.5 seconds for the old 0.47 loop.
             animation->disable(mDynamicDialogueActorAnimation);
         }
 
@@ -624,12 +850,19 @@ namespace MWGui
         {
             mDynamicDialogueActorAnimation.clear();
             mDynamicDialogueActorLeftArmProtected = false;
+            mDynamicDialogueActorAnimationSpeech = false;
             mDynamicDialogueActorAnimationTimer = speaking ? 5.f : 14.f;
             return;
         }
 
         mDynamicDialogueActorAnimation = selected.mGroup;
         mDynamicDialogueActorLeftArmProtected = leftArmProtected;
+        mDynamicDialogueActorAnimationSpeech = speaking;
+        // ArenaMP: the authority client also broadcasts the chosen contextual gesture.
+        queueDialogueNpcInteraction(mPtr, selected.mGroup, blendMask, selected.mSpeed,
+            static_cast<int>(selected.mLoops + 1), false);
+        if (mDynamicDialogueActorOpening)
+            mDynamicDialogueActorOpening = false;
         mDynamicDialogueActorPendingSpeaking = false;
         mDynamicDialogueActorAnimationEnding = false;
         mDynamicDialogueActorTransitionTimer = 0.f;
@@ -653,6 +886,7 @@ namespace MWGui
                     animation->disable(mDynamicDialogueActorAnimation);
                 mDynamicDialogueActorAnimation.clear();
                 mDynamicDialogueActorLeftArmProtected = false;
+                mDynamicDialogueActorAnimationSpeech = false;
             }
             mDynamicDialogueActorAnimationEnding = false;
             return;
@@ -690,6 +924,7 @@ namespace MWGui
                     animation->disable(mDynamicDialogueActorAnimation);
                 mDynamicDialogueActorAnimation.clear();
                 mDynamicDialogueActorLeftArmProtected = false;
+                mDynamicDialogueActorAnimationSpeech = false;
             }
             mDynamicDialogueActorAnimationEnding = false;
             return;
@@ -712,6 +947,7 @@ namespace MWGui
             mDynamicDialogueActorPendingSpeaking = false;
             mDynamicDialogueActorTransitionTimer = 0.f;
             mDynamicDialogueActorLeftArmProtected = false;
+            mDynamicDialogueActorAnimationSpeech = false;
             playDynamicDialogueAnimation(speaking, true);
             return;
         }
@@ -734,6 +970,7 @@ namespace MWGui
 
                 mDynamicDialogueActorAnimation.clear();
                 mDynamicDialogueActorLeftArmProtected = false;
+                mDynamicDialogueActorAnimationSpeech = false;
                 mDynamicDialogueActorAnimationEnding = false;
                 mDynamicDialogueActorTransitionTimer = 0.f;
                 playDynamicDialogueAnimation(pendingSpeaking, true);
@@ -746,6 +983,7 @@ namespace MWGui
         {
             mDynamicDialogueActorAnimation.clear();
             mDynamicDialogueActorLeftArmProtected = false;
+            mDynamicDialogueActorAnimationSpeech = false;
             mDynamicDialogueActorAnimationTimer = randomRange(6.f, 12.f);
         }
 
@@ -762,13 +1000,14 @@ namespace MWGui
         if (mDynamicDialogueActorWasSpeaking)
         {
             mDynamicDialogueActorWasSpeaking = false;
-            if (mDynamicDialogueActorAnimation.compare(0, 9, "idlespeak") == 0
+            if (mDynamicDialogueActorAnimationSpeech && !mDynamicDialogueActorAnimation.empty()
                 && animation->isPlaying(mDynamicDialogueActorAnimation))
             {
-                animation->setLoopingEnabled(mDynamicDialogueActorAnimation, false);
-                mDynamicDialogueActorAnimationEnding = true;
-                mDynamicDialogueActorPendingSpeaking = false;
-                mDynamicDialogueActorTransitionTimer = 2.5f;
+                animation->disable(mDynamicDialogueActorAnimation);
+                mDynamicDialogueActorAnimation.clear();
+                mDynamicDialogueActorLeftArmProtected = false;
+                mDynamicDialogueActorAnimationSpeech = false;
+                playDynamicDialogueAnimation(false, true);
                 return;
             }
         }
@@ -787,6 +1026,8 @@ namespace MWGui
         {
             if (!mDynamicDialogueActorAnimation.empty())
             {
+                queueDialogueNpcInteraction(mPtr, mDynamicDialogueActorAnimation,
+                    MWRender::Animation::BlendMask_UpperBody, 1.f, 1, true);
                 if (MWRender::Animation* animation = MWBase::Environment::get().getWorld()->getAnimation(mPtr))
                     animation->setLoopingEnabled(mDynamicDialogueActorAnimation, false);
             }
@@ -806,6 +1047,8 @@ namespace MWGui
         mDynamicDialogueActorPendingSpeaking = false;
         mDynamicDialogueActorWasSpeaking = false;
         mDynamicDialogueActorLeftArmProtected = false;
+        mDynamicDialogueActorOpening = false;
+        mDynamicDialogueActorAnimationSpeech = false;
         mDynamicDialogueActorAnimation.clear();
     }
 
@@ -1422,7 +1665,7 @@ namespace MWGui
             /*
                 End of tes3mp change (major)
             */
-            
+
             mTopicLinks[topicId] = t;
 
             mKeywordSearch.seed(topicId, intptr_t(t));

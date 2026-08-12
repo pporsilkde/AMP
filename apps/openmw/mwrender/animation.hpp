@@ -89,6 +89,7 @@ struct AnimationPoseTransitionState
 {
     osg::Matrixf mFrom;
     float mDuration = 0.f;
+    std::string mEasing = "sineout";
     double mStartTime = -1.0;
     bool mFinished = false;
 };
@@ -213,6 +214,7 @@ protected:
         AnimPriority mPriority;
         int mBlendMask;
         bool mAutoDisable;
+        std::string mStartKey;
 
         AnimState() : mStartTime(0.0f), mLoopStartTime(0.0f), mLoopStopTime(0.0f), mStopTime(0.0f),
                       mTime(new float), mSpeedMult(1.0f), mPlaying(false), mLoopingEnabled(true),
@@ -268,6 +270,14 @@ protected:
 
     typedef std::map<std::string, std::shared_ptr<AnimationPoseTransitionState> > PoseTransitionMap;
     PoseTransitionMap mPoseTransitions;
+
+    // 0.51-style state tracking used by the lightweight transition backport.
+    // Keeping the active group per bone mask lets resetActiveGroups detect every
+    // animation hand-off, including dialogue/scripted groups that do not call
+    // beginBoneTransition explicitly.
+    std::string mActiveGroupNames[sNumBlendMasks];
+    std::string mActiveStartKeys[sNumBlendMasks];
+    std::shared_ptr<AnimSource> mActiveGroupSources[sNumBlendMasks];
 
     MWWorld::Ptr mPtr;
 
@@ -447,7 +457,7 @@ public:
      * snapping in one frame. When replacing a group, disable the old group first, then
      * capture the still-visible pose immediately before playing the new group.
      */
-    void beginBoneTransition(int blendMask, float duration);
+    void beginBoneTransition(int blendMask, float duration, const std::string& easing = "sineout");
 
     /** Adjust the speed multiplier of an already playing animation.
      */

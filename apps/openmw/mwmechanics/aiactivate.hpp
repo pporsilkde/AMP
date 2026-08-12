@@ -64,6 +64,13 @@ namespace MWMechanics
                 Track the object associated with this AiActivate package
             */
             MWWorld::Ptr mObjectPtr;
+
+            // Runtime-only contextual altar/shrine animation state.
+            bool mContextActionStarted = false;
+            bool mContextActionCompleted = false;
+            float mContextActionTimer = 0.f;
+            std::string mContextAnimation;
+            int mContextBlendMask = 0;
             /*
                 End of tes3mp addition
             */

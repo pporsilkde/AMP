@@ -89,6 +89,7 @@ namespace MWRender
 
         bool mHeadBobbingEnabled;
         bool mImmersiveFirstPersonEnabled;
+        float mImmersiveFirstPersonForwardOffset;
         float mHeadBobbingOffset;
         float mHeadBobbingRoll;
         float mHeadBobbingWeight; // Value from 0 to 1 for smooth enabling/disabling.

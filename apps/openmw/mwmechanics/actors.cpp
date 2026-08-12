@@ -16,6 +16,7 @@
 #include <components/debug/debuglog.hpp>
 #include <components/misc/rng.hpp>
 #include <components/misc/mathutil.hpp>
+#include <components/misc/stringops.hpp>
 #include <components/settings/settings.hpp>
 
 /*
@@ -40,6 +41,7 @@
 */
 
 #include "../mwworld/esmstore.hpp"
+#include "../mwworld/cellstore.hpp"
 #include "../mwworld/class.hpp"
 #include "../mwworld/inventorystore.hpp"
 #include "../mwworld/actionequip.hpp"
@@ -91,6 +93,9 @@ struct DynamicIdleAnimation
     std::size_t mLoops;
     int mWeight = 4;
     bool mRequiresNearbyNpc = false;
+    bool mGuardOnly = false;
+    bool mReligiousOnly = false;
+    bool mFormalOnly = false;
 };
 
 float randomRange(float minimum, float maximum)
@@ -170,6 +175,89 @@ bool hasConstructionSetAnimation(const MWWorld::Ptr& ptr)
 
     const MWWorld::LiveCellRef<ESM::NPC>* npc = ptr.get<ESM::NPC>();
     return npc && !npc->mBase->mModel.empty();
+}
+
+bool isContextualGuard(const MWWorld::Ptr& ptr)
+{
+    if (ptr.isEmpty() || !ptr.getClass().isNpc())
+        return false;
+    if (ptr.getClass().isClass(ptr, "Guard"))
+        return true;
+
+    const ESM::NPC* npc = ptr.get<ESM::NPC>()->mBase;
+    if (!npc)
+        return false;
+    const std::string npcClass = Misc::StringUtils::lowerCase(npc->mClass);
+    const std::string id = Misc::StringUtils::lowerCase(npc->mId);
+    const std::string name = Misc::StringUtils::lowerCase(npc->mName);
+    return npcClass.find("guard") != std::string::npos
+        || npcClass.find("crusader") != std::string::npos
+        || npcClass.find("master-at-arms") != std::string::npos
+        || id.find("ordinator") != std::string::npos
+        || name.find("ordinator") != std::string::npos;
+}
+
+bool isContextualReligious(const MWWorld::Ptr& ptr)
+{
+    if (ptr.isEmpty() || !ptr.getClass().isNpc())
+        return false;
+
+    const ESM::NPC* npc = ptr.get<ESM::NPC>()->mBase;
+    if (!npc)
+        return false;
+
+    const std::string npcClass = Misc::StringUtils::lowerCase(npc->mClass);
+    const std::string faction = Misc::StringUtils::lowerCase(npc->mFaction);
+    if (faction.find("temple") != std::string::npos
+        || faction.find("cult") != std::string::npos
+        || faction.find("tribunal") != std::string::npos)
+        return true;
+    static const char* sReligiousClasses[] = {
+        "priest", "monk", "healer", "wise woman", "cult", "cleric", "shaman", "oracle", "pilgrim"
+    };
+    for (const char* token : sReligiousClasses)
+        if (npcClass.find(token) != std::string::npos)
+            return true;
+
+    // Location matters for ambience: an otherwise generic NPC inside a temple/shrine
+    // may plausibly pray, while the same NPC in a tavern should never do so.
+    if (ptr.getCell() && ptr.getCell()->getCell())
+    {
+        const std::string cellName = Misc::StringUtils::lowerCase(ptr.getCell()->getCell()->mName);
+        static const char* sReligiousCells[] = { "temple", "shrine", "chapel", "monastery", "sanctuary" };
+        for (const char* token : sReligiousCells)
+            if (cellName.find(token) != std::string::npos)
+                return true;
+    }
+    return false;
+}
+
+bool isContextualFormal(const MWWorld::Ptr& ptr)
+{
+    if (ptr.isEmpty() || !ptr.getClass().isNpc())
+        return false;
+
+    const ESM::NPC* npc = ptr.get<ESM::NPC>()->mBase;
+    if (!npc)
+        return false;
+
+    const std::string npcClass = Misc::StringUtils::lowerCase(npc->mClass);
+    static const char* sFormalClasses[] = {
+        "noble", "knight", "council", "steward", "magistrate", "official", "diplomat", "duke"
+    };
+    for (const char* token : sFormalClasses)
+        if (npcClass.find(token) != std::string::npos)
+            return true;
+
+    if (ptr.getCell() && ptr.getCell()->getCell())
+    {
+        const std::string cellName = Misc::StringUtils::lowerCase(ptr.getCell()->getCell()->mName);
+        static const char* sFormalCells[] = { "palace", "manor", "council", "embassy", "castle", "estate" };
+        for (const char* token : sFormalCells)
+            if (cellName.find(token) != std::string::npos)
+                return true;
+    }
+    return false;
 }
 
 bool isConscious(const MWWorld::Ptr& ptr)
@@ -781,48 +869,71 @@ namespace MWMechanics
             }
         }
 
+        const bool contextualAnimations = Settings::Manager::getBool("contextual npc animations", "GUI");
+        const bool guardContext = contextualAnimations && isContextualGuard(ptr);
+        const bool religiousContext = contextualAnimations && !guardContext && isContextualReligious(ptr);
+        const bool formalContext = contextualAnimations && !guardContext && !religiousContext && isContextualFormal(ptr);
+
         static const DynamicIdleAnimation sAnimations[] = {
-            { "armsakimbo", 0.68f, 8 },
-            { "armsfolded", 0.68f, 8 },
-            { "armsatback", 0.68f, 8 },
-            { "armsalmapray", 0.74f, 6 },
-            { "handhippose", 0.62f, 8 },
-            { "readypose", 0.68f, 6 },
-            { "posealma3", 0.82f, 4 },
-            { "idle2_copy", 0.90f, 2 },
-            { "idle3_copy", 0.78f, 2 },
-            { "idle6_copy", 0.72f, 2 },
-            { "idle7_copy", 0.90f, 2 },
-            { "idle8_copy", 0.90f, 2 },
-            { "armsgesture", 0.88f, 2 },
-            { "armssunshield", 0.65f, 1 },
-            // Bundled interaction animation sources that previously existed in VFS
-            // but were not selected by the ambient NPC controller.
-            { "prayer1", 0.82f, 2, 1 },
-            { "prayer2", 0.82f, 2, 1 },
+            // Generic standing poses. Correct text-key capitalization is intentional: 0.47
+            // animation group lookup is case-sensitive, so the old lowercase names silently
+            // left a significant part of the bundled VFS unused.
+            { "ArmsAkimbo", 0.68f, 8 },
+            { "ArmsFolded", 0.68f, 8 },
+            { "ArmsAtBack", 0.68f, 8 },
+            { "HandHipPose", 0.62f, 8 },
+            { "ReadyPose", 0.68f, 6 },
+            { "Idle2_copy", 0.90f, 2 },
+            { "Idle3_copy", 0.78f, 2 },
+            { "Idle6_copy", 0.72f, 2 },
+            { "Idle7_copy", 0.90f, 2 },
+            { "Idle8_copy", 0.90f, 2 },
+            { "ArmsGesture", 0.88f, 2 },
+            { "ArmsSunShield", 0.65f, 1 },
             { "petit", 0.90f, 1, 1 },
 
-            // Sit Down Please 3.5.1: safe standing/social sermon gestures.
-            // Seated audience animations are intentionally not selected here: the
-            // ambient controller does not own furniture placement, so playing a
-            // seated group on a standing NPC would make it sit in mid-air.
-            { "sdppreachattentive", 1.00f, 2, 2, true },
-            { "sdppreachadmonish", 1.00f, 1, 1, true },
-            { "sdppreachformal01", 1.00f, 2, 1, true },
-            { "sdppreachformal02", 1.00f, 2, 1, true },
-            { "sdppreachbeckon", 1.00f, 1, 1, true },
-            { "sdppreachhold", 1.00f, 1, 1, true },
-            { "sdppreachscan", 1.00f, 1, 1, true },
-            { "sdppreachcommand01", 1.00f, 1, 1, true },
-            { "sdppreachcommand02", 1.00f, 1, 1, true },
-            { "sdppreachcommand03", 1.00f, 1, 1, true },
-            { "sdppreachcommand04", 1.00f, 1, 1, true },
+            // Casual social gestures are only used when there is actually someone nearby.
+            { "sdppreachattentive", 0.96f, 2, 2, true },
+            { "sdppreachbeckon", 0.96f, 1, 1, true },
+            { "ArmsGesture_greet", 0.90f, 1, 1, true },
+
+            // Guards get disciplined/formal poses rather than random prayer/preaching.
+            { "sdpGuardPose", 0.88f, 3, 5, false, true, false },
+            { "sdpGuardPose2", 0.88f, 3, 5, false, true, false },
+            { "sdpGuardPose3", 0.88f, 3, 5, false, true, false },
+            { "sdppreachscan", 0.92f, 1, 3, false, true, false },
+            { "sdppreachhold", 0.96f, 1, 1, true, true, false },
+
+            // Temple staff / religious interiors can use the prayer and formal assets that
+            // were present in VFS but previously fired randomly on unrelated NPCs.
+            { "armsAlmaPray", 0.74f, 6, 5, false, false, true },
+            { "PoseAlma3", 0.82f, 4, 4, false, false, true },
+            { "prayer1", 0.82f, 2, 3, false, false, true },
+            { "prayer2", 0.82f, 2, 3, false, false, true },
+            { "sdppreachformal01", 0.92f, 2, 4, false, false, true },
+            { "sdppreachformal02", 0.92f, 2, 4, false, false, true },
+            { "sdppreachadmonish", 0.96f, 1, 1, true, false, true },
+            { "sdppreachcommand02", 0.96f, 1, 1, true, false, true },
+            { "sdppreachcommand04", 0.96f, 1, 1, true, false, true },
+
+            // Nobles/officials and formal interiors use restrained address/formal gestures.
+            { "sdppreachformal01", 0.82f, 3, 5, false, false, false, true },
+            { "sdppreachformal02", 0.82f, 3, 5, false, false, false, true },
+            { "sdppreachattentive", 0.88f, 2, 3, false, false, false, true },
+            { "ArmsAtBack", 0.66f, 6, 4, false, false, false, true },
+            { "ArmsFolded", 0.66f, 6, 3, false, false, false, true },
         };
 
         std::vector<const DynamicIdleAnimation*> available;
         for (const DynamicIdleAnimation& candidate : sAnimations)
         {
             if (candidate.mRequiresNearbyNpc && !nearbyNpc)
+                continue;
+            if (candidate.mGuardOnly && !guardContext)
+                continue;
+            if (candidate.mReligiousOnly && !religiousContext)
+                continue;
+            if (candidate.mFormalOnly && !formalContext)
                 continue;
             if (animation->hasAnimation(candidate.mGroup))
                 available.push_back(&candidate);
@@ -1943,7 +2054,7 @@ namespace MWMechanics
         if (!isPlayer && !mwmp::PlayerList::isDedicatedPlayer(ptr) && !mwmp::Main::get().getCellController()->isDedicatedActor(ptr))
         {
         /*
-            End of tes3mp change (major)    
+            End of tes3mp change (major)
         */
             MWWorld::ContainerStoreIterator torch = inventoryStore.end();
             for (MWWorld::ContainerStoreIterator it = inventoryStore.begin(); it != inventoryStore.end(); ++it)
@@ -3620,7 +3731,7 @@ namespace MWMechanics
         {
             while (reader.isNextSub("ID__"))
             {
-                std::string id = reader.getHString();
+                std::string id = reader.getCompatRefId();
                 int count;
                 reader.getHNT(count, "COUN");
                 if (MWBase::Environment::get().getWorld()->getStore().find(id))
