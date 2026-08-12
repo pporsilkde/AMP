@@ -2417,6 +2417,32 @@ namespace MWMechanics
 
     void Actors::updateCombatMusic ()
     {
+        // ArenaMP: keep the original Morrowind title theme active throughout the
+        // multiplayer login/registration flow. The MP client skips GM_MainMenu,
+        // so without this guard the normal combat-music updater immediately
+        // replaces the title theme with the Explore playlist while the player is
+        // still entering their name/password.
+        //
+        // Once LocalPlayer::isLoggedIn() becomes true, currentMusic remains in the
+        // title state and the normal logic below performs the regular transition
+        // to Explore/Battle (using SoundManager's built-in fade).
+        static int currentMusic = 0;
+        constexpr int titleMusic = 3;
+
+        if (mwmp::Main::isInitialized())
+        {
+            mwmp::LocalPlayer* localPlayer = mwmp::Main::get().getLocalPlayer();
+            if (localPlayer && !localPlayer->isLoggedIn())
+            {
+                if (currentMusic != titleMusic)
+                {
+                    MWBase::Environment::get().getSoundManager()->playTitleMusic();
+                    currentMusic = titleMusic;
+                }
+                return;
+            }
+        }
+
         MWWorld::Ptr player = getPlayer();
         const osg::Vec3f playerPos = player.getRefData().getPosition().asVec3();
         bool hasHostiles = false; // need to know this to play Battle music
@@ -2437,8 +2463,6 @@ namespace MWMechanics
         }
 
         // check if we still have any player enemies to switch music
-        static int currentMusic = 0;
-
         if (currentMusic != 1 && !hasHostiles && !(player.getClass().getCreatureStats(player).isDead() &&
         MWBase::Environment::get().getSoundManager()->isMusicPlaying()))
         {
