@@ -2,6 +2,7 @@
 
 #include <iomanip>
 #include <algorithm>
+#include <utility>
 
 #include <osg/Fog>
 #include <osg/Depth>
@@ -33,6 +34,7 @@
 #include <components/sceneutil/lightmanager.hpp>
 
 #include <components/misc/constants.hpp>
+#include <components/misc/stringops.hpp>
 
 #include <components/nifosg/controller.hpp>
 
@@ -619,7 +621,20 @@ void Water::updateWaterMaterial()
         mSimulation->setRipples(nullptr);
     }
 
-    const bool shaderWaterEnabled = Settings::Manager::getBool("shader", "Water");
+    std::string shaderWaterMode;
+    const auto modeKey = std::make_pair(std::string("Water"), std::string("shader mode"));
+    const auto modeIt = Settings::Manager::mUserSettings.find(modeKey);
+    if (modeIt != Settings::Manager::mUserSettings.end())
+        shaderWaterMode = modeIt->second;
+    else
+        shaderWaterMode = Settings::Manager::getBool("shader", "Water") ? "new" : "off";
+
+    Misc::StringUtils::lowerCaseInPlace(shaderWaterMode);
+    if (shaderWaterMode != "off" && shaderWaterMode != "simple" && shaderWaterMode != "new")
+        shaderWaterMode = Settings::Manager::getBool("shader", "Water") ? "new" : "off";
+
+    const bool shaderWaterEnabled = shaderWaterMode != "off";
+    const bool pbrWaterEnabled = shaderWaterMode == "new";
     const bool shaderWaterRipples = Settings::Manager::getBool("shader water ripples", "Water");
 
     if (shaderWaterEnabled)
@@ -647,7 +662,7 @@ void Water::updateWaterMaterial()
             mParent->addChild(mRipples);
         }
 
-        createShaderWaterStateSet(mWaterGeom, mReflection, mRefraction);
+        createShaderWaterStateSet(mWaterGeom, mReflection, mRefraction, pbrWaterEnabled);
     }
     else
     {
@@ -710,7 +725,7 @@ void Water::createSimpleWaterStateSet(osg::Node* node, float alpha)
     sceneManager->setForceShaders(oldValue);
 }
 
-void Water::createShaderWaterStateSet(osg::Node* node, Reflection* reflection, Refraction* refraction)
+void Water::createShaderWaterStateSet(osg::Node* node, Reflection* reflection, Refraction* refraction, bool pbr)
 {
     // The Complete Water Shaders PBR package targets OpenMW 0.51's compatibility
     // shader pipeline.  ArenaMP is based on 0.47, so compile the port through a
@@ -728,23 +743,34 @@ void Water::createShaderWaterStateSet(osg::Node* node, Reflection* reflection, R
     defineMap["rippleMapSize"] = std::to_string(RipplesSurface::sRTTSize) + ".0";
 
     Shader::ShaderManager& shaderMgr = mResourceSystem->getSceneManager()->getShaderManager();
-    osg::ref_ptr<osg::Shader> vertexShader(
-        shaderMgr.getShader("water_pbr_vertex.glsl", defineMap, osg::Shader::VERTEX));
-    osg::ref_ptr<osg::Shader> fragmentShader(
-        shaderMgr.getShader("water_pbr_fragment.glsl", defineMap, osg::Shader::FRAGMENT));
+    osg::ref_ptr<osg::Shader> vertexShader;
+    osg::ref_ptr<osg::Shader> fragmentShader;
 
-    // Keep the previous ArenaMP water shader as a parse-time fallback.  This does
-    // not mask GPU compile errors, but protects the build from a missing resource
-    // or an unsupported template directive.
-    if (!vertexShader || !fragmentShader)
+    if (pbr)
     {
-        Log(Debug::Error) << "PBR water shader template failed to load, falling back to ArenaMP legacy water shader";
+        vertexShader = shaderMgr.getShader("water_pbr_vertex.glsl", defineMap, osg::Shader::VERTEX);
+        fragmentShader = shaderMgr.getShader("water_pbr_fragment.glsl", defineMap, osg::Shader::FRAGMENT);
+
+        // Keep the previous ArenaMP water shader as a parse-time fallback. This
+        // protects old GPUs/configurations from a missing PBR resource.
+        if (!vertexShader || !fragmentShader)
+            Log(Debug::Error) << "PBR water shader template failed to load, falling back to ArenaMP simple water shader";
+    }
+
+    if (!pbr || !vertexShader || !fragmentShader)
+    {
         Shader::ShaderManager::DefineMap legacyDefineMap;
         vertexShader = shaderMgr.getShader("water_vertex.glsl", legacyDefineMap, osg::Shader::VERTEX);
         fragmentShader = shaderMgr.getShader("water_fragment.glsl", legacyDefineMap, osg::Shader::FRAGMENT);
     }
 
-    osg::ref_ptr<osg::Texture2D> normalMap (new osg::Texture2D(readPngImage(mResourcePath + "/shaders/water_nm.png")));
+    // Keep the legacy/simple and new/PBR water materials visually independent.
+    // The classic shader uses the softer bundled legacy normal map, while the
+    // new shader keeps the detailed normal map that ships with the PBR water.
+    const std::string normalMapPath = pbr
+        ? mResourcePath + "/shaders/water_nm.png"
+        : mResourcePath + "/shaders/water_nm_legacy.png";
+    osg::ref_ptr<osg::Texture2D> normalMap (new osg::Texture2D(readPngImage(normalMapPath)));
 
     if (normalMap->getImage())
         normalMap->getImage()->flipVertical();

@@ -29,7 +29,6 @@ namespace MWGui
             MyGUI::ScrollView* mDisplayScroll;
             MyGUI::ScrollView* mWaterScroll;
             MyGUI::ScrollView* mPbrScroll;
-            MyGUI::ScrollView* mEffectsScroll;
             MyGUI::ScrollView* mHdrScroll;
             MyGUI::Button* mOkButton;
 
@@ -40,6 +39,7 @@ namespace MWGui
             MyGUI::ComboBox* mTextureFilteringButton;
             MyGUI::Widget* mAnisotropyBox;
 
+            MyGUI::ComboBox* mWaterShaderMode;
             MyGUI::ComboBox* mWaterTextureSize;
             MyGUI::ComboBox* mWaterReflectionDetail;
             MyGUI::Button* mWaterResetButton;
@@ -84,6 +84,7 @@ namespace MWGui
             void onResolutionCancel();
             void highlightCurrentResolution();
 
+            void onWaterShaderModeChanged(MyGUI::ComboBox* _sender, size_t pos);
             void onWaterTextureSizeChanged(MyGUI::ComboBox* _sender, size_t pos);
             void onWaterReflectionDetailChanged(MyGUI::ComboBox* _sender, size_t pos);
             void onWaterResetButtonClicked(MyGUI::Widget* _sender);
@@ -114,6 +115,7 @@ namespace MWGui
             void updateLandOptimizationModeCombo();
             void updateLandDistanceControls();
             void updateShadowCombos();
+            void updateWaterShaderModeCombo();
             void selectLightingMethod(const std::string& value);
             void updateHdrTonemapperCombo();
 

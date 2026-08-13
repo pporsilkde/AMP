@@ -214,18 +214,28 @@ InputWrapper::InputWrapper(SDL_Window* window, osg::ref_ptr<osgViewer::Viewer> v
                 // so we ignore window moved events (improves window movement performance)
                 break;
             case SDL_WINDOWEVENT_SIZE_CHANGED:
-                int w,h;
-                SDL_GetWindowSize(mSDLWindow, &w, &h);
-                int x,y;
-                SDL_GetWindowPosition(mSDLWindow, &x,&y);
-                mViewer->getCamera()->getGraphicsContext()->resized(x,y,w,h);
+            {
+                // Use the real OpenGL drawable size, not SDL's logical window size.
+                // On Windows/DPI and Intel fullscreen restore, SDL can transiently
+                // report a 0x0 drawable during Alt+Tab/minimize; never propagate it
+                // to OSG/MyGUI because that can leave the viewport flickering.
+                int w = 0;
+                int h = 0;
+                SDL_GL_GetDrawableSize(mSDLWindow, &w, &h);
+                if (w <= 0 || h <= 0)
+                    break;
 
-                mViewer->getEventQueue()->windowResize(x,y,w,h);
+                int x = 0;
+                int y = 0;
+                SDL_GetWindowPosition(mSDLWindow, &x, &y);
+                mViewer->getCamera()->getGraphicsContext()->resized(x, y, w, h);
+                mViewer->getEventQueue()->windowResize(x, y, w, h);
 
                 if (mWindowListener)
                     mWindowListener->windowResized(w, h);
 
                 break;
+            }
 
             case SDL_WINDOWEVENT_RESIZED:
                 // This should also fire SIZE_CHANGED, so no need to handle

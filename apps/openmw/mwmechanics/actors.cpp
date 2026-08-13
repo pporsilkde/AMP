@@ -96,6 +96,8 @@ struct DynamicIdleAnimation
     bool mGuardOnly = false;
     bool mReligiousOnly = false;
     bool mFormalOnly = false;
+    bool mClosedPose = false;
+    bool mAllowWhileWalking = false;
 };
 
 float randomRange(float minimum, float maximum)
@@ -705,7 +707,7 @@ namespace MWMechanics
             state.mEnding = false;
             state.mTransitionTimeout = 0.f;
             state.mLeftArmProtected = false;
-            state.mTimer = randomRange(2.f, 5.f);
+            state.mTimer = randomRange(1.f, 3.f);
             return;
         }
 
@@ -760,6 +762,8 @@ namespace MWMechanics
 
         const AiSequence& aiSequence = stats.getAiSequence();
         const AiPackageTypeId activeAi = aiSequence.getTypeId();
+        const bool walkingWander = moving && !controller->isTurning()
+            && activeAi == AiPackageTypeId::Wander;
         const bool hasDirectedAi = (activeAi != AiPackageTypeId::None
             && activeAi != AiPackageTypeId::Wander)
             || aiSequence.hasPackage(AiPackageTypeId::Follow)
@@ -770,7 +774,7 @@ namespace MWMechanics
             || !Settings::Manager::getBool("dynamic dialogue actors", "GUI")
             || stats.isDead() || stats.getKnockedDown() || stats.getAiSequence().isInCombat()
             || hasDirectedAi
-            || stats.getDrawState() != DrawState_Nothing || moving || constructionSetAnimation
+            || stats.getDrawState() != DrawState_Nothing || (moving && !walkingWander) || constructionSetAnimation
             || controller->hasQueuedAnimation()
             || world->isSwimming(ptr) || MWBase::Environment::get().getSoundManager()->sayActive(ptr)
             || dialogueTarget || ArenaMW::isConsumingAnimationActive(ptr);
@@ -797,7 +801,7 @@ namespace MWMechanics
                 state.mAnimation.clear();
                 state.mEnding = false;
                 state.mTransitionTimeout = 0.f;
-                state.mTimer = randomRange(1.5f, 4.f);
+                state.mTimer = randomRange(0.8f, 2.5f);
             }
             return;
         }
@@ -839,7 +843,7 @@ namespace MWMechanics
                     dynamicIdleBlendMask(state.mLeftArmProtected), 1.f, 1, true);
                 state.mAnimation.clear();
                 state.mLeftArmProtected = false;
-                state.mTimer = randomRange(2.f, 5.f);
+                state.mTimer = randomRange(1.f, 3.f);
                 return;
             }
 
@@ -896,27 +900,27 @@ namespace MWMechanics
             // Generic standing poses. Correct text-key capitalization is intentional: 0.47
             // animation group lookup is case-sensitive, so the old lowercase names silently
             // left a significant part of the bundled VFS unused.
-            { "ArmsAkimbo", 0.68f, 8 },
-            { "ArmsFolded", 0.68f, 8 },
+            { "ArmsAkimbo", 0.68f, 8, 8, false, false, false, false, true, false },
+            { "ArmsFolded", 0.68f, 8, 8, false, false, false, false, true, false },
             { "ArmsAtBack", 0.68f, 8 },
-            { "HandHipPose", 0.62f, 8 },
-            { "ReadyPose", 0.68f, 6 },
+            { "HandHipPose", 0.62f, 8, 8, false, false, false, false, true, false },
+            { "ReadyPose", 0.68f, 6, 6, false, false, false, false, true, false },
             { "Idle2_copy", 0.90f, 2 },
             { "Idle3_copy", 0.78f, 2 },
             { "Idle6_copy", 0.72f, 2 },
             { "Idle7_copy", 0.90f, 2 },
             { "Idle8_copy", 0.90f, 2 },
-            { "ArmsGesture", 0.88f, 2 },
+            { "ArmsGesture", 0.88f, 2, 2, false, false, false, false, false, true },
             { "ArmsSunShield", 0.65f, 1 },
             { "petit", 0.90f, 1, 1 },
 
             // Casual social gestures are only used when there is actually someone nearby.
             { "sdppreachattentive", 0.96f, 2, 3, true },
-            { "sdppreachattentiveleft", 0.96f, 1, 2, true },
-            { "sdppreachattentiveright", 0.96f, 1, 2, true },
+            { "sdppreachattentiveleft", 0.96f, 1, 2, true, false, false, false, false, true },
+            { "sdppreachattentiveright", 0.96f, 1, 2, true, false, false, false, false, true },
             { "sdppreachaddressspeak", 0.96f, 1, 2, true },
             { "sdppreachbeckon", 0.96f, 1, 1, true },
-            { "ArmsGesture_greet", 0.90f, 1, 2, true },
+            { "ArmsGesture_greet", 0.90f, 1, 2, true, false, false, false, false, true },
 
             // Guards get disciplined/formal poses rather than random prayer/preaching.
             { "sdpGuardPose", 0.88f, 3, 5, false, true, false },
@@ -972,6 +976,8 @@ namespace MWMechanics
                 continue;
             if (candidate.mFormalOnly && !formalContext)
                 continue;
+            if (walkingWander && !candidate.mAllowWhileWalking)
+                continue;
             if (animation->hasAnimation(candidate.mGroup))
                 available.push_back(&candidate);
         }
@@ -982,15 +988,26 @@ namespace MWMechanics
             return;
         }
 
+        int disposition = 100;
+        if (MWBase::MechanicsManager* mechanics = MWBase::Environment::get().getMechanicsManager())
+            disposition = mechanics->getDerivedDisposition(ptr, true);
+        const int closedPoseMultiplier = disposition < 40 ? 6 : (disposition < 60 ? 4 : 1);
+
+        const auto weightedValue = [closedPoseMultiplier](const DynamicIdleAnimation* candidate)
+        {
+            const int base = std::max(1, candidate->mWeight);
+            return candidate->mClosedPose ? base * closedPoseMultiplier : base;
+        };
+
         int totalWeight = 0;
         for (const DynamicIdleAnimation* candidate : available)
-            totalWeight += std::max(1, candidate->mWeight);
+            totalWeight += weightedValue(candidate);
 
         int selection = Misc::Rng::rollDice(totalWeight);
         const DynamicIdleAnimation* selected = available.back();
         for (const DynamicIdleAnimation* candidate : available)
         {
-            selection -= std::max(1, candidate->mWeight);
+            selection -= weightedValue(candidate);
             if (selection < 0)
             {
                 selected = candidate;
@@ -1017,7 +1034,7 @@ namespace MWMechanics
         {
             state.mAnimation = selected->mGroup;
             state.mLeftArmProtected = leftArmProtected;
-            state.mTimer = randomRange(9.f, 18.f);
+            state.mTimer = walkingWander ? randomRange(4.f, 8.f) : randomRange(6.f, 12.f);
             // animation->play receives an extra-loop count; the MP interaction
             // payload stores a total play count, hence +1 here.
             queueDynamicNpcInteraction(ptr, selected->mGroup, blendMask,
@@ -1026,7 +1043,7 @@ namespace MWMechanics
         else
         {
             state.mLeftArmProtected = false;
-            state.mTimer = randomRange(3.f, 7.f);
+            state.mTimer = randomRange(1.5f, 4.f);
         }
     }
 

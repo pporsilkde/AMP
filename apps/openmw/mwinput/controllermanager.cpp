@@ -39,6 +39,8 @@ namespace MWInput
         , mJoystickLastUsed(false)
         , mSneakGamepadShortcut(false)
         , mGamepadPreviewMode(false)
+        , mGuiStickX(0)
+        , mGuiStickY(0)
     {
         if (!controllerBindingsFile.empty())
         {
@@ -248,14 +250,26 @@ namespace MWInput
         {
             if (mGamepadGuiCursorEnabled)
             {
-                // Temporary mouse binding until keyboard controls are available:
-                if (arg.button == SDL_CONTROLLER_BUTTON_A) // We'll pretend that A is left click.
+                // A is a mouse click in ordinary GUI windows, but focused item/list
+                // navigation consumed the press as Enter and therefore must not emit
+                // a stray mouse-button release here.
+                if (arg.button == SDL_CONTROLLER_BUTTON_A)
                 {
-                    bool mousePressSuccess = mMouseManager->injectMouseButtonRelease(SDL_BUTTON_LEFT);
-                    if (mBindingsManager->isDetectingBindingState()) // If the player just triggered binding, don't let button release bind.
-                        return;
+                    bool focusedNavigationWidget = false;
+                    if (MyGUI::Widget* focus = MyGUI::InputManager::getInstance().getKeyFocusWidget())
+                    {
+                        const std::string type = focus->getTypeName();
+                        focusedNavigationWidget = type.find("ItemView") != std::string::npos
+                            || type.find("ListBox") != std::string::npos;
+                    }
+                    if (!focusedNavigationWidget)
+                    {
+                        bool mousePressSuccess = mMouseManager->injectMouseButtonRelease(SDL_BUTTON_LEFT);
+                        if (mBindingsManager->isDetectingBindingState()) // If the player just triggered binding, don't let button release bind.
+                            return;
 
-                    mBindingsManager->setPlayerControlsEnabled(!mousePressSuccess);
+                        mBindingsManager->setPlayerControlsEnabled(!mousePressSuccess);
+                    }
                 }
             }
         }
@@ -275,7 +289,51 @@ namespace MWInput
             return;
 
         mJoystickLastUsed = true;
-        if (MWBase::Environment::get().getWindowManager()->isGuiMode())
+        MWBase::WindowManager* windowManager = MWBase::Environment::get().getWindowManager();
+
+        // The movement stick can be used as a discrete navigation pad. A latch
+        // prevents one analogue event from skipping several rows. In normal GUI
+        // mode this is active when the virtual mouse cursor is disabled; QuickLoot
+        // receives it directly because QuickLoot deliberately remains non-modal.
+        if (arg.axis == SDL_CONTROLLER_AXIS_LEFTX || arg.axis == SDL_CONTROLLER_AXIS_LEFTY)
+        {
+            constexpr int navThreshold = 15000;
+            const int direction = arg.value > navThreshold ? 1 : (arg.value < -navThreshold ? -1 : 0);
+            int& latch = arg.axis == SDL_CONTROLLER_AXIS_LEFTX ? mGuiStickX : mGuiStickY;
+            if (direction != latch)
+            {
+                latch = direction;
+                if (direction != 0)
+                {
+                    MyGUI::KeyCode key = MyGUI::KeyCode::None;
+                    if (arg.axis == SDL_CONTROLLER_AXIS_LEFTX)
+                        key = direction < 0 ? MyGUI::KeyCode::ArrowLeft : MyGUI::KeyCode::ArrowRight;
+                    else
+                        key = direction < 0 ? MyGUI::KeyCode::ArrowUp : MyGUI::KeyCode::ArrowDown;
+
+                    bool focusedNavigationWidget = false;
+                    if (windowManager->isGuiMode())
+                    {
+                        if (MyGUI::Widget* focus = MyGUI::InputManager::getInstance().getKeyFocusWidget())
+                        {
+                            const std::string& type = focus->getTypeName();
+                            focusedNavigationWidget = type.find("ItemView") != std::string::npos
+                                || type.find("ListBox") != std::string::npos;
+                        }
+                    }
+                    if (windowManager->isGuiMode()
+                        && (!mGamepadGuiCursorEnabled || focusedNavigationWidget))
+                    {
+                        windowManager->injectKeyPress(key, 0, false);
+                        return;
+                    }
+                    if (!windowManager->isGuiMode() && windowManager->handleQuickLootKeyPress(key))
+                        return;
+                }
+            }
+        }
+
+        if (windowManager->isGuiMode())
         {
             gamepadToGuiControl(arg);
         }
@@ -328,11 +386,21 @@ namespace MWInput
                 key = MyGUI::KeyCode::ArrowLeft;
                 break;
             case SDL_CONTROLLER_BUTTON_A:
-                // If we are using the joystick as a GUI mouse, A must be handled via mouse.
-                if (mGamepadGuiCursorEnabled)
+            {
+                // Item grids and list-based menus use the left stick for focus navigation,
+                // so A confirms the focused entry even while the virtual GUI cursor is enabled.
+                bool focusedNavigationWidget = false;
+                if (MyGUI::Widget* focus = MyGUI::InputManager::getInstance().getKeyFocusWidget())
+                {
+                    const std::string type = focus->getTypeName();
+                    focusedNavigationWidget = type.find("ItemView") != std::string::npos
+                        || type.find("ListBox") != std::string::npos;
+                }
+                if (mGamepadGuiCursorEnabled && !focusedNavigationWidget)
                     return false;
-                key = MyGUI::KeyCode::Space;
+                key = focusedNavigationWidget ? MyGUI::KeyCode::Return : MyGUI::KeyCode::Space;
                 break;
+            }
             case SDL_CONTROLLER_BUTTON_B:
                 if (MyGUI::InputManager::getInstance().isModalAny())
                     MWBase::Environment::get().getWindowManager()->exitCurrentModal();

@@ -1,4 +1,4 @@
-// Recommended to set in-game Water Texture Quality to High (if Refraction is disabled then set it to Low), and Water Reflections to Sky and to use Wetworld Water SSR instead for reflections.
+// Recommended to set in-game Water Texture Quality to High (if Refraction is disabled then set it to Low), and Water Reflections to Sky for the intended reflection balance.
 
 // Set to 0 instead of 1 to disable different features
 #define FOAM_ENABLED 1

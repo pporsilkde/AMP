@@ -334,7 +334,7 @@
               <Property key="Caption" value="#{sEnableJoystick}" />
             </Widget>
           </Widget>
-          <Widget type="TextBox" skin="NormalText" position="160 366 462 18">
+          <Widget type="TextBox" skin="NormalText" position="8 366 442 18">
             <Property key="Caption" value="#{arenamp=settings.camera_sensitivity}" />
           </Widget>
           <Widget type="ScrollBar" skin="MW_HScroll" position="8 390 462 16">
@@ -356,157 +356,183 @@
           </Widget>
         </Widget>
         <Widget type="TabItem" skin="" position="4 32 486 412">
-          <Property key="Caption" value="#{arenamp=settings.subsection.display}" />
+          <Property key="Caption" value="#{arenamp=settings.subsection.display}"/>
           <Widget type="ScrollView" skin="MW_ScrollView" position="4 4 478 400" align="Left Top" name="DisplayScroll">
-            <Property key="CanvasAlign" value="Left Top" />
-            <Property key="CanvasSize" value="458 560" />
-            <Widget type="ListBox" skin="MW_List" position="8 8 220 142" name="ResolutionList" />
+            <Property key="CanvasAlign" value="Left Top"/>
+            <Property key="CanvasSize" value="458 630"/>
+            <Widget type="ListBox" skin="MW_List" position="8 8 220 142" name="ResolutionList"/>
             <Widget type="HBox" skin="" position="244 8 206 24">
               <Widget type="AutoSizedButton" skin="MW_Button" position="0 0 24 24" name="FullscreenButton">
-                <UserString key="SettingCategory" value="Video" />
-                <UserString key="SettingName" value="fullscreen" />
-                <UserString key="SettingType" value="CheckButton" />
+                <UserString key="SettingCategory" value="Video"/>
+                <UserString key="SettingName" value="fullscreen"/>
+                <UserString key="SettingType" value="CheckButton"/>
               </Widget>
               <Widget type="AutoSizedTextBox" skin="SandText" position="30 4 170 18">
-                <Property key="Caption" value="#{arenamp=settings.fullscreen}" />
+                <Property key="Caption" value="#{arenamp=settings.fullscreen}"/>
               </Widget>
             </Widget>
             <Widget type="HBox" skin="" position="244 38 206 24">
               <Widget type="AutoSizedButton" skin="MW_Button" position="0 0 24 24" name="VSyncButton">
-                <UserString key="SettingCategory" value="Video" />
-                <UserString key="SettingName" value="vsync" />
-                <UserString key="SettingType" value="CheckButton" />
+                <UserString key="SettingCategory" value="Video"/>
+                <UserString key="SettingName" value="vsync"/>
+                <UserString key="SettingType" value="CheckButton"/>
               </Widget>
               <Widget type="AutoSizedTextBox" skin="SandText" position="30 4 170 18">
-                <Property key="Caption" value="#{arenamp=settings.vsync}" />
+                <Property key="Caption" value="#{arenamp=settings.vsync}"/>
               </Widget>
             </Widget>
             <Widget type="HBox" skin="" position="244 68 206 24">
               <Widget type="AutoSizedButton" skin="MW_Button" position="0 0 24 24" name="WindowBorderButton">
-                <UserString key="SettingCategory" value="Video" />
-                <UserString key="SettingName" value="window border" />
-                <UserString key="SettingType" value="CheckButton" />
+                <UserString key="SettingCategory" value="Video"/>
+                <UserString key="SettingName" value="window border"/>
+                <UserString key="SettingType" value="CheckButton"/>
               </Widget>
               <Widget type="AutoSizedTextBox" skin="SandText" position="30 4 170 18">
-                <Property key="Caption" value="#{arenamp=settings.window_border}" />
+                <Property key="Caption" value="#{arenamp=settings.window_border}"/>
               </Widget>
             </Widget>
-            <Widget type="TextBox" skin="NormalText" position="8 166 442 18" name="FovText">
-              <Property key="Caption" value="#{arenamp=settings.fov}" />
+            <Widget type="HBox" skin="" position="244 100 206 24">
+              <Widget type="AutoSizedButton" skin="MW_Button" position="0 0 24 24" name="SmaaButton">
+                <Property key="ExpandDirection" value="Right"/>
+                <UserString key="SettingCategory" value="Shaders"/>
+                <UserString key="SettingName" value="smaa enabled"/>
+                <UserString key="SettingType" value="CheckButton"/>
+              </Widget>
+              <Widget type="AutoSizedTextBox" skin="SandText" position="30 4 170 18">
+                <Property key="Caption" value="#{arenamp=settings.display.smaa_enabled}"/>
+              </Widget>
             </Widget>
-            <Widget type="ScrollBar" skin="MW_HScroll" position="8 188 442 16">
-              <Property key="Range" value="81" />
-              <Property key="Page" value="1" />
-              <UserString key="SettingType" value="Slider" />
-              <UserString key="SettingCategory" value="Camera" />
-              <UserString key="SettingName" value="field of view" />
-              <UserString key="SettingValueType" value="Integer" />
-              <UserString key="SettingMin" value="30" />
-              <UserString key="SettingMax" value="110" />
-              <UserString key="SettingLabelWidget" value="FovText" />
-              <UserString key="SettingLabelCaption" value="#{arenamp=settings.fov}" />
+            <Widget type="TextBox" skin="NormalText" position="244 132 206 18" name="SmaaThresholdLabel">
+              <Property key="Caption" value="#{arenamp=settings.display.smaa_threshold}"/>
             </Widget>
-            <Widget type="TextBox" skin="SandText" position="8 206 80 16">
-              <Property key="Caption" value="#{sLow}" />
+            <Widget type="ScrollBar" skin="MW_HScroll" position="244 152 206 16">
+              <Property key="Range" value="101"/>
+              <Property key="Page" value="1"/>
+              <UserString key="SettingType" value="Slider"/>
+              <UserString key="SettingCategory" value="Shaders"/>
+              <UserString key="SettingName" value="smaa threshold"/>
+              <UserString key="SettingValueType" value="Float"/>
+              <UserString key="SettingMin" value="0.03"/>
+              <UserString key="SettingMax" value="0.30"/>
+              <UserString key="SettingLabelWidget" value="SmaaThresholdLabel"/>
+              <UserString key="SettingLabelCaption" value="#{arenamp=settings.display.smaa_threshold}"/>
             </Widget>
-            <Widget type="TextBox" skin="SandText" position="370 206 80 16">
-              <Property key="Caption" value="#{sHigh}" />
-              <Property key="TextAlign" value="Right" />
+            <Widget type="TextBox" skin="NormalText" position="8 236 442 18" name="FovText">
+              <Property key="Caption" value="#{arenamp=settings.fov}"/>
             </Widget>
-            <Widget type="TextBox" skin="NormalText" position="8 232 442 18" name="GammaText">
-              <Property key="Caption" value="#{sGamma_Correction}" />
+            <Widget type="ScrollBar" skin="MW_HScroll" position="8 258 442 16">
+              <Property key="Range" value="81"/>
+              <Property key="Page" value="1"/>
+              <UserString key="SettingType" value="Slider"/>
+              <UserString key="SettingCategory" value="Camera"/>
+              <UserString key="SettingName" value="field of view"/>
+              <UserString key="SettingValueType" value="Integer"/>
+              <UserString key="SettingMin" value="30"/>
+              <UserString key="SettingMax" value="110"/>
+              <UserString key="SettingLabelWidget" value="FovText"/>
+              <UserString key="SettingLabelCaption" value="#{arenamp=settings.fov}"/>
             </Widget>
-            <Widget type="ScrollBar" skin="MW_HScroll" position="8 254 442 16" name="GammaSlider">
-              <Property key="Range" value="10000" />
-              <Property key="Page" value="300" />
-              <UserString key="SettingType" value="Slider" />
-              <UserString key="SettingCategory" value="Video" />
-              <UserString key="SettingName" value="gamma" />
-              <UserString key="SettingValueType" value="Float" />
-              <UserString key="SettingMin" value="0.1" />
-              <UserString key="SettingMax" value="3.0" />
+            <Widget type="TextBox" skin="SandText" position="8 276 80 16">
+              <Property key="Caption" value="#{sLow}"/>
             </Widget>
-            <Widget type="TextBox" skin="SandText" position="8 272 100 16" name="GammaTextDark">
-              <Property key="Caption" value="#{sDark_Gamma}" />
+            <Widget type="TextBox" skin="SandText" position="370 276 80 16">
+              <Property key="Caption" value="#{sHigh}"/>
+              <Property key="TextAlign" value="Right"/>
             </Widget>
-            <Widget type="TextBox" skin="SandText" position="350 272 100 16" name="GammaTextLight">
-              <Property key="Caption" value="#{sLight_Gamma}" />
-              <Property key="TextAlign" value="Right" />
+            <Widget type="TextBox" skin="NormalText" position="8 302 442 18" name="GammaText">
+              <Property key="Caption" value="#{sGamma_Correction}"/>
             </Widget>
-            <Widget type="Widget" skin="" position="8 298 442 42" name="AnisotropyBox">
+            <Widget type="ScrollBar" skin="MW_HScroll" position="8 324 442 16" name="GammaSlider">
+              <Property key="Range" value="10000"/>
+              <Property key="Page" value="300"/>
+              <UserString key="SettingType" value="Slider"/>
+              <UserString key="SettingCategory" value="Video"/>
+              <UserString key="SettingName" value="gamma"/>
+              <UserString key="SettingValueType" value="Float"/>
+              <UserString key="SettingMin" value="0.1"/>
+              <UserString key="SettingMax" value="3.0"/>
+            </Widget>
+            <Widget type="TextBox" skin="SandText" position="8 342 100 16" name="GammaTextDark">
+              <Property key="Caption" value="#{sDark_Gamma}"/>
+            </Widget>
+            <Widget type="TextBox" skin="SandText" position="350 342 100 16" name="GammaTextLight">
+              <Property key="Caption" value="#{sLight_Gamma}"/>
+              <Property key="TextAlign" value="Right"/>
+            </Widget>
+            <Widget type="Widget" skin="" position="8 368 442 42" name="AnisotropyBox">
               <Widget type="TextBox" skin="NormalText" position="0 0 442 18" name="AnisotropyLabel">
-                <Property key="Caption" value="#{arenamp=settings.anisotropy}" />
+                <Property key="Caption" value="#{arenamp=settings.anisotropy}"/>
               </Widget>
               <Widget type="ScrollBar" skin="MW_HScroll" position="0 22 442 16">
-                <Property key="Range" value="17" />
-                <Property key="Page" value="1" />
-                <UserString key="SettingType" value="Slider" />
-                <UserString key="SettingCategory" value="General" />
-                <UserString key="SettingName" value="anisotropy" />
-                <UserString key="SettingValueType" value="Integer" />
-                <UserString key="SettingMin" value="0" />
-                <UserString key="SettingMax" value="16" />
-                <UserString key="SettingLabelWidget" value="AnisotropyLabel" />
-                <UserString key="SettingLabelCaption" value="#{arenamp=settings.anisotropy}" />
+                <Property key="Range" value="17"/>
+                <Property key="Page" value="1"/>
+                <UserString key="SettingType" value="Slider"/>
+                <UserString key="SettingCategory" value="General"/>
+                <UserString key="SettingName" value="anisotropy"/>
+                <UserString key="SettingValueType" value="Integer"/>
+                <UserString key="SettingMin" value="0"/>
+                <UserString key="SettingMax" value="16"/>
+                <UserString key="SettingLabelWidget" value="AnisotropyLabel"/>
+                <UserString key="SettingLabelCaption" value="#{arenamp=settings.anisotropy}"/>
               </Widget>
             </Widget>
-            <Widget type="TextBox" skin="NormalText" position="8 484 442 18">
-              <Property key="Caption" value="#{sTransparency_Menu}" />
+            <Widget type="TextBox" skin="NormalText" position="8 554 442 18">
+              <Property key="Caption" value="#{sTransparency_Menu}"/>
             </Widget>
-            <Widget type="ScrollBar" skin="MW_HScroll" position="8 506 442 16">
-              <Property key="Range" value="10000" />
-              <Property key="Page" value="300" />
-              <UserString key="SettingType" value="Slider" />
-              <UserString key="SettingCategory" value="GUI" />
-              <UserString key="SettingName" value="menu transparency" />
-              <UserString key="SettingValueType" value="Float" />
+            <Widget type="ScrollBar" skin="MW_HScroll" position="8 576 442 16">
+              <Property key="Range" value="10000"/>
+              <Property key="Page" value="300"/>
+              <UserString key="SettingType" value="Slider"/>
+              <UserString key="SettingCategory" value="GUI"/>
+              <UserString key="SettingName" value="menu transparency"/>
+              <UserString key="SettingValueType" value="Float"/>
             </Widget>
-            <Widget type="TextBox" skin="SandText" position="8 524 80 16">
-              <Property key="Caption" value="#{sFull}" />
+            <Widget type="TextBox" skin="SandText" position="8 594 80 16">
+              <Property key="Caption" value="#{sFull}"/>
             </Widget>
-            <Widget type="TextBox" skin="SandText" position="370 524 80 16">
-              <Property key="Caption" value="#{sNone}" />
-              <Property key="TextAlign" value="Right" />
+            <Widget type="TextBox" skin="SandText" position="370 594 80 16">
+              <Property key="Caption" value="#{sNone}"/>
+              <Property key="TextAlign" value="Right"/>
             </Widget>
-            <Widget type="TextBox" skin="NormalText" position="8 418 442 18">
-              <Property key="Caption" value="#{sMenu_Help_Delay}" />
+            <Widget type="TextBox" skin="NormalText" position="8 488 442 18">
+              <Property key="Caption" value="#{sMenu_Help_Delay}"/>
             </Widget>
-            <Widget type="ScrollBar" skin="MW_HScroll" position="8 440 442 16">
-              <Property key="Range" value="10000" />
-              <Property key="Page" value="300" />
-              <UserString key="SettingType" value="Slider" />
-              <UserString key="SettingCategory" value="GUI" />
-              <UserString key="SettingName" value="tooltip delay" />
-              <UserString key="SettingValueType" value="Float" />
+            <Widget type="ScrollBar" skin="MW_HScroll" position="8 510 442 16">
+              <Property key="Range" value="10000"/>
+              <Property key="Page" value="300"/>
+              <UserString key="SettingType" value="Slider"/>
+              <UserString key="SettingCategory" value="GUI"/>
+              <UserString key="SettingName" value="tooltip delay"/>
+              <UserString key="SettingValueType" value="Float"/>
             </Widget>
-            <Widget type="TextBox" skin="SandText" position="8 458 80 16">
-              <Property key="Caption" value="#{sFast}" />
+            <Widget type="TextBox" skin="SandText" position="8 528 80 16">
+              <Property key="Caption" value="#{sFast}"/>
             </Widget>
-            <Widget type="TextBox" skin="SandText" position="370 458 80 16">
-              <Property key="Caption" value="#{sSlow}" />
-              <Property key="TextAlign" value="Right" />
+            <Widget type="TextBox" skin="SandText" position="370 528 80 16">
+              <Property key="Caption" value="#{sSlow}"/>
+              <Property key="TextAlign" value="Right"/>
             </Widget>
-            <Widget type="TextBox" skin="NormalText" position="8 352 442 18" name="GuiScalingFactorLabel">
-              <Property key="Caption" value="#{arenamp=settings.gui_scale}" />
+            <Widget type="TextBox" skin="NormalText" position="8 422 442 18" name="GuiScalingFactorLabel">
+              <Property key="Caption" value="#{arenamp=settings.gui_scale}"/>
             </Widget>
-            <Widget type="ScrollBar" skin="MW_HScroll" position="8 374 442 16" name="GuiScalingFactor">
-              <Property key="Range" value="151" />
-              <Property key="Page" value="1" />
-              <UserString key="SettingType" value="Slider" />
-              <UserString key="SettingCategory" value="GUI" />
-              <UserString key="SettingName" value="scaling factor" />
-              <UserString key="SettingValueType" value="Float" />
-              <UserString key="SettingMin" value="1.0" />
-              <UserString key="SettingMax" value="2.5" />
-              <UserString key="SettingLabelWidget" value="GuiScalingFactorLabel" />
-              <UserString key="SettingLabelCaption" value="#{arenamp=settings.gui_scale}" />
+            <Widget type="ScrollBar" skin="MW_HScroll" position="8 444 442 16" name="GuiScalingFactor">
+              <Property key="Range" value="151"/>
+              <Property key="Page" value="1"/>
+              <UserString key="SettingType" value="Slider"/>
+              <UserString key="SettingCategory" value="GUI"/>
+              <UserString key="SettingName" value="scaling factor"/>
+              <UserString key="SettingValueType" value="Float"/>
+              <UserString key="SettingMin" value="1.0"/>
+              <UserString key="SettingMax" value="2.5"/>
+              <UserString key="SettingLabelWidget" value="GuiScalingFactorLabel"/>
+              <UserString key="SettingLabelCaption" value="#{arenamp=settings.gui_scale}"/>
             </Widget>
-            <Widget type="TextBox" skin="SandText" position="8 392 80 16">
-              <Property key="Caption" value="100%" />
+            <Widget type="TextBox" skin="SandText" position="8 462 80 16">
+              <Property key="Caption" value="100%"/>
             </Widget>
-            <Widget type="TextBox" skin="SandText" position="370 392  80 16">
-              <Property key="Caption" value="250%" />
-              <Property key="TextAlign" value="Right" />
+            <Widget type="TextBox" skin="SandText" position="370 462  80 16">
+              <Property key="Caption" value="250%"/>
+              <Property key="TextAlign" value="Right"/>
             </Widget>
           </Widget>
         </Widget>
@@ -590,16 +616,12 @@
           <Property key="Caption" value="#{arenamp=settings.subsection.water}" />
           <Widget type="ScrollView" skin="MW_ScrollView" position="4 4 478 400" align="Left Top" name="WaterScroll">
             <Property key="CanvasAlign" value="Left Top" />
-            <Property key="CanvasSize" value="458 520" />
+            <Property key="CanvasSize" value="458 590" />
             <Widget type="HBox" skin="" position="8 8 442 24">
-              <Widget type="AutoSizedButton" skin="MW_Button" position="0 0 24 24">
-                <UserString key="SettingCategory" value="Water" />
-                <UserString key="SettingName" value="shader" />
-                <UserString key="SettingType" value="CheckButton" />
+              <Widget type="AutoSizedTextBox" skin="SandText" position="0 4 168 18">
+                <Property key="Caption" value="#{arenamp=settings.water_shader_mode}" />
               </Widget>
-              <Widget type="AutoSizedTextBox" skin="SandText" position="30 4 300 18">
-                <Property key="Caption" value="#{arenamp=settings.water_shader}" />
-              </Widget>
+              <Widget type="ComboBox" skin="MW_ComboBox" position="176 0 258 24" name="WaterShaderMode" />
             </Widget>
             <Widget type="HBox" skin="" position="8 38 442 24">
               <Widget type="AutoSizedButton" skin="MW_Button" position="0 0 24 24">
@@ -824,7 +846,7 @@
           <Property key="Caption" value="#{arenamp=settings.subsection.pbr}" />
           <Widget type="ScrollView" skin="MW_ScrollView" position="4 4 478 400" align="Left Top" name="PbrScroll">
             <Property key="CanvasAlign" value="Left Top" />
-            <Property key="CanvasSize" value="458 366" />
+            <Property key="CanvasSize" value="458 404" />
             <Widget type="HBox" skin="" position="8 8 442 24">
               <Widget type="AutoSizedButton" skin="MW_Button" position="0 0 52 24">
                 <Property key="ExpandDirection" value="Right" />
@@ -928,87 +950,6 @@
             </Widget>
             <Widget type="AutoSizedButton" skin="MW_Button" position="8 356 160 24" name="PbrResetButton">
               <Property key="Caption" value="#{arenamp=settings.reset_defaults}" />
-            </Widget>
-          </Widget>
-        </Widget>
-        <Widget type="TabItem" skin="" position="4 32 486 412">
-          <Property key="Caption" value="#{arenamp=settings.subsection.effects}" />
-          <Widget type="ScrollView" skin="MW_ScrollView" position="4 4 478 400" align="Left Top" name="EffectsScroll">
-            <Property key="CanvasAlign" value="Left Top" />
-            <Property key="CanvasSize" value="458 286" />
-            <Widget type="TextBox" skin="SandBrightText" position="8 8 442 20">
-              <Property key="Caption" value="#{arenamp=settings.effects.ssr_header}" />
-            </Widget>
-            <Widget type="HBox" skin="" position="8 34 442 24">
-              <Widget type="AutoSizedButton" skin="MW_Button" position="0 0 52 24">
-                <Property key="ExpandDirection" value="Right" />
-                <UserString key="SettingCategory" value="Shaders" />
-                <UserString key="SettingName" value="native ssr enabled" />
-                <UserString key="SettingType" value="CheckButton" />
-              </Widget>
-              <Widget type="AutoSizedTextBox" skin="SandText" position="60 4 370 18">
-                <Property key="Caption" value="#{arenamp=settings.effects.ssr_enabled}" />
-              </Widget>
-            </Widget>
-            <Widget type="TextBox" skin="NormalText" position="8 68 442 18" name="SsrStrengthLabel">
-              <Property key="Caption" value="#{arenamp=settings.effects.ssr_strength}" />
-            </Widget>
-            <Widget type="ScrollBar" skin="MW_HScroll" position="8 88 442 16">
-              <Property key="Range" value="101" />
-              <Property key="Page" value="1" />
-              <UserString key="SettingType" value="Slider" />
-              <UserString key="SettingCategory" value="Shaders" />
-              <UserString key="SettingName" value="ssr strength" />
-              <UserString key="SettingValueType" value="Float" />
-              <UserString key="SettingMin" value="0.0" />
-              <UserString key="SettingMax" value="1.0" />
-              <UserString key="SettingLabelWidget" value="SsrStrengthLabel" />
-              <UserString key="SettingLabelCaption" value="#{arenamp=settings.effects.ssr_strength}" />
-            </Widget>
-            <Widget type="TextBox" skin="NormalText" position="8 116 442 18" name="SsrDistanceLabel">
-              <Property key="Caption" value="#{arenamp=settings.effects.ssr_distance}" />
-            </Widget>
-            <Widget type="ScrollBar" skin="MW_HScroll" position="8 136 442 16">
-              <Property key="Range" value="121" />
-              <Property key="Page" value="1" />
-              <UserString key="SettingType" value="Slider" />
-              <UserString key="SettingCategory" value="Shaders" />
-              <UserString key="SettingName" value="ssr distance" />
-              <UserString key="SettingValueType" value="Integer" />
-              <UserString key="SettingMin" value="512" />
-              <UserString key="SettingMax" value="8192" />
-              <UserString key="SettingLabelWidget" value="SsrDistanceLabel" />
-              <UserString key="SettingLabelCaption" value="#{arenamp=settings.effects.ssr_distance}" />
-            </Widget>
-            <Widget type="ImageBox" skin="MW_HLine" position="8 168 442 2" />
-            <Widget type="TextBox" skin="SandBrightText" position="8 182 442 20">
-              <Property key="Caption" value="#{arenamp=settings.effects.smaa_header}" />
-            </Widget>
-            <Widget type="HBox" skin="" position="8 208 442 24">
-              <Widget type="AutoSizedButton" skin="MW_Button" position="0 0 52 24">
-                <Property key="ExpandDirection" value="Right" />
-                <UserString key="SettingCategory" value="Shaders" />
-                <UserString key="SettingName" value="smaa enabled" />
-                <UserString key="SettingType" value="CheckButton" />
-              </Widget>
-              <Widget type="AutoSizedTextBox" skin="SandText" position="60 4 370 18">
-                <Property key="Caption" value="#{arenamp=settings.effects.smaa_enabled}" />
-              </Widget>
-            </Widget>
-            <Widget type="TextBox" skin="NormalText" position="8 242 442 18" name="SmaaThresholdLabel">
-              <Property key="Caption" value="#{arenamp=settings.effects.smaa_threshold}" />
-            </Widget>
-            <Widget type="ScrollBar" skin="MW_HScroll" position="8 262 442 16">
-              <Property key="Range" value="101" />
-              <Property key="Page" value="1" />
-              <UserString key="SettingType" value="Slider" />
-              <UserString key="SettingCategory" value="Shaders" />
-              <UserString key="SettingName" value="smaa threshold" />
-              <UserString key="SettingValueType" value="Float" />
-              <UserString key="SettingMin" value="0.03" />
-              <UserString key="SettingMax" value="0.30" />
-              <UserString key="SettingLabelWidget" value="SmaaThresholdLabel" />
-              <UserString key="SettingLabelCaption" value="#{arenamp=settings.effects.smaa_threshold}" />
             </Widget>
           </Widget>
         </Widget>

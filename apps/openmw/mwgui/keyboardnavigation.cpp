@@ -1,4 +1,5 @@
 #include "keyboardnavigation.hpp"
+#include "itemview.hpp"
 
 #include <MyGUI_InputManager.h>
 #include <MyGUI_WidgetManager.h>
@@ -215,6 +216,13 @@ bool KeyboardNavigation::injectKeyPress(MyGUI::KeyCode key, unsigned int text, b
 {
     if (!mEnabled)
         return false;
+
+    if (MyGUI::Widget* focus = MyGUI::InputManager::getInstance().getKeyFocusWidget())
+    {
+        if (ItemView* itemView = focus->castType<ItemView>(false))
+            if (itemView->handleNavigationKey(key))
+                return true;
+    }
 
     switch (key.getValue())
     {

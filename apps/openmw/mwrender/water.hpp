@@ -82,7 +82,7 @@ namespace MWRender
 
         /// @param reflection the reflection camera (required)
         /// @param refraction the refraction camera (kept alive in shader-water mode for runtime toggling)
-        void createShaderWaterStateSet(osg::Node* node, Reflection* reflection, Refraction* refraction);
+        void createShaderWaterStateSet(osg::Node* node, Reflection* reflection, Refraction* refraction, bool pbr);
 
         void updateWaterMaterial();
 

@@ -68,10 +68,9 @@ namespace MWInput
             else if (arg.keysym.scancode == SDL_SCANCODE_F4)
                 consumed = togglePostProcessSetting("bloom enabled", "#{arenamp=hotkey.bloom_on}", "#{arenamp=hotkey.bloom_off}");
 
-            // ArenaMP placement mode owns these literal keys while a prop is
-            // grabbed. Consume them before the binding system so Space cannot
-            // jump, R/F cannot ready spell/weapon (or fire any rebound action),
-            // Ctrl cannot sneak, and Tab cannot trigger another bound command.
+            // Placement mode owns these literal keys while a prop is grabbed.
+            // Consume them before the binding system so the keys cannot also
+            // trigger jump, sneak, journal, ready weapon/spell, presets, etc.
             MWBase::World* world = MWBase::Environment::get().getWorld();
             const bool placementActive = world && world->isPhysicsGrabActive()
                 && !MWBase::Environment::get().getWindowManager()->isGuiMode();
@@ -94,8 +93,7 @@ namespace MWInput
                         break;
                     case SDL_SCANCODE_R:
                     case SDL_SCANCODE_F:
-                        // Rotation itself is continuous and sampled from SDL's
-                        // held-key state in ActionManager::update().
+                        // Continuous rotation is sampled by ActionManager::update().
                         consumed = true;
                         break;
                     default:
@@ -127,9 +125,23 @@ namespace MWInput
         {
             MWBase::WindowManager* windowManager = MWBase::Environment::get().getWindowManager();
 
+            // In GUI mode WASD mirrors the arrow keys. Text-entry widgets keep
+            // literal WASD so search fields, books and console editing are unaffected.
+            if (windowManager->isGuiMode() && !SDL_IsTextInputActive())
+            {
+                switch (arg.keysym.scancode)
+                {
+                    case SDL_SCANCODE_W: kc = MyGUI::KeyCode::ArrowUp; break;
+                    case SDL_SCANCODE_S: kc = MyGUI::KeyCode::ArrowDown; break;
+                    case SDL_SCANCODE_A: kc = MyGUI::KeyCode::ArrowLeft; break;
+                    case SDL_SCANCODE_D: kc = MyGUI::KeyCode::ArrowRight; break;
+                    default: break;
+                }
+            }
+
             // QuickLoot remains non-modal, but axis-placement mode owns the
-            // movement bindings. Do not let its W/S navigation consume a movement
-            // key that is currently supposed to translate the grabbed object.
+            // movement bindings. Do not let UI navigation consume a key that is
+            // currently supposed to translate the held object.
             MWBase::World* world = MWBase::Environment::get().getWorld();
             const bool placementMoveMode = world && world->isPhysicsGrabActive()
                 && world->getPhysicsGrabMoveMode() != 0;
@@ -165,10 +177,8 @@ namespace MWInput
         if (!mBindingsManager->isDetectingBindingState())
             mBindingsManager->setPlayerControlsEnabled(!MyGUI::InputManager::getInstance().injectKeyRelease(kc));
 
-        // Always forward releases to the binding state machine. Placement-mode
-        // key *presses* are consumed above, while a release is side-effect-free
-        // and is required to clear a key that may already have been held before
-        // the grab started (for example Ctrl/Sneak).
+        // Always forward releases to clear a binding that may have been held
+        // before placement mode consumed its key press (for example Ctrl/Sneak).
         mBindingsManager->keyReleased(arg);
     }
 }

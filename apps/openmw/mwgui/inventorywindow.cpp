@@ -824,6 +824,9 @@ namespace MWGui
         if (focus == mFilterEdit)
             MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(nullptr);
 
+        if (mItemView)
+            MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mItemView);
+
         refreshPaperDollToggleVisual();
         refreshWriterButtonVisual();
 

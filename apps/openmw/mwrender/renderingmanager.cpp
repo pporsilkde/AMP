@@ -2147,10 +2147,7 @@ namespace MWRender
                 refreshBloomSettings = true;
                 refreshNativeEffects = true;
             }
-            else if (setting.first == "Shaders" && (setting.second == "native ssr enabled"
-                || setting.second == "ssr strength"
-                || setting.second == "ssr distance"
-                || setting.second == "smaa enabled"
+            else if (setting.first == "Shaders" && (setting.second == "smaa enabled"
                 || setting.second == "smaa threshold"))
             {
                 refreshNativeEffects = true;

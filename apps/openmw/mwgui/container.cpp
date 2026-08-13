@@ -312,7 +312,7 @@ namespace MWGui
         mItemView->resetScrollBars();
         mDragAndDrop->setTransferTargetView(mItemView);
 
-        MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCloseButton);
+        MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mItemView);
 
         setTitle(container.getClass().getName(container));
         updateEncumbranceBar();

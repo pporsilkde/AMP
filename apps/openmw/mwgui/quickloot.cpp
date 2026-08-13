@@ -455,12 +455,14 @@ namespace MWGui
             return true;
         }
 
-        if (key == MyGUI::KeyCode::ArrowUp || key == MyGUI::KeyCode::W)
+        if (key == MyGUI::KeyCode::ArrowUp || key == MyGUI::KeyCode::ArrowLeft
+            || key == MyGUI::KeyCode::W || key == MyGUI::KeyCode::A)
         {
             handleMouseWheel(1);
             return true;
         }
-        if (key == MyGUI::KeyCode::ArrowDown || key == MyGUI::KeyCode::S)
+        if (key == MyGUI::KeyCode::ArrowDown || key == MyGUI::KeyCode::ArrowRight
+            || key == MyGUI::KeyCode::S || key == MyGUI::KeyCode::D)
         {
             handleMouseWheel(-1);
             return true;
@@ -471,7 +473,7 @@ namespace MWGui
             return true;
         }
 
-        // D and the remaining movement keys intentionally have no QuickLoot action.
+        // All four movement directions are usable for the vertical QuickLoot list.
         if (static_cast<int>(key.getValue()) != static_cast<int>(takeAll.getValue()))
             return false;
 

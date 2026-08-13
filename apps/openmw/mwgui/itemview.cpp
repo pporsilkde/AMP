@@ -13,6 +13,7 @@
 #include <MyGUI_InputManager.h>
 #include <MyGUI_ImageBox.h>
 #include <MyGUI_LanguageManager.h>
+#include <MyGUI_KeyCode.h>
 #include <MyGUI_ScrollView.h>
 #include <MyGUI_TextBox.h>
 
@@ -131,6 +132,7 @@ ItemView::ItemView()
     , mListDragStartX(0)
     , mListDragStartY(0)
     , mListDragStarted(false)
+    , mKeyboardFocusedIndex(-1)
 {
     sExtendedItemViews.push_back(this);
 }
@@ -149,6 +151,7 @@ void ItemView::setModel(ItemModel *model)
 
     delete mModel;
     mModel = model;
+    mKeyboardFocusedIndex = -1;
 
     updateHeaderCaptions();
     update();
@@ -157,6 +160,7 @@ void ItemView::setModel(ItemModel *model)
 void ItemView::initialiseOverride()
 {
     Base::initialiseOverride();
+    setNeedKeyFocus(true);
 
     assignWidget(mScrollView, "ScrollView");
     if (mScrollView == nullptr)
@@ -668,6 +672,8 @@ void ItemView::update()
     }
 
     layoutWidgets();
+    if (mKeyboardFocusedIndex >= 0 && mModel->getItemCount() > 0)
+        forceItemFocused(mKeyboardFocusedIndex);
 }
 
 int ItemView::forceItemFocused(int index)
@@ -678,6 +684,7 @@ int ItemView::forceItemFocused(int index)
 
     const int count = static_cast<int>(mModel->getItemCount());
     index = std::max(0, std::min(index, count - 1));
+    mKeyboardFocusedIndex = index;
 
     MyGUI::Widget* dragArea = view->getChildAt(0);
     const unsigned int childCount = dragArea->getChildCount();
@@ -713,6 +720,49 @@ int ItemView::forceItemFocused(int index)
     }
 
     return index;
+}
+
+bool ItemView::handleNavigationKey(MyGUI::KeyCode key)
+{
+    if (!mModel || mModel->getItemCount() == 0)
+        return false;
+
+    const int count = static_cast<int>(mModel->getItemCount());
+    int index = mKeyboardFocusedIndex < 0 ? 0 : std::min(mKeyboardFocusedIndex, count - 1);
+
+    if (key == MyGUI::KeyCode::Return || key == MyGUI::KeyCode::NumpadEnter
+        || key == MyGUI::KeyCode::Space)
+    {
+        forceItemFocused(index);
+        if (mExtendedMode && mViewMode == View_List && !mSingleClickActionEnabled)
+            eventItemDoubleClicked(index);
+        else
+            eventItemClicked(index);
+        return true;
+    }
+
+    int delta = 0;
+    if (mExtendedMode && mViewMode == View_List)
+    {
+        if (key == MyGUI::KeyCode::ArrowUp || key == MyGUI::KeyCode::ArrowLeft) delta = -1;
+        if (key == MyGUI::KeyCode::ArrowDown || key == MyGUI::KeyCode::ArrowRight) delta = 1;
+    }
+    else
+    {
+        MyGUI::ScrollView* view = getActiveScrollView();
+        int rows = view ? std::max(1, view->getHeight() / 42) : 1;
+        if (key == MyGUI::KeyCode::ArrowUp) delta = -1;
+        if (key == MyGUI::KeyCode::ArrowDown) delta = 1;
+        if (key == MyGUI::KeyCode::ArrowLeft) delta = -rows;
+        if (key == MyGUI::KeyCode::ArrowRight) delta = rows;
+    }
+
+    if (delta == 0)
+        return false;
+
+    index = std::max(0, std::min(count - 1, index + delta));
+    forceItemFocused(index);
+    return true;
 }
 
 int ItemView::requestListSize() const

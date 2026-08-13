@@ -9,7 +9,7 @@ namespace MWMechanics
     Actor::Actor(const MWWorld::Ptr &ptr, MWRender::Animation *animation)
     {
         mCharacterController.reset(new CharacterController(ptr, animation));
-        mDynamicIdle.mTimer = 1.5f + Misc::Rng::rollProbability() * 4.f;
+        mDynamicIdle.mTimer = 0.5f + Misc::Rng::rollProbability() * 2.f;
         // Keep more stationary NPCs in the ambience system. The animation itself
         // is still gated by movement/combat/dialogue checks in Actors.
         mDynamicIdle.mActivationDistance = 1600.f + Misc::Rng::rollProbability() * 1000.f;

@@ -111,6 +111,16 @@ namespace
         const std::string& type = carried->getTypeName();
         return type == typeid(ESM::Armor).name() || type == typeid(ESM::Light).name();
     }
+
+    bool isClosedDialoguePose(const std::string& group)
+    {
+        return group == "ArmsFolded" || group == "ArmsAkimbo"
+            || group == "HandHipPose";
+    }
+
+    constexpr int sDialogueArmsBlendMask
+        = MWRender::Animation::BlendMask_LeftArm | MWRender::Animation::BlendMask_RightArm;
+
     bool isDynamicDialogueGuard(const MWWorld::Ptr& ptr)
     {
         if (ptr.isEmpty() || !ptr.getClass().isNpc())
@@ -654,6 +664,22 @@ namespace MWGui
         const bool arrestOpening = guard && mDynamicDialogueActorOpening && isDynamicDialogueArrest(mPtr);
         const bool religious = contextualAnimations && !guard && isDynamicDialogueReligious(mPtr);
         const bool formal = contextualAnimations && !guard && !religious && isDynamicDialogueFormal(mPtr);
+        const int disposition = MWBase::Environment::get().getMechanicsManager()
+            ->getDerivedDisposition(mPtr, true);
+
+        // A guarded/hostile NPC should not immediately throw away a closed pose
+        // every time a voiced line starts. Keeping folded/akimbo/hand-on-hip
+        // poses through many replies looks much more natural than repeatedly
+        // switching into full-body speaking idles.
+        if (speaking && !force && !arrestOpening && disposition < 60
+            && isClosedDialoguePose(mDynamicDialogueActorAnimation)
+            && animation->isPlaying(mDynamicDialogueActorAnimation)
+            && Misc::Rng::rollDice(100) < 78)
+        {
+            mDynamicDialogueActorSpeechCooldown = randomRange(3.5f, 6.f);
+            mDynamicDialogueActorAnimationTimer = randomRange(5.f, 9.f);
+            return;
+        }
 
         if (speaking && !force && !arrestOpening)
         {
@@ -839,10 +865,46 @@ namespace MWGui
             return;
         }
 
-        // The arrest opener should read as an intentional stop gesture, not as a dice roll.
-        const DialogueAnimation& selected = arrestOpening
-            ? *available.front()
-            : *available[Misc::Rng::rollDice(static_cast<int>(available.size()))];
+        // Closed dialogue poses are deliberately weighted. They are sourced from
+        // the generic idle set even while a voiced line is active, so an NPC can
+        // keep folded arms / akimbo / hand-on-hip instead of gesturing on every
+        // sentence. Low disposition makes those defensive poses dominant.
+        std::vector<const DialogueAnimation*> closedAvailable;
+        for (const DialogueAnimation* entry = std::begin(sIdleAnimations); entry != std::end(sIdleAnimations); ++entry)
+        {
+            if (isClosedDialoguePose(entry->mGroup) && animation->hasAnimation(entry->mGroup)
+                && (mDynamicDialogueActorAnimation.empty()
+                    || mDynamicDialogueActorAnimation != entry->mGroup))
+                closedAvailable.push_back(entry);
+        }
+        if (closedAvailable.empty())
+        {
+            for (const DialogueAnimation* entry = std::begin(sIdleAnimations); entry != std::end(sIdleAnimations); ++entry)
+                if (isClosedDialoguePose(entry->mGroup) && animation->hasAnimation(entry->mGroup))
+                    closedAvailable.push_back(entry);
+        }
+
+        int closedPoseChance = 0;
+        if (!arrestOpening)
+        {
+            if (disposition < 40)
+                closedPoseChance = speaking ? 74 : 92;
+            else if (disposition < 60)
+                closedPoseChance = speaking ? 62 : 86;
+            else if (!guard && !religious)
+                closedPoseChance = speaking ? 18 : 52;
+            else if (!speaking)
+                closedPoseChance = 30;
+        }
+
+        const DialogueAnimation* selectedPtr = nullptr;
+        if (arrestOpening)
+            selectedPtr = available.front();
+        else if (!closedAvailable.empty() && Misc::Rng::rollDice(100) < closedPoseChance)
+            selectedPtr = closedAvailable[Misc::Rng::rollDice(static_cast<int>(closedAvailable.size()))];
+        else
+            selectedPtr = available[Misc::Rng::rollDice(static_cast<int>(available.size()))];
+        const DialogueAnimation& selected = *selectedPtr;
 
         if (!mDynamicDialogueActorAnimation.empty()
             && animation->isPlaying(mDynamicDialogueActorAnimation))
@@ -852,7 +914,7 @@ namespace MWGui
                 if (mDynamicDialogueActorOpening)
                     mDynamicDialogueActorOpening = false;
                 mDynamicDialogueActorAnimationTimer
-                    = speaking ? randomRange(4.f, 7.f) : randomRange(10.f, 18.f);
+                    = speaking ? randomRange(3.f, 6.f) : randomRange(6.f, 12.f);
                 if (speaking)
                     mDynamicDialogueActorSpeechCooldown = randomRange(4.f, 7.f);
                 return;
@@ -864,7 +926,13 @@ namespace MWGui
         }
 
         const bool leftArmProtected = dynamicActorLeftArmOccupied(mPtr);
-        int blendMask = selected.mBlendMask;
+        // Dialogue gesture clips often contain authored spine/head keys. On some
+        // animation packs those keys pitch the NPC's head sharply up or down at
+        // the start of every sentence. The body is already faced toward the
+        // player by the dialogue controller, so inject only the arm channels and
+        // leave head/neck/spine to the normal idle + head tracking controllers.
+        int blendMask = selected.mBlendMask == MWRender::Animation::BlendMask_UpperBody
+            ? sDialogueArmsBlendMask : selected.mBlendMask;
         if (leftArmProtected)
             blendMask &= ~MWRender::Animation::BlendMask_LeftArm;
 
@@ -901,7 +969,7 @@ namespace MWGui
         mDynamicDialogueActorAnimationEnding = false;
         mDynamicDialogueActorTransitionTimer = 0.f;
         mDynamicDialogueActorAnimationTimer
-            = speaking ? randomRange(4.f, 7.f) : randomRange(10.f, 18.f);
+            = speaking ? randomRange(3.f, 6.f) : randomRange(6.f, 12.f);
         if (speaking)
             mDynamicDialogueActorSpeechCooldown = randomRange(4.f, 7.f);
     }
@@ -1065,8 +1133,11 @@ namespace MWGui
         {
             if (!mDynamicDialogueActorAnimation.empty())
             {
+                int stopBlendMask = sDialogueArmsBlendMask;
+                if (mDynamicDialogueActorLeftArmProtected)
+                    stopBlendMask &= ~MWRender::Animation::BlendMask_LeftArm;
                 queueDialogueNpcInteraction(mPtr, mDynamicDialogueActorAnimation,
-                    MWRender::Animation::BlendMask_UpperBody, 1.f, 1, true);
+                    stopBlendMask, 1.f, 1, true);
                 if (MWRender::Animation* animation = MWBase::Environment::get().getWorld()->getAnimation(mPtr))
                     animation->setLoopingEnabled(mDynamicDialogueActorAnimation, false);
             }

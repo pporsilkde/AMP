@@ -215,6 +215,31 @@ namespace
         return "balance";
     }
 
+    constexpr std::array<const char*, 3> waterShaderModeNames =
+        { "value.off", "value.water_simple", "value.water_new" };
+    constexpr std::array<const char*, 3> waterShaderModes =
+        { "off", "simple", "new" };
+
+    std::string getWaterShaderMode()
+    {
+        const auto modeKey = std::make_pair(std::string("Water"), std::string("shader mode"));
+        auto modeIt = Settings::Manager::mUserSettings.find(modeKey);
+        if (modeIt != Settings::Manager::mUserSettings.end())
+        {
+            std::string mode = modeIt->second;
+            Misc::StringUtils::lowerCaseInPlace(mode);
+            for (const char* candidate : waterShaderModes)
+            {
+                if (mode == candidate)
+                    return mode;
+            }
+        }
+
+        // Migrate old ArenaMP profiles: shader=false was classic animated water,
+        // shader=true was the current PBR water.
+        return Settings::Manager::getBool("shader", "Water") ? "new" : "off";
+    }
+
     constexpr std::array<const char*, 5> materialQualityNames =
         { "value.none", "value.simple", "value.balanced", "value.quality", "value.ultra" };
     constexpr std::array<const char*, 5> materialQualityModes =
@@ -462,7 +487,6 @@ namespace MWGui
         getWidget(mDisplayScroll, "DisplayScroll");
         getWidget(mWaterScroll, "WaterScroll");
         getWidget(mPbrScroll, "PbrScroll");
-        getWidget(mEffectsScroll, "EffectsScroll");
         getWidget(mHdrScroll, "HdrScroll");
         getWidget(mOkButton, "OkButton");
         getWidget(mResolutionList, "ResolutionList");
@@ -474,6 +498,7 @@ namespace MWGui
         getWidget(mResetControlsButton, "ResetControlsButton");
         getWidget(mKeyboardSwitch, "KeyboardButton");
         getWidget(mControllerSwitch, "ControllerButton");
+        getWidget(mWaterShaderMode, "WaterShaderMode");
         getWidget(mWaterTextureSize, "WaterTextureSize");
         getWidget(mWaterReflectionDetail, "WaterReflectionDetail");
         getWidget(mWaterResetButton, "WaterResetButton");
@@ -500,7 +525,7 @@ namespace MWGui
         mMainWidget->setSize(settingsWindowWidth, settingsWindowHeight);
 
         // Must match the TabItem order in openmw_settings_window.layout.
-        const std::array<const char*, 15> sectionKeys = {
+        const std::array<const char*, 14> sectionKeys = {
             "settings.section.interface",
             "settings.section.hud",
             "settings.section.controls",
@@ -509,7 +534,6 @@ namespace MWGui
             "settings.subsection.water",
             "settings.subsection.lighting",
             "settings.subsection.pbr",
-            "settings.subsection.effects",
             "settings.subsection.hdr",
             "settings.subsection.bloom",
             "settings.subsection.world",
@@ -544,6 +568,7 @@ namespace MWGui
         mTextureFilteringButton->eventComboChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onTextureFilteringChanged);
         mResolutionList->eventListChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onResolutionSelected);
 
+        mWaterShaderMode->eventComboChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onWaterShaderModeChanged);
         mWaterTextureSize->eventComboChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onWaterTextureSizeChanged);
         mWaterReflectionDetail->eventComboChangePosition += MyGUI::newDelegate(this, &SettingsWindow::onWaterReflectionDetailChanged);
         mWaterResetButton->eventMouseButtonClick += MyGUI::newDelegate(this, &SettingsWindow::onWaterResetButtonClicked);
@@ -563,6 +588,10 @@ namespace MWGui
         mTextureFilteringButton->removeAllItems();
         mTextureFilteringButton->addItem(arenaText("value.bilinear"));
         mTextureFilteringButton->addItem(arenaText("value.trilinear"));
+
+        mWaterShaderMode->removeAllItems();
+        for (const char* name : waterShaderModeNames)
+            mWaterShaderMode->addItem(arenaText(name));
 
         mWaterTextureSize->removeAllItems();
         mWaterTextureSize->addItem(arenaText("value.extra_low"));
@@ -757,6 +786,18 @@ namespace MWGui
         }
     }
 
+    void SettingsWindow::onWaterShaderModeChanged(MyGUI::ComboBox*, size_t pos)
+    {
+        if (pos == MyGUI::ITEM_NONE || pos >= waterShaderModes.size())
+            return;
+
+        Settings::Manager::setString("shader mode", "Water", waterShaderModes[pos]);
+        // Keep the legacy boolean synchronized for old configs/tools. Both
+        // explicit shader modes use shader-water; only Off maps to false.
+        Settings::Manager::setBool("shader", "Water", pos != 0);
+        apply();
+    }
+
     void SettingsWindow::onWaterTextureSizeChanged(MyGUI::ComboBox* _sender, size_t pos)
     {
         int size = 256;
@@ -788,8 +829,9 @@ namespace MWGui
         if (selectedButton == 1 || selectedButton == -1)
             return;
 
-        constexpr std::array<const char*, 10> settings = {
+        constexpr std::array<const char*, 11> settings = {
             "shader",
+            "shader mode",
             "refraction",
             "rtt size",
             "reflection detail",
@@ -803,6 +845,8 @@ namespace MWGui
         for (const char* setting : settings)
             Settings::Manager::setString(setting, "Water", Settings::Manager::mDefaultSettings[{"Water", setting}]);
         Settings::Manager::setString("highlight intensity", "Water", Settings::Manager::mDefaultSettings[{"Water", "highlight intensity"}]);
+
+        updateWaterShaderModeCombo();
 
         const int waterTextureSize = Settings::Manager::getInt("rtt size", "Water");
         if (waterTextureSize >= 2048)
@@ -1383,6 +1427,20 @@ namespace MWGui
         layoutControlsBox();
     }
 
+    void SettingsWindow::updateWaterShaderModeCombo()
+    {
+        const std::string mode = getWaterShaderMode();
+        for (size_t i = 0; i < waterShaderModes.size(); ++i)
+        {
+            if (mode == waterShaderModes[i])
+            {
+                mWaterShaderMode->setIndexSelected(i);
+                return;
+            }
+        }
+        mWaterShaderMode->setIndexSelected(2);
+    }
+
     void SettingsWindow::selectLightingMethod(const std::string& value)
     {
         for (size_t i = 0; i < mLightingMethodValues.size(); ++i)
@@ -1489,6 +1547,7 @@ namespace MWGui
     {
         highlightCurrentResolution();
         updateControlsBox();
+        updateWaterShaderModeCombo();
         updateLightSettings();
         updateHdrTonemapperCombo();
         updateWeaponSpellBoxModeCombo();
@@ -1524,7 +1583,6 @@ namespace MWGui
         mDisplayScroll->setViewOffset(MyGUI::IntPoint(0, 0));
         mWaterScroll->setViewOffset(MyGUI::IntPoint(0, 0));
         mPbrScroll->setViewOffset(MyGUI::IntPoint(0, 0));
-        mEffectsScroll->setViewOffset(MyGUI::IntPoint(0, 0));
         mHdrScroll->setViewOffset(MyGUI::IntPoint(0, 0));
     }
 }

@@ -13,7 +13,6 @@ set(SHADER_FILES
     bloom_extract_horizontal.frag
     bloom_vertical.frag
     bloom_composite.frag
-    native_effects_composite.frag
     native_smaa_edge.frag
     native_smaa_weights.frag
     native_final.frag
@@ -29,6 +28,7 @@ set(SHADER_FILES
     water_pbr_rain_ripples.glsl
     water_pbr_data.glsl
     water_nm.png
+    water_nm_legacy.png
     water_waves.glsl
     alpha.glsl
     HDR.glsl

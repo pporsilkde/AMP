@@ -59,6 +59,8 @@ namespace MWInput
         bool mJoystickLastUsed;
         bool mSneakGamepadShortcut;
         bool mGamepadPreviewMode;
+        int mGuiStickX;
+        int mGuiStickY;
     };
 }
 #endif

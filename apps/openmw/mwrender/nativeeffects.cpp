@@ -2,10 +2,10 @@
 
 #include <algorithm>
 
-#include <osg/BlendFunc>
 #include <osg/Camera>
 #include <osg/Geometry>
 #include <osg/Geode>
+#include <osg/Group>
 #include <osg/Matrix>
 #include <osg/Program>
 #include <osg/State>
@@ -55,15 +55,14 @@ namespace MWRender
     {
         if (!mainCamera || !rootNode)
         {
-            Log(Debug::Error) << "Cannot create ArenaMP native effects without a main camera/root node";
+            Log(Debug::Error) << "Cannot create ArenaMW native effects without a main camera/root node";
             return;
         }
 
-        // Keep the native processor limited to the stable screen-space path:
-        // SSR + SMAA, reusing the existing bloom shaders when this path is active.
+        // Keep this compositor deliberately small: native SMAA plus the existing
+        // bloom pass; reflection rendering is handled by the water pipeline.
         mSceneTexture = createTexture(GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE);
         mDepthTexture = createTexture(GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_FLOAT, false);
-        mEffectsTexture = createTexture(GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE);
         mBloomHorizontalTexture = createTexture(GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE);
         mBloomVerticalTexture = createTexture(GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE);
         mEdgeTexture = createTexture(GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, false);
@@ -79,54 +78,32 @@ namespace MWRender
             return shaderManager.getProgram(vertex, fragment);
         };
 
-        osg::ref_ptr<osg::Program> effectsProgram = getProgram("native_effects_composite.frag");
         osg::ref_ptr<osg::Program> bloomHorizontalProgram = getProgram("bloom_extract_horizontal.frag");
         osg::ref_ptr<osg::Program> bloomVerticalProgram = getProgram("bloom_vertical.frag");
         osg::ref_ptr<osg::Program> edgeProgram = getProgram("native_smaa_edge.frag");
         osg::ref_ptr<osg::Program> weightProgram = getProgram("native_smaa_weights.frag");
         osg::ref_ptr<osg::Program> finalProgram = getProgram("native_final.frag");
 
-        if (!effectsProgram || !bloomHorizontalProgram || !bloomVerticalProgram
+        if (!bloomHorizontalProgram || !bloomVerticalProgram
             || !edgeProgram || !weightProgram || !finalProgram)
         {
-            Log(Debug::Error) << "Failed to create ArenaMP native SSR/SMAA programs";
+            Log(Debug::Error) << "Failed to create ArenaMW native SMAA/bloom programs";
             return;
         }
 
-        // All native passes finish before MyGUI. This keeps HUD/menu rendering
-        // untouched by SSR, SMAA and the bloom composite.
-        mEffectsCamera = createCamera(-10, true);
+        // All native passes finish before MyGUI (POST_RENDER order 0), keeping
+        // HUD/menu rendering untouched.
         mBloomHorizontalCamera = createCamera(-9, true);
         mBloomVerticalCamera = createCamera(-8, true);
         mEdgeCamera = createCamera(-7, true);
         mWeightCamera = createCamera(-6, true);
         mFinalCamera = createCamera(-5, false);
 
-        mEffectsCamera->attach(osg::Camera::COLOR_BUFFER0, mEffectsTexture);
         mBloomHorizontalCamera->attach(osg::Camera::COLOR_BUFFER0, mBloomHorizontalTexture);
         mBloomVerticalCamera->attach(osg::Camera::COLOR_BUFFER0, mBloomVerticalTexture);
         mEdgeCamera->attach(osg::Camera::COLOR_BUFFER0, mEdgeTexture);
         mWeightCamera->attach(osg::Camera::COLOR_BUFFER0, mWeightTexture);
 
-        osg::ref_ptr<osg::Geode> effectsPass = createFullscreenPass(effectsProgram);
-        mEffectsState = effectsPass->getOrCreateStateSet();
-        mEffectsState->setTextureAttributeAndModes(0, mSceneTexture, osg::StateAttribute::ON);
-        mEffectsState->setTextureAttributeAndModes(1, mDepthTexture, osg::StateAttribute::ON);
-        mEffectsState->addUniform(new osg::Uniform("sceneTexture", 0));
-        mEffectsState->addUniform(new osg::Uniform("depthTexture", 1));
-        mInverseSceneSizeEffects = new osg::Uniform("inverseSceneSize", osg::Vec2f(1.f, 1.f));
-        mInverseProjectionEffects = new osg::Uniform(osg::Uniform::FLOAT_MAT4, "inverseProjectionMatrix");
-        mProjectionEffects = new osg::Uniform(osg::Uniform::FLOAT_MAT4, "projectionMatrix");
-        mSsrEnabledUniform = new osg::Uniform("ssrEnabled", 0.f);
-        mSsrStrengthUniform = new osg::Uniform("ssrStrength", 0.25f);
-        mSsrDistanceUniform = new osg::Uniform("ssrDistance", 4096.f);
-        mEffectsState->addUniform(mInverseSceneSizeEffects);
-        mEffectsState->addUniform(mInverseProjectionEffects);
-        mEffectsState->addUniform(mProjectionEffects);
-        mEffectsState->addUniform(mSsrEnabledUniform);
-        mEffectsState->addUniform(mSsrStrengthUniform);
-        mEffectsState->addUniform(mSsrDistanceUniform);
-        mEffectsCamera->addChild(effectsPass);
 
         osg::ref_ptr<osg::Geode> bloomHorizontalPass = createFullscreenPass(bloomHorizontalProgram);
         mBloomHorizontalState = bloomHorizontalPass->getOrCreateStateSet();
@@ -191,7 +168,6 @@ namespace MWRender
         mFinalState->addUniform(mBloomIntensityUniform);
         mFinalCamera->addChild(finalPass);
 
-        mRootNode->addChild(mEffectsCamera);
         mRootNode->addChild(mBloomHorizontalCamera);
         mRootNode->addChild(mBloomVerticalCamera);
         mRootNode->addChild(mEdgeCamera);
@@ -218,7 +194,6 @@ namespace MWRender
 
         if (mRootNode.valid())
         {
-            if (mEffectsCamera) mRootNode->removeChild(mEffectsCamera);
             if (mBloomHorizontalCamera) mRootNode->removeChild(mBloomHorizontalCamera);
             if (mBloomVerticalCamera) mRootNode->removeChild(mBloomVerticalCamera);
             if (mEdgeCamera) mRootNode->removeChild(mEdgeCamera);
@@ -307,12 +282,8 @@ namespace MWRender
             return;
 
         mSmaaEnabled = Settings::Manager::getBool("smaa enabled", "Shaders");
-        mSsrEnabled = Settings::Manager::getBool("native ssr enabled", "Shaders");
         mBloomEnabled = Settings::Manager::getBool("bloom enabled", "Shaders");
 
-        mSsrEnabledUniform->set(mSsrEnabled ? 1.f : 0.f);
-        mSsrStrengthUniform->set(std::clamp(Settings::Manager::getFloat("ssr strength", "Shaders"), 0.f, 1.f));
-        mSsrDistanceUniform->set(static_cast<float>(std::clamp(Settings::Manager::getInt("ssr distance", "Shaders"), 512, 8192)));
         mSmaaEnabledUniform->set(mSmaaEnabled ? 1.f : 0.f);
         mSmaaThresholdUniform->set(std::clamp(Settings::Manager::getFloat("smaa threshold", "Shaders"), 0.03f, 0.30f));
 
@@ -324,11 +295,8 @@ namespace MWRender
         mBloomRadiusVerticalUniform->set(bloomRadius);
         mBloomIntensityUniform->set(std::clamp(Settings::Manager::getFloat("bloom intensity", "Shaders"), 0.f, 3.f));
 
-        // Bloom alone keeps using the existing BloomProcessor. Native capture is
-        // needed only for SSR/SMAA; if either is active, bloom is folded into the
-        // same final pass so it is not rendered twice.
         const bool wasEnabled = mEnabled;
-        mEnabled = mSmaaEnabled || mSsrEnabled;
+        mEnabled = mSmaaEnabled || mBloomEnabled;
         if (!mEnabled || !wasEnabled)
             mCaptureReady.store(false, std::memory_order_release);
         if (!mEnabled)
@@ -343,10 +311,9 @@ namespace MWRender
         if (!mReady)
             return;
 
-        osg::Texture2D* working = mSsrEnabled ? mEffectsTexture.get() : mSceneTexture.get();
-        mBloomHorizontalState->setTextureAttributeAndModes(0, working, osg::StateAttribute::ON);
-        mEdgeState->setTextureAttributeAndModes(0, working, osg::StateAttribute::ON);
-        mFinalState->setTextureAttributeAndModes(0, working, osg::StateAttribute::ON);
+        mBloomHorizontalState->setTextureAttributeAndModes(0, mSceneTexture, osg::StateAttribute::ON);
+        mEdgeState->setTextureAttributeAndModes(0, mSceneTexture, osg::StateAttribute::ON);
+        mFinalState->setTextureAttributeAndModes(0, mSceneTexture, osg::StateAttribute::ON);
     }
 
     void NativeEffectsProcessor::applyPassVisibility()
@@ -354,7 +321,6 @@ namespace MWRender
         const bool visible = mReady && mEnabled && mCaptureReady.load(std::memory_order_acquire);
         const unsigned int on = Mask_RenderToTexture;
 
-        if (mEffectsCamera) mEffectsCamera->setNodeMask(visible && mSsrEnabled ? on : 0u);
         if (mBloomHorizontalCamera) mBloomHorizontalCamera->setNodeMask(visible && mBloomEnabled ? on : 0u);
         if (mBloomVerticalCamera) mBloomVerticalCamera->setNodeMask(visible && mBloomEnabled ? on : 0u);
         if (mEdgeCamera) mEdgeCamera->setNodeMask(visible && mSmaaEnabled ? on : 0u);
@@ -371,13 +337,11 @@ namespace MWRender
 
         mSceneTexture->setTextureSize(width, height);
         mDepthTexture->setTextureSize(width, height);
-        mEffectsTexture->setTextureSize(width, height);
         mEdgeTexture->setTextureSize(width, height);
         mWeightTexture->setTextureSize(width, height);
         mBloomHorizontalTexture->setTextureSize(bloomWidth, bloomHeight);
         mBloomVerticalTexture->setTextureSize(bloomWidth, bloomHeight);
 
-        mEffectsCamera->setViewport(0, 0, width, height);
         mBloomHorizontalCamera->setViewport(0, 0, bloomWidth, bloomHeight);
         mBloomVerticalCamera->setViewport(0, 0, bloomWidth, bloomHeight);
         mEdgeCamera->setViewport(0, 0, width, height);
@@ -386,7 +350,6 @@ namespace MWRender
 
         const osg::Vec2f invScene(1.f/static_cast<float>(width), 1.f/static_cast<float>(height));
         const osg::Vec2f invBloom(1.f/static_cast<float>(bloomWidth), 1.f/static_cast<float>(bloomHeight));
-        mInverseSceneSizeEffects->set(invScene);
         mInverseSceneSizeEdge->set(invScene);
         mInverseSceneSizeWeight->set(invScene);
         mInverseSceneSizeFinal->set(invScene);
@@ -397,17 +360,6 @@ namespace MWRender
 
         mCaptureReady.store(false, std::memory_order_release);
         applyPassVisibility();
-    }
-
-    void NativeEffectsProcessor::updateMatrices()
-    {
-        if (!mMainCamera.valid())
-            return;
-        osg::Matrixf projection(mMainCamera->getProjectionMatrix());
-        osg::Matrixf inverseProjection;
-        inverseProjection.invert(projection);
-        mInverseProjectionEffects->set(inverseProjection);
-        mProjectionEffects->set(projection);
     }
 
     void NativeEffectsProcessor::update()
@@ -423,7 +375,6 @@ namespace MWRender
         if (width != mWidth || height != mHeight)
             resizeTargets(width, height);
 
-        updateMatrices();
         updateSourceBindings();
         applyPassVisibility();
     }

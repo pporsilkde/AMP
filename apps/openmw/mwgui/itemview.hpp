@@ -2,6 +2,7 @@
 #define MWGUI_ITEMVIEW_H
 
 #include <MyGUI_Widget.h>
+#include <MyGUI_KeyCode.h>
 
 #include "itemmodel.hpp"
 
@@ -59,6 +60,9 @@ namespace MWGui
 
         /// Clamp and visually focus an item. Returns the actual focused index.
         int forceItemFocused(int index);
+
+        /// Navigate/activate the item grid from keyboard or controller focus.
+        bool handleNavigationKey(MyGUI::KeyCode key);
 
         /// Height requested by the current item grid/list, including inner margins.
         int requestListSize() const;
@@ -138,6 +142,7 @@ namespace MWGui
         int mListDragStartX;
         int mListDragStartY;
         bool mListDragStarted;
+        int mKeyboardFocusedIndex;
 
     };
 
