@@ -87,12 +87,76 @@ jobs:
       - name: Install Windows incremental build tools
         shell: pwsh
         run: |
-          choco install ccache ninja --yes --no-progress
-          ccache --version
+          $ErrorActionPreference = "Stop"
+
+          # windows-2022 ships Ninja, so do not depend on Chocolatey for it.
+          $ninja = Get-Command ninja -ErrorAction SilentlyContinue
+          if (-not $ninja) {
+            throw "Ninja is not available on the windows-2022 runner."
+          }
           ninja --version
-          ccache --set-config=max_size=$env:CCACHE_MAXSIZE
-          ccache --set-config=compression=true
-          ccache --zero-stats
+          if ($LASTEXITCODE -ne 0) {
+            throw "Ninja failed to start."
+          }
+
+          # ccache is optional. Fetch the official Windows x86_64 release
+          # directly from GitHub; if it is unavailable, build without ccache.
+          $ccacheVersion = "4.13.6"
+          $ccache = Get-Command ccache -ErrorAction SilentlyContinue
+
+          if (-not $ccache) {
+            try {
+              $archive = Join-Path $env:RUNNER_TEMP "ccache-$ccacheVersion-windows-x86_64.zip"
+              $extractRoot = Join-Path $env:RUNNER_TEMP "ccache-$ccacheVersion-windows-x86_64"
+              $url = "https://github.com/ccache/ccache/releases/download/v$ccacheVersion/ccache-$ccacheVersion-windows-x86_64.zip"
+
+              Remove-Item $archive -Force -ErrorAction SilentlyContinue
+              Remove-Item $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
+              Invoke-WebRequest -Uri $url -OutFile $archive
+              Expand-Archive -Path $archive -DestinationPath $extractRoot -Force
+
+              $ccacheExe = Get-ChildItem -Path $extractRoot -Filter ccache.exe -File -Recurse | Select-Object -First 1
+              if (-not $ccacheExe) {
+                throw "ccache.exe was not found in the downloaded archive."
+              }
+
+              $ccacheBin = $ccacheExe.DirectoryName
+              $ccacheBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+              $env:PATH = "$ccacheBin;$env:PATH"
+              $ccache = Get-Command ccache -ErrorAction Stop
+            }
+            catch {
+              Write-Warning "ccache download/setup failed: $($_.Exception.Message)"
+              $ccache = $null
+            }
+          }
+
+          if ($ccache) {
+            try {
+              ccache --version
+              if ($LASTEXITCODE -ne 0) { throw "ccache --version failed." }
+              ccache --set-config=max_size=$env:CCACHE_MAXSIZE
+              if ($LASTEXITCODE -ne 0) { throw "ccache max_size configuration failed." }
+              ccache --set-config=compression=true
+              if ($LASTEXITCODE -ne 0) { throw "ccache compression configuration failed." }
+              ccache --zero-stats
+              if ($LASTEXITCODE -ne 0) { throw "ccache --zero-stats failed." }
+
+              "ARENA_USE_CCACHE=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+              Write-Host "ccache enabled for this build."
+            }
+            catch {
+              Write-Warning "ccache is present but unusable: $($_.Exception.Message)"
+              "ARENA_USE_CCACHE=0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            }
+          }
+          else {
+            Write-Warning "ccache unavailable; continuing without compiler cache."
+            "ARENA_USE_CCACHE=0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
+          # Never leak a stale non-zero exit code from optional ccache commands.
+          exit 0
 
       - name: Prepare Windows build tree
         shell: bash
@@ -134,10 +198,15 @@ jobs:
             -p x64
             -v 2022
             -N
-            -C
             -V
             -i "$GITHUB_WORKSPACE/install"
           )
+
+          # -C enables ccache in before_script.msvc.sh. Use it only when the
+          # previous step successfully prepared a working ccache executable.
+          if [[ "${ARENA_USE_CCACHE:-0}" == "1" ]]; then
+            args+=( -C )
+          fi
 
           # Manual builds reuse the restored CMake/Ninja tree. CMake refreshes
           # changed project files and Ninja rebuilds only affected targets.
@@ -161,7 +230,9 @@ jobs:
           cmake --build MSVC2022_64_Ninja --config Release --parallel 2
           cmake --install MSVC2022_64_Ninja --config Release
           printf '%s\n' "$GITHUB_SHA" > MSVC2022_64_Ninja/.arenamp-cache-sha
-          ccache --show-stats || true
+          if command -v ccache >/dev/null 2>&1; then
+            ccache --show-stats || true
+          fi
 
       - name: Verify Windows install tree
         shell: pwsh
