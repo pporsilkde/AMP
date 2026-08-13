@@ -114,10 +114,13 @@ namespace
 
     bool isClosedDialoguePose(const std::string& group)
     {
-        return group == "ArmsFolded" || group == "ArmsAkimbo"
-            || group == "HandHipPose";
+        return group == "ArmsAtBack" || group == "ArmsFolded"
+            || group == "ArmsAkimbo" || group == "HandHipPose";
     }
 
+    // Automatic dialogue poses are arm-only. Torso includes neck/head in this
+    // renderer, so excluding it prevents imported KF pitch keys from fighting
+    // the normal dialogue look-at controller.
     constexpr int sDialogueArmsBlendMask
         = MWRender::Animation::BlendMask_LeftArm | MWRender::Animation::BlendMask_RightArm;
 
@@ -696,106 +699,57 @@ namespace MWGui
         }
 
         static const DialogueAnimation sSpeechAnimations[] = {
-            { "IdleSpeak_idleF", MWRender::Animation::BlendMask_UpperBody, 0.88f, 0 },
-            { "IdleSpeak_handhip", MWRender::Animation::BlendMask_UpperBody, 0.88f, 0 },
-            { "IdleSpeak_ready", MWRender::Animation::BlendMask_UpperBody, 0.88f, 0 },
-            { "IdleSpeak", MWRender::Animation::BlendMask_UpperBody, 0.88f, 0 },
-            { "ArmsGesture", MWRender::Animation::BlendMask_UpperBody, 0.90f, 1 },
-            { "ArmsGesture_greet", MWRender::Animation::BlendMask_UpperBody, 0.90f, 1 },
-            { "sdppreachattentiveleft", MWRender::Animation::BlendMask_UpperBody, 0.94f, 1 },
-            { "sdppreachattentiveright", MWRender::Animation::BlendMask_UpperBody, 0.94f, 1 },
+            // Restrained formal poses only; no torso/head-driving speech gestures.
+            { "ArmsFolded", sDialogueArmsBlendMask, 0.64f, 8 },
+            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.64f, 8 },
+            { "HandHipPose", sDialogueArmsBlendMask, 0.60f, 8 },
+            { "ArmsAtBack", sDialogueArmsBlendMask, 0.64f, 8 },
         };
         static const DialogueAnimation sIdleAnimations[] = {
-            { "ArmsAkimbo", MWRender::Animation::BlendMask_UpperBody, 0.66f, 10 },
-            { "ArmsFolded", MWRender::Animation::BlendMask_UpperBody, 0.66f, 10 },
-            { "ArmsAtBack", MWRender::Animation::BlendMask_UpperBody, 0.66f, 10 },
-            { "HandHipPose", MWRender::Animation::BlendMask_UpperBody, 0.60f, 10 },
-            { "ReadyPose", MWRender::Animation::BlendMask_UpperBody, 0.66f, 8 },
-            { "Idle2_copy", MWRender::Animation::BlendMask_UpperBody, 0.88f, 1 },
-            { "Idle3_copy", MWRender::Animation::BlendMask_UpperBody, 0.78f, 1 },
-            { "Idle6_copy", MWRender::Animation::BlendMask_UpperBody, 0.72f, 1 },
-            { "Idle7_copy", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
-            { "Idle8_copy", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
-            { "ArmsGesture", MWRender::Animation::BlendMask_UpperBody, 0.88f, 1 },
-            { "ArmsGesture_greet", MWRender::Animation::BlendMask_UpperBody, 0.88f, 1 },
-            { "sdppreachattentive", MWRender::Animation::BlendMask_UpperBody, 0.90f, 2 },
-            { "sdppreachattentiveleft", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
-            { "sdppreachattentiveright", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
-            { "ArmsSunShield", MWRender::Animation::BlendMask_UpperBody, 0.65f, 1 },
+            { "ArmsAtBack", sDialogueArmsBlendMask, 0.64f, 8 },
+            { "ArmsFolded", sDialogueArmsBlendMask, 0.64f, 8 },
+            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.64f, 8 },
+            { "HandHipPose", sDialogueArmsBlendMask, 0.60f, 8 },
         };
         static const DialogueAnimation sGuardOpeningAnimations[] = {
-            // "Stop there" / warning gestures for a guard that has caught the player.
-            { "sdppreachhold", MWRender::Animation::BlendMask_UpperBody, 1.00f, 1 },
-            { "sdppreachadmonish", MWRender::Animation::BlendMask_UpperBody, 1.00f, 1 },
-            { "sdppreachcommand02", MWRender::Animation::BlendMask_UpperBody, 1.00f, 1 },
-            { "ArmsGesture_greet", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
+            // Guard/arrest dialogue stays formal: no scan/hold/command clips.
+            { "ArmsAtBack", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "ArmsFolded", sDialogueArmsBlendMask, 0.62f, 8 },
         };
         static const DialogueAnimation sGuardSpeechAnimations[] = {
-            { "sdppreachadmonish", MWRender::Animation::BlendMask_UpperBody, 1.00f, 1 },
-            { "sdppreachcommand01", MWRender::Animation::BlendMask_UpperBody, 1.00f, 1 },
-            { "sdppreachcommand02", MWRender::Animation::BlendMask_UpperBody, 1.00f, 1 },
-            { "sdppreachcommand03", MWRender::Animation::BlendMask_UpperBody, 1.00f, 1 },
-            { "sdppreachcommand04", MWRender::Animation::BlendMask_UpperBody, 1.00f, 1 },
-            { "ArmsGesture", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
-            { "IdleSpeak_ready", MWRender::Animation::BlendMask_UpperBody, 0.90f, 0 },
-            { "IdleSpeak", MWRender::Animation::BlendMask_UpperBody, 0.90f, 0 },
-            { "sdppreachattentiveleft", MWRender::Animation::BlendMask_UpperBody, 0.94f, 1 },
-            { "sdppreachattentiveright", MWRender::Animation::BlendMask_UpperBody, 0.94f, 1 },
+            { "ArmsAtBack", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "ArmsFolded", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "HandHipPose", sDialogueArmsBlendMask, 0.58f, 8 },
         };
         static const DialogueAnimation sGuardIdleAnimations[] = {
-            { "sdpGuardPose", MWRender::Animation::BlendMask_UpperBody, 0.88f, 3 },
-            { "sdpGuardPose2", MWRender::Animation::BlendMask_UpperBody, 0.88f, 3 },
-            { "sdpGuardPose3", MWRender::Animation::BlendMask_UpperBody, 0.88f, 3 },
-            { "ArmsAtBack", MWRender::Animation::BlendMask_UpperBody, 0.68f, 8 },
-            { "ReadyPose", MWRender::Animation::BlendMask_UpperBody, 0.70f, 6 },
-            { "sdppreachattentive", MWRender::Animation::BlendMask_UpperBody, 0.90f, 2 },
-            { "sdppreachattentiveleft", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
-            { "sdppreachattentiveright", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
-            { "sdppreachscan", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
+            { "ArmsAtBack", sDialogueArmsBlendMask, 0.62f, 10 },
+            { "ArmsAtBack", sDialogueArmsBlendMask, 0.62f, 10 },
+            { "ArmsFolded", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "HandHipPose", sDialogueArmsBlendMask, 0.58f, 8 },
         };
         static const DialogueAnimation sReligiousSpeechAnimations[] = {
-            { "sdppreachaddressspeakleft", MWRender::Animation::BlendMask_UpperBody, 0.94f, 1 },
-            { "sdppreachaddressspeakright", MWRender::Animation::BlendMask_UpperBody, 0.94f, 1 },
-            { "sdppreachaddressspeak", MWRender::Animation::BlendMask_UpperBody, 0.94f, 1 },
-            { "sdppreachattentiveleft", MWRender::Animation::BlendMask_UpperBody, 0.94f, 1 },
-            { "sdppreachattentiveright", MWRender::Animation::BlendMask_UpperBody, 0.94f, 1 },
-            { "sdppreachadmonish", MWRender::Animation::BlendMask_UpperBody, 0.96f, 1 },
-            { "sdppreachcommand01", MWRender::Animation::BlendMask_UpperBody, 0.96f, 1 },
-            { "sdppreachcommand02", MWRender::Animation::BlendMask_UpperBody, 0.96f, 1 },
-            { "sdppreachcommand03", MWRender::Animation::BlendMask_UpperBody, 0.96f, 1 },
-            { "IdleSpeak", MWRender::Animation::BlendMask_UpperBody, 0.88f, 0 },
+            { "ArmsFolded", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "ArmsAtBack", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "HandHipPose", sDialogueArmsBlendMask, 0.58f, 8 },
         };
         static const DialogueAnimation sReligiousIdleAnimations[] = {
-            { "sdppreachformal01", MWRender::Animation::BlendMask_UpperBody, 0.82f, 4 },
-            { "sdppreachformal02", MWRender::Animation::BlendMask_UpperBody, 0.82f, 4 },
-            { "sdppreachattentive", MWRender::Animation::BlendMask_UpperBody, 0.88f, 3 },
-            { "sdppreachattentiveleft", MWRender::Animation::BlendMask_UpperBody, 0.90f, 1 },
-            { "sdppreachattentiveright", MWRender::Animation::BlendMask_UpperBody, 0.90f, 1 },
-            { "sdppreachaddressidle", MWRender::Animation::BlendMask_UpperBody, 0.86f, 2 },
-            { "armsAlmaPray", MWRender::Animation::BlendMask_UpperBody, 0.72f, 6 },
-            { "PoseAlma3", MWRender::Animation::BlendMask_UpperBody, 0.80f, 4 },
-            { "ArmsAtBack", MWRender::Animation::BlendMask_UpperBody, 0.68f, 6 },
+            { "ArmsFolded", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "ArmsAtBack", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.62f, 8 },
         };
         static const DialogueAnimation sFormalSpeechAnimations[] = {
-            { "sdppreachaddressspeakleft", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
-            { "sdppreachaddressspeakright", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
-            { "sdppreachaddressspeak", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
-            { "sdppreachattentiveleft", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
-            { "sdppreachattentiveright", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
-            { "sdppreachcommand01", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
-            { "sdppreachcommand03", MWRender::Animation::BlendMask_UpperBody, 0.92f, 1 },
-            { "ArmsGesture", MWRender::Animation::BlendMask_UpperBody, 0.86f, 1 },
-            { "IdleSpeak", MWRender::Animation::BlendMask_UpperBody, 0.86f, 0 },
+            { "ArmsAtBack", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "ArmsFolded", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "HandHipPose", sDialogueArmsBlendMask, 0.58f, 8 },
         };
         static const DialogueAnimation sFormalIdleAnimations[] = {
-            { "sdppreachformal01", MWRender::Animation::BlendMask_UpperBody, 0.78f, 5 },
-            { "sdppreachformal02", MWRender::Animation::BlendMask_UpperBody, 0.78f, 5 },
-            { "sdppreachattentive", MWRender::Animation::BlendMask_UpperBody, 0.84f, 3 },
-            { "sdppreachattentiveleft", MWRender::Animation::BlendMask_UpperBody, 0.88f, 1 },
-            { "sdppreachattentiveright", MWRender::Animation::BlendMask_UpperBody, 0.88f, 1 },
-            { "sdppreachaddressidle", MWRender::Animation::BlendMask_UpperBody, 0.82f, 2 },
-            { "ArmsAtBack", MWRender::Animation::BlendMask_UpperBody, 0.64f, 8 },
-            { "ArmsFolded", MWRender::Animation::BlendMask_UpperBody, 0.64f, 6 },
+            { "ArmsAtBack", sDialogueArmsBlendMask, 0.62f, 10 },
+            { "ArmsFolded", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "HandHipPose", sDialogueArmsBlendMask, 0.58f, 8 },
         };
 
         std::vector<const DialogueAnimation*> available;
@@ -905,6 +859,7 @@ namespace MWGui
         else
             selectedPtr = available[Misc::Rng::rollDice(static_cast<int>(available.size()))];
         const DialogueAnimation& selected = *selectedPtr;
+        const bool selectedClosedPose = isClosedDialoguePose(selected.mGroup);
 
         if (!mDynamicDialogueActorAnimation.empty()
             && animation->isPlaying(mDynamicDialogueActorAnimation))
@@ -914,7 +869,8 @@ namespace MWGui
                 if (mDynamicDialogueActorOpening)
                     mDynamicDialogueActorOpening = false;
                 mDynamicDialogueActorAnimationTimer
-                    = speaking ? randomRange(3.f, 6.f) : randomRange(6.f, 12.f);
+                    = selectedClosedPose ? randomRange(8.f, 14.f)
+                    : (speaking ? randomRange(4.f, 7.f) : randomRange(7.f, 13.f));
                 if (speaking)
                     mDynamicDialogueActorSpeechCooldown = randomRange(4.f, 7.f);
                 return;
@@ -959,7 +915,9 @@ namespace MWGui
 
         mDynamicDialogueActorAnimation = selected.mGroup;
         mDynamicDialogueActorLeftArmProtected = leftArmProtected;
-        mDynamicDialogueActorAnimationSpeech = speaking;
+        // Formal/closed poses persist across individual voice lines instead of
+        // being torn down as one-line speech gestures.
+        mDynamicDialogueActorAnimationSpeech = speaking && !selectedClosedPose;
         // ArenaMP: the authority client also broadcasts the chosen contextual gesture.
         queueDialogueNpcInteraction(mPtr, selected.mGroup, blendMask, selected.mSpeed,
             static_cast<int>(selected.mLoops + 1), false);
@@ -969,7 +927,8 @@ namespace MWGui
         mDynamicDialogueActorAnimationEnding = false;
         mDynamicDialogueActorTransitionTimer = 0.f;
         mDynamicDialogueActorAnimationTimer
-            = speaking ? randomRange(3.f, 6.f) : randomRange(6.f, 12.f);
+            = selectedClosedPose ? randomRange(8.f, 14.f)
+            : (speaking ? randomRange(4.f, 7.f) : randomRange(7.f, 13.f));
         if (speaking)
             mDynamicDialogueActorSpeechCooldown = randomRange(4.f, 7.f);
     }

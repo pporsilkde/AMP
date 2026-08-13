@@ -122,7 +122,13 @@ bool dynamicActorLeftArmOccupied(const MWWorld::Ptr& ptr)
 
 int dynamicIdleBlendMask(bool leftArmProtected)
 {
-    int blendMask = MWRender::Animation::BlendMask_UpperBody;
+    // ArenaMP head-tilt fix: automatic NPC poses must not drive the torso.
+    // In this 0.47-based renderer the neck/head are descendants of the torso
+    // blend group, so imported KF torso/head keys can fight head tracking and
+    // leave NPCs looking sharply forward/down or backward/up. Keep the base
+    // idle/look-at controllers in charge of spine, neck and head.
+    int blendMask = MWRender::Animation::BlendMask_LeftArm
+        | MWRender::Animation::BlendMask_RightArm;
     if (leftArmProtected)
         blendMask &= ~MWRender::Animation::BlendMask_LeftArm;
     return blendMask;
@@ -897,72 +903,28 @@ namespace MWMechanics
         const bool formalContext = contextualAnimations && !guardContext && !religiousContext && isContextualFormal(ptr);
 
         static const DynamicIdleAnimation sAnimations[] = {
-            // Generic standing poses. Correct text-key capitalization is intentional: 0.47
-            // animation group lookup is case-sensitive, so the old lowercase names silently
-            // left a significant part of the bundled VFS unused.
-            { "ArmsAkimbo", 0.68f, 8, 8, false, false, false, false, true, false },
-            { "ArmsFolded", 0.68f, 8, 8, false, false, false, false, true, false },
-            { "ArmsAtBack", 0.68f, 8 },
-            { "HandHipPose", 0.62f, 8, 8, false, false, false, false, true, false },
-            { "ReadyPose", 0.68f, 6, 6, false, false, false, false, true, false },
-            { "Idle2_copy", 0.90f, 2 },
-            { "Idle3_copy", 0.78f, 2 },
-            { "Idle6_copy", 0.72f, 2 },
-            { "Idle7_copy", 0.90f, 2 },
-            { "Idle8_copy", 0.90f, 2 },
-            { "ArmsGesture", 0.88f, 2, 2, false, false, false, false, false, true },
-            { "ArmsSunShield", 0.65f, 1 },
-            { "petit", 0.90f, 1, 1 },
+            // Safe formal arm poses only. Do not automatically inject preach,
+            // guard-scan/command, copied-idle, prayer or gesture clips: those
+            // packs may contain authored torso/neck keys that cause the head
+            // tilt glitch. Manual player animation assets remain untouched.
+            { "ArmsAtBack", 0.66f, 8, 12, false, false, false, false, true, false },
+            { "ArmsFolded", 0.66f, 8, 10, false, false, false, false, true, false },
+            { "ArmsAkimbo", 0.66f, 8, 9, false, false, false, false, true, false },
+            { "HandHipPose", 0.60f, 8, 8, false, false, false, false, true, false },
 
-            // Casual social gestures are only used when there is actually someone nearby.
-            { "sdppreachattentive", 0.96f, 2, 3, true },
-            { "sdppreachattentiveleft", 0.96f, 1, 2, true, false, false, false, false, true },
-            { "sdppreachattentiveright", 0.96f, 1, 2, true, false, false, false, false, true },
-            { "sdppreachaddressspeak", 0.96f, 1, 2, true },
-            { "sdppreachbeckon", 0.96f, 1, 1, true },
-            { "ArmsGesture_greet", 0.90f, 1, 2, true, false, false, false, false, true },
+            // Guards strongly prefer disciplined hands-behind-back/formal poses.
+            { "ArmsAtBack", 0.64f, 8, 18, false, true, false, false, true, false },
+            { "ArmsFolded", 0.64f, 8, 10, false, true, false, false, true, false },
+            { "ArmsAkimbo", 0.64f, 8, 8, false, true, false, false, true, false },
 
-            // Guards get disciplined/formal poses rather than random prayer/preaching.
-            { "sdpGuardPose", 0.88f, 3, 5, false, true, false },
-            { "sdpGuardPose2", 0.88f, 3, 5, false, true, false },
-            { "sdpGuardPose3", 0.88f, 3, 5, false, true, false },
-            { "sdppreachscan", 0.92f, 1, 3, false, true, false },
-            { "sdppreachattentiveleft", 0.94f, 1, 2, false, true, false },
-            { "sdppreachattentiveright", 0.94f, 1, 2, false, true, false },
-            { "sdppreachcommand01", 0.96f, 1, 2, true, true, false },
-            { "sdppreachcommand03", 0.96f, 1, 2, true, true, false },
-            { "sdppreachhold", 0.96f, 1, 1, true, true, false },
-
-            // Temple staff / religious interiors can use the prayer and formal assets that
-            // were present in VFS but previously fired randomly on unrelated NPCs.
-            { "armsAlmaPray", 0.74f, 6, 5, false, false, true },
-            { "PoseAlma3", 0.82f, 4, 4, false, false, true },
-            { "prayer1", 0.82f, 2, 3, false, false, true },
-            { "prayer2", 0.82f, 2, 3, false, false, true },
-            { "sdppreachformal01", 0.92f, 2, 4, false, false, true },
-            { "sdppreachformal02", 0.92f, 2, 4, false, false, true },
-            { "sdppreachaddressidle", 0.90f, 2, 3, false, false, true },
-            { "sdppreachaddressspeak", 0.94f, 1, 2, true, false, true },
-            { "sdppreachattentiveleft", 0.92f, 1, 2, false, false, true },
-            { "sdppreachattentiveright", 0.92f, 1, 2, false, false, true },
-            { "sdppreachadmonish", 0.96f, 1, 1, true, false, true },
-            { "sdppreachcommand01", 0.96f, 1, 1, true, false, true },
-            { "sdppreachcommand02", 0.96f, 1, 1, true, false, true },
-            { "sdppreachcommand03", 0.96f, 1, 1, true, false, true },
-            { "sdppreachcommand04", 0.96f, 1, 1, true, false, true },
-
-            // Nobles/officials and formal interiors use restrained address/formal gestures.
-            { "sdppreachformal01", 0.82f, 3, 5, false, false, false, true },
-            { "sdppreachformal02", 0.82f, 3, 5, false, false, false, true },
-            { "sdppreachattentive", 0.88f, 2, 3, false, false, false, true },
-            { "sdppreachattentiveleft", 0.90f, 1, 2, false, false, false, true },
-            { "sdppreachattentiveright", 0.90f, 1, 2, false, false, false, true },
-            { "sdppreachaddressidle", 0.84f, 2, 3, false, false, false, true },
-            { "sdppreachaddressspeak", 0.90f, 1, 2, true, false, false, true },
-            { "sdppreachcommand01", 0.90f, 1, 1, true, false, false, true },
-            { "sdppreachcommand03", 0.90f, 1, 1, true, false, false, true },
-            { "ArmsAtBack", 0.66f, 6, 4, false, false, false, true },
-            { "ArmsFolded", 0.66f, 6, 3, false, false, false, true },
+            // Religious/formal contexts keep their weighting, but now draw from
+            // the same safe pose family instead of prayer/preach command clips.
+            { "ArmsFolded", 0.64f, 8, 12, false, false, true, false, true, false },
+            { "ArmsAtBack", 0.64f, 8, 10, false, false, true, false, true, false },
+            { "HandHipPose", 0.60f, 8, 7, false, false, true, false, true, false },
+            { "ArmsAtBack", 0.64f, 8, 14, false, false, false, true, true, false },
+            { "ArmsFolded", 0.64f, 8, 12, false, false, false, true, true, false },
+            { "ArmsAkimbo", 0.64f, 8, 8, false, false, false, true, true, false },
         };
 
         std::vector<const DynamicIdleAnimation*> available;
@@ -1034,7 +996,7 @@ namespace MWMechanics
         {
             state.mAnimation = selected->mGroup;
             state.mLeftArmProtected = leftArmProtected;
-            state.mTimer = walkingWander ? randomRange(4.f, 8.f) : randomRange(6.f, 12.f);
+            state.mTimer = randomRange(9.f, 18.f);
             // animation->play receives an extra-loop count; the MP interaction
             // payload stores a total play count, hence +1 here.
             queueDynamicNpcInteraction(ptr, selected->mGroup, blendMask,
