@@ -677,10 +677,12 @@ namespace MWGui
         if (speaking && !force && !arrestOpening && disposition < 60
             && isClosedDialoguePose(mDynamicDialogueActorAnimation)
             && animation->isPlaying(mDynamicDialogueActorAnimation)
-            && Misc::Rng::rollDice(100) < 78)
+            && Misc::Rng::rollDice(100) < 35)
         {
-            mDynamicDialogueActorSpeechCooldown = randomRange(3.5f, 6.f);
-            mDynamicDialogueActorAnimationTimer = randomRange(5.f, 9.f);
+            // Occasionally keep an existing closed pose through a reply, but do
+            // not let it freeze the whole conversation in one stance.
+            mDynamicDialogueActorSpeechCooldown = randomRange(1.5f, 2.5f);
+            mDynamicDialogueActorAnimationTimer = randomRange(2.5f, 4.5f);
             return;
         }
 
@@ -689,27 +691,31 @@ namespace MWGui
             if (mDynamicDialogueActorSpeechCooldown > 0.f)
                 return;
 
-            // Most voiced replies now receive a subtle gesture. Keep a small
-            // no-gesture chance so conversations still have natural pauses.
-            if (Misc::Rng::rollProbability() > 0.72f)
+            // Almost every new voiced reply may pick a fresh arm gesture/pose.
+            // A small pause chance keeps the system from looking mechanical.
+            if (Misc::Rng::rollProbability() > 0.90f)
             {
-                mDynamicDialogueActorSpeechCooldown = randomRange(2.f, 4.f);
+                mDynamicDialogueActorSpeechCooldown = randomRange(1.f, 2.f);
                 return;
             }
         }
 
         static const DialogueAnimation sSpeechAnimations[] = {
-            // Restrained formal poses only; no torso/head-driving speech gestures.
-            { "ArmsFolded", sDialogueArmsBlendMask, 0.64f, 8 },
-            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.64f, 8 },
-            { "HandHipPose", sDialogueArmsBlendMask, 0.60f, 8 },
-            { "ArmsAtBack", sDialogueArmsBlendMask, 0.64f, 8 },
+            // Head-safe dialogue repertoire. All clips are injected arm-only,
+            // so even gesture KF files that contain torso/head keys cannot tilt
+            // the NPC's neck while talking.
+            { "ArmsFolded", sDialogueArmsBlendMask, 0.66f, 5 },
+            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.66f, 5 },
+            { "HandHipPose", sDialogueArmsBlendMask, 0.62f, 5 },
+            { "ArmsAtBack", sDialogueArmsBlendMask, 0.66f, 5 },
+            { "ArmsGesture", sDialogueArmsBlendMask, 0.88f, 1 },
+            { "ArmsGesture_greet", sDialogueArmsBlendMask, 0.88f, 1 },
         };
         static const DialogueAnimation sIdleAnimations[] = {
-            { "ArmsAtBack", sDialogueArmsBlendMask, 0.64f, 8 },
-            { "ArmsFolded", sDialogueArmsBlendMask, 0.64f, 8 },
-            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.64f, 8 },
-            { "HandHipPose", sDialogueArmsBlendMask, 0.60f, 8 },
+            { "ArmsAtBack", sDialogueArmsBlendMask, 0.66f, 5 },
+            { "ArmsFolded", sDialogueArmsBlendMask, 0.66f, 5 },
+            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.66f, 5 },
+            { "HandHipPose", sDialogueArmsBlendMask, 0.62f, 5 },
         };
         static const DialogueAnimation sGuardOpeningAnimations[] = {
             // Guard/arrest dialogue stays formal: no scan/hold/command clips.
@@ -718,10 +724,11 @@ namespace MWGui
             { "ArmsFolded", sDialogueArmsBlendMask, 0.62f, 8 },
         };
         static const DialogueAnimation sGuardSpeechAnimations[] = {
-            { "ArmsAtBack", sDialogueArmsBlendMask, 0.62f, 8 },
-            { "ArmsFolded", sDialogueArmsBlendMask, 0.62f, 8 },
-            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.62f, 8 },
-            { "HandHipPose", sDialogueArmsBlendMask, 0.58f, 8 },
+            { "ArmsAtBack", sDialogueArmsBlendMask, 0.64f, 5 },
+            { "ArmsFolded", sDialogueArmsBlendMask, 0.64f, 5 },
+            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.64f, 5 },
+            { "HandHipPose", sDialogueArmsBlendMask, 0.60f, 5 },
+            { "ArmsGesture", sDialogueArmsBlendMask, 0.86f, 1 },
         };
         static const DialogueAnimation sGuardIdleAnimations[] = {
             { "ArmsAtBack", sDialogueArmsBlendMask, 0.62f, 10 },
@@ -731,9 +738,10 @@ namespace MWGui
             { "HandHipPose", sDialogueArmsBlendMask, 0.58f, 8 },
         };
         static const DialogueAnimation sReligiousSpeechAnimations[] = {
-            { "ArmsFolded", sDialogueArmsBlendMask, 0.62f, 8 },
-            { "ArmsAtBack", sDialogueArmsBlendMask, 0.62f, 8 },
-            { "HandHipPose", sDialogueArmsBlendMask, 0.58f, 8 },
+            { "ArmsFolded", sDialogueArmsBlendMask, 0.64f, 5 },
+            { "ArmsAtBack", sDialogueArmsBlendMask, 0.64f, 5 },
+            { "HandHipPose", sDialogueArmsBlendMask, 0.60f, 5 },
+            { "ArmsGesture", sDialogueArmsBlendMask, 0.84f, 1 },
         };
         static const DialogueAnimation sReligiousIdleAnimations[] = {
             { "ArmsFolded", sDialogueArmsBlendMask, 0.62f, 8 },
@@ -741,9 +749,11 @@ namespace MWGui
             { "ArmsAkimbo", sDialogueArmsBlendMask, 0.62f, 8 },
         };
         static const DialogueAnimation sFormalSpeechAnimations[] = {
-            { "ArmsAtBack", sDialogueArmsBlendMask, 0.62f, 8 },
-            { "ArmsFolded", sDialogueArmsBlendMask, 0.62f, 8 },
-            { "HandHipPose", sDialogueArmsBlendMask, 0.58f, 8 },
+            { "ArmsAtBack", sDialogueArmsBlendMask, 0.64f, 5 },
+            { "ArmsFolded", sDialogueArmsBlendMask, 0.64f, 5 },
+            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.64f, 5 },
+            { "HandHipPose", sDialogueArmsBlendMask, 0.60f, 5 },
+            { "ArmsGesture", sDialogueArmsBlendMask, 0.86f, 1 },
         };
         static const DialogueAnimation sFormalIdleAnimations[] = {
             { "ArmsAtBack", sDialogueArmsBlendMask, 0.62f, 10 },
@@ -842,9 +852,9 @@ namespace MWGui
         if (!arrestOpening)
         {
             if (disposition < 40)
-                closedPoseChance = speaking ? 74 : 92;
+                closedPoseChance = speaking ? 58 : 92;
             else if (disposition < 60)
-                closedPoseChance = speaking ? 62 : 86;
+                closedPoseChance = speaking ? 48 : 86;
             else if (!guard && !religious)
                 closedPoseChance = speaking ? 18 : 52;
             else if (!speaking)
@@ -869,10 +879,10 @@ namespace MWGui
                 if (mDynamicDialogueActorOpening)
                     mDynamicDialogueActorOpening = false;
                 mDynamicDialogueActorAnimationTimer
-                    = selectedClosedPose ? randomRange(8.f, 14.f)
-                    : (speaking ? randomRange(4.f, 7.f) : randomRange(7.f, 13.f));
+                    = selectedClosedPose ? randomRange(3.5f, 6.f)
+                    : (speaking ? randomRange(2.5f, 4.5f) : randomRange(4.f, 7.f));
                 if (speaking)
-                    mDynamicDialogueActorSpeechCooldown = randomRange(4.f, 7.f);
+                    mDynamicDialogueActorSpeechCooldown = randomRange(1.5f, 3.f);
                 return;
             }
 
@@ -927,10 +937,10 @@ namespace MWGui
         mDynamicDialogueActorAnimationEnding = false;
         mDynamicDialogueActorTransitionTimer = 0.f;
         mDynamicDialogueActorAnimationTimer
-            = selectedClosedPose ? randomRange(8.f, 14.f)
-            : (speaking ? randomRange(4.f, 7.f) : randomRange(7.f, 13.f));
+            = selectedClosedPose ? randomRange(3.5f, 6.f)
+            : (speaking ? randomRange(2.5f, 4.5f) : randomRange(4.f, 7.f));
         if (speaking)
-            mDynamicDialogueActorSpeechCooldown = randomRange(4.f, 7.f);
+            mDynamicDialogueActorSpeechCooldown = randomRange(1.5f, 3.f);
     }
 
     void DialogueWindow::updateDynamicDialogueActor(float dt)
@@ -1050,7 +1060,7 @@ namespace MWGui
             mDynamicDialogueActorAnimation.clear();
             mDynamicDialogueActorLeftArmProtected = false;
             mDynamicDialogueActorAnimationSpeech = false;
-            mDynamicDialogueActorAnimationTimer = randomRange(3.f, 6.f);
+            mDynamicDialogueActorAnimationTimer = randomRange(1.5f, 3.f);
         }
 
         if (speaking)
