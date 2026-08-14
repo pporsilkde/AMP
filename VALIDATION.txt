@@ -1,0 +1,14 @@
+VALIDATION
+==========
+- git diff --check: OK
+- XML parse: tes3mp_login.layout, tes3mp_text_input.layout, openmw_settings_window.layout: OK
+- RU/EN ArenaMP localisation: no duplicate keys; login keys present: OK
+- Login layout required widgets/resource references: OK
+- Runtime ArenaLocalization language switch bridge: OK (static source assertion)
+- TES3MP password protocol path retained: OK (static source assertion)
+- Door pursuit delayed queue + forward/ReturnHome authority split: OK (static source assertion)
+- menu_arenamw.png included through files/vfs/CMakeLists.txt: OK
+- CMake configure reached dependency discovery but full configure/build could not continue in this environment because system OpenGL development libraries/headers are not installed.
+- CI log logs_86382046062 inspected: 18 reported compiler errors reduce to one unique root cause, GUILogin.hpp(37) C2039.
+- GUILogin eventDone type checked against AMP/apps/openmw/mwgui/windowbase.hpp: MWGui::WindowBase::EventHandle_WindowBase: OK.
+- Existing GUIController callback remains void onAccountLoginDone(MWGui::WindowBase*): compatible with the delegate type.

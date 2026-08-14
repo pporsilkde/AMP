@@ -38,6 +38,7 @@ namespace mwmp
 
     private:
         void onConnect(MyGUI::Widget* sender);
+        void onExitClicked(MyGUI::Widget* sender);
         void onLoginAccepted(MyGUI::Edit* sender);
         void onPasswordAccepted(MyGUI::Edit* sender);
         void onLanguageChanged(MyGUI::ComboBox* sender, size_t index);
@@ -48,6 +49,7 @@ namespace mwmp
         MyGUI::EditBox* mPassword = nullptr;
         MyGUI::ComboBox* mLanguage = nullptr;
         MyGUI::Button* mConnect = nullptr;
+        MyGUI::Button* mExit = nullptr;
         bool mRetryMode = false;
         bool mLoginEditable = true;
     };

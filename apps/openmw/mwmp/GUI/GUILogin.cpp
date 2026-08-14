@@ -12,6 +12,7 @@
 
 #include "apps/openmw/mwbase/environment.hpp"
 #include "apps/openmw/mwbase/windowmanager.hpp"
+#include "apps/openmw/mwbase/statemanager.hpp"
 
 namespace
 {
@@ -39,12 +40,14 @@ namespace mwmp
         getWidget(mPassword, "EditPassword");
         getWidget(mLanguage, "LanguageSelect");
         getWidget(mConnect, "ButtonConnect");
+        getWidget(mExit, "ButtonExit");
 
         mPassword->setEditPassword(true);
         mLogin->eventEditSelectAccept += MyGUI::newDelegate(this, &GUILogin::onLoginAccepted);
         mPassword->eventEditSelectAccept += MyGUI::newDelegate(this, &GUILogin::onPasswordAccepted);
         mLanguage->eventComboChangePosition += MyGUI::newDelegate(this, &GUILogin::onLanguageChanged);
         mConnect->eventMouseButtonClick += MyGUI::newDelegate(this, &GUILogin::onConnect);
+        mExit->eventMouseButtonClick += MyGUI::newDelegate(this, &GUILogin::onExitClicked);
 
         // The language names are intentionally self-identifying so the selector
         // remains understandable before a language has been chosen.
@@ -90,6 +93,7 @@ namespace mwmp
         const std::string normalized = normalizeLoginLanguage(value);
         mLanguage->setIndexSelected(normalized == "ru" ? 0 : 1);
         applyLanguage(normalized, false);
+        refreshStrings();
     }
 
     void GUILogin::setLoginEditable(bool editable)
@@ -135,6 +139,11 @@ namespace mwmp
         eventDone(this);
     }
 
+    void GUILogin::onExitClicked(MyGUI::Widget*)
+    {
+        MWBase::Environment::get().getStateManager()->requestQuit();
+    }
+
     void GUILogin::onLoginAccepted(MyGUI::Edit*)
     {
         MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mPassword);
@@ -158,8 +167,8 @@ namespace mwmp
         setText("LabelName", arenaText("login.name"));
         setText("LabelPassword", arenaText("login.password"));
         setText("LabelLanguage", arenaText("login.language"));
-        setText("LanguageHint", arenaText("login.language_hint"));
-        mConnect->setCaption(arenaText(mRetryMode ? "login.retry" : "login.continue"));
+        mConnect->setCaption(arenaText("login.login"));
+        mExit->setCaption(arenaText("login.exit"));
     }
 
     void GUILogin::applyLanguage(const std::string& language, bool persist)
