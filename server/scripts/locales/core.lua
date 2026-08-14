@@ -448,6 +448,9 @@ end
 return {
     EN = {
         language_detected = "Client language detected: {language}",
+        login_dialog_title = "Enter your password:",
+        register_dialog_title = "Create new password:",
+        register_dialog_note = "Use a unique password for this server.",
         welcome_login = "Welcome {name}\nYou have {seconds} seconds to log in.\n",
         welcome_register = "Welcome {name}\nYou have {seconds} seconds to register.\n",
         login_success = "You have successfully logged in.\n",
@@ -460,6 +463,9 @@ return {
     },
     RU = {
         language_detected = "Определён язык клиента: {language}",
+        login_dialog_title = "Введите пароль:",
+        register_dialog_title = "Создайте новый пароль:",
+        register_dialog_note = "Используйте уникальный пароль для этого сервера.",
         welcome_login = "Добро пожаловать, {name}!\nУ вас есть {seconds} секунд для входа.\n",
         welcome_register = "Добро пожаловать, {name}!\nУ вас есть {seconds} секунд для регистрации.\n",
         login_success = "Вы успешно вошли в систему.\n",

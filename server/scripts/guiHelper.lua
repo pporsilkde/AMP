@@ -5,13 +5,17 @@ guiHelper.names = {"LOGIN", "REGISTER", "PLAYERSLIST", "CELLSLIST"}
 guiHelper.ID = tableHelper.enum(guiHelper.names)
 
 guiHelper.ShowLogin = function(pid)
-    tes3mp.PasswordDialog(pid, guiHelper.ID.LOGIN, "Enter your password:", "")
+    tes3mp.PasswordDialog(pid, guiHelper.ID.LOGIN,
+        localization.Get(pid, "core", "login_dialog_title"), "")
 end
 
 guiHelper.ShowRegister = function(pid)
-    tes3mp.PasswordDialog(pid, guiHelper.ID.REGISTER, "Create new password:",
-        "Warning: there is no guarantee that your password will be stored securely on any game server, so you should use " ..
-        "a unique one for each server.")
+    -- Modern ArenaMP clients replace this native PasswordDialog with the branded
+    -- registration card and a local confirmation field. Keeping a real
+    -- PasswordDialog here preserves compatibility with stock/older clients.
+    tes3mp.PasswordDialog(pid, guiHelper.ID.REGISTER,
+        localization.Get(pid, "core", "register_dialog_title"),
+        localization.Get(pid, "core", "register_dialog_note"))
 end
 
 local GetConnectedPlayerList = function()

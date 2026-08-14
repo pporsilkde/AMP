@@ -428,8 +428,11 @@ eventHandler.OnPlayerConnect = function(pid, playerName)
 
     Players[pid] = Player(pid, playerName)
     Players[pid].name = playerName
-    Players[pid].language = localization.GetLanguage(pid)
+    -- Store the actual client preference here. The effective output language may
+    -- still be overridden globally by config.serverLanguage.
+    Players[pid].language = localization.GetClientLanguage(pid)
     tes3mp.LogAppend(enumerations.log.INFO, "- Client language flag: " .. Players[pid].language)
+    tes3mp.LogAppend(enumerations.log.INFO, "- Effective server message language: " .. localization.GetLanguage(pid))
     
     local eventStatus = customEventHooks.triggerValidators("OnPlayerConnect", {pid})
     

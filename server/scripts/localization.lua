@@ -29,15 +29,24 @@ local function getConfiguredServerLanguage()
 end
 
 local function getClientLanguage(pid)
-    if type(pid) == "number" and Players ~= nil and Players[pid] ~= nil and Players[pid].language ~= nil then
-        return normalizeLanguage(Players[pid].language)
-    end
-
+    -- The engine-side PlayerBaseInfo flag is the source of truth. Do not read
+    -- Players[pid].language first: BasePlayer initializes that field to EN,
+    -- which used to mask a later RU selection made in the ArenaMP login card.
     if type(pid) == "number" and tes3mp.GetLanguage ~= nil then
         local ok, language = pcall(tes3mp.GetLanguage, pid)
-        if ok then
-            return normalizeLanguage(language)
+        if ok and type(language) == "string" and language ~= "" then
+            local normalized = normalizeLanguage(language)
+            -- Keep the Lua-side convenience field synchronized for existing
+            -- scripts that read Players[pid].language directly.
+            if Players ~= nil and Players[pid] ~= nil then
+                Players[pid].language = normalized
+            end
+            return normalized
         end
+    end
+
+    if type(pid) == "number" and Players ~= nil and Players[pid] ~= nil and Players[pid].language ~= nil then
+        return normalizeLanguage(Players[pid].language)
     end
 
     return normalizeLanguage(config ~= nil and config.defaultLanguage or "EN")
@@ -211,6 +220,15 @@ function localization.SetPlayerLanguage(pid, language)
 
     Players[pid].language = normalizeLanguage(language)
     return true
+end
+
+-- Refresh the Lua-side flag from the current engine-side PlayerBaseInfo value.
+-- This is useful after clients change language during the pre-login flow.
+function localization.RefreshPlayerLanguage(pid)
+    if type(pid) ~= "number" then
+        return "EN"
+    end
+    return getClientLanguage(pid)
 end
 
 function localization.Get(pidOrLanguage, namespace, key, variables)

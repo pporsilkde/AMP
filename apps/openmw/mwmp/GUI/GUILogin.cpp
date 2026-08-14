@@ -33,8 +33,9 @@ namespace
 
 namespace mwmp
 {
-    GUILogin::GUILogin()
-        : MWGui::WindowModal("tes3mp_login.layout")
+    GUILogin::GUILogin(Mode mode)
+        : MWGui::WindowModal(mode == RegisterMode ? "tes3mp_register.layout" : "tes3mp_login.layout")
+        , mMode(mode)
     {
         getWidget(mLogin, "EditLogin");
         getWidget(mPassword, "EditPassword");
@@ -42,9 +43,17 @@ namespace mwmp
         getWidget(mConnect, "ButtonConnect");
         getWidget(mExit, "ButtonExit");
 
+        if (mMode == RegisterMode)
+            getWidget(mPasswordConfirm, "EditPasswordConfirm");
+
         mPassword->setEditPassword(true);
+        if (mPasswordConfirm)
+            mPasswordConfirm->setEditPassword(true);
+
         mLogin->eventEditSelectAccept += MyGUI::newDelegate(this, &GUILogin::onLoginAccepted);
         mPassword->eventEditSelectAccept += MyGUI::newDelegate(this, &GUILogin::onPasswordAccepted);
+        if (mPasswordConfirm)
+            mPasswordConfirm->eventEditSelectAccept += MyGUI::newDelegate(this, &GUILogin::onPasswordConfirmAccepted);
         mLanguage->eventComboChangePosition += MyGUI::newDelegate(this, &GUILogin::onLanguageChanged);
         mConnect->eventMouseButtonClick += MyGUI::newDelegate(this, &GUILogin::onConnect);
         mExit->eventMouseButtonClick += MyGUI::newDelegate(this, &GUILogin::onExitClicked);
@@ -105,7 +114,9 @@ namespace mwmp
 
     void GUILogin::setRetryMode(bool retry)
     {
-        mRetryMode = retry;
+        // Retry wording only applies to an existing account login. Registration
+        // always has its own title/copy and never reuses the failed-login state.
+        mRetryMode = retry && mMode == LoginMode;
         refreshStrings();
     }
 
@@ -113,7 +124,15 @@ namespace mwmp
     {
         MWGui::WindowModal::onOpen();
         MWBase::WindowManager* windowManager = MWBase::Environment::get().getWindowManager();
-        if (mLoginEditable && mLogin->getOnlyText().empty())
+
+        if (mMode == RegisterMode)
+        {
+            if (mPassword->getOnlyText().empty())
+                windowManager->setKeyFocusWidget(mPassword);
+            else
+                windowManager->setKeyFocusWidget(mPasswordConfirm);
+        }
+        else if (mLoginEditable && mLogin->getOnlyText().empty())
             windowManager->setKeyFocusWidget(mLogin);
         else
             windowManager->setKeyFocusWidget(mPassword);
@@ -130,9 +149,30 @@ namespace mwmp
         }
         if (getPassword().empty())
         {
-            windowManager->messageBox("#{arenamp=login.password_required}");
+            windowManager->messageBox(mMode == RegisterMode
+                ? "#{arenamp=register.password_required}"
+                : "#{arenamp=login.password_required}");
             windowManager->setKeyFocusWidget(mPassword);
             return;
+        }
+
+        if (mMode == RegisterMode)
+        {
+            if (!mPasswordConfirm || mPasswordConfirm->getOnlyText().empty())
+            {
+                windowManager->messageBox("#{arenamp=register.confirm_required}");
+                if (mPasswordConfirm)
+                    windowManager->setKeyFocusWidget(mPasswordConfirm);
+                return;
+            }
+
+            if (mPassword->getOnlyText() != mPasswordConfirm->getOnlyText())
+            {
+                windowManager->messageBox("#{arenamp=register.mismatch}");
+                mPasswordConfirm->setCaption("");
+                windowManager->setKeyFocusWidget(mPasswordConfirm);
+                return;
+            }
         }
 
         applyLanguage(getLanguage(), true);
@@ -151,7 +191,15 @@ namespace mwmp
 
     void GUILogin::onPasswordAccepted(MyGUI::Edit*)
     {
-        onConnect(mPassword);
+        if (mMode == RegisterMode && mPasswordConfirm)
+            MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mPasswordConfirm);
+        else
+            onConnect(mPassword);
+    }
+
+    void GUILogin::onPasswordConfirmAccepted(MyGUI::Edit*)
+    {
+        onConnect(mPasswordConfirm);
     }
 
     void GUILogin::onLanguageChanged(MyGUI::ComboBox*, size_t)
@@ -162,6 +210,19 @@ namespace mwmp
 
     void GUILogin::refreshStrings()
     {
+        if (mMode == RegisterMode)
+        {
+            setText("LoginTitle", arenaText("register.title"));
+            setText("LoginSubtitle", arenaText("register.subtitle"));
+            setText("LabelName", arenaText("register.name"));
+            setText("LabelPassword", arenaText("register.password"));
+            setText("LabelPasswordConfirm", arenaText("register.confirm"));
+            setText("LabelLanguage", arenaText("register.language"));
+            mConnect->setCaption(arenaText("register.create"));
+            mExit->setCaption(arenaText("register.exit"));
+            return;
+        }
+
         setText("LoginTitle", arenaText(mRetryMode ? "login.retry_title" : "login.title"));
         setText("LoginSubtitle", arenaText(mRetryMode ? "login.retry_subtitle" : "login.subtitle"));
         setText("LabelName", arenaText("login.name"));

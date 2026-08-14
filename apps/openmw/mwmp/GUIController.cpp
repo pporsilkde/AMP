@@ -172,11 +172,14 @@ void mwmp::GUIController::showInputBox(const BasePlayer::GUIMessageBox &guiMessa
     const bool passwordDialog = guiMessageBox.type == BasePlayer::GUIMessageBox::PasswordDialog;
     const bool preLoginAccountPrompt = passwordDialog && !localPlayer->isLoggedIn();
 
-    // The first server password/register request is fulfilled from the password
-    // collected together with the player name in the ArenaMP login card. This
-    // keeps the established TES3MP protocol intact while removing the old second
-    // modal from the normal login path.
-    if (preLoginAccountPrompt && !mPreLoginPasswordAutoSubmitted)
+    // CoreScripts' stable GUI ids are LOGIN=1 and REGISTER=2 (tableHelper.enum
+    // is 1-based). Existing accounts may use the password already collected on
+    // the initial ArenaMP account card for a fast login. New accounts must never
+    // auto-submit: registration gets a dedicated confirmation screen first.
+    const bool registrationPrompt = preLoginAccountPrompt && guiMessageBox.id == 2;
+    const bool loginPrompt = preLoginAccountPrompt && !registrationPrompt;
+
+    if (loginPrompt && !mPreLoginPasswordAutoSubmitted)
     {
         const std::string savedPassword = Settings::Manager::getString("password", "Login");
         if (!savedPassword.empty())
@@ -195,16 +198,18 @@ void mwmp::GUIController::showInputBox(const BasePlayer::GUIMessageBox &guiMessa
 
     if (preLoginAccountPrompt)
     {
-        // A repeated PasswordDialog means the automatic attempt was rejected (or
-        // no password was available). Reuse the same modern account card. The
-        // name is shown but locked because the server has already bound this
-        // connection to that account name; changing it requires reconnecting.
-        mAccountLoginBox = new GUILogin();
+        // Once the server knows the player name it also knows whether the account
+        // exists. Registration therefore has its own branded card with a second
+        // password field. The account name is locked in both modes because changing
+        // it after PlayerBaseInfo requires reconnecting.
+        mAccountLoginBox = new GUILogin(registrationPrompt ? GUILogin::RegisterMode : GUILogin::LoginMode);
         mAccountLoginBox->setLogin(Settings::Manager::getString("name", "Login"));
-        mAccountLoginBox->setPassword("");
+        mAccountLoginBox->setPassword(registrationPrompt
+            ? Settings::Manager::getString("password", "Login")
+            : "");
         mAccountLoginBox->setLanguage(Settings::Manager::getString("interface language", "General"));
         mAccountLoginBox->setLoginEditable(false);
-        mAccountLoginBox->setRetryMode(true);
+        mAccountLoginBox->setRetryMode(loginPrompt && mPreLoginPasswordAutoSubmitted);
         mAccountLoginBox->eventDone += MyGUI::newDelegate(this, &GUIController::onAccountLoginDone);
         mAccountLoginBox->setVisible(true);
         return;
@@ -269,7 +274,24 @@ void mwmp::GUIController::onAccountLoginDone(MWGui::WindowBase *parWindow)
     Settings::Manager::setString("interface language", "General", mAccountLoginBox->getLanguage());
     Settings::Manager::saveUser();
     MWBase::Environment::get().getWindowManager()->setArenaLanguage(mAccountLoginBox->getLanguage());
-    Main::get().getLocalPlayer()->updateLanguage();
+
+    // A manually submitted login attempt must also arm the retry state; otherwise
+    // a wrong password would be automatically resent once before the retry card
+    // could be shown. Registration is intentionally excluded from this fast-login
+    // state because it is never auto-submitted.
+    if (!mAccountLoginBox->isRegistrationMode())
+        mPreLoginPasswordAutoSubmitted = true;
+
+    // The account card is shown after the initial PlayerBaseInfo handshake, so a
+    // language selected here would otherwise remain client-only until the next
+    // connection. Re-send BaseInfo first. Player packets are RELIABLE_ORDERED on
+    // CHANNEL_PLAYER, therefore the server receives RU/EN before the following
+    // GUI password reply and can localize login/result messages immediately.
+    LocalPlayer* localPlayer = Main::get().getLocalPlayer();
+    localPlayer->updateLanguage();
+    PlayerPacket* baseInfoPacket = Main::get().getNetworking()->getPlayerPacket(ID_PLAYER_BASEINFO);
+    baseInfoPacket->setPlayer(localPlayer);
+    baseInfoPacket->Send();
 
     submitInputReply(mAccountLoginBox->getPassword());
 
