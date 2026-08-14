@@ -547,6 +547,16 @@ eventHandler.OnPlayerDisconnect = function(pid)
     end
 
     if Players[pid] ~= nil then
+        -- A client can disappear while the login/registration card is still open
+        -- (for example after a client-side GUI exception). In that case the C++
+        -- peer is already gone but the Lua Player object and login timer used to
+        -- survive until OnLoginTimeExpiration, which then called GetLanguage/
+        -- SendMessage/Kick for a dead pid. Always stop the pre-login timer here.
+        if Players[pid].loginTimerId ~= nil then
+            tes3mp.StopTimer(Players[pid].loginTimerId)
+            Players[pid].loginTimerId = nil
+        end
+
         if Players[pid]:IsLoggedIn() then
             local eventStatus = customEventHooks.triggerValidators("OnPlayerDisconnect", {pid})
             
@@ -596,6 +606,17 @@ eventHandler.OnPlayerDisconnect = function(pid)
             end
             
             customEventHooks.triggerHandlers("OnPlayerDisconnect", eventStatus, {pid})
+        else
+            -- The player never completed login, so there is no persistent character
+            -- state to save. Remove the pid from the IP tracker and discard the Lua
+            -- object immediately; the native networking layer has already deleted
+            -- its peer by this point.
+            local ipAddress = Players[pid].ipAddress
+            if ipAddress ~= nil and pidsByIpAddress[ipAddress] ~= nil and
+                tableHelper.containsValue(pidsByIpAddress[ipAddress], pid) then
+                tableHelper.removeValue(pidsByIpAddress[ipAddress], pid)
+            end
+            Players[pid] = nil
         end
     end
 

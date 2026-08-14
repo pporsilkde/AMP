@@ -1476,32 +1476,12 @@ namespace MWMechanics
             */
         }
 
-        // Guards protect the local player from both hostile creatures and NPCs that actually initiated
-        // a fight with that player. The provenance check prevents a player who attacked first
-        // from turning the victim's defensive combat into free guard assistance.
-        const MWWorld::Ptr& player = MWMechanics::getPlayer();
+        // Preserve the original creature-response behaviour, but do not make guards
+        // automatically side with players in NPC-vs-player fights. NPC hostility can
+        // come from quests, scripts, disposition changes or other legitimate gameplay
+        // and is not a reliable indication that the NPC is a bandit.
         const bool hostileCreature = !actor2.getClass().isNpc() && creatureStats2.getAiSequence().isInCombat();
-        bool hostileNpcAggressor = false;
-        if (Settings::Manager::getBool("guards protect player from npc aggressors", "Game")
-            && actor2.getClass().isNpc())
-        {
-            // MP adaptation: the cell-authority client may be simulating an NPC
-            // that attacked another (Dedicated) player. Inspect every combat
-            // target instead of protecting only this client's LocalPlayer.
-            std::vector<MWWorld::Ptr> combatTargets;
-            creatureStats2.getAiSequence().getCombatTargets(combatTargets);
-            for (const MWWorld::Ptr& combatTarget : combatTargets)
-            {
-                if (!combatTarget.isEmpty()
-                    && (combatTarget == player || mwmp::PlayerList::isDedicatedPlayer(combatTarget))
-                    && isCombatInitiator(actor2, combatTarget))
-                {
-                    hostileNpcAggressor = true;
-                    break;
-                }
-            }
-        }
-        if (!aggressive && actor1.getClass().isClass(actor1, "Guard") && (hostileCreature || hostileNpcAggressor))
+        if (!aggressive && actor1.getClass().isClass(actor1, "Guard") && hostileCreature)
         {
             // Check if the creature is too far
             static const float fAlarmRadius = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("fAlarmRadius")->mValue.getFloat();
