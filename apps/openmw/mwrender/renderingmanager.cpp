@@ -267,6 +267,11 @@ namespace MWRender
             mIsInterior = interior;
         }
 
+        bool isInterior() const
+        {
+            return mIsInterior;
+        }
+
         void setUnderwaterBlend(float blend)
         {
             mUnderwaterBlend = std::clamp(blend, 0.f, 1.f);
@@ -1276,7 +1281,7 @@ namespace MWRender
             return;
 
         mHdrTonemapperUniform->set(std::clamp(
-            Settings::Manager::getInt("hdr tonemapper", "Shaders"), 0, 3));
+            Settings::Manager::getInt("hdr tonemapper", "Shaders"), 0, 4));
         mHdrExposureUniform->set(std::clamp(
             Settings::Manager::getFloat("hdr exposure", "Shaders"), 0.25f, 3.f));
         mHdrInteriorExposureUniform->set(std::clamp(
@@ -1391,6 +1396,16 @@ namespace MWRender
 
         if (mNativeEffectsProcessor)
         {
+            const osg::Vec4f sunPosition = mSunLight->getPosition();
+            mNativeEffectsProcessor->setEnvironment(
+                mFog->getFogColor(mUnderwaterFogActive),
+                mFog->getFogStart(mUnderwaterFogActive),
+                mFog->getFogEnd(mUnderwaterFogActive),
+                mStateUpdater->isInterior(),
+                mUnderwaterFogActive,
+                mCamera->isFirstPerson(),
+                osg::Vec3f(sunPosition.x(), sunPosition.y(), sunPosition.z()),
+                mSunLight->getDiffuse());
             mNativeEffectsProcessor->update();
             if (mBloomProcessor)
                 mBloomProcessor->setSuppressed(mNativeEffectsProcessor->isEnabled());
@@ -2148,7 +2163,14 @@ namespace MWRender
                 refreshNativeEffects = true;
             }
             else if (setting.first == "Shaders" && (setting.second == "smaa enabled"
-                || setting.second == "smaa threshold"))
+                || setting.second == "smaa threshold"
+                || setting.second == "atmospheric fog enabled"
+                || setting.second == "atmospheric fog strength"
+                || setting.second == "god rays enabled"
+                || setting.second == "god rays strength"
+                || setting.second == "sharpening enabled"
+                || setting.second == "sharpening strength"
+                || setting.second == "dithering enabled"))
             {
                 refreshNativeEffects = true;
             }

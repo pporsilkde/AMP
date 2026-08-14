@@ -20,6 +20,7 @@
 #include <components/esm/loadarmo.hpp>
 #include <components/esm/loadligh.hpp>
 #include <components/esm/loadnpc.hpp>
+#include <components/esm/loadrace.hpp>
 #include <components/esm/loadgmst.hpp>
 #include <components/misc/rng.hpp>
 #include <components/misc/stringops.hpp>
@@ -114,8 +115,21 @@ namespace
 
     bool isClosedDialoguePose(const std::string& group)
     {
-        return group == "ArmsAtBack" || group == "ArmsFolded"
-            || group == "ArmsAkimbo" || group == "HandHipPose";
+        return group == "armsatback" || group == "armsfolded"
+            || group == "armsakimbo" || group == "handhippose";
+    }
+
+    bool isDynamicDialogueBeast(const MWWorld::Ptr& ptr)
+    {
+        if (ptr.isEmpty() || !ptr.getClass().isNpc())
+            return false;
+
+        const ESM::NPC* npc = ptr.get<ESM::NPC>()->mBase;
+        if (!npc)
+            return false;
+        const ESM::Race* race = MWBase::Environment::get().getWorld()->getStore()
+            .get<ESM::Race>().search(npc->mRace);
+        return race && (race->mData.mFlags & ESM::Race::Beast) != 0;
     }
 
     // Automatic dialogue poses are arm-only. Torso includes neck/head in this
@@ -667,20 +681,18 @@ namespace MWGui
         const bool arrestOpening = guard && mDynamicDialogueActorOpening && isDynamicDialogueArrest(mPtr);
         const bool religious = contextualAnimations && !guard && isDynamicDialogueReligious(mPtr);
         const bool formal = contextualAnimations && !guard && !religious && isDynamicDialogueFormal(mPtr);
+        const bool beast = isDynamicDialogueBeast(mPtr);
         const int disposition = MWBase::Environment::get().getMechanicsManager()
             ->getDerivedDisposition(mPtr, true);
 
         // A guarded/hostile NPC should not immediately throw away a closed pose
-        // every time a voiced line starts. Keeping folded/akimbo/hand-on-hip
-        // poses through many replies looks much more natural than repeatedly
-        // switching into full-body speaking idles.
+        // every time a voiced line starts. Occasionally keep the stance, but do
+        // not let one pose freeze the whole conversation.
         if (speaking && !force && !arrestOpening && disposition < 60
             && isClosedDialoguePose(mDynamicDialogueActorAnimation)
             && animation->isPlaying(mDynamicDialogueActorAnimation)
             && Misc::Rng::rollDice(100) < 35)
         {
-            // Occasionally keep an existing closed pose through a reply, but do
-            // not let it freeze the whole conversation in one stance.
             mDynamicDialogueActorSpeechCooldown = randomRange(1.5f, 2.5f);
             mDynamicDialogueActorAnimationTimer = randomRange(2.5f, 4.5f);
             return;
@@ -691,7 +703,7 @@ namespace MWGui
             if (mDynamicDialogueActorSpeechCooldown > 0.f)
                 return;
 
-            // Almost every new voiced reply may pick a fresh arm gesture/pose.
+            // Almost every new voiced reply may pick a fresh known-good speaking gesture/pose.
             // A small pause chance keeps the system from looking mechanical.
             if (Misc::Rng::rollProbability() > 0.90f)
             {
@@ -701,65 +713,84 @@ namespace MWGui
         }
 
         static const DialogueAnimation sSpeechAnimations[] = {
-            // Head-safe dialogue repertoire. All clips are injected arm-only,
-            // so even gesture KF files that contain torso/head keys cannot tilt
-            // the NPC's neck while talking.
-            { "ArmsFolded", sDialogueArmsBlendMask, 0.66f, 5 },
-            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.66f, 5 },
-            { "HandHipPose", sDialogueArmsBlendMask, 0.62f, 5 },
-            { "ArmsAtBack", sDialogueArmsBlendMask, 0.66f, 5 },
-            { "ArmsGesture", sDialogueArmsBlendMask, 0.88f, 1 },
-            { "ArmsGesture_greet", sDialogueArmsBlendMask, 0.88f, 1 },
+            // These are the same speaking groups used by the last known-good
+            // ArenaMW build. Keep them arm-only: their KF files contain head,
+            // neck and spine controllers, which caused the old head-pitch bug
+            // when played through BlendMask_UpperBody.
+            { "idlespeak_idlef", sDialogueArmsBlendMask, 0.88f, 0 },
+            { "idlespeak_handhip", sDialogueArmsBlendMask, 0.88f, 0 },
+            { "idlespeak_ready", sDialogueArmsBlendMask, 0.88f, 0 },
+            { "idlespeak", sDialogueArmsBlendMask, 0.88f, 0 },
+            { "armsgesture", sDialogueArmsBlendMask, 0.90f, 1 },
+            { "armsgesture_greet", sDialogueArmsBlendMask, 0.90f, 1 },
+            { "armsfolded", sDialogueArmsBlendMask, 0.66f, 4 },
+            { "armsakimbo", sDialogueArmsBlendMask, 0.66f, 4 },
+            { "handhippose", sDialogueArmsBlendMask, 0.62f, 4 },
+        };
+        static const DialogueAnimation sBeastSpeechAnimations[] = {
+            // KNA-authored groups physically present in xbase_animkna. These
+            // sources are appended last by NpcAnimation, so the human xbase_anim
+            // compatibility source cannot steal the group from a beast skeleton.
+            { "idlespeak", sDialogueArmsBlendMask, 0.88f, 0 },
+            { "armsgesture", sDialogueArmsBlendMask, 0.90f, 1 },
+            { "armsgesture_greet", sDialogueArmsBlendMask, 0.90f, 1 },
+            { "armsakimbo", sDialogueArmsBlendMask, 0.66f, 4 },
+            { "handhippose", sDialogueArmsBlendMask, 0.62f, 4 },
+        };
+        static const DialogueAnimation sBeastIdleAnimations[] = {
+            { "armsakimbo", sDialogueArmsBlendMask, 0.66f, 6 },
+            { "handhippose", sDialogueArmsBlendMask, 0.62f, 6 },
         };
         static const DialogueAnimation sIdleAnimations[] = {
-            { "ArmsAtBack", sDialogueArmsBlendMask, 0.66f, 5 },
-            { "ArmsFolded", sDialogueArmsBlendMask, 0.66f, 5 },
-            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.66f, 5 },
-            { "HandHipPose", sDialogueArmsBlendMask, 0.62f, 5 },
+            { "armsatback", sDialogueArmsBlendMask, 0.66f, 5 },
+            { "armsfolded", sDialogueArmsBlendMask, 0.66f, 5 },
+            { "armsakimbo", sDialogueArmsBlendMask, 0.66f, 5 },
+            { "handhippose", sDialogueArmsBlendMask, 0.62f, 5 },
         };
         static const DialogueAnimation sGuardOpeningAnimations[] = {
-            // Guard/arrest dialogue stays formal: no scan/hold/command clips.
-            { "ArmsAtBack", sDialogueArmsBlendMask, 0.62f, 8 },
-            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.62f, 8 },
-            { "ArmsFolded", sDialogueArmsBlendMask, 0.62f, 8 },
+            // Arrest/guard dialogue stays formal: no pointing, scanning or
+            // command animations that can pitch the head.
+            { "armsatback", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "armsakimbo", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "armsfolded", sDialogueArmsBlendMask, 0.62f, 8 },
         };
         static const DialogueAnimation sGuardSpeechAnimations[] = {
-            { "ArmsAtBack", sDialogueArmsBlendMask, 0.64f, 5 },
-            { "ArmsFolded", sDialogueArmsBlendMask, 0.64f, 5 },
-            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.64f, 5 },
-            { "HandHipPose", sDialogueArmsBlendMask, 0.60f, 5 },
-            { "ArmsGesture", sDialogueArmsBlendMask, 0.86f, 1 },
+            { "armsatback", sDialogueArmsBlendMask, 0.64f, 5 },
+            { "armsfolded", sDialogueArmsBlendMask, 0.64f, 5 },
+            { "armsakimbo", sDialogueArmsBlendMask, 0.64f, 5 },
+            { "handhippose", sDialogueArmsBlendMask, 0.60f, 5 },
+            { "armsgesture", sDialogueArmsBlendMask, 0.86f, 1 },
         };
         static const DialogueAnimation sGuardIdleAnimations[] = {
-            { "ArmsAtBack", sDialogueArmsBlendMask, 0.62f, 10 },
-            { "ArmsAtBack", sDialogueArmsBlendMask, 0.62f, 10 },
-            { "ArmsFolded", sDialogueArmsBlendMask, 0.62f, 8 },
-            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.62f, 8 },
-            { "HandHipPose", sDialogueArmsBlendMask, 0.58f, 8 },
+            { "armsatback", sDialogueArmsBlendMask, 0.62f, 10 },
+            { "armsatback", sDialogueArmsBlendMask, 0.62f, 10 },
+            { "armsfolded", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "armsakimbo", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "handhippose", sDialogueArmsBlendMask, 0.58f, 8 },
         };
         static const DialogueAnimation sReligiousSpeechAnimations[] = {
-            { "ArmsFolded", sDialogueArmsBlendMask, 0.64f, 5 },
-            { "ArmsAtBack", sDialogueArmsBlendMask, 0.64f, 5 },
-            { "HandHipPose", sDialogueArmsBlendMask, 0.60f, 5 },
-            { "ArmsGesture", sDialogueArmsBlendMask, 0.84f, 1 },
+            { "armsfolded", sDialogueArmsBlendMask, 0.64f, 5 },
+            { "armsatback", sDialogueArmsBlendMask, 0.64f, 5 },
+            { "handhippose", sDialogueArmsBlendMask, 0.60f, 5 },
+            { "armsgesture", sDialogueArmsBlendMask, 0.84f, 1 },
         };
         static const DialogueAnimation sReligiousIdleAnimations[] = {
-            { "ArmsFolded", sDialogueArmsBlendMask, 0.62f, 8 },
-            { "ArmsAtBack", sDialogueArmsBlendMask, 0.62f, 8 },
-            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "armsfolded", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "armsatback", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "armsakimbo", sDialogueArmsBlendMask, 0.62f, 8 },
         };
         static const DialogueAnimation sFormalSpeechAnimations[] = {
-            { "ArmsAtBack", sDialogueArmsBlendMask, 0.64f, 5 },
-            { "ArmsFolded", sDialogueArmsBlendMask, 0.64f, 5 },
-            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.64f, 5 },
-            { "HandHipPose", sDialogueArmsBlendMask, 0.60f, 5 },
-            { "ArmsGesture", sDialogueArmsBlendMask, 0.86f, 1 },
+            { "armsatback", sDialogueArmsBlendMask, 0.64f, 5 },
+            { "armsfolded", sDialogueArmsBlendMask, 0.64f, 5 },
+            { "armsakimbo", sDialogueArmsBlendMask, 0.64f, 5 },
+            { "handhippose", sDialogueArmsBlendMask, 0.60f, 5 },
+            { "armsgesture", sDialogueArmsBlendMask, 0.86f, 1 },
         };
         static const DialogueAnimation sFormalIdleAnimations[] = {
-            { "ArmsAtBack", sDialogueArmsBlendMask, 0.62f, 10 },
-            { "ArmsFolded", sDialogueArmsBlendMask, 0.62f, 8 },
-            { "ArmsAkimbo", sDialogueArmsBlendMask, 0.62f, 8 },
-            { "HandHipPose", sDialogueArmsBlendMask, 0.58f, 8 },
+            { "armsatback", sDialogueArmsBlendMask, 0.62f, 10 },
+            { "armsfolded", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "armsakimbo", sDialogueArmsBlendMask, 0.62f, 8 },
+            { "handhippose", sDialogueArmsBlendMask, 0.58f, 8 },
         };
 
         std::vector<const DialogueAnimation*> available;
@@ -782,7 +813,12 @@ namespace MWGui
 
         const DialogueAnimation* poolBegin = nullptr;
         const DialogueAnimation* poolEnd = nullptr;
-        if (arrestOpening)
+        if (beast)
+        {
+            poolBegin = speaking ? std::begin(sBeastSpeechAnimations) : std::begin(sBeastIdleAnimations);
+            poolEnd = speaking ? std::end(sBeastSpeechAnimations) : std::end(sBeastIdleAnimations);
+        }
+        else if (arrestOpening)
         {
             poolBegin = std::begin(sGuardOpeningAnimations);
             poolEnd = std::end(sGuardOpeningAnimations);
@@ -814,7 +850,7 @@ namespace MWGui
 
         // Role-specific resources are optional. Fall back to the generic pool instead of
         // leaving a modded NPC completely static if its skeleton lacks the formal gestures.
-        if (available.empty() && (guard || religious || formal))
+        if (available.empty() && !beast && (guard || religious || formal))
         {
             poolBegin = speaking ? std::begin(sSpeechAnimations) : std::begin(sIdleAnimations);
             poolEnd = speaking ? std::end(sSpeechAnimations) : std::end(sIdleAnimations);
@@ -829,23 +865,30 @@ namespace MWGui
             return;
         }
 
-        // Closed dialogue poses are deliberately weighted. They are sourced from
-        // the generic idle set even while a voiced line is active, so an NPC can
-        // keep folded arms / akimbo / hand-on-hip instead of gesturing on every
-        // sentence. Low disposition makes those defensive poses dominant.
+        // Prefer defensive/closed poses without altering the animation blend mask.
+        // Low-disposition NPCs use them heavily; friendly NPCs still use them often
+        // enough to avoid looking rigid, but retain ordinary gestures and idles.
         std::vector<const DialogueAnimation*> closedAvailable;
-        for (const DialogueAnimation* entry = std::begin(sIdleAnimations); entry != std::end(sIdleAnimations); ++entry)
+        if (!arrestOpening)
         {
-            if (isClosedDialoguePose(entry->mGroup) && animation->hasAnimation(entry->mGroup)
-                && (mDynamicDialogueActorAnimation.empty()
-                    || mDynamicDialogueActorAnimation != entry->mGroup))
-                closedAvailable.push_back(entry);
-        }
-        if (closedAvailable.empty())
-        {
-            for (const DialogueAnimation* entry = std::begin(sIdleAnimations); entry != std::end(sIdleAnimations); ++entry)
-                if (isClosedDialoguePose(entry->mGroup) && animation->hasAnimation(entry->mGroup))
+            const DialogueAnimation* closedBegin = beast
+                ? std::begin(sBeastIdleAnimations) : std::begin(sIdleAnimations);
+            const DialogueAnimation* closedEnd = beast
+                ? std::end(sBeastIdleAnimations) : std::end(sIdleAnimations);
+            for (const DialogueAnimation* entry = closedBegin; entry != closedEnd; ++entry)
+            {
+                if (!isClosedDialoguePose(entry->mGroup) || !animation->hasAnimation(entry->mGroup))
+                    continue;
+                if (mDynamicDialogueActorAnimation.empty()
+                    || mDynamicDialogueActorAnimation != entry->mGroup)
                     closedAvailable.push_back(entry);
+            }
+            if (closedAvailable.empty())
+            {
+                for (const DialogueAnimation* entry = closedBegin; entry != closedEnd; ++entry)
+                    if (isClosedDialoguePose(entry->mGroup) && animation->hasAnimation(entry->mGroup))
+                        closedAvailable.push_back(entry);
+            }
         }
 
         int closedPoseChance = 0;
@@ -892,11 +935,9 @@ namespace MWGui
         }
 
         const bool leftArmProtected = dynamicActorLeftArmOccupied(mPtr);
-        // Dialogue gesture clips often contain authored spine/head keys. On some
-        // animation packs those keys pitch the NPC's head sharply up or down at
-        // the start of every sentence. The body is already faced toward the
-        // player by the dialogue controller, so inject only the arm channels and
-        // leave head/neck/spine to the normal idle + head tracking controllers.
+        // Defensive safeguard for any future dialogue entry that accidentally
+        // requests UpperBody: keep spine/neck/head under the normal look-at
+        // controller and inject only the arm channels.
         int blendMask = selected.mBlendMask == MWRender::Animation::BlendMask_UpperBody
             ? sDialogueArmsBlendMask : selected.mBlendMask;
         if (leftArmProtected)
@@ -925,10 +966,11 @@ namespace MWGui
 
         mDynamicDialogueActorAnimation = selected.mGroup;
         mDynamicDialogueActorLeftArmProtected = leftArmProtected;
-        // Formal/closed poses persist across individual voice lines instead of
-        // being torn down as one-line speech gestures.
+        // A defensive pose selected while speech is active is a persistent pose,
+        // not a one-line speech clip.  Keep it after the voice sample ends.
         mDynamicDialogueActorAnimationSpeech = speaking && !selectedClosedPose;
-        // ArenaMP: the authority client also broadcasts the chosen contextual gesture.
+        // ArenaMP: cell-authority client broadcasts the exact arm-only gesture
+        // and blend mask so every client sees the same dialogue animation.
         queueDialogueNpcInteraction(mPtr, selected.mGroup, blendMask, selected.mSpeed,
             static_cast<int>(selected.mLoops + 1), false);
         if (mDynamicDialogueActorOpening)

@@ -9,6 +9,7 @@
 #include <components/esm/esmreader.hpp>
 #include <components/esm/esmwriter.hpp>
 #include <components/esm/loadnpc.hpp>
+#include <components/esm/loadrace.hpp>
 #include <components/esm/loadarmo.hpp>
 #include <components/esm/loadligh.hpp>
 
@@ -183,6 +184,18 @@ bool hasConstructionSetAnimation(const MWWorld::Ptr& ptr)
 
     const MWWorld::LiveCellRef<ESM::NPC>* npc = ptr.get<ESM::NPC>();
     return npc && !npc->mBase->mModel.empty();
+}
+
+bool isBeastNpc(const MWWorld::Ptr& ptr)
+{
+    if (ptr.isEmpty() || !ptr.getClass().isNpc())
+        return false;
+    const ESM::NPC* npc = ptr.get<ESM::NPC>()->mBase;
+    if (!npc)
+        return false;
+    const ESM::Race* race = MWBase::Environment::get().getWorld()->getStore()
+        .get<ESM::Race>().search(npc->mRace);
+    return race && (race->mData.mFlags & ESM::Race::Beast) != 0;
 }
 
 void faceDialogueActorToPlayer(const MWWorld::Ptr& actor, const MWWorld::Ptr& player)
@@ -787,6 +800,29 @@ namespace MWMechanics
 
         if (hardBlocked)
         {
+            if (dialogueTarget && !state.mAnimation.empty())
+            {
+                MWBase::WindowManager* windowManager
+                    = MWBase::Environment::get().getWindowManager();
+                MWGui::DialogueWindow* dialogueWindow
+                    = windowManager ? windowManager->getDialogueWindow() : nullptr;
+
+                // Ambient and dialogue systems reuse the same safe group names.
+                // If dialogue has already taken ownership of exactly this group,
+                // disabling the ambient state would also kill the fresh dialogue
+                // pose. Drop only ambient bookkeeping and keep MP animation alive.
+                if (dialogueWindow
+                    && dialogueWindow->getDynamicDialogueAnimationGroup() == state.mAnimation)
+                {
+                    state.mAnimation.clear();
+                    state.mEnding = false;
+                    state.mTransitionTimeout = 0.f;
+                    state.mLeftArmProtected = false;
+                    state.mTimer = randomRange(2.f, 5.f);
+                    return;
+                }
+            }
+
             stopDynamicIdleActor(ptr, actorState, true);
             return;
         }
@@ -901,35 +937,42 @@ namespace MWMechanics
         const bool guardContext = contextualAnimations && isContextualGuard(ptr);
         const bool religiousContext = contextualAnimations && !guardContext && isContextualReligious(ptr);
         const bool formalContext = contextualAnimations && !guardContext && !religiousContext && isContextualFormal(ptr);
+        const bool beastNpc = isBeastNpc(ptr);
 
         static const DynamicIdleAnimation sAnimations[] = {
             // Safe formal arm poses only. Do not automatically inject preach,
             // guard-scan/command, copied-idle, prayer or gesture clips: those
             // packs may contain authored torso/neck keys that cause the head
             // tilt glitch. Manual player animation assets remain untouched.
-            { "ArmsAtBack", 0.66f, 8, 12, false, false, false, false, true, false },
-            { "ArmsFolded", 0.66f, 8, 10, false, false, false, false, true, false },
-            { "ArmsAkimbo", 0.66f, 8, 9, false, false, false, false, true, false },
-            { "HandHipPose", 0.60f, 8, 8, false, false, false, false, true, false },
+            { "armsatback", 0.66f, 8, 12, false, false, false, false, true, false },
+            { "armsfolded", 0.66f, 8, 10, false, false, false, false, true, false },
+            { "armsakimbo", 0.66f, 8, 9, false, false, false, false, true, false },
+            { "handhippose", 0.60f, 8, 8, false, false, false, false, true, false },
 
             // Guards strongly prefer disciplined hands-behind-back/formal poses.
-            { "ArmsAtBack", 0.64f, 8, 18, false, true, false, false, true, false },
-            { "ArmsFolded", 0.64f, 8, 10, false, true, false, false, true, false },
-            { "ArmsAkimbo", 0.64f, 8, 8, false, true, false, false, true, false },
+            { "armsatback", 0.64f, 8, 18, false, true, false, false, true, false },
+            { "armsfolded", 0.64f, 8, 10, false, true, false, false, true, false },
+            { "armsakimbo", 0.64f, 8, 8, false, true, false, false, true, false },
 
             // Religious/formal contexts keep their weighting, but now draw from
             // the same safe pose family instead of prayer/preach command clips.
-            { "ArmsFolded", 0.64f, 8, 12, false, false, true, false, true, false },
-            { "ArmsAtBack", 0.64f, 8, 10, false, false, true, false, true, false },
-            { "HandHipPose", 0.60f, 8, 7, false, false, true, false, true, false },
-            { "ArmsAtBack", 0.64f, 8, 14, false, false, false, true, true, false },
-            { "ArmsFolded", 0.64f, 8, 12, false, false, false, true, true, false },
-            { "ArmsAkimbo", 0.64f, 8, 8, false, false, false, true, true, false },
+            { "armsfolded", 0.64f, 8, 12, false, false, true, false, true, false },
+            { "armsatback", 0.64f, 8, 10, false, false, true, false, true, false },
+            { "handhippose", 0.60f, 8, 7, false, false, true, false, true, false },
+            { "armsatback", 0.64f, 8, 14, false, false, false, true, true, false },
+            { "armsfolded", 0.64f, 8, 12, false, false, false, true, true, false },
+            { "armsakimbo", 0.64f, 8, 8, false, false, false, true, true, false },
         };
 
         std::vector<const DynamicIdleAnimation*> available;
         for (const DynamicIdleAnimation& candidate : sAnimations)
         {
+            // Beast skeletons do not provide ArmPoses (armsatback/armsfolded).
+            // Restrict automatic ambient poses to native KNA groups so a human
+            // compatibility source cannot be selected for Argonian/Khajiit rigs.
+            if (beastNpc && std::string(candidate.mGroup) != "armsakimbo"
+                && std::string(candidate.mGroup) != "handhippose")
+                continue;
             if (candidate.mRequiresNearbyNpc && !nearbyNpc)
                 continue;
             if (candidate.mGuardOnly && !guardContext)

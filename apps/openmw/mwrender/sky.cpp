@@ -485,28 +485,17 @@ public:
 
         mGeom->getOrCreateStateSet()->setTextureAttributeAndModes(0, sunTex, osg::StateAttribute::ON);
 
-        osg::ref_ptr<osg::Group> queryNode (new osg::Group);
-        // Need to render after the world geometry so we can correctly test for occlusions
-        osg::StateSet* stateset = queryNode->getOrCreateStateSet();
-        stateset->setRenderBinDetails(RenderBin_OcclusionQuery, "RenderBin");
-        stateset->setNestRenderBins(false);
-        // Set up alpha testing on the occlusion testing subgraph, that way we can get the occlusion tested fragments to match the circular shape of the sun
-        osg::ref_ptr<osg::AlphaFunc> alphaFunc (new osg::AlphaFunc);
-        alphaFunc->setFunction(osg::AlphaFunc::GREATER, 0.8);
-        stateset->setAttributeAndModes(alphaFunc, osg::StateAttribute::ON);
-        stateset->setTextureAttributeAndModes(0, sunTex, osg::StateAttribute::ON);
-        stateset->setAttributeAndModes(createUnlitMaterial(), osg::StateAttribute::ON);
-        // Disable writing to the color buffer. We are using this geometry for visibility tests only.
-        osg::ref_ptr<osg::ColorMask> colormask (new osg::ColorMask(0, 0, 0, 0));
-        stateset->setAttributeAndModes(colormask, osg::StateAttribute::ON);
+        // ArenaMP: do not create the legacy OSG OcclusionQueryNode pair here.
+        // With the multi-camera native post chain on OSG 3.6.5 this path can
+        // request query results for a camera that has no valid render-query
+        // callback, producing "osgOQ: QG: Invalid RQCB" every frame.
+        //
+        // Sun flash/glare occlusion is now evaluated in native_final.frag from
+        // the preserved world-depth texture, using the same soft sun-disc
+        // coverage model as the God Rays pass.  Keeping the legacy helpers
+        // below dormant makes this change small and easy to revert while
+        // guaranteeing that no OcclusionQueryNode is traversed at runtime.
 
-        mTransform->addChild(queryNode);
-
-        mOcclusionQueryVisiblePixels = createOcclusionQueryNode(queryNode, true);
-        mOcclusionQueryTotalPixels = createOcclusionQueryNode(queryNode, false);
-
-        createSunFlash(imageManager);
-        createSunGlare();
     }
 
     ~Sun()
@@ -728,26 +717,36 @@ private:
     protected:
         float getVisibleRatio (osg::Camera* camera)
         {
-            int visible = mOcclusionQueryVisiblePixels->getQueryGeometry()->getNumPixels(camera);
-            int total = mOcclusionQueryTotalPixels->getQueryGeometry()->getNumPixels(camera);
+            const int visible = mOcclusionQueryVisiblePixels->getQueryGeometry()->getNumPixels(camera);
+            const int total = mOcclusionQueryTotalPixels->getQueryGeometry()->getNumPixels(camera);
 
             float visibleRatio = 0.f;
             if (total > 0)
                 visibleRatio = static_cast<float>(visible) / static_cast<float>(total);
 
-            float dt = MWBase::Environment::get().getFrameDuration();
+            const osg::observer_ptr<osg::Camera> key(camera);
 
-            float lastRatio = mLastRatio[osg::observer_ptr<osg::Camera>(camera)];
+            // Do not let the glare linger once geometry really covers the sun.
+            // Query results are already one frame delayed by the GPU, so another
+            // long fade on top of that looks like the flare shines through walls.
+            if (visibleRatio <= 0.025f)
+            {
+                mLastRatio[key] = 0.f;
+                return 0.f;
+            }
 
-            float change = dt*10;
+            const float dt = MWBase::Environment::get().getFrameDuration();
+            float lastRatio = mLastRatio[key];
 
+            // Keep appearance smooth, but make disappearance much faster.
+            const float rise = dt * 8.f;
+            const float fall = dt * 32.f;
             if (visibleRatio > lastRatio)
-                visibleRatio = std::min(visibleRatio, lastRatio + change);
+                visibleRatio = std::min(visibleRatio, lastRatio + rise);
             else
-                visibleRatio = std::max(visibleRatio, lastRatio - change);
+                visibleRatio = std::max(visibleRatio, lastRatio - fall);
 
-            mLastRatio[osg::observer_ptr<osg::Camera>(camera)] = visibleRatio;
-
+            mLastRatio[key] = visibleRatio;
             return visibleRatio;
         }
 

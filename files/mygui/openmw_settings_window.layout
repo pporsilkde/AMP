@@ -1143,6 +1143,34 @@
           </Widget>
         </Widget>
         <Widget type="TabItem" skin="" position="4 32 486 412">
+          <Property key="Caption" value="#{arenamp=settings.subsection.effects}"/>
+          <Widget type="HBox" skin="" position="8 8 462 24">
+            <Widget type="AutoSizedButton" skin="MW_Button" position="0 0 52 24"><Property key="ExpandDirection" value="Right"/><UserString key="SettingCategory" value="Shaders"/><UserString key="SettingName" value="atmospheric fog enabled"/><UserString key="SettingType" value="CheckButton"/></Widget>
+            <Widget type="AutoSizedTextBox" skin="SandText" position="60 4 390 18"><Property key="Caption" value="#{arenamp=settings.atmospheric_fog_enabled}"/></Widget>
+          </Widget>
+          <Widget type="TextBox" skin="NormalText" position="8 42 462 18" name="AtmosFogStrengthLabel"><Property key="Caption" value="#{arenamp=settings.atmospheric_fog_strength}"/></Widget>
+          <Widget type="ScrollBar" skin="MW_HScroll" position="8 62 462 16"><Property key="Range" value="101"/><Property key="Page" value="1"/><UserString key="SettingType" value="Slider"/><UserString key="SettingCategory" value="Shaders"/><UserString key="SettingName" value="atmospheric fog strength"/><UserString key="SettingValueType" value="Float"/><UserString key="SettingMin" value="0.0"/><UserString key="SettingMax" value="1.0"/><UserString key="SettingLabelWidget" value="AtmosFogStrengthLabel"/><UserString key="SettingLabelCaption" value="#{arenamp=settings.atmospheric_fog_strength}"/></Widget>
+
+          <Widget type="HBox" skin="" position="8 94 462 24">
+            <Widget type="AutoSizedButton" skin="MW_Button" position="0 0 52 24"><Property key="ExpandDirection" value="Right"/><UserString key="SettingCategory" value="Shaders"/><UserString key="SettingName" value="god rays enabled"/><UserString key="SettingType" value="CheckButton"/></Widget>
+            <Widget type="AutoSizedTextBox" skin="SandText" position="60 4 390 18"><Property key="Caption" value="#{arenamp=settings.god_rays_enabled}"/></Widget>
+          </Widget>
+          <Widget type="TextBox" skin="NormalText" position="8 128 462 18" name="GodRaysStrengthLabel"><Property key="Caption" value="#{arenamp=settings.god_rays_strength}"/></Widget>
+          <Widget type="ScrollBar" skin="MW_HScroll" position="8 148 462 16"><Property key="Range" value="151"/><Property key="Page" value="1"/><UserString key="SettingType" value="Slider"/><UserString key="SettingCategory" value="Shaders"/><UserString key="SettingName" value="god rays strength"/><UserString key="SettingValueType" value="Float"/><UserString key="SettingMin" value="0.0"/><UserString key="SettingMax" value="1.5"/><UserString key="SettingLabelWidget" value="GodRaysStrengthLabel"/><UserString key="SettingLabelCaption" value="#{arenamp=settings.god_rays_strength}"/></Widget>
+
+          <Widget type="HBox" skin="" position="8 180 462 24">
+            <Widget type="AutoSizedButton" skin="MW_Button" position="0 0 52 24"><Property key="ExpandDirection" value="Right"/><UserString key="SettingCategory" value="Shaders"/><UserString key="SettingName" value="sharpening enabled"/><UserString key="SettingType" value="CheckButton"/></Widget>
+            <Widget type="AutoSizedTextBox" skin="SandText" position="60 4 390 18"><Property key="Caption" value="#{arenamp=settings.sharpening_enabled}"/></Widget>
+          </Widget>
+          <Widget type="TextBox" skin="NormalText" position="8 214 462 18" name="SharpeningStrengthLabel"><Property key="Caption" value="#{arenamp=settings.sharpening_strength}"/></Widget>
+          <Widget type="ScrollBar" skin="MW_HScroll" position="8 234 462 16"><Property key="Range" value="101"/><Property key="Page" value="1"/><UserString key="SettingType" value="Slider"/><UserString key="SettingCategory" value="Shaders"/><UserString key="SettingName" value="sharpening strength"/><UserString key="SettingValueType" value="Float"/><UserString key="SettingMin" value="0.0"/><UserString key="SettingMax" value="1.0"/><UserString key="SettingLabelWidget" value="SharpeningStrengthLabel"/><UserString key="SettingLabelCaption" value="#{arenamp=settings.sharpening_strength}"/></Widget>
+
+          <Widget type="HBox" skin="" position="8 274 462 24">
+            <Widget type="AutoSizedButton" skin="MW_Button" position="0 0 52 24"><Property key="ExpandDirection" value="Right"/><UserString key="SettingCategory" value="Shaders"/><UserString key="SettingName" value="dithering enabled"/><UserString key="SettingType" value="CheckButton"/></Widget>
+            <Widget type="AutoSizedTextBox" skin="SandText" position="60 4 390 18"><Property key="Caption" value="#{arenamp=settings.dithering_enabled}"/></Widget>
+          </Widget>
+        </Widget>
+        <Widget type="TabItem" skin="" position="4 32 486 412">
           <Property key="Caption" value="#{arenamp=settings.subsection.world}" />
           <Widget type="HBox" skin="" position="8 8 462 24">
             <Widget type="AutoSizedButton" skin="MW_Button" position="0 0 52 24">

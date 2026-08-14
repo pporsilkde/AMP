@@ -2,7 +2,7 @@
 // Lighting remains in the existing material shaders, while these runtime
 // uniforms make the final HDR look adjustable without restarting the game.
 
-uniform int hdrTonemapper; // 0 ACES, 1 Reinhard, 2 Filmic, 3 Neutral
+uniform int hdrTonemapper; // 0 ACES, 1 Reinhard, 2 Filmic, 3 Neutral, 4 Cinematic
 uniform float hdrExposure;
 uniform float hdrInteriorExposure;
 uniform float hdrNightExposure;
@@ -50,6 +50,22 @@ vec3 neutralTonemap(vec3 x)
     return clamp(mapped / max(divisor, vec3(0.0001)), 0.0, 1.0);
 }
 
+// Luxora-inspired cinematic curve: gentle shoulder, preserved mid-tones and
+// a very small warm/cool separation. Kept inside ArenaMP's existing HDR
+// pipeline so exposure/gamma remain authoritative.
+vec3 cinematicTonemap(vec3 x)
+{
+    x *= 0.72;
+    vec3 a = x * (x + 0.08) + 0.004;
+    vec3 b = x * (x * 0.90 + 0.52) + 0.065;
+    vec3 r = a / max(b, vec3(0.0001));
+    float lum = dot(r, vec3(0.2126, 0.7152, 0.0722));
+    float shadowMask = 1.0 - smoothstep(0.0, 0.30, lum);
+    r.r = pow(max(r.r, 0.0), mix(0.99, 1.01, shadowMask));
+    r.b = pow(max(r.b, 0.0), mix(1.01, 0.98, shadowMask));
+    return clamp(r, 0.0, 1.0);
+}
+
 vec3 preLight(vec3 x)
 {
 #if @hdrLighting
@@ -74,6 +90,8 @@ vec3 toneMap(vec3 x)
         col = filmicTonemap(x);
     else if (hdrTonemapper == 3)
         col = neutralTonemap(x);
+    else if (hdrTonemapper == 4)
+        col = cinematicTonemap(x);
     else
         col = acesTonemap(x);
 

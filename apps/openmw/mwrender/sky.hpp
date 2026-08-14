@@ -185,6 +185,8 @@ namespace MWRender
 
         float getBaseWindSpeed() const;
 
+        // Last sun occlusion-query visibility ratio, used by native light shafts.
+
     private:
         void create();
         ///< no need to call this, automatically done on first enable()

@@ -1,0 +1,60 @@
+ArenaMP cumulative adaptation
+Source patch: ArenaMW_CUMULATIVE_NPC_CI_Luxora_Dialogue_CASEFIX_GodRaysFogV6_NoOSGQuery_BeastKNAFix_NoSSAO_NoVolumetricClouds_CLEANUP
+Base: supplied AMP.zip (git 370de5dc884be5db280b2e555ba6e1a023192456)
+Format: ChangedFilesOnly
+
+ADAPTED FOR ARENAMP
+===================
+
+NPC / dialogue
+- Preserves ArenaMP multiplayer animation authority and InteractionAnimationSync packet path.
+- Preserves TES3MP dialogue-choice handling, local topic acknowledgement and server dialogue flow.
+- Keeps automatic NPC poses ARM-ONLY (LeftArm + RightArm), so torso/neck/head remain controlled by normal look-at logic.
+- Dialogue gestures remain frequent instead of becoming static: IdleSpeak variants, ArmsGesture/ArmsGesture_greet and safe formal poses are used regularly.
+- Animation group CASEFIX is retained: automatic lookups use normalized lowercase text keys.
+- Beast/KNA fix is ported: Argonians/Khajiit use only KNA-compatible automatic pose groups and explicitly load KNA dialogue sources last.
+- Human NPCs explicitly load the safe dialogue animation sources if missing.
+- Custom-model / authored NPC animation blocking remains intact; automatic system does not override NPCs with custom model controllers.
+- Shields/torches continue to protect the left arm from automatic pose blending.
+
+Luxora / native render effects
+- Atmospheric fog + strength setting.
+- God Rays V6 + strength setting.
+- First-person world-depth bridge: world depth is captured before the first-person weapon/hands depth clear.
+- Separate overlay depth keeps fog/rays off first-person weapon geometry.
+- Old OSG SunFlash/SunGlare OcclusionQueryNode creation is disabled to avoid osgOQ Invalid RQCB spam/regressions.
+- God-rays/sun visibility uses preserved screen-space world depth instead of the legacy OSG query.
+- CAS-style sharpening + strength setting.
+- Gradient dithering setting.
+- Cinematic (Luxora) HDR tonemapper added as fifth tonemapper.
+- SMAA edge/weight passes updated with local-contrast/corner handling.
+- Native final shader updated for fog, rays, sharpening, dithering and soft sun glare.
+
+Settings / UI
+- Adds a dedicated Effects category to ArenaMP settings.
+- Preserves ArenaMP ChatMode, chat enabled/delay widgets and localisation (the ArenaMW source patch removed them because it is single-player).
+- Preserves all existing ArenaMP-specific settings while adding the new effect defaults.
+- English and Russian localisation added for Effects and Cinematic tonemapper.
+
+Cleanup
+- SSAO remains absent.
+- Photon volumetric clouds remain absent.
+- DELETE_FILES.txt lists legacy files from the source cleanup. They were already absent from the supplied AMP.zip.
+
+CI
+- Did NOT copy the standalone ArenaMW windows.yml because it explicitly rejects tes3mp binaries.
+- Ported its useful Windows fixes into ArenaMP .github/workflows/release-builds.yml instead.
+- Removes Chocolatey dependency for Ninja/ccache setup: uses runner Ninja and official ccache release with SHA-256 verification.
+- ccache failure is non-fatal and build falls back to normal compilation.
+- Existing ArenaMP server-core validation, tes3mp client/server packaging and multi-platform workflow are preserved.
+- Ninja uses -k 20 so a CI run can report multiple independent compiler failures.
+
+Validation performed
+- git diff --check: clean.
+- openmw_settings_window.layout parses as XML.
+- release-builds.yml parses as YAML.
+- Settings tab count matches SettingsWindow section list: 15.
+- ArenaMP chat controls remain present.
+- New Effects controls/settings/localisation are present.
+- Legacy Photon volumetric-cloud/crepuscular shader files are absent in supplied AMP base.
+- No local full C++ build was run in this environment because OpenSceneGraph/MyGUI build dependencies are not installed; CI is the final compile validation.

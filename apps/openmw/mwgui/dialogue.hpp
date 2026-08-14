@@ -123,6 +123,14 @@ namespace MWGui
 
         void setPtr(const MWWorld::Ptr& actor) override;
 
+        /// Animation group currently owned by the dialogue system. The ambient
+        /// NPC animation controller uses this during the ambient->dialogue hand-off
+        /// so it does not stop a freshly started dialogue pose with the same group.
+        const std::string& getDynamicDialogueAnimationGroup() const
+        {
+            return mDynamicDialogueActorAnimation;
+        }
+
         /// @return true if stale keywords were updated successfully
         bool setKeywords(std::list<std::string> keyWord);
 

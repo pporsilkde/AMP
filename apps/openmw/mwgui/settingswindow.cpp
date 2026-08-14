@@ -142,8 +142,8 @@ namespace
     constexpr std::array<const char*, 6> shadowPresetNames =
         { "value.disabled", "value.actor", "value.npc", "value.object", "value.terrain", "value.indoor" };
 
-    constexpr std::array<const char*, 4> hdrTonemapperNames =
-        { "value.aces", "value.reinhard", "value.filmic", "value.neutral" };
+    constexpr std::array<const char*, 5> hdrTonemapperNames =
+        { "value.aces", "value.reinhard", "value.filmic", "value.neutral", "value.cinematic" };
 
     constexpr std::array<const char*, 3> weaponSpellBoxModeNames =
         { "value.hidden", "value.transparent", "value.visible" };
@@ -525,7 +525,7 @@ namespace MWGui
         mMainWidget->setSize(settingsWindowWidth, settingsWindowHeight);
 
         // Must match the TabItem order in openmw_settings_window.layout.
-        const std::array<const char*, 14> sectionKeys = {
+        const std::array<const char*, 15> sectionKeys = {
             "settings.section.interface",
             "settings.section.hud",
             "settings.section.controls",
@@ -536,6 +536,7 @@ namespace MWGui
             "settings.subsection.pbr",
             "settings.subsection.hdr",
             "settings.subsection.bloom",
+            "settings.subsection.effects",
             "settings.subsection.world",
             "settings.subsection.shadows",
             "settings.section.audio",
@@ -945,13 +946,13 @@ namespace MWGui
     {
         if (pos == MyGUI::ITEM_NONE)
             return;
-        Settings::Manager::setInt("hdr tonemapper", "Shaders", static_cast<int>(std::min<size_t>(pos, 3)));
+        Settings::Manager::setInt("hdr tonemapper", "Shaders", static_cast<int>(std::min<size_t>(pos, 4)));
         apply();
     }
 
     void SettingsWindow::updateHdrTonemapperCombo()
     {
-        const int value = std::clamp(Settings::Manager::getInt("hdr tonemapper", "Shaders"), 0, 3);
+        const int value = std::clamp(Settings::Manager::getInt("hdr tonemapper", "Shaders"), 0, 4);
         mHdrTonemapper->setIndexSelected(static_cast<size_t>(value));
     }
 

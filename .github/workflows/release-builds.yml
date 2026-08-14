@@ -44,7 +44,7 @@ jobs:
       CCACHE_MAXSIZE: 3G
       CCACHE_COMPRESS: "true"
       CCACHE_BASEDIR: ${{ github.workspace }}
-      WINDOWS_CACHE_EPOCH: v1
+      WINDOWS_CACHE_EPOCH: v2
     defaults:
       run:
         shell: bash
@@ -87,75 +87,47 @@ jobs:
       - name: Install Windows incremental build tools
         shell: pwsh
         run: |
-          $ErrorActionPreference = "Stop"
-
-          # windows-2022 ships Ninja, so do not depend on Chocolatey for it.
-          $ninja = Get-Command ninja -ErrorAction SilentlyContinue
-          if (-not $ninja) {
-            throw "Ninja is not available on the windows-2022 runner."
+          # windows-2022 ships Ninja. Avoid Chocolatey Community feed outages.
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+            throw 'Required Ninja build tool is missing from the GitHub runner image.'
           }
           ninja --version
-          if ($LASTEXITCODE -ne 0) {
-            throw "Ninja failed to start."
+
+          # ccache is an optimization only. Download the official upstream archive
+          # and continue without compiler cache if GitHub release delivery is down.
+          $ccacheVersion = '4.13.6'
+          $ccacheSha256 = '3d7cebb05850ad704e197b3f1d3f0f924ab6c9fdfc561578e146184fe9d89380'
+          $ccacheUrl = "https://github.com/ccache/ccache/releases/download/v$ccacheVersion/ccache-$ccacheVersion-windows-x86_64.zip"
+          $ccacheZip = Join-Path $env:RUNNER_TEMP "ccache-$ccacheVersion-windows-x86_64.zip"
+          $ccacheRoot = Join-Path $env:RUNNER_TEMP "ccache-$ccacheVersion"
+          $ccacheAvailable = $false
+
+          try {
+            Invoke-WebRequest -Uri $ccacheUrl -OutFile $ccacheZip -UseBasicParsing
+            $actualSha256 = (Get-FileHash -Path $ccacheZip -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualSha256 -ne $ccacheSha256) {
+              throw "ccache SHA-256 mismatch: expected $ccacheSha256, got $actualSha256"
+            }
+            if (Test-Path $ccacheRoot) { Remove-Item -Recurse -Force $ccacheRoot }
+            Expand-Archive -Path $ccacheZip -DestinationPath $ccacheRoot -Force
+            $ccacheExe = Get-ChildItem -Path $ccacheRoot -Filter ccache.exe -File -Recurse | Select-Object -First 1
+            if ($null -eq $ccacheExe) { throw 'ccache.exe was not found in the official release archive.' }
+            $ccacheExe.Directory.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            & $ccacheExe.FullName --set-config=max_size=$env:CCACHE_MAXSIZE
+            & $ccacheExe.FullName --set-config=compression=true
+            & $ccacheExe.FullName --zero-stats
+            $ccacheAvailable = $true
+          }
+          catch {
+            Write-Warning "ccache setup failed; continuing without compiler cache. $($_.Exception.Message)"
           }
 
-          # ccache is optional. Fetch the official Windows x86_64 release
-          # directly from GitHub; if it is unavailable, build without ccache.
-          $ccacheVersion = "4.13.6"
-          $ccache = Get-Command ccache -ErrorAction SilentlyContinue
-
-          if (-not $ccache) {
-            try {
-              $archive = Join-Path $env:RUNNER_TEMP "ccache-$ccacheVersion-windows-x86_64.zip"
-              $extractRoot = Join-Path $env:RUNNER_TEMP "ccache-$ccacheVersion-windows-x86_64"
-              $url = "https://github.com/ccache/ccache/releases/download/v$ccacheVersion/ccache-$ccacheVersion-windows-x86_64.zip"
-
-              Remove-Item $archive -Force -ErrorAction SilentlyContinue
-              Remove-Item $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
-              Invoke-WebRequest -Uri $url -OutFile $archive
-              Expand-Archive -Path $archive -DestinationPath $extractRoot -Force
-
-              $ccacheExe = Get-ChildItem -Path $extractRoot -Filter ccache.exe -File -Recurse | Select-Object -First 1
-              if (-not $ccacheExe) {
-                throw "ccache.exe was not found in the downloaded archive."
-              }
-
-              $ccacheBin = $ccacheExe.DirectoryName
-              $ccacheBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-              $env:PATH = "$ccacheBin;$env:PATH"
-              $ccache = Get-Command ccache -ErrorAction Stop
-            }
-            catch {
-              Write-Warning "ccache download/setup failed: $($_.Exception.Message)"
-              $ccache = $null
-            }
-          }
-
-          if ($ccache) {
-            try {
-              ccache --version
-              if ($LASTEXITCODE -ne 0) { throw "ccache --version failed." }
-              ccache --set-config=max_size=$env:CCACHE_MAXSIZE
-              if ($LASTEXITCODE -ne 0) { throw "ccache max_size configuration failed." }
-              ccache --set-config=compression=true
-              if ($LASTEXITCODE -ne 0) { throw "ccache compression configuration failed." }
-              ccache --zero-stats
-              if ($LASTEXITCODE -ne 0) { throw "ccache --zero-stats failed." }
-
-              "ARENA_USE_CCACHE=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-              Write-Host "ccache enabled for this build."
-            }
-            catch {
-              Write-Warning "ccache is present but unusable: $($_.Exception.Message)"
-              "ARENA_USE_CCACHE=0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-            }
+          if ($ccacheAvailable) {
+            'ARENA_USE_CCACHE=1' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
           else {
-            Write-Warning "ccache unavailable; continuing without compiler cache."
-            "ARENA_USE_CCACHE=0" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            'ARENA_USE_CCACHE=0' | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
-
-          # Never leak a stale non-zero exit code from optional ccache commands.
           exit 0
 
       - name: Prepare Windows build tree
@@ -202,8 +174,6 @@ jobs:
             -i "$GITHUB_WORKSPACE/install"
           )
 
-          # -C enables ccache in before_script.msvc.sh. Use it only when the
-          # previous step successfully prepared a working ccache executable.
           if [[ "${ARENA_USE_CCACHE:-0}" == "1" ]]; then
             args+=( -C )
           fi
@@ -227,7 +197,9 @@ jobs:
           test -n "${INCLUDE:-}"
           test -n "${LIB:-}"
 
-          cmake --build MSVC2022_64_Ninja --config Release --parallel 2
+          # Continue independent translation units after the first compiler error,
+          # so one CI run reports several actionable failures.
+          cmake --build MSVC2022_64_Ninja --config Release --parallel 2 -- -k 20
           cmake --install MSVC2022_64_Ninja --config Release
           printf '%s\n' "$GITHUB_SHA" > MSVC2022_64_Ninja/.arenamp-cache-sha
           if command -v ccache >/dev/null 2>&1; then

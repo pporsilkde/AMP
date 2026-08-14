@@ -1,6 +1,8 @@
 #include "nativeeffects.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
 
 #include <osg/Camera>
 #include <osg/Geometry>
@@ -22,6 +24,8 @@
 
 namespace MWRender
 {
+    std::atomic<NativeEffectsProcessor*> NativeEffectsProcessor::sActiveProcessor{nullptr};
+
     class NativeEffectsProcessor::FramebufferCopyCallback : public osg::Camera::DrawCallback
     {
     public:
@@ -55,14 +59,16 @@ namespace MWRender
     {
         if (!mainCamera || !rootNode)
         {
-            Log(Debug::Error) << "Cannot create ArenaMW native effects without a main camera/root node";
+            Log(Debug::Error) << "Cannot create ArenaMP native effects without a main camera/root node";
             return;
         }
 
-        // Keep this compositor deliberately small: native SMAA plus the existing
-        // bloom pass; reflection rendering is handled by the water pipeline.
+        // Native post chain: SMAA/bloom plus Luxora-inspired atmospheric fog,
+        // classic screen-space god rays, CAS sharpening and output dithering.
+        // Reflection rendering remains owned by the water pipeline.
         mSceneTexture = createTexture(GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE);
         mDepthTexture = createTexture(GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_FLOAT, false);
+        mOverlayDepthTexture = createTexture(GL_DEPTH_COMPONENT24, GL_DEPTH_COMPONENT, GL_FLOAT, false);
         mBloomHorizontalTexture = createTexture(GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE);
         mBloomVerticalTexture = createTexture(GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE);
         mEdgeTexture = createTexture(GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, false);
@@ -87,7 +93,7 @@ namespace MWRender
         if (!bloomHorizontalProgram || !bloomVerticalProgram
             || !edgeProgram || !weightProgram || !finalProgram)
         {
-            Log(Debug::Error) << "Failed to create ArenaMW native SMAA/bloom programs";
+            Log(Debug::Error) << "Failed to create ArenaMP native SMAA/bloom programs";
             return;
         }
 
@@ -155,17 +161,72 @@ namespace MWRender
         mFinalState->setTextureAttributeAndModes(0, mSceneTexture, osg::StateAttribute::ON);
         mFinalState->setTextureAttributeAndModes(1, mWeightTexture, osg::StateAttribute::ON);
         mFinalState->setTextureAttributeAndModes(2, mBloomVerticalTexture, osg::StateAttribute::ON);
+        mFinalState->setTextureAttributeAndModes(3, mDepthTexture, osg::StateAttribute::ON);
+        mFinalState->setTextureAttributeAndModes(4, mOverlayDepthTexture, osg::StateAttribute::ON);
         mFinalState->addUniform(new osg::Uniform("sceneTexture", 0));
         mFinalState->addUniform(new osg::Uniform("weightTexture", 1));
         mFinalState->addUniform(new osg::Uniform("bloomTexture", 2));
+        mFinalState->addUniform(new osg::Uniform("depthTexture", 3));
+        mFinalState->addUniform(new osg::Uniform("overlayDepthTexture", 4));
         mInverseSceneSizeFinal = new osg::Uniform("inverseSceneSize", osg::Vec2f(1.f, 1.f));
         mSmaaEnabledUniform = new osg::Uniform("smaaEnabled", 0.f);
         mBloomEnabledUniform = new osg::Uniform("bloomEnabled", 0.f);
         mBloomIntensityUniform = new osg::Uniform("bloomIntensity", 0.50f);
+        mAtmosphericFogEnabledUniform = new osg::Uniform("atmosphericFogEnabled", 0.f);
+        mAtmosphericFogStrengthUniform = new osg::Uniform("atmosphericFogStrength", 0.28f);
+        mGodRaysEnabledUniform = new osg::Uniform("godRaysEnabled", 0.f);
+        mGodRaysStrengthUniform = new osg::Uniform("godRaysStrength", 0.65f);
+        mSharpeningEnabledUniform = new osg::Uniform("sharpeningEnabled", 0.f);
+        mSharpeningStrengthUniform = new osg::Uniform("sharpeningStrength", 0.32f);
+        mDitheringEnabledUniform = new osg::Uniform("ditheringEnabled", 0.f);
+        mFogColorUniform = new osg::Uniform("fogColor", osg::Vec3f(0.5f, 0.5f, 0.5f));
+        mFogStartUniform = new osg::Uniform("fogStart", 0.f);
+        mFogEndUniform = new osg::Uniform("fogEnd", 8192.f);
+        mCameraNearUniform = new osg::Uniform("cameraNear", 1.f);
+        mCameraFarUniform = new osg::Uniform("cameraFar", 8192.f);
+        mCameraWorldPositionUniform = new osg::Uniform("cameraWorldPosition", osg::Vec3f());
+        mCameraRightUniform = new osg::Uniform("cameraRight", osg::Vec3f(1.f, 0.f, 0.f));
+        mCameraUpUniform = new osg::Uniform("cameraUp", osg::Vec3f(0.f, 0.f, 1.f));
+        mCameraForwardUniform = new osg::Uniform("cameraForward", osg::Vec3f(0.f, 1.f, 0.f));
+        mCameraTanHalfFovYUniform = new osg::Uniform("cameraTanHalfFovY", 0.75f);
+        mCameraAspectUniform = new osg::Uniform("cameraAspect", 1.f);
+        mEnvironmentExteriorUniform = new osg::Uniform("environmentExterior", 1.f);
+        mEnvironmentUnderwaterUniform = new osg::Uniform("environmentUnderwater", 0.f);
+        mSunScreenPositionUniform = new osg::Uniform("sunScreenPosition", osg::Vec2f(0.5f, 0.5f));
+        mSunVisibleUniform = new osg::Uniform("sunVisible", 0.f);
+        mSunColorUniform = new osg::Uniform("sunColor", osg::Vec3f(1.f, 0.9f, 0.75f));
+        mFirstPersonViewUniform = new osg::Uniform("firstPersonView", 0.f);
+        mFrameTimeUniform = new osg::Uniform("frameTime", 0.f);
+
         mFinalState->addUniform(mInverseSceneSizeFinal);
         mFinalState->addUniform(mSmaaEnabledUniform);
         mFinalState->addUniform(mBloomEnabledUniform);
         mFinalState->addUniform(mBloomIntensityUniform);
+        mFinalState->addUniform(mAtmosphericFogEnabledUniform);
+        mFinalState->addUniform(mAtmosphericFogStrengthUniform);
+        mFinalState->addUniform(mGodRaysEnabledUniform);
+        mFinalState->addUniform(mGodRaysStrengthUniform);
+        mFinalState->addUniform(mSharpeningEnabledUniform);
+        mFinalState->addUniform(mSharpeningStrengthUniform);
+        mFinalState->addUniform(mDitheringEnabledUniform);
+        mFinalState->addUniform(mFogColorUniform);
+        mFinalState->addUniform(mFogStartUniform);
+        mFinalState->addUniform(mFogEndUniform);
+        mFinalState->addUniform(mCameraNearUniform);
+        mFinalState->addUniform(mCameraFarUniform);
+        mFinalState->addUniform(mCameraWorldPositionUniform);
+        mFinalState->addUniform(mCameraRightUniform);
+        mFinalState->addUniform(mCameraUpUniform);
+        mFinalState->addUniform(mCameraForwardUniform);
+        mFinalState->addUniform(mCameraTanHalfFovYUniform);
+        mFinalState->addUniform(mCameraAspectUniform);
+        mFinalState->addUniform(mEnvironmentExteriorUniform);
+        mFinalState->addUniform(mEnvironmentUnderwaterUniform);
+        mFinalState->addUniform(mSunScreenPositionUniform);
+        mFinalState->addUniform(mSunVisibleUniform);
+        mFinalState->addUniform(mSunColorUniform);
+        mFinalState->addUniform(mFirstPersonViewUniform);
+        mFinalState->addUniform(mFrameTimeUniform);
         mFinalCamera->addChild(finalPass);
 
         mRootNode->addChild(mBloomHorizontalCamera);
@@ -179,12 +240,15 @@ namespace MWRender
             mMainCamera->setPostDrawCallback(mFramebufferCopyCallback.get());
 
         mReady = true;
+        sActiveProcessor.store(this, std::memory_order_release);
         reloadSettings();
         applyPassVisibility();
     }
 
     NativeEffectsProcessor::~NativeEffectsProcessor()
     {
+        NativeEffectsProcessor* expected = this;
+        sActiveProcessor.compare_exchange_strong(expected, nullptr, std::memory_order_acq_rel);
         mEnabled = false;
         applyPassVisibility();
         if (mFramebufferCopyCallback)
@@ -261,7 +325,8 @@ namespace MWRender
 
     void NativeEffectsProcessor::copyFramebuffer(osg::RenderInfo& renderInfo)
     {
-        if (!mEnabled || !mSceneTexture || !mDepthTexture || !renderInfo.getState() || !mMainCamera.valid())
+        if (!mEnabled || !mSceneTexture || !mDepthTexture || !mOverlayDepthTexture
+            || !renderInfo.getState() || !mMainCamera.valid())
             return;
         osg::Viewport* viewport = mMainCamera->getViewport();
         if (!viewport || viewport->width() <= 0.0 || viewport->height() <= 0.0)
@@ -271,9 +336,44 @@ namespace MWRender
         const int y = static_cast<int>(viewport->y());
         const int w = std::max(1, static_cast<int>(viewport->width()));
         const int h = std::max(1, static_cast<int>(viewport->height()));
+
+        // Scene colour is always captured after the complete frame, including
+        // first-person hands/weapons. The final depth is kept separately so the
+        // shader can protect that foreground overlay from atmospheric effects.
         mSceneTexture->copyTexImage2D(*renderInfo.getState(), x, y, w, h);
-        mDepthTexture->copyTexImage2D(*renderInfo.getState(), x, y, w, h);
+        mOverlayDepthTexture->copyTexImage2D(*renderInfo.getState(), x, y, w, h);
+
+        // In third person the post-draw depth is the real world depth. In first
+        // person it has already been cleared by DepthClearCallback, so preserve
+        // the copy taken immediately before that clear instead.
+        const bool hadPreClearDepth = mWorldDepthCapturedBeforeFirstPerson.exchange(false, std::memory_order_acq_rel);
+        if (!hadPreClearDepth)
+            mDepthTexture->copyTexImage2D(*renderInfo.getState(), x, y, w, h);
+
         mCaptureReady.store(true, std::memory_order_release);
+    }
+
+    void NativeEffectsProcessor::captureWorldDepth(osg::RenderInfo& renderInfo)
+    {
+        if (!mEnabled || !mDepthTexture || !renderInfo.getState() || !mMainCamera.valid())
+            return;
+        osg::Viewport* viewport = mMainCamera->getViewport();
+        if (!viewport || viewport->width() <= 0.0 || viewport->height() <= 0.0)
+            return;
+
+        const int x = static_cast<int>(viewport->x());
+        const int y = static_cast<int>(viewport->y());
+        const int w = std::max(1, static_cast<int>(viewport->width()));
+        const int h = std::max(1, static_cast<int>(viewport->height()));
+        mDepthTexture->copyTexImage2D(*renderInfo.getState(), x, y, w, h);
+        mWorldDepthCapturedBeforeFirstPerson.store(true, std::memory_order_release);
+    }
+
+    void NativeEffectsProcessor::captureWorldDepthBeforeFirstPersonClear(osg::RenderInfo& renderInfo)
+    {
+        NativeEffectsProcessor* processor = sActiveProcessor.load(std::memory_order_acquire);
+        if (processor)
+            processor->captureWorldDepth(renderInfo);
     }
 
     void NativeEffectsProcessor::reloadSettings()
@@ -283,6 +383,10 @@ namespace MWRender
 
         mSmaaEnabled = Settings::Manager::getBool("smaa enabled", "Shaders");
         mBloomEnabled = Settings::Manager::getBool("bloom enabled", "Shaders");
+        mAtmosphericFogEnabled = Settings::Manager::getBool("atmospheric fog enabled", "Shaders");
+        mGodRaysEnabled = Settings::Manager::getBool("god rays enabled", "Shaders");
+        mSharpeningEnabled = Settings::Manager::getBool("sharpening enabled", "Shaders");
+        mDitheringEnabled = Settings::Manager::getBool("dithering enabled", "Shaders");
 
         mSmaaEnabledUniform->set(mSmaaEnabled ? 1.f : 0.f);
         mSmaaThresholdUniform->set(std::clamp(Settings::Manager::getFloat("smaa threshold", "Shaders"), 0.03f, 0.30f));
@@ -295,8 +399,17 @@ namespace MWRender
         mBloomRadiusVerticalUniform->set(bloomRadius);
         mBloomIntensityUniform->set(std::clamp(Settings::Manager::getFloat("bloom intensity", "Shaders"), 0.f, 3.f));
 
+        mAtmosphericFogEnabledUniform->set(mAtmosphericFogEnabled ? 1.f : 0.f);
+        mAtmosphericFogStrengthUniform->set(std::clamp(Settings::Manager::getFloat("atmospheric fog strength", "Shaders"), 0.f, 1.f));
+        mGodRaysEnabledUniform->set(mGodRaysEnabled ? 1.f : 0.f);
+        mGodRaysStrengthUniform->set(std::clamp(Settings::Manager::getFloat("god rays strength", "Shaders"), 0.f, 1.5f));
+        mSharpeningEnabledUniform->set(mSharpeningEnabled ? 1.f : 0.f);
+        mSharpeningStrengthUniform->set(std::clamp(Settings::Manager::getFloat("sharpening strength", "Shaders"), 0.f, 1.f));
+        mDitheringEnabledUniform->set(mDitheringEnabled ? 1.f : 0.f);
+
         const bool wasEnabled = mEnabled;
-        mEnabled = mSmaaEnabled || mBloomEnabled;
+        mEnabled = mSmaaEnabled || mBloomEnabled || mAtmosphericFogEnabled || mGodRaysEnabled
+            || mSharpeningEnabled || mDitheringEnabled;
         if (!mEnabled || !wasEnabled)
             mCaptureReady.store(false, std::memory_order_release);
         if (!mEnabled)
@@ -304,6 +417,31 @@ namespace MWRender
 
         updateSourceBindings();
         applyPassVisibility();
+
+        Log(Debug::Info) << "ArenaMP native effects: fog=" << (mAtmosphericFogEnabled ? "on" : "off")
+                         << ", godRays=" << (mGodRaysEnabled ? "on" : "off")
+                         << ", firstPersonWorldDepthBridge=on";
+    }
+
+    void NativeEffectsProcessor::setEnvironment(const osg::Vec4f& fogColor, float fogStart, float fogEnd,
+        bool interior, bool underwater, bool firstPerson, const osg::Vec3f& sunDirection,
+        const osg::Vec4f& sunColor)
+    {
+        mInterior = interior;
+        mUnderwater = underwater;
+        mSunDirection = sunDirection;
+        if (mSunDirection.length2() > 0.000001f)
+            mSunDirection.normalize();
+        if (!mReady)
+            return;
+
+        mFogColorUniform->set(osg::Vec3f(fogColor.r(), fogColor.g(), fogColor.b()));
+        mFogStartUniform->set(std::max(fogStart, 0.f));
+        mFogEndUniform->set(std::max(fogEnd, fogStart + 1.f));
+        mEnvironmentExteriorUniform->set(interior ? 0.f : 1.f);
+        mEnvironmentUnderwaterUniform->set(underwater ? 1.f : 0.f);
+        mFirstPersonViewUniform->set(firstPerson ? 1.f : 0.f);
+        mSunColorUniform->set(osg::Vec3f(std::max(sunColor.r(), 0.f), std::max(sunColor.g(), 0.f), std::max(sunColor.b(), 0.f)));
     }
 
     void NativeEffectsProcessor::updateSourceBindings()
@@ -314,6 +452,8 @@ namespace MWRender
         mBloomHorizontalState->setTextureAttributeAndModes(0, mSceneTexture, osg::StateAttribute::ON);
         mEdgeState->setTextureAttributeAndModes(0, mSceneTexture, osg::StateAttribute::ON);
         mFinalState->setTextureAttributeAndModes(0, mSceneTexture, osg::StateAttribute::ON);
+        mFinalState->setTextureAttributeAndModes(3, mDepthTexture, osg::StateAttribute::ON);
+        mFinalState->setTextureAttributeAndModes(4, mOverlayDepthTexture, osg::StateAttribute::ON);
     }
 
     void NativeEffectsProcessor::applyPassVisibility()
@@ -337,6 +477,7 @@ namespace MWRender
 
         mSceneTexture->setTextureSize(width, height);
         mDepthTexture->setTextureSize(width, height);
+        mOverlayDepthTexture->setTextureSize(width, height);
         mEdgeTexture->setTextureSize(width, height);
         mWeightTexture->setTextureSize(width, height);
         mBloomHorizontalTexture->setTextureSize(bloomWidth, bloomHeight);
@@ -374,6 +515,57 @@ namespace MWRender
         const int height = std::max(1, static_cast<int>(mMainCamera->getViewport()->height()));
         if (width != mWidth || height != mHeight)
             resizeTargets(width, height);
+
+        double fovy = 75.0, aspect = static_cast<double>(width) / static_cast<double>(height);
+        double zNear = 1.0, zFar = 8192.0;
+        mMainCamera->getProjectionMatrix().getPerspective(fovy, aspect, zNear, zFar);
+        zNear = std::max(zNear, 0.001);
+        zFar = std::max(zFar, zNear + 1.0);
+        mCameraNearUniform->set(static_cast<float>(zNear));
+        mCameraFarUniform->set(static_cast<float>(zFar));
+        mCameraAspectUniform->set(static_cast<float>(std::max(aspect, 0.01)));
+        constexpr double pi = 3.14159265358979323846;
+        mCameraTanHalfFovYUniform->set(static_cast<float>(std::tan(fovy * pi / 360.0)));
+
+        const osg::Matrixd inverseView = mMainCamera->getInverseViewMatrix();
+        const osg::Vec3d cameraPosition = inverseView.getTrans();
+        osg::Vec3d cameraRight = osg::Matrixd::transform3x3(osg::Vec3d(1.0, 0.0, 0.0), inverseView);
+        osg::Vec3d cameraUp = osg::Matrixd::transform3x3(osg::Vec3d(0.0, 1.0, 0.0), inverseView);
+        osg::Vec3d cameraForward = osg::Matrixd::transform3x3(osg::Vec3d(0.0, 0.0, -1.0), inverseView);
+        cameraRight.normalize();
+        cameraUp.normalize();
+        cameraForward.normalize();
+        mCameraWorldPositionUniform->set(osg::Vec3f(static_cast<float>(cameraPosition.x()), static_cast<float>(cameraPosition.y()), static_cast<float>(cameraPosition.z())));
+        mCameraRightUniform->set(osg::Vec3f(static_cast<float>(cameraRight.x()), static_cast<float>(cameraRight.y()), static_cast<float>(cameraRight.z())));
+        mCameraUpUniform->set(osg::Vec3f(static_cast<float>(cameraUp.x()), static_cast<float>(cameraUp.y()), static_cast<float>(cameraUp.z())));
+        mCameraForwardUniform->set(osg::Vec3f(static_cast<float>(cameraForward.x()), static_cast<float>(cameraForward.y()), static_cast<float>(cameraForward.z())));
+
+        const osg::Vec3d sunDir(mSunDirection.x(), mSunDirection.y(), mSunDirection.z());
+        const double sunViewX = sunDir * cameraRight;
+        const double sunViewY = sunDir * cameraUp;
+        const double sunFacing = sunDir * cameraForward;
+
+        // Project from the actual camera basis rather than multiplying a far
+        // point by the camera matrices. This stays stable when OpenMW switches
+        // between normal and first-person rendering/FOV overrides.
+        osg::Vec2f sunUv(0.5f, 0.5f);
+        if (sunFacing > 0.0001)
+        {
+            const double tanHalfFovY = std::max(std::tan(fovy * pi / 360.0), 0.0001);
+            const double ndcX = sunViewX / (sunFacing * std::max(aspect, 0.01) * tanHalfFovY);
+            const double ndcY = sunViewY / (sunFacing * tanHalfFovY);
+            sunUv.set(static_cast<float>(ndcX * 0.5 + 0.5), static_cast<float>(ndcY * 0.5 + 0.5));
+        }
+        mSunScreenPositionUniform->set(sunUv);
+        const bool sunOnUsefulSide = sunFacing > 0.02
+            && sunUv.x() > -0.45f && sunUv.x() < 1.45f
+            && sunUv.y() > -0.45f && sunUv.y() < 1.45f
+            && !mInterior && !mUnderwater;
+        mSunVisibleUniform->set(sunOnUsefulSide ? 1.f : 0.f);
+
+        const double now = std::chrono::duration<double>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        mFrameTimeUniform->set(static_cast<float>(std::fmod(now, 4096.0)));
 
         updateSourceBindings();
         applyPassVisibility();

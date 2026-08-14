@@ -40,6 +40,7 @@
 #include "../mwbase/soundmanager.hpp"
 
 #include "camera.hpp"
+#include "nativeeffects.hpp"
 #include "rotatecontroller.hpp"
 #include "renderbin.hpp"
 #include "vismask.hpp"
@@ -381,6 +382,11 @@ public:
     {
         renderInfo.getState()->applyAttribute(mDepth);
 
+        // Preserve the fully rendered world depth before OpenMW clears it for
+        // the first-person hands/weapon render bin. Native fog and god rays use
+        // this copy, while the normal clear still gives the weapon its expected
+        // depth behaviour.
+        NativeEffectsProcessor::captureWorldDepthBeforeFirstPersonClear(renderInfo);
         glClear(GL_DEPTH_BUFFER_BIT);
 
         bin->drawImplementation(renderInfo, previous);
@@ -538,6 +544,61 @@ void NpcAnimation::updateNpcBase()
 
         if(!isWerewolf && Misc::StringUtils::lowerCase(mNpc->mRace).find("argonian") != std::string::npos)
             addAnimSource("meshes\\xargonian_swimkna.nif", smodel);
+
+        // ArenaMP's dialogue/ambient arm poses are core engine resources for standard NPCs.
+        // NPCs with an authored/custom model remain excluded: their own animation
+        // controller must not be overridden by the automatic dialogue system.
+        if (!isWerewolf && mNpc->mModel.empty())
+        {
+            if (isBeast)
+            {
+                // Beast races use base_animkna. A generic xbase_anim source is added
+                // earlier for compatibility, so hasAnimation() may already report a
+                // human group with the same text key. Do NOT use hasAnimation() as a
+                // gate here. Animation::play() prefers the last inserted source, thus
+                // explicitly append the KNA-authored clips last so Argonians/Khajiit
+                // always resolve these groups to controllers authored for base_animkna.
+                const std::string dialogueRoot = "animations\\xbase_animkna\\";
+                addSingleAnimSource(dialogueRoot + "ArmsAkimbo.kf", smodel);
+                addSingleAnimSource(dialogueRoot + "HandHipPose.kf", smodel);
+                addSingleAnimSource(dialogueRoot + "ArmsGesture.kf", smodel);
+                addSingleAnimSource(dialogueRoot + "ArmsGesture_greet.kf", smodel);
+                addSingleAnimSource(dialogueRoot + "IdleSpeak.kf", smodel);
+
+                // xbase_animkna intentionally has no ArmPoses.kf and no
+                // IdleSpeak_ready/handhip/idleF variants. Do not fall back to
+                // human ArmPoses for beast skeletons; the dialogue/ambient pools
+                // below only select the KNA groups that physically exist.
+            }
+            else
+            {
+                const std::string dialogueRoot = isFemale
+                    ? "animations\\xbase_anim_female\\"
+                    : "animations\\xbase_anim\\";
+
+                auto addDialogueSourceIfMissing = [&](const std::string& group, const std::string& file)
+                {
+                    if (!hasAnimation(group))
+                        addSingleAnimSource(file, smodel);
+                };
+
+                if (!hasAnimation("armsfolded") || !hasAnimation("armsatback"))
+                    addSingleAnimSource(dialogueRoot + "ArmPoses.kf", smodel);
+
+                addDialogueSourceIfMissing("armsakimbo", dialogueRoot + "ArmsAkimbo.kf");
+                addDialogueSourceIfMissing("handhippose", dialogueRoot + "HandHipPose.kf");
+                addDialogueSourceIfMissing("armsgesture", dialogueRoot + "ArmsGesture.kf");
+                addDialogueSourceIfMissing("armsgesture_greet", dialogueRoot + "ArmsGesture_greet.kf");
+
+                // The last known-good dialogue system used these IdleSpeak groups
+                // for visible conversational hand motion. Load them explicitly so
+                // dialogue does not depend on the global additional-source toggle.
+                addDialogueSourceIfMissing("idlespeak", dialogueRoot + "IdleSpeak.kf");
+                addDialogueSourceIfMissing("idlespeak_ready", dialogueRoot + "IdleSpeak_ready.kf");
+                addDialogueSourceIfMissing("idlespeak_handhip", dialogueRoot + "IdleSpeak_handhip.kf");
+                addDialogueSourceIfMissing("idlespeak_idlef", dialogueRoot + "IdleSpeak_idleF.kf");
+            }
+        }
     }
     else
     {
