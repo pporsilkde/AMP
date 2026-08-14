@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <vector>
 
 #include <components/misc/rng.hpp>
 #include <components/settings/settings.hpp>
@@ -25,6 +27,7 @@
 #include "../mwmp/ActorList.hpp"
 #include "../mwmp/CellController.hpp"
 #include "../mwmp/MechanicsHelper.hpp"
+#include "../mwmp/PlayerList.hpp"
 #include "../mwgui/windowmanagerimp.hpp"
 /*
     End of tes3mp addition
@@ -41,6 +44,7 @@
 
 #include "pathgrid.hpp"
 #include "creaturestats.hpp"
+#include "npcstats.hpp"
 #include "steering.hpp"
 #include "movement.hpp"
 #include "character.hpp"
@@ -161,16 +165,80 @@ namespace MWMechanics
 
         if (!storage.isFleeing())
         {
+            // Keep perception separate from pathing: when a sneaking player is
+            // genuinely lost, AiCombat must stop consuming the player's real
+            // coordinates and pursue only remembered/predicted positions.
+            updateLOS(actor, target, duration, storage);
+            if (updateStealthSearch(actor, target, duration, storage))
+            {
+                clearTacticalMovement(actor, storage);
+                storage.stopAttack();
+                characterController.setAttackingOrSpell(false);
+                return true;
+            }
+
+            if (storage.mSearchingLastKnown)
+            {
+                clearTacticalMovement(actor, storage);
+                storage.mFormationActive = false;
+                storage.stopAttack();
+                characterController.setAttackingOrSpell(false);
+                actor.getClass().getCreatureStats(actor).setMovementFlag(CreatureStats::Flag_Run, true);
+
+                const bool reached = pathTo(actor, storage.mSearchDestination, duration, 72.f);
+                if (reached)
+                {
+                    ++storage.mSearchPointsVisited;
+                    const int maxPoints = std::max(0,
+                        Settings::Manager::getInt("combat stealth search points", "Game"));
+                    if (storage.mSearchPointsVisited <= maxPoints)
+                    {
+                        const auto world = MWBase::Environment::get().getWorld();
+                        const auto navigator = world->getNavigator();
+                        const auto halfExtents = world->getPathfindingHalfExtents(actor);
+                        const float radius = std::max(96.f,
+                            Settings::Manager::getFloat("combat stealth search radius", "Game"));
+                        const auto point = navigator->findRandomPointAroundCircle(
+                            halfExtents, storage.mLastSeenTargetPos, radius, getNavigatorFlags(actor));
+                        if (point.has_value())
+                        {
+                            storage.mSearchDestination = *point;
+                            mPathFinder.clearPath();
+                        }
+                    }
+                    else
+                    {
+                        auto& movement = actor.getClass().getMovementSettings(actor);
+                        movement.mPosition[0] = 0.f;
+                        movement.mPosition[1] = 0.f;
+                    }
+                }
+
+                storage.mActionCooldown -= duration;
+                return false;
+            }
+
             if (storage.mCurrentAction.get())
             {
-                updateLOS(actor, target, duration, storage);
-                const float targetReachedTolerance = storage.mLOS && !storage.mUseCustomDestination
-                        ? storage.mAttackRange : 0.0f;
+                bool ranged = false;
+                storage.mCurrentAction->getCombatRange(ranged);
+                updateFormationDestination(actor, target, duration, storage, ranged);
+
+                const bool usesAlternateDestination = storage.mUseCustomDestination || storage.mFormationActive;
+                const float targetReachedTolerance = storage.mLOS && !usesAlternateDestination
+                    ? storage.mAttackRange : 0.0f;
                 const osg::Vec3f destination = storage.mUseCustomDestination
-                        ? storage.mCustomDestination : target.getRefData().getPosition().asVec3();
+                    ? storage.mCustomDestination
+                    : (storage.mFormationActive ? storage.mFormationDestination
+                                                : target.getRefData().getPosition().asVec3());
                 const bool isTargetReached = pathTo(actor, destination, duration, targetReachedTolerance);
-                if (isTargetReached)
+                if (isTargetReached && !usesAlternateDestination)
                     storage.mReadyToAttack = true;
+                else if (isTargetReached && storage.mFormationActive)
+                {
+                    storage.mFormationActive = false;
+                    mPathFinder.clearPath();
+                }
             }
 
             storage.updateCombatMove(duration);
@@ -199,6 +267,7 @@ namespace MWMechanics
         else
         {
             clearTacticalMovement(actor, storage);
+            storage.mFormationActive = false;
             updateFleeing(actor, target, duration, storage);
         }
         storage.mActionCooldown -= duration;
@@ -285,7 +354,13 @@ namespace MWMechanics
             if (actionCooldown > 0)
                 return false;
 
-            if (characterController.readyToPrepareAttack())
+            const bool threatFlee = updateThreatFlee(actor, target, storage);
+            if (threatFlee)
+            {
+                currentAction.reset(new ActionFlee());
+                actionCooldown = currentAction->getActionCooldown();
+            }
+            else if (characterController.readyToPrepareAttack())
             {
                 currentAction = prepareNextAction(actor, target);
                 actionCooldown = currentAction->getActionCooldown();
@@ -415,11 +490,20 @@ namespace MWMechanics
 
         const MWWorld::CellStore* actorCell = actor.getCell();
         const osg::Vec3f actorPos = actor.getRefData().getPosition().asVec3();
-        if (!storage.mCombatOriginSet || storage.mCombatOriginCell != actorCell)
+        if (!storage.mCombatOriginSet)
         {
             storage.mCombatOrigin = actorPos;
             storage.mCombatOriginCell = actorCell;
             storage.mCombatOriginSet = true;
+            storage.mLeashExceededTimer = 0.f;
+            return false;
+        }
+
+        // Never rebase the leash origin after a door transition. Interior cell
+        // coordinates are unrelated, so same-cell distance is meaningful only
+        // in the original combat cell. Door breadcrumbs handle the return path.
+        if (storage.mCombatOriginCell != actorCell)
+        {
             storage.mLeashExceededTimer = 0.f;
             return false;
         }
@@ -633,14 +717,249 @@ namespace MWMechanics
 
     void MWMechanics::AiCombat::updateLOS(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, float duration, MWMechanics::AiCombatStorage& storage)
     {
-        static const float LOS_UPDATE_DURATION = 0.5f;
+        static const float LOS_UPDATE_DURATION = 0.4f;
         if (storage.mUpdateLOSTimer <= 0.f)
         {
-            storage.mLOS = MWBase::Environment::get().getWorld()->getLOS(actor, target);
+            MWBase::World* world = MWBase::Environment::get().getWorld();
+            MWBase::MechanicsManager* mechanics = MWBase::Environment::get().getMechanicsManager();
+            storage.mGeometricLOS = world->getLOS(actor, target);
+
+            bool detected = storage.mGeometricLOS;
+            if (detected && target == MWMechanics::getPlayer() && mechanics->isSneaking(target))
+                detected = mechanics->awarenessCheck(target, actor);
+
+            storage.mLOS = detected;
             storage.mUpdateLOSTimer = LOS_UPDATE_DURATION;
+
+            if (detected)
+            {
+                const osg::Vec3f targetPos = target.getRefData().getPosition().asVec3();
+                if (storage.mHasLastSeenTarget)
+                {
+                    osg::Vec3f velocity = (targetPos - storage.mLastSeenTargetPos) / LOS_UPDATE_DURATION;
+                    const float maxRememberedSpeed = 650.f;
+                    if (velocity.length2() > maxRememberedSpeed * maxRememberedSpeed)
+                    {
+                        velocity.normalize();
+                        velocity *= maxRememberedSpeed;
+                    }
+                    storage.mLastSeenTargetVelocity = velocity;
+                }
+                storage.mLastSeenTargetPos = targetPos;
+                storage.mHasLastSeenTarget = true;
+                storage.mLostSightTimer = 0.f;
+                storage.mSearchElapsed = 0.f;
+                storage.mSearchingLastKnown = false;
+                storage.mSearchPointsVisited = 0;
+            }
         }
         else
             storage.mUpdateLOSTimer -= duration;
+    }
+
+    bool AiCombat::updateStealthSearch(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, float duration,
+        AiCombatStorage& storage)
+    {
+        const bool targetIsPlayer = target == MWMechanics::getPlayer()
+            || mwmp::PlayerList::isDedicatedPlayer(target);
+        if (!Settings::Manager::getBool("combat stealth search", "Game")
+            || !targetIsPlayer)
+        {
+            storage.mSearchingLastKnown = false;
+            storage.mLostSightTimer = 0.f;
+            storage.mSearchElapsed = 0.f;
+            return false;
+        }
+
+        MWBase::MechanicsManager* mechanics = MWBase::Environment::get().getMechanicsManager();
+        if (storage.mLOS)
+            return false;
+
+        if (!mechanics->isSneaking(target) || !storage.mHasLastSeenTarget)
+        {
+            storage.mSearchingLastKnown = false;
+            storage.mLostSightTimer = 0.f;
+            storage.mSearchElapsed = 0.f;
+            return false;
+        }
+
+        storage.mLostSightTimer += duration;
+        const float searchDelay = std::max(0.f,
+            Settings::Manager::getFloat("combat stealth search delay", "Game"));
+        if (storage.mLostSightTimer < searchDelay)
+            return false;
+
+        storage.mSearchElapsed += duration;
+        if (!storage.mSearchingLastKnown)
+        {
+            const float predictionSeconds = std::max(0.f,
+                Settings::Manager::getFloat("combat stealth prediction time", "Game"));
+            osg::Vec3f predicted = storage.mLastSeenTargetPos
+                + storage.mLastSeenTargetVelocity * predictionSeconds;
+
+            // Never extrapolate an arbitrarily long sprint or a teleport. A short
+            // predicted corridor is enough to create a believable search without
+            // leaking the player's actual hidden position into pathfinding.
+            osg::Vec3f predictionDelta = predicted - storage.mLastSeenTargetPos;
+            const float maxPredictionDistance = 420.f;
+            if (predictionDelta.length2() > maxPredictionDistance * maxPredictionDistance)
+            {
+                predictionDelta.normalize();
+                predicted = storage.mLastSeenTargetPos + predictionDelta * maxPredictionDistance;
+            }
+
+            MWBase::World* world = MWBase::Environment::get().getWorld();
+            const osg::Vec3f actorPos = actor.getRefData().getPosition().asVec3();
+            const auto hit = world->getNavigator()->raycast(world->getPathfindingHalfExtents(actor),
+                actorPos, predicted, getNavigatorFlags(actor));
+            storage.mSearchDestination = hit.has_value() ? *hit : storage.mLastSeenTargetPos;
+            storage.mSearchingLastKnown = true;
+            storage.mSearchPointsVisited = 0;
+            storage.mFormationActive = false;
+            storage.mUseCustomDestination = false;
+            mPathFinder.clearPath();
+        }
+
+        const float giveUpTime = std::max(searchDelay + 0.5f,
+            Settings::Manager::getFloat("combat stealth search give up time", "Game"));
+
+        // A target may be hidden by Sneak mechanics while still physically in
+        // front of the NPC. Do not declare the search over until geometric LOS
+        // is also gone; this prevents absurd disengagement while staring at the
+        // player in an unobstructed corridor.
+        return storage.mSearchElapsed >= giveUpTime && !storage.mGeometricLOS;
+    }
+
+    void AiCombat::updateFormationDestination(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, float duration,
+        AiCombatStorage& storage, bool ranged)
+    {
+        storage.mFormationUpdateTimer = std::max(0.f, storage.mFormationUpdateTimer - duration);
+        if (!Settings::Manager::getBool("combat formation slots", "Game") || !storage.mLOS
+            || storage.mSearchingLastKnown || storage.mUseCustomDestination)
+        {
+            storage.mFormationActive = false;
+            return;
+        }
+
+        if (storage.mFormationUpdateTimer > 0.f)
+            return;
+        storage.mFormationUpdateTimer = 0.45f;
+
+        std::list<MWWorld::Ptr> attackers
+            = MWBase::Environment::get().getMechanicsManager()->getActorsFighting(target);
+        std::vector<MWWorld::Ptr> sameCell;
+        sameCell.reserve(attackers.size());
+        for (const MWWorld::Ptr& attacker : attackers)
+        {
+            if (attacker.isEmpty() || attacker.getCell() != actor.getCell()
+                || attacker.getClass().getCreatureStats(attacker).isDead())
+                continue;
+            sameCell.push_back(attacker);
+        }
+
+        const int maxSlots = std::max(2, Settings::Manager::getInt("combat formation max actors", "Game"));
+        if (sameCell.size() < 2)
+        {
+            storage.mFormationActive = false;
+            return;
+        }
+
+        std::sort(sameCell.begin(), sameCell.end(), [](const MWWorld::Ptr& left, const MWWorld::Ptr& right) {
+            return left.getClass().getCreatureStats(left).getActorId()
+                < right.getClass().getCreatureStats(right).getActorId();
+        });
+
+        if (sameCell.size() > static_cast<std::size_t>(maxSlots))
+            sameCell.resize(static_cast<std::size_t>(maxSlots));
+        const auto it = std::find(sameCell.begin(), sameCell.end(), actor);
+        if (it == sameCell.end())
+        {
+            storage.mFormationActive = false;
+            return;
+        }
+
+        const std::size_t index = static_cast<std::size_t>(std::distance(sameCell.begin(), it));
+        const float count = static_cast<float>(sameCell.size());
+        const float radius = ranged
+            ? std::max(340.f, std::min(720.f, storage.mAttackRange * 0.55f))
+            : std::max(82.f, std::min(170.f, storage.mAttackRange * 0.70f));
+        const float phase = static_cast<float>(target.getClass().getCreatureStats(target).getActorId() & 7)
+            * (osg::PI / 16.f);
+        const float angle = phase + osg::PI * 2.f * static_cast<float>(index) / count;
+        const osg::Vec3f targetPos = target.getRefData().getPosition().asVec3();
+        const osg::Vec3f candidate(targetPos.x() + std::sin(angle) * radius,
+            targetPos.y() + std::cos(angle) * radius, targetPos.z());
+
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        const auto hit = world->getNavigator()->raycast(world->getPathfindingHalfExtents(actor),
+            targetPos, candidate, getNavigatorFlags(actor));
+        if (!hit.has_value() || distanceIgnoreZ(*hit, targetPos) < 48.f)
+        {
+            storage.mFormationActive = false;
+            return;
+        }
+
+        if (distanceIgnoreZ(actor.getRefData().getPosition().asVec3(), *hit) <= 72.f)
+        {
+            storage.mFormationActive = false;
+            return;
+        }
+
+        storage.mFormationDestination = *hit;
+        storage.mFormationActive = true;
+    }
+
+    bool AiCombat::updateThreatFlee(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, AiCombatStorage& storage)
+    {
+        if (!Settings::Manager::getBool("combat threat flee", "Game")
+            || !actor.getClass().isNpc() || actor.getClass().isClass(actor, "Guard"))
+        {
+            storage.mThreatFlee = false;
+            return false;
+        }
+
+        storage.mThreatUpdateTimer -= AI_REACTION_TIME;
+        if (storage.mThreatUpdateTimer > 0.f)
+            return storage.mThreatFlee;
+        storage.mThreatUpdateTimer = 0.9f;
+
+        const CreatureStats& actorStats = actor.getClass().getCreatureStats(actor);
+        const CreatureStats& targetStats = target.getClass().getCreatureStats(target);
+        const float actorHealthMax = std::max(1.f, actorStats.getHealth().getModified());
+        const float actorHpRatio = std::max(0.f, actorStats.getHealth().getCurrent() / actorHealthMax);
+
+        auto power = [](const CreatureStats& stats) {
+            return std::max(1.f, static_cast<float>(stats.getLevel()) * 10.f
+                + stats.getHealth().getModified() * 0.34f
+                + stats.getMagicka().getModified() * 0.09f);
+        };
+
+        float actorPower = power(actorStats);
+        float targetPower = power(targetStats);
+        MWBase::MechanicsManager* mechanics = MWBase::Environment::get().getMechanicsManager();
+        int allies = 0;
+        for (const MWWorld::Ptr& ally : mechanics->getActorsFighting(target))
+            if (!ally.isEmpty() && ally.getCell() == actor.getCell())
+                ++allies;
+        int enemies = 0;
+        for (const MWWorld::Ptr& enemy : mechanics->getActorsFighting(actor))
+            if (!enemy.isEmpty() && enemy.getCell() == actor.getCell())
+                ++enemies;
+        actorPower *= 1.f + std::min(3, std::max(0, allies - 1)) * 0.18f;
+        targetPower *= 1.f + std::min(3, std::max(0, enemies - 1)) * 0.18f;
+
+        const float ratio = actorPower / std::max(1.f, targetPower);
+        const float fight = std::max(0, std::min(100,
+            actorStats.getAiSetting(CreatureStats::AI_Fight).getModified())) / 100.f;
+        const float flee = std::max(0, std::min(100,
+            actorStats.getAiSetting(CreatureStats::AI_Flee).getModified())) / 100.f;
+        float threshold = std::max(0.15f,
+            Settings::Manager::getFloat("combat threat flee ratio", "Game"));
+        threshold += (1.f - actorHpRatio) * 0.28f + flee * 0.18f - fight * 0.16f;
+
+        storage.mThreatFlee = ratio < threshold
+            && (actorHpRatio < 0.72f || ratio < threshold * 0.72f);
+        return storage.mThreatFlee;
     }
 
     void MWMechanics::AiCombat::updateFleeing(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, float duration, MWMechanics::AiCombatStorage& storage)
@@ -657,6 +976,46 @@ namespace MWMechanics
 
             case AiCombatStorage::FleeState_Idle:
                 {
+                    const bool targetIsPlayer = target == MWMechanics::getPlayer()
+                        || mwmp::PlayerList::isDedicatedPlayer(target);
+                    if (!storage.mFleeAskedGuard && actor.getClass().isNpc()
+                        && targetIsPlayer
+                        && Settings::Manager::getBool("combat flee seek guard", "Game")
+                        && MWBase::Environment::get().getMechanicsManager()->isCombatInitiator(target, actor))
+                    {
+                        const float guardRadius = std::max(256.f,
+                            Settings::Manager::getFloat("combat flee seek guard radius", "Game"));
+                        std::vector<MWWorld::Ptr> nearby;
+                        MWBase::Environment::get().getMechanicsManager()->getActorsInRange(
+                            actor.getRefData().getPosition().asVec3(), guardRadius, nearby);
+                        MWWorld::Ptr bestGuard;
+                        float bestDistance2 = std::numeric_limits<float>::max();
+                        for (const MWWorld::Ptr& candidate : nearby)
+                        {
+                            if (candidate.isEmpty() || candidate == actor || candidate == target
+                                || candidate.getCell() != actor.getCell() || !candidate.getClass().isNpc()
+                                || !candidate.getClass().isClass(candidate, "Guard")
+                                || candidate.getClass().getCreatureStats(candidate).isDead())
+                                continue;
+                            const float dist2 = (candidate.getRefData().getPosition().asVec3()
+                                - actor.getRefData().getPosition().asVec3()).length2();
+                            if (dist2 < bestDistance2)
+                            {
+                                bestDistance2 = dist2;
+                                bestGuard = candidate;
+                            }
+                        }
+
+                        if (!bestGuard.isEmpty())
+                        {
+                            storage.mFleeGuardActorId
+                                = bestGuard.getClass().getCreatureStats(bestGuard).getActorId();
+                            state = AiCombatStorage::FleeState_RunToGuard;
+                            mPathFinder.clearPath();
+                            break;
+                        }
+                    }
+
                     float triggerDist = getMaxAttackDistance(target);
 
                     if (storage.mLOS &&
@@ -731,6 +1090,36 @@ namespace MWMechanics
                             || pathTo(actor, PathFinder::makeOsgVec3(storage.mFleeDest), duration))
                     {
                         state = AiCombatStorage::FleeState_Idle;
+                    }
+                }
+                break;
+
+            case AiCombatStorage::FleeState_RunToGuard:
+                {
+                    MWWorld::Ptr guard = MWBase::Environment::get().getWorld()
+                        ->searchPtrViaActorId(storage.mFleeGuardActorId);
+                    if (guard.isEmpty() || guard.getCell() != actor.getCell()
+                        || guard.getClass().getCreatureStats(guard).isDead())
+                    {
+                        storage.mFleeGuardActorId = -1;
+                        state = AiCombatStorage::FleeState_Idle;
+                        break;
+                    }
+
+                    const float guardDistance = distanceIgnoreZ(
+                        actor.getRefData().getPosition().asVec3(), guard.getRefData().getPosition().asVec3());
+                    if (guardDistance <= 180.f
+                        || pathTo(actor, guard.getRefData().getPosition().asVec3(), duration, 140.f))
+                    {
+                        // Only victims for whom the player is the recorded initiator
+                        // take this branch, so hostile bandits cannot abuse city guards
+                        // after attacking the player themselves.
+                        MWBase::Environment::get().getMechanicsManager()->startCombat(guard, target);
+                        storage.mFleeAskedGuard = true;
+                        storage.mFleeGuardActorId = -1;
+                        state = AiCombatStorage::FleeState_RunBlindly;
+                        storage.mFleeBlindRunTimer = 0.f;
+                        mPathFinder.clearPath();
                     }
                 }
                 break;
@@ -965,6 +1354,8 @@ namespace MWMechanics
     {
         stopFleeing();
         mFleeState = FleeState_Idle;
+        mFleeGuardActorId = -1;
+        mFleeAskedGuard = false;
     }
 
     void AiCombatStorage::stopFleeing()
@@ -974,6 +1365,7 @@ namespace MWMechanics
         mMovement.mPosition[2] = 0;
         mFleeState = FleeState_None;
         mFleeDest = ESM::Pathgrid::Point(0, 0, 0);
+        mFleeGuardActorId = -1;
     }
 
     bool AiCombatStorage::isFleeing()

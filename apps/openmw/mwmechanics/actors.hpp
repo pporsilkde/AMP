@@ -137,6 +137,11 @@ namespace MWMechanics
             */
             void engageCombat(const MWWorld::Ptr& actor1, const MWWorld::Ptr& actor2, std::map<const MWWorld::Ptr, const std::set<MWWorld::Ptr> >& cachedAllies, bool againstPlayer);
 
+            /// Remember who actually initiated the current actor-vs-actor conflict.
+            /// actorAttacked() updates this on the first hit of a new conflict, before the victim retaliates.
+            void recordCombatAggression(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim);
+            bool isCombatInitiator(const MWWorld::Ptr& actor, const MWWorld::Ptr& other) const;
+
             void playIdleDialogue(const MWWorld::Ptr& actor);
             void updateMovementSpeed(const MWWorld::Ptr& actor);
             void updateGreetingState(const MWWorld::Ptr& actor, Actor& actorState, bool turnOnly);
@@ -254,6 +259,7 @@ namespace MWMechanics
             int mDrawState;
         };
         std::map<int, WeaponSheatheDelayState> mWeaponSheatheDelays;
+        std::map<std::pair<int, int>, int> mCombatInitiators;
         std::map<MWWorld::Ptr, std::unique_ptr<MWPhysics::Ragdoll>> mRagdolls;
     };
 }

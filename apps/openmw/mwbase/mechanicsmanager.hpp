@@ -144,6 +144,8 @@ namespace MWBase
                                       const std::string& factionId="", int arg=0, bool victimAware=false) = 0;
             /// @return false if the attack was considered a "friendly hit" and forgiven
             virtual bool actorAttacked (const MWWorld::Ptr& victim, const MWWorld::Ptr& attacker) = 0;
+            virtual void recordCombatAggression(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim) = 0;
+            virtual bool isCombatInitiator(const MWWorld::Ptr& actor, const MWWorld::Ptr& other) const = 0;
 
             /// Notify that actor was killed, add a murder bounty if applicable
             /// @note No-op for non-player attackers

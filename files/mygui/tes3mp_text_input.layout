@@ -6,11 +6,19 @@
         <Property key="Padding" value="10"/>
         <Property key="Spacing" value="12"/>
 
+        <!-- ArenaMW account-login branding. Hidden for ordinary in-game server input boxes. -->
+        <Widget type="ImageBox" skin="ImageBox" position="0 0 420 116" name="LoginBrand">
+            <Property key="ImageTexture" value="textures\menu_arenamw.png"/>
+            <Property key="NeedMouse" value="false"/>
+            <Property key="Visible" value="false"/>
+            <UserString key="Hidden" value="true"/>
+        </Widget>
+
         <!-- Appearance -->
-        <Widget type="TextBox" skin="ProgressText" position="6 6 300 18" name="LabelT" align="Left Top">
+        <Widget type="TextBox" skin="ProgressText" position="6 6 360 18" name="LabelT" align="Left Top">
             <Property key="TextAlign" value="Left Top"/>
         </Widget>
-        <Widget type="EditBox" skin="MW_TextEdit" position="6 28 300 30" name="TextEdit" align="Left Top"/>
+        <Widget type="EditBox" skin="MW_TextEdit" position="6 28 360 30" name="TextEdit" align="Left Top"/>
 
         <!-- Dialog buttons -->
         <Widget type="HBox" skin="">
@@ -24,7 +32,7 @@
             </Widget>
         </Widget>
 
-        <Widget type="AutoSizedEditBox" skin="HeaderText" position="6 96 300 0" name="TextNote" align="Left Top">
+        <Widget type="AutoSizedEditBox" skin="HeaderText" position="6 96 360 0" name="TextNote" align="Left Top">
             <Property key="TextAlign" value="Center"/>
             <Property key="MultiLine" value="true"/>
             <Property key="WordWrap" value="true"/>

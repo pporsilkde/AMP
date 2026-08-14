@@ -3,6 +3,13 @@
 
 #include "typedaipackage.hpp"
 
+#include <cstddef>
+#include <string>
+#include <vector>
+
+#include <components/esm/cellid.hpp>
+#include <components/esm/defs.hpp>
+
 namespace ESM
 {
 namespace AiSequence
@@ -56,13 +63,36 @@ namespace MWMechanics
 
     struct AiInternalTravel final : public AiTravel
     {
+        struct DoorBreadcrumb
+        {
+            ESM::CellId mFromCellId;
+            std::string mFromCellName;
+            ESM::Position mFromPosition;
+            ESM::CellId mToCellId;
+            ESM::Position mToPosition;
+        };
+
+        AiInternalTravel(const ESM::Position& homePosition, const ESM::CellId& homeCellId, std::string homeCellName);
         AiInternalTravel(float x, float y, float z);
 
         explicit AiInternalTravel(const ESM::AiSequence::AiTravel* travel);
 
         static constexpr AiPackageTypeId getTypeId() { return AiPackageTypeId::InternalTravel; }
 
+        bool execute(const MWWorld::Ptr& actor, CharacterController& characterController, AiState& state, float duration) override;
+        void recordDoorTransition(const ESM::CellId& fromCellId, const std::string& fromCellName,
+            const ESM::Position& fromPosition, const ESM::CellId& toCellId, const ESM::Position& toPosition);
+        std::size_t getDoorTransitionCount() const { return mDoorBreadcrumbs.size(); }
+
         std::unique_ptr<AiPackage> clone() const override;
+
+    private:
+        ESM::CellId mHomeCellId;
+        std::string mHomeCellName;
+        ESM::Position mHomePosition;
+        bool mHasHomeCell = false;
+        bool mHomeTeleportQueued = false;
+        std::vector<DoorBreadcrumb> mDoorBreadcrumbs;
     };
 }
 

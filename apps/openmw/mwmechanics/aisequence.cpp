@@ -17,6 +17,9 @@
 #include "aipursue.hpp"
 #include "actorutil.hpp"
 #include "../mwworld/class.hpp"
+#include "../mwworld/cellstore.hpp"
+#include "../mwbase/environment.hpp"
+#include "../mwbase/world.hpp"
 
 namespace MWMechanics
 {
@@ -304,6 +307,30 @@ void AiSequence::execute (const MWWorld::Ptr& actor, CharacterController& charac
     }
 }
 
+void AiSequence::recordDoorTransition(const ESM::CellId& fromCellId, const std::string& fromCellName,
+    const ESM::Position& fromPosition, const ESM::CellId& toCellId, const ESM::Position& toPosition)
+{
+    for (const auto& package : mPackages)
+    {
+        if (package->getTypeId() == AiPackageTypeId::InternalTravel)
+        {
+            static_cast<AiInternalTravel*>(package.get())->recordDoorTransition(
+                fromCellId, fromCellName, fromPosition, toCellId, toPosition);
+            return;
+        }
+    }
+}
+
+std::size_t AiSequence::getReturnHomeDoorTransitionCount() const
+{
+    for (const auto& package : mPackages)
+    {
+        if (package->getTypeId() == AiPackageTypeId::InternalTravel)
+            return static_cast<const AiInternalTravel*>(package.get())->getDoorTransitionCount();
+    }
+    return 0;
+}
+
 void AiSequence::clear()
 {
     mPackages.clear();
@@ -325,21 +352,37 @@ void AiSequence::stack (const AiPackage& package, const MWWorld::Ptr& actor, boo
     const auto newTypeId = package.getTypeId();
     if (currentTypeId <= MWMechanics::AiPackageTypeId::Wander
         && !hasPackage(MWMechanics::AiPackageTypeId::InternalTravel)
-        && (newTypeId <= MWMechanics::AiPackageTypeId::Combat
+        && (newTypeId == MWMechanics::AiPackageTypeId::Combat
         || newTypeId == MWMechanics::AiPackageTypeId::Pursue
         || newTypeId == MWMechanics::AiPackageTypeId::Cast))
     {
-        osg::Vec3f dest;
+        // Preserve the Wander origin instead of a transient random waypoint.
+        // For actors without an AI package the current pre-combat transform is
+        // the safest home anchor and does not undo earlier scripted relocation.
+        ESM::Position homePosition = actor.getRefData().getPosition();
         if (currentTypeId == MWMechanics::AiPackageTypeId::Wander)
         {
-            dest = getActivePackage().getDestination(actor);
-        }
-        else
-        {
-            dest = actor.getRefData().getPosition().asVec3();
+            const AiWander& wander = static_cast<const AiWander&>(getActivePackage());
+            const osg::Vec3f home = wander.getHomePosition(actor);
+            homePosition.pos[0] = home.x();
+            homePosition.pos[1] = home.y();
+            homePosition.pos[2] = home.z();
         }
 
-        MWMechanics::AiInternalTravel travelPackage(dest.x(), dest.y(), dest.z());
+        ESM::CellId homeCellId = actor.getCell()->getCell()->getCellId();
+        std::string homeCellName = actor.getCell()->isExterior()
+            ? std::string() : actor.getCell()->getCell()->mName;
+
+        if (actor.getCell()->isExterior())
+        {
+            int homeX = 0;
+            int homeY = 0;
+            MWBase::World* world = MWBase::Environment::get().getWorld();
+            world->positionToIndex(homePosition.pos[0], homePosition.pos[1], homeX, homeY);
+            homeCellId = world->getExterior(homeX, homeY)->getCell()->getCellId();
+        }
+
+        MWMechanics::AiInternalTravel travelPackage(homePosition, homeCellId, homeCellName);
         stack(travelPackage, actor, false);
     }
 

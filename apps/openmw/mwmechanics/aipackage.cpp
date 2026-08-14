@@ -1,5 +1,8 @@
 #include "aipackage.hpp"
 
+#include <limits>
+#include <optional>
+
 #include <components/esm/loadcell.hpp>
 #include <components/esm/loadland.hpp>
 #include <components/detournavigator/navigator.hpp>
@@ -83,6 +86,11 @@ void MWMechanics::AiPackage::reset()
     mIsShortcutting = false;
     mShortcutProhibited = false;
     mShortcutFailPos = osg::Vec3f();
+    mLocalDetourRequested = false;
+    mLocalDetourActive = false;
+    mLocalDetourStrikes = 0;
+    mLocalDetourTimeLeft = 0.f;
+    mLocalDetourPoint = osg::Vec3f();
 
     mPathFinder.clearPath();
     mObstacleCheck.clear();
@@ -115,6 +123,33 @@ bool MWMechanics::AiPackage::pathTo(const MWWorld::Ptr& actor, const osg::Vec3f&
     const bool isDestReached = (distToTarget <= destTolerance);
     const bool actorCanMoveByZ = canActorMoveByZAxis(actor);
 
+    // A repeated geometry/traffic blockage may request one short side waypoint.
+    // It is projected through the existing Detour navmesh and expires quickly,
+    // so scripted Travel/Follow/Wander destinations remain authoritative.
+    if (mLocalDetourActive)
+    {
+        mLocalDetourTimeLeft -= duration;
+        const float localTolerance = std::max(48.f, std::max(halfExtents.x(), halfExtents.y()) * 1.25f);
+        if (distance(position, mLocalDetourPoint) <= localTolerance || mLocalDetourTimeLeft <= 0.f)
+        {
+            mLocalDetourActive = false;
+            mLocalDetourTimeLeft = 0.f;
+            mPathFinder.clearPath();
+            if (mLocalDetourStrikes > 0)
+                --mLocalDetourStrikes;
+        }
+    }
+
+    if (mLocalDetourRequested && !mLocalDetourActive)
+    {
+        mLocalDetourRequested = false;
+        if (mLocalDetourStrikes >= 2
+            && Settings::Manager::getBool("smart local alternative routes", "Game"))
+            selectLocalDetour(actor, dest);
+    }
+
+    const osg::Vec3f routingDestination = mLocalDetourActive ? mLocalDetourPoint : dest;
+
     if (!isDestReached && timerStatus == Misc::TimerStatus::Elapsed)
     {
         if (actor.getClass().isBipedal(actor))
@@ -125,14 +160,14 @@ bool MWMechanics::AiPackage::pathTo(const MWWorld::Ptr& actor, const osg::Vec3f&
 
         // Prohibit shortcuts for AiWander, if the actor can not move in 3 dimensions.
         mIsShortcutting = actorCanMoveByZ
-            && shortcutPath(position, dest, actor, &destInLOS, actorCanMoveByZ); // try to shortcut first
+            && shortcutPath(position, routingDestination, actor, &destInLOS, actorCanMoveByZ); // try to shortcut first
 
         if (!mIsShortcutting)
         {
-            if (wasShortcutting || doesPathNeedRecalc(dest, actor)) // if need to rebuild path
+            if (wasShortcutting || doesPathNeedRecalc(routingDestination, actor)) // if need to rebuild path
             {
                 const auto pathfindingHalfExtents = world->getPathfindingHalfExtents(actor);
-                mPathFinder.buildLimitedPath(actor, position, dest, actor.getCell(), getPathGridGraph(actor.getCell()),
+                mPathFinder.buildLimitedPath(actor, position, routingDestination, actor.getCell(), getPathGridGraph(actor.getCell()),
                     pathfindingHalfExtents, getNavigatorFlags(actor), getAreaCosts(actor));
                 mRotateOnTheRunChecks = 3;
 
@@ -143,10 +178,10 @@ bool MWMechanics::AiPackage::pathTo(const MWWorld::Ptr& actor, const osg::Vec3f&
                     auto pPointBeforeDest = mPathFinder.getPath().rbegin() + 1;
 
                     // if start point is closer to the target then last point of path (excluding target itself) then go straight on the target
-                    if (distance(position, dest) <= distance(dest, *pPointBeforeDest))
+                    if (distance(position, routingDestination) <= distance(routingDestination, *pPointBeforeDest))
                     {
                         mPathFinder.clearPath();
-                        mPathFinder.addPointToPath(dest);
+                        mPathFinder.addPointToPath(routingDestination);
                     }
                 }
             }
@@ -155,8 +190,8 @@ bool MWMechanics::AiPackage::pathTo(const MWWorld::Ptr& actor, const osg::Vec3f&
             {
                 const osg::Vec3f& lastPos = mPathFinder.getPath().back(); //Get the end of the proposed path
 
-                if(distance(dest, lastPos) > 100) //End of the path is far from the destination
-                    mPathFinder.addPointToPath(dest); //Adds the final destination to the path, to try to get to where you want to go
+                if(distance(routingDestination, lastPos) > 100) //End of the path is far from the destination
+                    mPathFinder.addPointToPath(routingDestination); //Adds the final destination to the path, to try to get to where you want to go
             }
         }
     }
@@ -170,6 +205,15 @@ bool MWMechanics::AiPackage::pathTo(const MWWorld::Ptr& actor, const osg::Vec3f&
 
     if (isDestReached || mPathFinder.checkPathCompleted()) // if path is finished
     {
+        if (mLocalDetourActive && !isDestReached)
+        {
+            mLocalDetourActive = false;
+            mLocalDetourTimeLeft = 0.f;
+            mPathFinder.clearPath();
+            world->removeActorPath(actor);
+            return false;
+        }
+
         // turn to destination point
         zTurn(actor, getZAngleToPoint(position, dest));
         smoothTurn(actor, getXAngleToPoint(position, dest), 0);
@@ -193,7 +237,7 @@ bool MWMechanics::AiPackage::pathTo(const MWWorld::Ptr& actor, const osg::Vec3f&
     zTurn(actor, zAngleToNext);
     smoothTurn(actor, mPathFinder.getXAngleToNext(position.x(), position.y(), position.z()), 0);
 
-    const auto destination = getNextPathPoint(dest);
+    const auto destination = getNextPathPoint(routingDestination);
     mObstacleCheck.update(actor, destination, duration);
 
     if (smoothMovement)
@@ -222,6 +266,59 @@ bool MWMechanics::AiPackage::pathTo(const MWWorld::Ptr& actor, const osg::Vec3f&
     return false;
 }
 
+bool MWMechanics::AiPackage::selectLocalDetour(const MWWorld::Ptr& actor, const osg::Vec3f& finalDestination)
+{
+    if (!actor.getClass().isBipedal(actor) || canActorMoveByZAxis(actor))
+        return false;
+
+    MWBase::World* world = MWBase::Environment::get().getWorld();
+    const osg::Vec3f position = actor.getRefData().getPosition().asVec3();
+    osg::Vec2f forward(finalDestination.x() - position.x(), finalDestination.y() - position.y());
+    if (forward.length2() < 1.f)
+        return false;
+    forward.normalize();
+
+    const osg::Vec2f side(-forward.y(), forward.x());
+    const float sideDistance = std::max(96.f,
+        Settings::Manager::getFloat("smart local route side distance", "Game"));
+    const float forwardDistance = std::max(32.f, sideDistance * 0.45f);
+    const int actorId = actor.getClass().getCreatureStats(actor).getActorId();
+    const float preferredSign = (actorId & 1) ? 1.f : -1.f;
+
+    const auto halfExtents = world->getPathfindingHalfExtents(actor);
+    const auto flags = getNavigatorFlags(actor);
+    const auto navigator = world->getNavigator();
+
+    std::optional<osg::Vec3f> best;
+    float bestProgress = -std::numeric_limits<float>::max();
+    for (int i = 0; i < 2; ++i)
+    {
+        const float sign = i == 0 ? preferredSign : -preferredSign;
+        osg::Vec3f candidate(position.x() + forward.x() * forwardDistance + side.x() * sideDistance * sign,
+            position.y() + forward.y() * forwardDistance + side.y() * sideDistance * sign, position.z());
+        const auto hit = navigator->raycast(halfExtents, position, candidate, flags);
+        if (!hit.has_value() || distanceIgnoreZ(position, *hit) < 64.f)
+            continue;
+
+        const float progress = distanceIgnoreZ(position, finalDestination)
+            - distanceIgnoreZ(*hit, finalDestination);
+        if (!best.has_value() || progress > bestProgress)
+        {
+            best = *hit;
+            bestProgress = progress;
+        }
+    }
+
+    if (!best.has_value())
+        return false;
+
+    mLocalDetourPoint = *best;
+    mLocalDetourActive = true;
+    mLocalDetourTimeLeft = 2.5f;
+    mPathFinder.clearPath();
+    return true;
+}
+
 void MWMechanics::AiPackage::evadeObstacles(const MWWorld::Ptr& actor)
 {
     if (mObstacleCheck.consumePathRebuildRequest())
@@ -231,6 +328,8 @@ void MWMechanics::AiPackage::evadeObstacles(const MWWorld::Ptr& actor)
         mPathFinder.clearPath();
         mShortcutProhibited = true;
         mShortcutFailPos = actor.getRefData().getPosition().asVec3();
+        mLocalDetourStrikes = std::min(4u, mLocalDetourStrikes + 1u);
+        mLocalDetourRequested = true;
     }
 
     // check if stuck due to obstacles

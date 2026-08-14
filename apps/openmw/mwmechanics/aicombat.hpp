@@ -47,11 +47,22 @@ namespace MWMechanics
             FleeState_None,
             FleeState_Idle,
             FleeState_RunBlindly,
-            FleeState_RunToDestination
+            FleeState_RunToDestination,
+            FleeState_RunToGuard
         };
         FleeState mFleeState;
         bool mLOS;
+        bool mGeometricLOS;
         float mUpdateLOSTimer;
+
+        bool mHasLastSeenTarget;
+        osg::Vec3f mLastSeenTargetPos;
+        osg::Vec3f mLastSeenTargetVelocity;
+        float mLostSightTimer;
+        float mSearchElapsed;
+        bool mSearchingLastKnown;
+        osg::Vec3f mSearchDestination;
+        int mSearchPointsVisited;
         float mFleeBlindRunTimer;
         ESM::Pathgrid::Point mFleeDest;
 
@@ -86,6 +97,15 @@ namespace MWMechanics
         bool mCombatOriginSet;
         float mLeashExceededTimer;
 
+        bool mFormationActive;
+        osg::Vec3f mFormationDestination;
+        float mFormationUpdateTimer;
+
+        float mThreatUpdateTimer;
+        bool mThreatFlee;
+        int mFleeGuardActorId;
+        bool mFleeAskedGuard;
+
         AiCombatStorage():
         mAttackCooldown(0.0f),
         mTimerCombatMove(0.0f),
@@ -103,7 +123,16 @@ namespace MWMechanics
         mMovement(),
         mFleeState(FleeState_None),
         mLOS(false),
+        mGeometricLOS(false),
         mUpdateLOSTimer(0.0f),
+        mHasLastSeenTarget(false),
+        mLastSeenTargetPos(),
+        mLastSeenTargetVelocity(),
+        mLostSightTimer(0.0f),
+        mSearchElapsed(0.0f),
+        mSearchingLastKnown(false),
+        mSearchDestination(),
+        mSearchPointsVisited(0),
         mFleeBlindRunTimer(0.0f),
         mUseCustomDestination(false),
         mCustomDestination(),
@@ -120,7 +149,14 @@ namespace MWMechanics
         mCombatOrigin(),
         mCombatOriginCell(nullptr),
         mCombatOriginSet(false),
-        mLeashExceededTimer(0.0f)
+        mLeashExceededTimer(0.0f),
+        mFormationActive(false),
+        mFormationDestination(),
+        mFormationUpdateTimer(0.0f),
+        mThreatUpdateTimer(0.0f),
+        mThreatFlee(false),
+        mFleeGuardActorId(-1),
+        mFleeAskedGuard(false)
         {}
 
         void startCombatMove(bool isDistantCombat, float distToTarget, float rangeAttack, const MWWorld::Ptr& actor, const MWWorld::Ptr& target);
@@ -173,6 +209,11 @@ namespace MWMechanics
             bool attack(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, AiCombatStorage& storage, CharacterController& characterController);
 
             void updateLOS(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, float duration, AiCombatStorage& storage);
+            bool updateStealthSearch(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, float duration,
+                AiCombatStorage& storage);
+            void updateFormationDestination(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, float duration,
+                AiCombatStorage& storage, bool ranged);
+            bool updateThreatFlee(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, AiCombatStorage& storage);
 
             void updateFleeing(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, float duration, AiCombatStorage& storage);
             void updateTacticalMovement(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, float duration,

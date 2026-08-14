@@ -1,5 +1,7 @@
 #include "aitravel.hpp"
 
+#include <utility>
+
 #include <components/esm/aisequence.hpp>
 
 #include "../mwbase/environment.hpp"
@@ -8,6 +10,7 @@
 
 #include "../mwworld/class.hpp"
 #include "../mwworld/cellstore.hpp"
+#include "../mwworld/actionteleport.hpp"
 
 #include "movement.hpp"
 #include "creaturestats.hpp"
@@ -116,6 +119,15 @@ namespace MWMechanics
         sequence.mPackages.push_back(package);
     }
 
+    AiInternalTravel::AiInternalTravel(const ESM::Position& homePosition, const ESM::CellId& homeCellId, std::string homeCellName)
+        : AiTravel(homePosition.pos[0], homePosition.pos[1], homePosition.pos[2], this)
+        , mHomeCellId(homeCellId)
+        , mHomeCellName(std::move(homeCellName))
+        , mHomePosition(homePosition)
+        , mHasHomeCell(true)
+    {
+    }
+
     AiInternalTravel::AiInternalTravel(float x, float y, float z)
         : AiTravel(x, y, z, this)
     {
@@ -124,6 +136,82 @@ namespace MWMechanics
     AiInternalTravel::AiInternalTravel(const ESM::AiSequence::AiTravel* travel)
         : AiTravel(travel->mData.mX, travel->mData.mY, travel->mData.mZ, this)
     {
+        // The legacy save format contains only XYZ for hidden travel packages.
+        // Do not infer a home cell from the cell where the save was loaded: that
+        // could be the pursuit destination and would corrupt return-home behavior.
+    }
+
+    void AiInternalTravel::recordDoorTransition(const ESM::CellId& fromCellId, const std::string& fromCellName,
+        const ESM::Position& fromPosition, const ESM::CellId& toCellId, const ESM::Position& toPosition)
+    {
+        if (!mHasHomeCell)
+            return;
+
+        DoorBreadcrumb breadcrumb;
+        breadcrumb.mFromCellId = fromCellId;
+        breadcrumb.mFromCellName = fromCellName;
+        breadcrumb.mFromPosition = fromPosition;
+        breadcrumb.mToCellId = toCellId;
+        breadcrumb.mToPosition = toPosition;
+
+        if (!mDoorBreadcrumbs.empty()
+            && mDoorBreadcrumbs.back().mFromCellId == breadcrumb.mFromCellId
+            && mDoorBreadcrumbs.back().mToCellId == breadcrumb.mToCellId)
+        {
+            mDoorBreadcrumbs.back() = std::move(breadcrumb);
+            return;
+        }
+
+        constexpr std::size_t maxBreadcrumbs = 8;
+        if (mDoorBreadcrumbs.size() >= maxBreadcrumbs)
+            mDoorBreadcrumbs.erase(mDoorBreadcrumbs.begin());
+        mDoorBreadcrumbs.push_back(std::move(breadcrumb));
+    }
+
+    bool AiInternalTravel::execute(const MWWorld::Ptr& actor, CharacterController& characterController, AiState& state, float duration)
+    {
+        if (!mHasHomeCell || actor.getCell()->getCell()->getCellId() == mHomeCellId)
+            return AiTravel::execute(actor, characterController, state, duration);
+
+        // We deliberately do not run a full AI simulation through unloaded cells.
+        // Instead, visibly walk back to the door through which the NPC entered the
+        // currently active pursuit cell. Once the NPC leaves through that door, a
+        // queued world move restores its persistent home cell and exact home point.
+        if (mHomeTeleportQueued)
+            return false;
+
+        const ESM::CellId currentCellId = actor.getCell()->getCell()->getCellId();
+        const DoorBreadcrumb* breadcrumb = nullptr;
+        for (auto it = mDoorBreadcrumbs.rbegin(); it != mDoorBreadcrumbs.rend(); ++it)
+        {
+            if (it->mToCellId == currentCellId)
+            {
+                breadcrumb = &*it;
+                break;
+            }
+        }
+
+        if (!breadcrumb)
+        {
+            // No trustworthy transition history (e.g. a legacy mid-combat save).
+            // Keep the old hidden-travel package rather than teleporting visibly
+            // or guessing a door/cell relationship.
+            return false;
+        }
+
+        auto& stats = actor.getClass().getCreatureStats(actor);
+        stats.setMovementFlag(CreatureStats::Flag_Run, false);
+        stats.setDrawState(DrawState_Nothing);
+
+        const osg::Vec3f doorPoint = breadcrumb->mToPosition.asVec3();
+        const float distToDoor = distance(actor.getRefData().getPosition().asVec3(), doorPoint);
+        if (distToDoor > 96.f && !pathTo(actor, doorPoint, duration, 72.f))
+            return false;
+
+        actor.getClass().getMovementSettings(actor).mPosition[1] = 0.f;
+        MWWorld::ActionTeleport::queueDelayedTeleport(actor, mHomeCellName, mHomePosition, 0.f, -1, true);
+        mHomeTeleportQueued = true;
+        return false;
     }
 
     std::unique_ptr<AiPackage> AiInternalTravel::clone() const

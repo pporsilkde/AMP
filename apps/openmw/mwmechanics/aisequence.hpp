@@ -1,13 +1,17 @@
 #ifndef GAME_MWMECHANICS_AISEQUENCE_H
 #define GAME_MWMECHANICS_AISEQUENCE_H
 
+#include <cstddef>
 #include <list>
 #include <memory>
+#include <string>
 
 #include "aistate.hpp"
 #include "aipackagetypeid.hpp"
 
 #include <components/esm/loadnpc.hpp>
+#include <components/esm/cellid.hpp>
+#include <components/esm/defs.hpp>
 
 namespace MWWorld
 {
@@ -124,6 +128,11 @@ namespace MWMechanics
             /** Suspends current package
                 @param actor The actor that owns this AiSequence **/
             void stack (const AiPackage& package, const MWWorld::Ptr& actor, bool cancelOther=true);
+
+            /// Record a real teleport-door transition for a suspended return-home package.
+            void recordDoorTransition(const ESM::CellId& fromCellId, const std::string& fromCellName,
+                const ESM::Position& fromPosition, const ESM::CellId& toCellId, const ESM::Position& toPosition);
+            std::size_t getReturnHomeDoorTransitionCount() const;
 
             /// Return the current active package.
             /** If there is no active package, it will throw an exception **/

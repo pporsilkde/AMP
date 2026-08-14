@@ -419,6 +419,49 @@ void forEachFollowingPackage(MWMechanics::Actors::PtrActorMap& actors, const MWW
 
 }
 
+
+static int collisionMovementPriority(const MWWorld::Ptr& actor)
+{
+    if (actor.isEmpty() || !actor.getClass().isActor())
+        return 0;
+    if (actor == MWMechanics::getPlayer())
+        return 100;
+
+    const MWMechanics::AiSequence& sequence = actor.getClass().getCreatureStats(actor).getAiSequence();
+    switch (sequence.getTypeId())
+    {
+        case MWMechanics::AiPackageTypeId::Combat:
+        case MWMechanics::AiPackageTypeId::Pursue:
+            return 80;
+        case MWMechanics::AiPackageTypeId::Follow:
+        case MWMechanics::AiPackageTypeId::Escort:
+            return 65;
+        case MWMechanics::AiPackageTypeId::Travel:
+        case MWMechanics::AiPackageTypeId::InternalTravel:
+        case MWMechanics::AiPackageTypeId::Cast:
+            return 55;
+        case MWMechanics::AiPackageTypeId::Wander:
+            return 30;
+        default:
+            return 15;
+    }
+}
+
+static bool shouldYieldCollision(const MWWorld::Ptr& actor, const MWWorld::Ptr& other)
+{
+    if (other == MWMechanics::getPlayer())
+        return true;
+
+    const int ownPriority = collisionMovementPriority(actor);
+    const int otherPriority = collisionMovementPriority(other);
+    if (ownPriority != otherPriority)
+        return ownPriority < otherPriority;
+
+    const int ownId = actor.getClass().getCreatureStats(actor).getActorId();
+    const int otherId = other.getClass().getCreatureStats(other).getActorId();
+    return ownId > otherId;
+}
+
 namespace MWMechanics
 {
     static const int GREETING_SHOULD_START = 4; // how many updates should pass before NPC can greet player
@@ -1277,6 +1320,34 @@ namespace MWMechanics
         }
     }
 
+    void Actors::recordCombatAggression(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim)
+    {
+        if (attacker.isEmpty() || victim.isEmpty() || !attacker.getClass().isActor() || !victim.getClass().isActor())
+            return;
+
+        const int attackerId = attacker.getClass().getCreatureStats(attacker).getActorId();
+        const int victimId = victim.getClass().getCreatureStats(victim).getActorId();
+        if (attackerId < 0 || victimId < 0 || attackerId == victimId)
+            return;
+
+        const std::pair<int, int> key(std::min(attackerId, victimId), std::max(attackerId, victimId));
+        // actorAttacked() is only called before the victim has joined this combat, so assigning here
+        // intentionally replaces provenance left by an older, already-finished conflict.
+        mCombatInitiators[key] = attackerId;
+    }
+
+    bool Actors::isCombatInitiator(const MWWorld::Ptr& actor, const MWWorld::Ptr& other) const
+    {
+        if (actor.isEmpty() || other.isEmpty() || !actor.getClass().isActor() || !other.getClass().isActor())
+            return false;
+
+        const int actorId = actor.getClass().getCreatureStats(actor).getActorId();
+        const int otherId = other.getClass().getCreatureStats(other).getActorId();
+        const std::pair<int, int> key(std::min(actorId, otherId), std::max(actorId, otherId));
+        const auto it = mCombatInitiators.find(key);
+        return it != mCombatInitiators.end() && it->second == actorId;
+    }
+
     void Actors::engageCombat (const MWWorld::Ptr& actor1, const MWWorld::Ptr& actor2, std::map<const MWWorld::Ptr, const std::set<MWWorld::Ptr> >& cachedAllies, bool againstPlayer)
     {
         // No combat for totally static creatures
@@ -1405,8 +1476,32 @@ namespace MWMechanics
             */
         }
 
-        // Make guards go aggressive with creatures that are in combat, unless the creature is a follower or escorter
-        if (!aggressive && actor1.getClass().isClass(actor1, "Guard") && !actor2.getClass().isNpc() && creatureStats2.getAiSequence().isInCombat())
+        // Guards protect the local player from both hostile creatures and NPCs that actually initiated
+        // a fight with that player. The provenance check prevents a player who attacked first
+        // from turning the victim's defensive combat into free guard assistance.
+        const MWWorld::Ptr& player = MWMechanics::getPlayer();
+        const bool hostileCreature = !actor2.getClass().isNpc() && creatureStats2.getAiSequence().isInCombat();
+        bool hostileNpcAggressor = false;
+        if (Settings::Manager::getBool("guards protect player from npc aggressors", "Game")
+            && actor2.getClass().isNpc())
+        {
+            // MP adaptation: the cell-authority client may be simulating an NPC
+            // that attacked another (Dedicated) player. Inspect every combat
+            // target instead of protecting only this client's LocalPlayer.
+            std::vector<MWWorld::Ptr> combatTargets;
+            creatureStats2.getAiSequence().getCombatTargets(combatTargets);
+            for (const MWWorld::Ptr& combatTarget : combatTargets)
+            {
+                if (!combatTarget.isEmpty()
+                    && (combatTarget == player || mwmp::PlayerList::isDedicatedPlayer(combatTarget))
+                    && isCombatInitiator(actor2, combatTarget))
+                {
+                    hostileNpcAggressor = true;
+                    break;
+                }
+            }
+        }
+        if (!aggressive && actor1.getClass().isClass(actor1, "Guard") && (hostileCreature || hostileNpcAggressor))
         {
             // Check if the creature is too far
             static const float fAlarmRadius = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("fAlarmRadius")->mValue.getFloat();
@@ -1436,7 +1531,11 @@ namespace MWMechanics
                     && MWBase::Environment::get().getMechanicsManager()->awarenessCheck(actor2, actor1);
 
             if (LOS)
-                MWBase::Environment::get().getMechanicsManager()->startCombat(actor1, actor2);
+            {
+                MWBase::MechanicsManager* mechanics = MWBase::Environment::get().getMechanicsManager();
+                mechanics->recordCombatAggression(actor1, actor2);
+                mechanics->startCombat(actor1, actor2);
+            }
         }
     }
 
@@ -2592,28 +2691,40 @@ namespace MWMechanics
                 continue; // Can't move, so there is no sense to predict collisions.
 
             Movement& movement = ptr.getClass().getMovementSettings(ptr);
+            avoidance.mCooldown = std::max(0.f, avoidance.mCooldown - duration);
             if (avoidance.mPhase != Actor::CollisionAvoidancePhase::None)
             {
                 movement.mPosition[0] = 0.f;
                 movement.mPosition[1] = 0.f;
                 avoidance.mTimer -= duration;
 
-                if (avoidance.mPhase == Actor::CollisionAvoidancePhase::Turning)
+                if (avoidance.mPhase == Actor::CollisionAvoidancePhase::Yielding)
+                {
+                    if (avoidance.mTimer <= 0.f)
+                    {
+                        avoidance.mPhase = Actor::CollisionAvoidancePhase::None;
+                        avoidance.mCooldown = 0.25f;
+                    }
+                }
+                else if (avoidance.mPhase == Actor::CollisionAvoidancePhase::Turning)
                 {
                     const bool turned = zTurn(ptr, avoidance.mTargetAngle, osg::DegreesToRadians(3.f));
                     if (turned || avoidance.mTimer <= 0.f)
                     {
                         avoidance.mPhase = Actor::CollisionAvoidancePhase::Stepping;
-                        avoidance.mTimer = 0.32f;
+                        avoidance.mTimer = 0.30f;
                     }
                 }
                 else
                 {
-                    // One short forward walk in the newly selected direction is
-                    // visually stable and actually clears a narrow passage.
-                    movement.mPosition[1] = 0.38f;
+                    // One short step after a deterministic turn clears narrow
+                    // passages without the old left/right oscillation.
+                    movement.mPosition[1] = 0.34f;
                     if (avoidance.mTimer <= 0.f)
+                    {
                         avoidance.mPhase = Actor::CollisionAvoidancePhase::None;
+                        avoidance.mCooldown = 0.35f;
+                    }
                 }
                 continue;
             }
@@ -2663,6 +2774,7 @@ namespace MWMechanics
 
             float timeToCollision = timeToCheck;
             float nearestActorRelativeX = 0.f;
+            MWWorld::Ptr nearestCollisionActor;
 
             // Iterate through all other actors and predict collisions.
             for(PtrActorMap::iterator otherIter(mActors.begin()); otherIter != mActors.end(); ++otherIter)
@@ -2721,23 +2833,51 @@ namespace MWMechanics
 
                 timeToCollision = t;
                 nearestActorRelativeX = relPos.x();
+                nearestCollisionActor = otherPtr;
             }
 
-            if (timeToCollision < timeToCheck)
+            if (timeToCollision < timeToCheck && !nearestCollisionActor.isEmpty())
             {
-                // A single turn-in-place avoids rapid alternation between
-                // strafe/backpedal/walk groups. This is used for both the
-                // player and other NPCs, so crowded passages remain stable.
-                float direction;
-                if (std::abs(nearestActorRelativeX) > 5.f)
-                    direction = nearestActorRelativeX >= 0.f ? -1.f : 1.f;
-                else
-                    direction = Misc::Rng::rollProbability() < 0.5f ? -1.f : 1.f;
+                // Only one side of a meeting should yield. Package priority is
+                // deterministic (combat > follow/escort > travel > wander), and
+                // actor id breaks ties, so two NPCs never mirror each other's
+                // left/right decision forever.
+                if (!shouldYieldCollision(ptr, nearestCollisionActor))
+                    continue;
 
-                const float angle = 55.f + 55.f * Misc::Rng::rollClosedProbability();
+                if (timeToCollision > 0.65f)
+                {
+                    // Timely soft slowdown while there is still room to resolve
+                    // the encounter without changing animation direction.
+                    movement.mPosition[1] *= 0.45f;
+                    movement.mPosition[0] *= 0.65f;
+                    continue;
+                }
+
+                if (avoidance.mCooldown > 0.f && timeToCollision > 0.20f)
+                {
+                    movement.mPosition[1] *= 0.35f;
+                    continue;
+                }
+
+                if (std::abs(nearestActorRelativeX) > 14.f)
+                {
+                    // The other actor already has a clear side: wait briefly
+                    // rather than performing an unnecessary detour.
+                    avoidance.mPhase = Actor::CollisionAvoidancePhase::Yielding;
+                    avoidance.mTimer = 0.18f + std::min(0.18f, timeToCollision * 0.25f);
+                    movement.mPosition[0] = 0.f;
+                    movement.mPosition[1] = 0.f;
+                    continue;
+                }
+
+                const int ownId = ptr.getClass().getCreatureStats(ptr).getActorId();
+                const int otherId = nearestCollisionActor.getClass().getCreatureStats(nearestCollisionActor).getActorId();
+                const float direction = ownId > otherId ? 1.f : -1.f;
+                const float angle = 62.f;
                 avoidance.mTargetAngle = baseRotZ + direction * osg::DegreesToRadians(angle);
                 avoidance.mPhase = Actor::CollisionAvoidancePhase::Turning;
-                avoidance.mTimer = 0.65f;
+                avoidance.mTimer = 0.48f;
                 movement.mPosition[0] = 0.f;
                 movement.mPosition[1] = 0.f;
                 zTurn(ptr, avoidance.mTargetAngle, osg::DegreesToRadians(3.f));
@@ -3840,6 +3980,7 @@ namespace MWMechanics
         }
         mActors.clear();
         mDeathCount.clear();
+        mCombatInitiators.clear();
     }
 
     void Actors::updateMagicEffects(const MWWorld::Ptr &ptr)

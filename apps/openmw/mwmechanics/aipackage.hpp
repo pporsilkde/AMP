@@ -145,6 +145,8 @@ namespace MWMechanics
 
             void evadeObstacles(const MWWorld::Ptr& actor);
 
+            bool selectLocalDetour(const MWWorld::Ptr& actor, const osg::Vec3f& finalDestination);
+
             void openDoors(const MWWorld::Ptr& actor);
 
             const PathgridGraph& getPathGridGraph(const MWWorld::CellStore* cell);
@@ -171,6 +173,15 @@ namespace MWMechanics
             bool mShortcutProhibited; // shortcutting may be prohibited after unsuccessful attempt
             osg::Vec3f mShortcutFailPos; // position of last shortcut fail
             float mLastDestinationTolerance = 0;
+
+            // ArenaMW lightweight local route recovery. This never changes the
+            // actor's real AI package or navmesh; it only inserts a short
+            // navmesh-validated side waypoint after repeated obstacle recovery.
+            bool mLocalDetourRequested = false;
+            bool mLocalDetourActive = false;
+            unsigned int mLocalDetourStrikes = 0;
+            float mLocalDetourTimeLeft = 0.f;
+            osg::Vec3f mLocalDetourPoint;
 
         private:
             bool isNearInactiveCell(osg::Vec3f position);

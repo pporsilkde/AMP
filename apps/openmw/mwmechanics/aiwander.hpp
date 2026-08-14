@@ -106,6 +106,10 @@ namespace MWMechanics
 
             osg::Vec3f getDestination(const MWWorld::Ptr& actor) const override;
 
+            /// Stable origin used for temporary combat/pursuit return-home.
+            /// If Wander has not run yet, the actor's current position is the safest anchor.
+            osg::Vec3f getHomePosition(const MWWorld::Ptr& actor) const;
+
             osg::Vec3f getDestination() const override
             {
                 if (!mHasDestination)
@@ -115,6 +119,12 @@ namespace MWMechanics
             }
 
             bool isStationary() const { return mDistance == 0; }
+
+            // Multiplayer cell-transition restoration only needs the fields that
+            // exist in TES3MP's ActorAI WANDER packet. Keep these read-only so
+            // the original AI package remains authoritative.
+            int getDistance() const { return mDistance; }
+            int getDuration() const { return mDuration; }
 
         private:
             void stopWalking(const MWWorld::Ptr& actor);

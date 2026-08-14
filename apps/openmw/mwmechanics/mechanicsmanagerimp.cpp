@@ -30,6 +30,7 @@
 #include "../mwworld/class.hpp"
 #include "../mwworld/player.hpp"
 #include "../mwworld/ptr.hpp"
+#include "../mwworld/actionteleport.hpp"
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/statemanager.hpp"
@@ -353,6 +354,8 @@ namespace MWMechanics
 
         mActors.update(duration, paused);
         mObjects.update(duration, paused);
+        if (!paused)
+            MWWorld::ActionTeleport::updateDelayedTeleports(duration);
     }
 
     void MechanicsManager::processChangedSettings(const Settings::CategorySettingVector &changed)
@@ -1498,10 +1501,28 @@ namespace MWMechanics
         return reported;
     }
 
+    void MechanicsManager::recordCombatAggression(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim)
+    {
+        mActors.recordCombatAggression(attacker, victim);
+    }
+
+    bool MechanicsManager::isCombatInitiator(const MWWorld::Ptr& actor, const MWWorld::Ptr& other) const
+    {
+        return mActors.isCombatInitiator(actor, other);
+    }
+
     bool MechanicsManager::actorAttacked(const MWWorld::Ptr &target, const MWWorld::Ptr &attacker)
     {
         const MWWorld::Ptr& player = getPlayer();
-        if (target == player || !attacker.getClass().isActor())
+        if (target.isEmpty() || attacker.isEmpty() || !target.getClass().isActor() || !attacker.getClass().isActor())
+            return false;
+
+        // Record who actually initiated this actor pair before MP-specific early-outs.
+        // Guards only consume this provenance for the local player, but keeping it here
+        // also makes the result consistent if authority changes during the fight.
+        mActors.recordCombatAggression(attacker, target);
+
+        if (target == player)
             return false;
 
         /*
@@ -1850,6 +1871,7 @@ namespace MWMechanics
 
     void MechanicsManager::clear()
     {
+        MWWorld::ActionTeleport::clearDelayedTeleports();
         mActors.clear();
         mStolenItems.clear();
         mClassSelected = false;

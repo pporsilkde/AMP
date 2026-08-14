@@ -5,7 +5,10 @@
 
 #include <MyGUI_EditBox.h>
 #include <MyGUI_Button.h>
+#include <MyGUI_ImageBox.h>
 #include <MyGUI_InputManager.h>
+
+#include <components/widgets/box.hpp>
 
 namespace mwmp
 {
@@ -16,6 +19,7 @@ namespace mwmp
         center();
 
         getWidget(mTextEdit, "TextEdit");
+        getWidget(mLoginBrand, "LoginBrand");
         mTextEdit->eventEditSelectAccept += newDelegate(this, &TextInputDialog::onTextAccepted);
 
         MyGUI::Button *okButton;
@@ -40,6 +44,24 @@ namespace mwmp
     void TextInputDialog::setEditPassword(bool value)
     {
         mTextEdit->setEditPassword(value);
+    }
+
+    void TextInputDialog::setLoginBrandVisible(bool value)
+    {
+        if (!mLoginBrand)
+            return;
+
+        // Gui::VBox uses the custom "Hidden" user string when computing its
+        // requested size. This keeps normal in-game text prompts compact while
+        // giving pre-login name/password prompts the full ArenaMW title treatment.
+        mLoginBrand->setUserString("Hidden", value ? "false" : "true");
+        mLoginBrand->setVisible(value);
+        mLoginBrand->setNeedMouseFocus(false);
+        mLoginBrand->setNeedKeyFocus(false);
+
+        if (Gui::Box* box = dynamic_cast<Gui::Box*>(mMainWidget))
+            box->notifyChildrenSizeChanged();
+        center();
     }
 
     void TextInputDialog::setTextLabel(const std::string &label)

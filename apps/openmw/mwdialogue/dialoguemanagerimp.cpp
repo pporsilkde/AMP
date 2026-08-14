@@ -663,6 +663,25 @@ namespace MWDialogue
                 || (appliedDispositionChange == 0.f && success);
             reactToUnvoicedDialogueClick(false, positiveReaction ? "hello" : "idle");
         }
+
+        // A severe persuasion failure may turn an already volatile NPC hostile.
+        // Keep the normal OpenMW Fight/disposition calculation authoritative: the
+        // drop merely allows the existing aggression rule to be re-evaluated now.
+        if (Settings::Manager::getBool("dialogue hostility on sharp disposition drop", "Game")
+            && appliedDispositionChange <= -Settings::Manager::getFloat("dialogue hostility disposition drop", "Game"))
+        {
+            MWBase::MechanicsManager* mechanics = MWBase::Environment::get().getMechanicsManager();
+            const int disposition = mechanics->getDerivedDisposition(mActor, true);
+            const int threshold = Settings::Manager::getInt("dialogue hostility disposition threshold", "Game");
+            if (disposition <= threshold
+                && !mActor.getClass().getCreatureStats(mActor).getAiSequence().isInCombat(player)
+                && mechanics->isAggressive(mActor, player))
+            {
+                mechanics->recordCombatAggression(mActor, player);
+                mechanics->startCombat(mActor, player);
+                goodbye();
+            }
+        }
     }
 
     int DialogueManager::getTemporaryDispositionChange() const

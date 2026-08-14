@@ -317,6 +317,12 @@ namespace MWMechanics
         return actor.getRefData().getPosition().asVec3();
     }
 
+    osg::Vec3f AiWander::getHomePosition(const MWWorld::Ptr& actor) const
+    {
+        return mStoredInitialActorPosition
+            ? mInitialActorPosition : actor.getRefData().getPosition().asVec3();
+    }
+
     bool AiWander::isPackageCompleted() const
     {
         // End package if duration is complete

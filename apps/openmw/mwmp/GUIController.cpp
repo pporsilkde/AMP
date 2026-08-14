@@ -165,7 +165,9 @@ void mwmp::GUIController::showInputBox(const BasePlayer::GUIMessageBox &guiMessa
     mInputBox = new TextInputDialog();
 
     const bool passwordDialog = guiMessageBox.type == BasePlayer::GUIMessageBox::PasswordDialog;
+    const bool preLoginAccountPrompt = !Main::get().getLocalPlayer()->isLoggedIn();
     mInputBox->setEditPassword(passwordDialog);
+    mInputBox->setLoginBrandVisible(preLoginAccountPrompt);
 
     // Password dialogs shown before login are the account login/registration prompt.
     // Fill them from the regular user settings file exactly as requested by the user.

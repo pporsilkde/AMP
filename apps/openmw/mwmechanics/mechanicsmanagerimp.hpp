@@ -124,6 +124,8 @@ namespace MWMechanics
                                       OffenseType type, const std::string& factionId="", int arg=0, bool victimAware=false) override;
             /// @return false if the attack was considered a "friendly hit" and forgiven
             bool actorAttacked (const MWWorld::Ptr& victim, const MWWorld::Ptr& attacker) override;
+            void recordCombatAggression(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim) override;
+            bool isCombatInitiator(const MWWorld::Ptr& actor, const MWWorld::Ptr& other) const override;
 
             /// Notify that actor was killed, add a murder bounty if applicable
             /// @note No-op for non-player attackers

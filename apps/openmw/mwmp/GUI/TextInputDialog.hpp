@@ -3,6 +3,11 @@
 
 #include "apps/openmw/mwgui/windowbase.hpp"
 
+namespace MyGUI
+{
+    class ImageBox;
+}
+
 namespace MWGui
 {
     class WindowManager;
@@ -23,6 +28,7 @@ namespace mwmp
         void setTextNote(const std::string &note);
 
         void setEditPassword(bool value);
+        void setLoginBrandVisible(bool value);
 
         virtual void onOpen();
         virtual bool exit();
@@ -38,6 +44,7 @@ namespace mwmp
 
     private:
         MyGUI::EditBox *mTextEdit;
+        MyGUI::ImageBox *mLoginBrand;
     };
 }
 

@@ -29,6 +29,7 @@ namespace MWMechanics
         enum class CollisionAvoidancePhase
         {
             None,
+            Yielding,
             Turning,
             Stepping
         };
@@ -38,6 +39,7 @@ namespace MWMechanics
             CollisionAvoidancePhase mPhase{CollisionAvoidancePhase::None};
             float mTimer{0.f};
             float mTargetAngle{0.f};
+            float mCooldown{0.f};
         };
 
         struct DynamicIdleState
