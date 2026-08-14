@@ -34,7 +34,7 @@ namespace mwmp
         void onOpen() override;
         bool exit() override { return false; }
 
-        MWGui::EventHandle_WindowBase eventDone;
+        MWGui::WindowBase::EventHandle_WindowBase eventDone;
 
     private:
         void onConnect(MyGUI::Widget* sender);
