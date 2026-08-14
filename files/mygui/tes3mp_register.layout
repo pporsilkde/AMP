@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <MyGUI type="Layout" version="3.2.0">
-    <Widget type="Window" skin="MW_Dialog" position="0 0 430 462" layer="Windows" align="Center" name="_Main">
+    <Widget type="Window" skin="MW_Dialog" position="0 0 430 476" layer="Windows" align="Center" name="_Main">
         <Widget type="ImageBox" skin="ImageBox" position="35 16 360 99" name="LoginBrand">
             <Property key="ImageTexture" value="textures\menu_arenamw.png"/>
             <Property key="NeedMouse" value="false"/>

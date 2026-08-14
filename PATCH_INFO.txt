@@ -38,3 +38,31 @@ BUILD FIX2 / UI REFINE:
 - Added Sign in / Exit buttons.
 - Shorter subtitle.
 - Immediate localisation refresh on language change.
+
+
+SERVER LANGUAGE FIX / BUILD FIX3:
+- Selected RU/EN is re-sent to server in PlayerBaseInfo before password reply.
+- Server localization reads tes3mp.GetLanguage(pid) as source of truth before Lua cache.
+- Players[pid].language is synchronized from the current engine flag.
+- OnPlayerConnect stores actual client language; config.serverLanguage remains an optional effective override.
+- Existing SendMessage/MessageBox/CustomMessageBox/InputDialog/PasswordDialog/ListBox wrappers continue to localize per recipient.
+
+
+BUILD FIX4 / MODERN REGISTRATION:
+- Dedicated ArenaMW-branded registration card after the server confirms the account is new.
+- Registration never auto-submits the cached password.
+- Account name is locked; password + confirmation + per-player language are shown together.
+- Password mismatch/empty confirmation are validated locally before the server receives the registration hash.
+- Existing-account fast login remains unchanged.
+- Manual failed login no longer causes one duplicate automatic resend.
+- Default server LOGIN=1 / REGISTER=2 flow remains protocol-compatible with stock TES3MP PasswordDialog handling.
+- Older clients receive concise localized registration prompts from CoreScripts.
+
+
+BUILD FIX5 / REGISTRATION STATE MACHINE:
+- Close/remove GM_TES3MP_InputBox before sending registration password.
+- Prevent duplicate TES3MP input GUI modes.
+- Registration detection falls back to PasswordDialog note text.
+- Stop login timeout after accepted login/registration.
+- Server log explicitly marks registration password acceptance and CharGen start.
+- Login and registration windows are 14 px taller for bottom spacing.

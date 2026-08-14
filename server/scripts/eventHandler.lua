@@ -703,6 +703,10 @@ eventHandler.OnGUIAction = function(pid, idGui, data)
                         Players[pid]:Message(Players[pid].accountName .. " is banned from this server.\n")
                         tes3mp.BanAddress(tes3mp.GetIP(pid))
                     else
+                        if Players[pid].loginTimerId ~= nil then
+                            tes3mp.StopTimer(Players[pid].loginTimerId)
+                            Players[pid].loginTimerId = nil
+                        end
                         Players[pid]:FinishLogin()
                         Players[pid]:Message(localization.Get(pid, "core", "login_success") ..
                             localization.Get(pid, "core", "chat_instructions"))
@@ -724,6 +728,16 @@ eventHandler.OnGUIAction = function(pid, idGui, data)
                         guiHelper.ShowRegister(pid)
                         return
                     end
+                    -- Password reply has arrived: from this point the connection
+                    -- must leave the login state and enter the native character
+                    -- generation sequence. Stop the old login timeout explicitly
+                    -- so it cannot race the CharGen screens on a slow client.
+                    if Players[pid].loginTimerId ~= nil then
+                        tes3mp.StopTimer(Players[pid].loginTimerId)
+                        Players[pid].loginTimerId = nil
+                    end
+                    tes3mp.LogMessage(enumerations.log.INFO, "Registration password accepted for " ..
+                        logicHandler.GetChatName(pid) .. "; starting character generation")
                     Players[pid]:Register(data)
                     Players[pid]:Message(localization.Get(pid, "core", "register_success") ..
                         localization.Get(pid, "core", "chat_instructions"))

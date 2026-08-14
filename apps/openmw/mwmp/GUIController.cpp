@@ -176,8 +176,17 @@ void mwmp::GUIController::showInputBox(const BasePlayer::GUIMessageBox &guiMessa
     // is 1-based). Existing accounts may use the password already collected on
     // the initial ArenaMP account card for a fast login. New accounts must never
     // auto-submit: registration gets a dedicated confirmation screen first.
-    const bool registrationPrompt = preLoginAccountPrompt && guiMessageBox.id == 2;
+    // CoreScripts uses REGISTER=2. Keep a note-based fallback as well because
+    // older/custom server scripts may preserve PasswordDialog semantics while
+    // using a different GUI id. The registration prompt is the only pre-login
+    // password dialog that normally carries explanatory note text.
+    const bool registrationPrompt = preLoginAccountPrompt
+        && (guiMessageBox.id == 2 || !guiMessageBox.note.empty());
     const bool loginPrompt = preLoginAccountPrompt && !registrationPrompt;
+
+    LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO,
+        "ArenaMP account PasswordDialog: id=%d registration=%d login=%d",
+        guiMessageBox.id, registrationPrompt ? 1 : 0, loginPrompt ? 1 : 0);
 
     if (loginPrompt && !mPreLoginPasswordAutoSubmitted)
     {
@@ -194,7 +203,14 @@ void mwmp::GUIController::showInputBox(const BasePlayer::GUIMessageBox &guiMessa
     mInputBox = nullptr;
     windowManager->removeDialog(mAccountLoginBox);
     mAccountLoginBox = nullptr;
-    windowManager->pushGuiMode((MWGui::GuiMode)GM_TES3MP_InputBox);
+
+    // Do not stack the same TES3MP modal mode repeatedly when a server replaces
+    // one password prompt with another (login retry / registration). A duplicate
+    // mode can keep LocalPlayer::processCharGen() blocked even after the visible
+    // dialog has gone away.
+    const MWGui::GuiMode inputMode = (MWGui::GuiMode)GM_TES3MP_InputBox;
+    if (!windowManager->containsMode(inputMode))
+        windowManager->pushGuiMode(inputMode);
 
     if (preLoginAccountPrompt)
     {
@@ -270,35 +286,40 @@ void mwmp::GUIController::onAccountLoginDone(MWGui::WindowBase *parWindow)
     if (!mAccountLoginBox)
         return;
 
-    Settings::Manager::setString("password", "Login", mAccountLoginBox->getPassword());
-    Settings::Manager::setString("interface language", "General", mAccountLoginBox->getLanguage());
-    Settings::Manager::saveUser();
-    MWBase::Environment::get().getWindowManager()->setArenaLanguage(mAccountLoginBox->getLanguage());
+    // Capture everything before destroying the modal. In particular, close the
+    // TES3MP input GUI mode BEFORE the password reply is sent: registration can
+    // make the server answer with ID_PLAYER_CHARGEN immediately, and CharGen is
+    // intentionally blocked while any GUI mode is still active.
+    const std::string password = mAccountLoginBox->getPassword();
+    const std::string language = mAccountLoginBox->getLanguage();
+    const bool registration = mAccountLoginBox->isRegistrationMode();
 
-    // A manually submitted login attempt must also arm the retry state; otherwise
-    // a wrong password would be automatically resent once before the retry card
-    // could be shown. Registration is intentionally excluded from this fast-login
-    // state because it is never auto-submitted.
-    if (!mAccountLoginBox->isRegistrationMode())
+    Settings::Manager::setString("password", "Login", password);
+    Settings::Manager::setString("interface language", "General", language);
+    Settings::Manager::saveUser();
+    MWBase::Environment::get().getWindowManager()->setArenaLanguage(language);
+
+    if (!registration)
         mPreLoginPasswordAutoSubmitted = true;
 
-    // The account card is shown after the initial PlayerBaseInfo handshake, so a
-    // language selected here would otherwise remain client-only until the next
-    // connection. Re-send BaseInfo first. Player packets are RELIABLE_ORDERED on
-    // CHANNEL_PLAYER, therefore the server receives RU/EN before the following
-    // GUI password reply and can localize login/result messages immediately.
+    MWBase::WindowManager *windowManager = MWBase::Environment::get().getWindowManager();
+    windowManager->removeDialog(mAccountLoginBox);
+    mAccountLoginBox = nullptr;
+    windowManager->removeGuiMode((MWGui::GuiMode)GM_TES3MP_InputBox);
+
+    // The account card is shown after the initial PlayerBaseInfo handshake, so
+    // re-send the selected RU/EN flag before the password response. The server
+    // can then localise registration/login result messages for this player.
     LocalPlayer* localPlayer = Main::get().getLocalPlayer();
     localPlayer->updateLanguage();
     PlayerPacket* baseInfoPacket = Main::get().getNetworking()->getPlayerPacket(ID_PLAYER_BASEINFO);
     baseInfoPacket->setPlayer(localPlayer);
     baseInfoPacket->Send();
 
-    submitInputReply(mAccountLoginBox->getPassword());
-
-    MWBase::WindowManager *windowManager = MWBase::Environment::get().getWindowManager();
-    windowManager->removeDialog(mAccountLoginBox);
-    mAccountLoginBox = nullptr;
-    windowManager->popGuiMode();
+    LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO,
+        "Submitting ArenaMP %s password reply after closing TES3MP input mode",
+        registration ? "registration" : "login");
+    submitInputReply(password);
 }
 
 bool mwmp::GUIController::pressedKey(int key)
