@@ -8,6 +8,7 @@
 #include <components/openmw-mp/Base/BasePlayer.hpp>
 #include "GUI/PlayerMarkerCollection.hpp"
 #include "GUI/TextInputDialog.hpp"
+#include "GUI/GUILogin.hpp"
 
 namespace MWGui
 {
@@ -77,8 +78,12 @@ namespace mwmp
 
         long id;
         TextInputDialog *mInputBox;
+        GUILogin *mAccountLoginBox;
         GUIDialogList *mListBox;
+        bool mPreLoginPasswordAutoSubmitted;
         void onInputBoxDone(MWGui::WindowBase* parWindow);
+        void onAccountLoginDone(MWGui::WindowBase* parWindow);
+        void submitInputReply(const std::string& rawText);
         //MyGUI::Widget *oldFocusWidget, *currentFocusWidget;
     };
 }

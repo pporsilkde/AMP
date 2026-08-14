@@ -3,17 +3,54 @@
 
 #include "apps/openmw/mwgui/windowbase.hpp"
 
-class GUILogin : public MWGui::WindowModal
+namespace MyGUI
 {
-public:
-    GUILogin();
+    class Button;
+    class ComboBox;
+    class EditBox;
+}
 
-    MyGUI::EditBox* mLogin;
-    MyGUI::EditBox* mServer;
-    MyGUI::EditBox* mPort;
-protected:
-    MyGUI::Button* mConnect;
-};
+namespace mwmp
+{
+    /// ArenaMP account front-end used before the TES3MP base-info/login handshake.
+    /// It deliberately collects name + password + server-interface language in one
+    /// place; the password is then auto-submitted when the server sends its normal
+    /// PasswordDialog so the wire protocol stays compatible with existing servers.
+    class GUILogin : public MWGui::WindowModal
+    {
+    public:
+        GUILogin();
 
+        std::string getLogin() const;
+        std::string getPassword() const;
+        std::string getLanguage() const;
 
-#endif //OPENMW_GUILOGIN_HPP
+        void setLogin(const std::string& value);
+        void setPassword(const std::string& value);
+        void setLanguage(const std::string& value);
+        void setLoginEditable(bool editable);
+        void setRetryMode(bool retry);
+
+        void onOpen() override;
+        bool exit() override { return false; }
+
+        MWGui::EventHandle_WindowBase eventDone;
+
+    private:
+        void onConnect(MyGUI::Widget* sender);
+        void onLoginAccepted(MyGUI::Edit* sender);
+        void onPasswordAccepted(MyGUI::Edit* sender);
+        void onLanguageChanged(MyGUI::ComboBox* sender, size_t index);
+        void refreshStrings();
+        void applyLanguage(const std::string& language, bool persist);
+
+        MyGUI::EditBox* mLogin = nullptr;
+        MyGUI::EditBox* mPassword = nullptr;
+        MyGUI::ComboBox* mLanguage = nullptr;
+        MyGUI::Button* mConnect = nullptr;
+        bool mRetryMode = false;
+        bool mLoginEditable = true;
+    };
+}
+
+#endif // OPENMW_GUILOGIN_HPP

@@ -469,6 +469,8 @@ namespace MWBase
             /// Return the normalized ArenaMP interface language used by this client.
             /// The result is currently "ru" or "en".
             virtual std::string getArenaLanguage() const = 0;
+            /// Switch ArenaMP-owned UI/server-interface language at runtime.
+            virtual void setArenaLanguage(const std::string& language) = 0;
 
             virtual void watchActor(const MWWorld::Ptr& ptr) = 0;
             virtual MWWorld::Ptr getWatchedActor() const = 0;

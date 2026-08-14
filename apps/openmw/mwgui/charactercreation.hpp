@@ -18,11 +18,15 @@ namespace Resource
     class ResourceSystem;
 }
 
+namespace mwmp
+{
+    class GUILogin;
+}
+
 namespace MWGui
 {
     class WindowBase;
 
-    class TextInputDialog;
     class InfoBoxDialog;
     class RaceDialog;
     class DialogueWindow;
@@ -61,7 +65,7 @@ namespace MWGui
     std::map<int, MWMechanics::SkillValue> mPlayerSkillValues;
 
     //Dialogs
-    TextInputDialog* mNameDialog;
+    mwmp::GUILogin* mNameDialog;
     RaceDialog* mRaceDialog;
     ClassChoiceDialog* mClassChoiceDialog;
     InfoBoxDialog* mGenerateClassQuestionDialog;

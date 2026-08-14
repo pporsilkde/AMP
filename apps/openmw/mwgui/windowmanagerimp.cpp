@@ -1423,6 +1423,12 @@ namespace MWGui
         return mArenaLocalization ? mArenaLocalization->getLanguage() : "en";
     }
 
+    void WindowManager::setArenaLanguage(const std::string& language)
+    {
+        if (mArenaLocalization)
+            mArenaLocalization->setLanguage(language);
+    }
+
     void WindowManager::openBookWriter()
     {
         if (MWMechanics::isPlayerInCombat())

@@ -12,9 +12,22 @@ namespace MWGui
 {
     ArenaLocalization::ArenaLocalization(const VFS::Manager* vfs, ToUTF8::FromType encoding)
         : mVfs(vfs)
+        , mEncoding(encoding)
         , mLanguage(normaliseLanguage(Settings::Manager::getString("interface language", "General"), encoding))
     {
         load("en", mEnglish);
+        if (mLanguage != "en")
+            load(mLanguage, mCurrent);
+    }
+
+    void ArenaLocalization::setLanguage(const std::string& language)
+    {
+        const std::string normalized = normaliseLanguage(language, mEncoding);
+        if (normalized == mLanguage)
+            return;
+
+        mLanguage = normalized;
+        mCurrent.clear();
         if (mLanguage != "en")
             load(mLanguage, mCurrent);
     }

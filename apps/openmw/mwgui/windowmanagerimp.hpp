@@ -386,6 +386,7 @@ namespace MWGui
     void windowClosed() override;
     bool isWindowVisible() override;
     std::string getArenaLanguage() const override;
+    void setArenaLanguage(const std::string& language) override;
     void openBookWriter() override;
     void openBookWriter(const MWWorld::Ptr& source) override;
 

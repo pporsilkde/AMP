@@ -25,11 +25,11 @@
 */
 #include "../mwmp/Main.hpp"
 #include "../mwmp/LocalPlayer.hpp"
+#include "../mwmp/GUI/GUILogin.hpp"
 /*
     End of tes3mp addition
 */
 
-#include "textinput.hpp"
 #include "race.hpp"
 #include "class.hpp"
 #include "birth.hpp"
@@ -197,15 +197,19 @@ namespace MWGui
                 case GM_Name:
                     MWBase::Environment::get().getWindowManager()->removeDialog(mNameDialog);
                     mNameDialog = nullptr;
-                    mNameDialog = new TextInputDialog();
-                    mNameDialog->setTextLabel(MWBase::Environment::get().getWindowManager()->getGameSettingString("sName", "Name"));
+                    mNameDialog = new mwmp::GUILogin();
 
-                    // Reuse the last account/character name on the next connection. Keep an
-                    // in-progress name when the player goes back during character creation.
+                    // ArenaMP uses one account card instead of the old sequential
+                    // character-name and server-password dialogs. The actual TES3MP
+                    // password packet is still sent later when the server asks for it,
+                    // preserving compatibility with unmodified servers.
                     if (mPlayerName.empty())
                         mPlayerName = Settings::Manager::getString("name", "Login");
-                    mNameDialog->setTextInput(mPlayerName);
-                    mNameDialog->setNextButtonShow(mCreationStage >= CSE_NameChosen);
+                    mNameDialog->setLogin(mPlayerName);
+                    mNameDialog->setPassword(Settings::Manager::getString("password", "Login"));
+                    mNameDialog->setLanguage(Settings::Manager::getString("interface language", "General"));
+                    mNameDialog->setLoginEditable(true);
+                    mNameDialog->setRetryMode(false);
                     mNameDialog->eventDone += MyGUI::newDelegate(this, &CharacterCreation::onNameDialogDone);
                     mNameDialog->setVisible(true);
                     break;
@@ -467,7 +471,9 @@ namespace MWGui
     {
         if (mNameDialog)
         {
-            mPlayerName = mNameDialog->getTextInput();
+            mPlayerName = mNameDialog->getLogin();
+            const std::string loginPassword = mNameDialog->getPassword();
+            const std::string loginLanguage = mNameDialog->getLanguage();
 
             /*
                 Start of tes3mp change (major)
@@ -480,10 +486,14 @@ namespace MWGui
                 End of tes3mp change (major)
             */
 
-            // Store the name in the regular user settings file so the same field is
-            // automatically filled on the next launch.
+            // Keep account details in the regular user settings file. The language is
+            // also applied immediately so ID_PLAYER_BASEINFO reports the user's chosen
+            // server-interface language on this very connection.
             Settings::Manager::setString("name", "Login", mPlayerName);
+            Settings::Manager::setString("password", "Login", loginPassword);
+            Settings::Manager::setString("interface language", "General", loginLanguage);
             Settings::Manager::saveUser();
+            MWBase::Environment::get().getWindowManager()->setArenaLanguage(loginLanguage);
 
             MWBase::Environment::get().getMechanicsManager()->setPlayerName(mPlayerName);
             MWBase::Environment::get().getWindowManager()->removeDialog(mNameDialog);

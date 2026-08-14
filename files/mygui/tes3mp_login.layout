@@ -1,23 +1,36 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <MyGUI type="Layout" version="3.2.0">
-    <Widget type="Window" skin="MW_Dialog" position="0 0 600 600" layer="Windows" name="_Main">
-        <Widget type="TextBox" skin="ProgressText" position="6 6 300 18" align="Left Top" name="LabelName">
-            <Property key="TextAlign" value="Left Top"/>
-            <Property key="Caption" value="Login"/>
+    <Widget type="Window" skin="MW_Dialog" position="0 0 500 414" layer="Windows" align="Center" name="_Main">
+        <Widget type="ImageBox" skin="ImageBox" position="30 18 440 121" name="LoginBrand">
+            <Property key="ImageTexture" value="textures\menu_arenamw.png"/>
+            <Property key="NeedMouse" value="false"/>
         </Widget>
-        <Widget type="EditBox" skin="MW_TextEdit" position="6 28 300 30" align="Left Top" name="EditLogin"/>
-        <Widget type="TextBox" skin="ProgressText" position="6 58 300 18" align="Left Top" name="LabelServer">
-            <Property key="TextAlign" value="Left Top"/>
-            <Property key="Caption" value="Server address and port"/>
-        </Widget>
-        <Widget type="EditBox" skin="MW_TextEdit" position="6 80 300 30" align="Left Top" name="EditServer"/>
-        <Widget type="EditBox" skin="MW_TextEdit" position="306 80 80 30" align="Left Top" name="EditPort"/>
 
-        <Widget type="AutoSizedButton" skin="MW_Button" position="540 560 42 23" name="ButtonConnect">
+        <Widget type="TextBox" skin="ProgressText" position="30 146 440 24" name="LoginTitle">
+            <Property key="TextAlign" value="Center"/>
+            <Property key="FontHeight" value="18"/>
+        </Widget>
+        <Widget type="TextBox" skin="HeaderText" position="30 171 440 34" name="LoginSubtitle">
+            <Property key="TextAlign" value="Center Top"/>
+            <Property key="WordWrap" value="true"/>
+        </Widget>
+
+        <Widget type="TextBox" skin="ProgressText" position="34 214 208 18" name="LabelName"/>
+        <Widget type="TextBox" skin="ProgressText" position="258 214 208 18" name="LabelPassword"/>
+        <Widget type="EditBox" skin="MW_TextEdit" position="34 236 208 30" name="EditLogin"/>
+        <Widget type="EditBox" skin="MW_TextEdit" position="258 236 208 30" name="EditPassword"/>
+
+        <Widget type="TextBox" skin="ProgressText" position="34 280 432 18" name="LabelLanguage"/>
+        <Widget type="ComboBox" skin="MW_ComboBox" position="34 302 432 28" name="LanguageSelect"/>
+        <Widget type="TextBox" skin="HeaderText" position="34 334 432 32" name="LanguageHint">
+            <Property key="TextAlign" value="Left Top"/>
+            <Property key="WordWrap" value="true"/>
+        </Widget>
+
+        <Widget type="AutoSizedButton" skin="MW_Button" position="466 374 0 28" name="ButtonConnect">
             <Property key="ExpandDirection" value="Left"/>
-            <Property key="Caption" value="Connect"/>
+            <Property key="Caption" value="Continue"/>
         </Widget>
-
     </Widget>
     <CodeGeneratorSettings/>
 </MyGUI>

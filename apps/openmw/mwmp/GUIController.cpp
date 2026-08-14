@@ -35,7 +35,11 @@
 #include "PlayerList.hpp"
 
 
-mwmp::GUIController::GUIController(): mInputBox(0), mListBox(0)
+mwmp::GUIController::GUIController()
+    : mInputBox(nullptr)
+    , mAccountLoginBox(nullptr)
+    , mListBox(nullptr)
+    , mPreLoginPasswordAutoSubmitted(false)
 {
     mChat = nullptr;
     keySay = SDL_SCANCODE_Y;
@@ -53,6 +57,11 @@ void mwmp::GUIController::cleanUp()
     if (mChat != nullptr)
         delete mChat;
     mChat = nullptr;
+
+    // A fresh connection gets one automatic submission from the credentials
+    // collected by the account card, even if the previous connection ended
+    // before authentication completed.
+    mPreLoginPasswordAutoSubmitted = false;
 }
 
 void mwmp::GUIController::refreshGuiMode(MWGui::GuiMode guiMode)
@@ -158,60 +167,115 @@ void mwmp::GUIController::showCustomMessageBox(const BasePlayer::GUIMessageBox &
 void mwmp::GUIController::showInputBox(const BasePlayer::GUIMessageBox &guiMessageBox)
 {
     MWBase::WindowManager *windowManager = MWBase::Environment::get().getWindowManager();
-
-    windowManager->removeDialog(mInputBox);
-    windowManager->pushGuiMode((MWGui::GuiMode)GM_TES3MP_InputBox);
-    mInputBox = 0;
-    mInputBox = new TextInputDialog();
+    LocalPlayer* localPlayer = Main::get().getLocalPlayer();
 
     const bool passwordDialog = guiMessageBox.type == BasePlayer::GUIMessageBox::PasswordDialog;
-    const bool preLoginAccountPrompt = !Main::get().getLocalPlayer()->isLoggedIn();
+    const bool preLoginAccountPrompt = passwordDialog && !localPlayer->isLoggedIn();
+
+    // The first server password/register request is fulfilled from the password
+    // collected together with the player name in the ArenaMP login card. This
+    // keeps the established TES3MP protocol intact while removing the old second
+    // modal from the normal login path.
+    if (preLoginAccountPrompt && !mPreLoginPasswordAutoSubmitted)
+    {
+        const std::string savedPassword = Settings::Manager::getString("password", "Login");
+        if (!savedPassword.empty())
+        {
+            mPreLoginPasswordAutoSubmitted = true;
+            submitInputReply(savedPassword);
+            return;
+        }
+    }
+
+    windowManager->removeDialog(mInputBox);
+    mInputBox = nullptr;
+    windowManager->removeDialog(mAccountLoginBox);
+    mAccountLoginBox = nullptr;
+    windowManager->pushGuiMode((MWGui::GuiMode)GM_TES3MP_InputBox);
+
+    if (preLoginAccountPrompt)
+    {
+        // A repeated PasswordDialog means the automatic attempt was rejected (or
+        // no password was available). Reuse the same modern account card. The
+        // name is shown but locked because the server has already bound this
+        // connection to that account name; changing it requires reconnecting.
+        mAccountLoginBox = new GUILogin();
+        mAccountLoginBox->setLogin(Settings::Manager::getString("name", "Login"));
+        mAccountLoginBox->setPassword("");
+        mAccountLoginBox->setLanguage(Settings::Manager::getString("interface language", "General"));
+        mAccountLoginBox->setLoginEditable(false);
+        mAccountLoginBox->setRetryMode(true);
+        mAccountLoginBox->eventDone += MyGUI::newDelegate(this, &GUIController::onAccountLoginDone);
+        mAccountLoginBox->setVisible(true);
+        return;
+    }
+
+    // Ordinary server InputDialog/PasswordDialog windows used after login stay
+    // compact and keep their original semantics.
+    mInputBox = new TextInputDialog();
     mInputBox->setEditPassword(passwordDialog);
-    mInputBox->setLoginBrandVisible(preLoginAccountPrompt);
-
-    // Password dialogs shown before login are the account login/registration prompt.
-    // Fill them from the regular user settings file exactly as requested by the user.
-    if (passwordDialog && !Main::get().getLocalPlayer()->isLoggedIn())
-        mInputBox->setTextInput(Settings::Manager::getString("password", "Login"));
-
     mInputBox->setTextLabel(guiMessageBox.label);
     mInputBox->setTextNote(guiMessageBox.note);
-
     mInputBox->eventDone += MyGUI::newDelegate(this, &GUIController::onInputBoxDone);
-
     mInputBox->setVisible(true);
 }
 
-void mwmp::GUIController::onInputBoxDone(MWGui::WindowBase *parWindow)
+void mwmp::GUIController::submitInputReply(const std::string& rawText)
 {
     LocalPlayer *localPlayer = Main::get().getLocalPlayer();
-    std::string textInput = mInputBox->getTextInput();
+    std::string textInput = rawText;
 
-    // Send input for password dialogs after it's been hashed and rehashed, for some slight
-    // extra security that doesn't require the client to keep storing a salt
+    // Password dialogs use TES3MP's historical client-side double hashing. Keep
+    // the plain password only in local settings; the protocol payload remains
+    // exactly what existing servers expect.
     if (localPlayer->guiMessageBox.type == BasePlayer::GUIMessageBox::PasswordDialog)
     {
-        // Preserve the plain text entered for login/registration in settings.cfg before
-        // producing the protocol hash that is sent to the server.
         if (!localPlayer->isLoggedIn())
         {
-            Settings::Manager::setString("password", "Login", textInput);
+            Settings::Manager::setString("password", "Login", rawText);
             Settings::Manager::saveUser();
         }
 
         textInput = picosha2::hash256_hex_string(textInput);
-        textInput = picosha2::hash256_hex_string(textInput + picosha2::hash256_hex_string(picosha2::hash256_hex_string((textInput))));
+        textInput = picosha2::hash256_hex_string(textInput
+            + picosha2::hash256_hex_string(picosha2::hash256_hex_string(textInput)));
     }
 
     localPlayer->guiMessageBox.data = textInput;
 
     PlayerPacket *playerPacket = Main::get().getNetworking()->getPlayerPacket(ID_GUI_MESSAGEBOX);
-    playerPacket->setPlayer(Main::get().getLocalPlayer());
+    playerPacket->setPlayer(localPlayer);
     playerPacket->Send();
+}
+
+void mwmp::GUIController::onInputBoxDone(MWGui::WindowBase *parWindow)
+{
+    (void)parWindow;
+    submitInputReply(mInputBox->getTextInput());
 
     MWBase::WindowManager *windowManager = MWBase::Environment::get().getWindowManager();
     windowManager->removeDialog(mInputBox);
-    mInputBox = 0;
+    mInputBox = nullptr;
+    windowManager->popGuiMode();
+}
+
+void mwmp::GUIController::onAccountLoginDone(MWGui::WindowBase *parWindow)
+{
+    (void)parWindow;
+    if (!mAccountLoginBox)
+        return;
+
+    Settings::Manager::setString("password", "Login", mAccountLoginBox->getPassword());
+    Settings::Manager::setString("interface language", "General", mAccountLoginBox->getLanguage());
+    Settings::Manager::saveUser();
+    MWBase::Environment::get().getWindowManager()->setArenaLanguage(mAccountLoginBox->getLanguage());
+    Main::get().getLocalPlayer()->updateLanguage();
+
+    submitInputReply(mAccountLoginBox->getPassword());
+
+    MWBase::WindowManager *windowManager = MWBase::Environment::get().getWindowManager();
+    windowManager->removeDialog(mAccountLoginBox);
+    mAccountLoginBox = nullptr;
     windowManager->popGuiMode();
 }
 
@@ -274,6 +338,11 @@ void mwmp::GUIController::update(float dt)
 {
     if (mChat != nullptr)
         mChat->update(dt);
+
+    // Re-arm automatic credential submission only after a successful login, so
+    // a wrong password produces the retry card instead of an infinite resend loop.
+    if (Main::get().getLocalPlayer()->isLoggedIn())
+        mPreLoginPasswordAutoSubmitted = false;
 }
 
 void mwmp::GUIController::processCustomMessageBoxInput(int pressedButton)
@@ -294,8 +363,10 @@ void mwmp::GUIController::WM_UpdateVisible(MWGui::GuiMode mode)
     {
         case GM_TES3MP_InputBox:
         {
-            if (mInputBox != 0)
+            if (mInputBox != nullptr)
                 mInputBox->setVisible(true);
+            if (mAccountLoginBox != nullptr)
+                mAccountLoginBox->setVisible(true);
             break;
         }
         case GM_TES3MP_ListBox:

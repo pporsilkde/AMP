@@ -22,6 +22,7 @@ namespace MWGui
 
         std::string translate(const std::string& key) const;
         const std::string& getLanguage() const { return mLanguage; }
+        void setLanguage(const std::string& language);
 
     private:
         using Strings = std::map<std::string, std::string>;
@@ -32,6 +33,7 @@ namespace MWGui
         void load(const std::string& language, Strings& destination);
 
         const VFS::Manager* mVfs;
+        ToUTF8::FromType mEncoding;
         std::string mLanguage;
         Strings mEnglish;
         Strings mCurrent;

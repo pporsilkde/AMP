@@ -316,7 +316,17 @@ namespace MWWorld
                 continue;
             }
 
-            if (mwmp::Main::isInitialized())
+            // Important MP distinction:
+            // - forward pursuit through a player-used door was authorized while the
+            //   pursuer was still a LocalActor in the origin cell; after the player
+            //   changes cells TES3MP immediately uninitializes that LocalActor record.
+            //   Requiring isLocalActor() again here therefore cancels every delayed
+            //   chase 0.7-1.4 seconds later. Forward pursuit intentionally uses the
+            //   established follower-cell-change bypass, so let the queued transfer
+            //   finish even if the origin cell has already been unloaded.
+            // - ReturnHome is an autonomous AI move, not a follower transfer, and must
+            //   still be owned by the current cell authority at execution time.
+            if (it->mReturnHome && mwmp::Main::isInitialized())
             {
                 mwmp::CellController* controller = mwmp::Main::get().getCellController();
                 if (!controller || !controller->isLocalActor(actor))
