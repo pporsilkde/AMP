@@ -33,6 +33,10 @@ namespace MWMechanics
         bool mAttack;
         float mAttackRange;
         bool mCombatMove;
+        // Short melee commitment window. While active a close-range fighter
+        // keeps pressure on the target instead of repeatedly switching between
+        // circle/strafe/dodge/path decisions.
+        float mMeleeCommitTimer;
         osg::Vec3f mLastTargetPos;
         const MWWorld::CellStore* mCell;
         std::shared_ptr<Action> mCurrentAction;
@@ -113,6 +117,7 @@ namespace MWMechanics
         mAttack(false),
         mAttackRange(0.0f),
         mCombatMove(false),
+        mMeleeCommitTimer(0.0f),
         mLastTargetPos(0,0,0),
         mCell(nullptr),
         mCurrentAction(),
