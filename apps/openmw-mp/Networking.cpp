@@ -458,23 +458,35 @@ void Networking::revealPlayer(Player* player)
         }
     };
 
-    // Exchange complete snapshots in BOTH directions. This is deliberately done
-    // only after the joining player has finished authentication/CharGen, so neither
-    // side ever has to instantiate a temporary default-Dunmer representation.
-    for (const auto& entry : *players)
+    // Exchange snapshots only with players whose loaded-cell sets overlap.
+    //
+    // This is critical for instanced interiors. An ArenaMP instance such as
+    // "... - Instance for Alice" is a dynamic cell record sent only to Alice.
+    // Sending Bob's full presence (especially ID_PLAYER_CELL_CHANGE) to Alice
+    // while they are in different private instances makes Alice receive a cell
+    // that does not exist in her local store. It can leave a DedicatedPlayer in
+    // an invalid cross-instance state and has caused client crashes when the
+    // second player enters an instance of the same base interior.
+    //
+    // Player::forEachLoaded() is the server-side interest filter: it only visits
+    // authenticated players that share at least one currently loaded cell. If no
+    // overlap exists yet, ProcessorPlayerCellChange will perform the same complete
+    // exchange once the clients actually become mutually relevant.
+    std::size_t exchangedPeerCount = 0;
+    player->forEachLoaded([&sendSnapshot, &exchangedPeerCount](Player* subject, Player* other)
     {
-        Player* other = entry.second;
-        if (other == nullptr || other == player || !other->isVisibleToOthers()
-            || other->getLoadState() != Player::POSTLOADED)
-            continue;
-
-        sendSnapshot(player, other->guid);
-        sendSnapshot(other, player->guid);
+        sendSnapshot(subject, other->guid);
+        sendSnapshot(other, subject->guid);
+        ++exchangedPeerCount;
 
         LOG_APPEND(TimedLog::LOG_INFO,
-            "- Exchanged appearance snapshots: %s <-> %s",
-            player->npc.mName.c_str(), other->npc.mName.c_str());
-    }
+            "- Exchanged cell-local appearance snapshots: %s <-> %s",
+            subject->npc.mName.c_str(), other->npc.mName.c_str());
+    });
+
+    if (exchangedPeerCount == 0)
+        LOG_APPEND(TimedLog::LOG_INFO,
+            "- No shared loaded cells; remote presence exchange deferred until cell overlap");
 }
 
 void Networking::disconnectPlayer(RakNet::RakNetGUID guid)

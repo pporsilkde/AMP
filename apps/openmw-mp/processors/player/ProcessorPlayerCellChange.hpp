@@ -33,6 +33,11 @@ namespace mwmp
 
                 other->exchangeFullInfo = true;
 
+                // A remote DedicatedPlayer is created by ID_PLAYER_BASEINFO.
+                // Since revealPlayer() no longer publishes players globally across
+                // unrelated private instances, send authoritative BaseInfo first
+                // whenever two players actually share a loaded cell.
+                playerController->GetPacket(ID_PLAYER_BASEINFO)->setPlayer(other);
                 playerController->GetPacket(ID_PLAYER_STATS_DYNAMIC)->setPlayer(other);
                 playerController->GetPacket(ID_PLAYER_ATTRIBUTE)->setPlayer(other);
                 playerController->GetPacket(ID_PLAYER_POSITION)->setPlayer(other);
@@ -41,6 +46,7 @@ namespace mwmp
                 playerController->GetPacket(ID_PLAYER_ANIM_FLAGS)->setPlayer(other);
                 playerController->GetPacket(ID_PLAYER_SHAPESHIFT)->setPlayer(other);
 
+                playerController->GetPacket(ID_PLAYER_BASEINFO)->Send(pl->guid);
                 playerController->GetPacket(ID_PLAYER_STATS_DYNAMIC)->Send(pl->guid);
                 playerController->GetPacket(ID_PLAYER_ATTRIBUTE)->Send(pl->guid);
                 playerController->GetPacket(ID_PLAYER_POSITION)->Send(pl->guid);
@@ -49,6 +55,7 @@ namespace mwmp
                 playerController->GetPacket(ID_PLAYER_ANIM_FLAGS)->Send(pl->guid);
                 playerController->GetPacket(ID_PLAYER_SHAPESHIFT)->Send(pl->guid);
 
+                playerController->GetPacket(ID_PLAYER_BASEINFO)->setPlayer(pl);
                 playerController->GetPacket(ID_PLAYER_STATS_DYNAMIC)->setPlayer(pl);
                 playerController->GetPacket(ID_PLAYER_ATTRIBUTE)->setPlayer(pl);
                 playerController->GetPacket(ID_PLAYER_SKILL)->setPlayer(pl);
@@ -56,6 +63,7 @@ namespace mwmp
                 playerController->GetPacket(ID_PLAYER_ANIM_FLAGS)->setPlayer(pl);
                 playerController->GetPacket(ID_PLAYER_SHAPESHIFT)->setPlayer(pl);
 
+                playerController->GetPacket(ID_PLAYER_BASEINFO)->Send(other->guid);
                 playerController->GetPacket(ID_PLAYER_STATS_DYNAMIC)->Send(other->guid);
                 playerController->GetPacket(ID_PLAYER_ATTRIBUTE)->Send(other->guid);
                 playerController->GetPacket(ID_PLAYER_SKILL)->Send(other->guid);
