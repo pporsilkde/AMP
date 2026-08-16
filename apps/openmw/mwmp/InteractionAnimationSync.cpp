@@ -443,18 +443,18 @@ namespace mwmp
             && Settings::Manager::getBool("dynamic first person locomotion", "GUI"))
         {
             static const std::map<std::string, std::string> sFirstPersonGroups = {
-                { "walkforward", "walkforward_base" },
-                { "walkback", "walkback_base" },
-                { "walkleft", "walkleft_base" },
-                { "walkright", "walkright_base" },
-                { "runforward", "runforward_base" },
-                { "runback", "runback_base" },
-                { "runleft", "runleft_base" },
-                { "runright", "runright_base" },
-                { "sneakforward", "sneakforward_base" },
-                { "sneakback", "sneakback_base" },
-                { "sneakleft", "sneakleft_base" },
-                { "sneakright", "sneakright_base" },
+                { "walkforward", "WalkForward_base" },
+                { "walkback", "WalkBack_base" },
+                { "walkleft", "WalkLeft_base" },
+                { "walkright", "WalkRight_base" },
+                { "runforward", "RunForward_base" },
+                { "runback", "RunBack_base" },
+                { "runleft", "RunLeft_base" },
+                { "runright", "RunRight_base" },
+                { "sneakforward", "SneakForward_base" },
+                { "sneakback", "SneakBack_base" },
+                { "sneakleft", "SneakLeft_base" },
+                { "sneakright", "SneakRight_base" },
             };
             const auto found = sFirstPersonGroups.find(baseGroup);
             return found != sFirstPersonGroups.end() ? found->second : std::string();
@@ -467,7 +467,20 @@ namespace mwmp
         if (localPlayer || dedicatedPlayer)
         {
             if (baseGroup == "walkforward" || baseGroup == "runforward")
-                return getWalkAnimationStyle(ptr);
+            {
+                // The network token is intentionally lowercase, but KF text-key
+                // group matching is case-sensitive. Resolve it to the real group
+                // names used by the bundled Dynamic Animations files.
+                const std::string style = getWalkAnimationStyle(ptr);
+                if (style == "walkforward_dirn154")
+                    return "WalkForward_dirn154";
+                if (style == "walkforward_march154")
+                    return "WalkForward_march154";
+                if (style == "walkforward_mw")
+                    return "WalkForward_mw";
+                if (style == "walkforward_mwfem")
+                    return "WalkForward_mwFem";
+            }
             return std::string();
         }
 
@@ -505,16 +518,16 @@ namespace mwmp
         const bool beast = race == "argonian" || race == "khajiit";
 
         if (guard)
-            return "walkforward_march";
+            return "WalkForward_march";
         if (beast)
-            return "walkforward_spd09";
+            return "WalkForward_spd09";
         if (!npc->isMale()
             && (npcClass.find("noble") != std::string::npos
                 || npcClass.find("merchant") != std::string::npos
                 || race == "high elf"))
-            return "walkforward_noble";
+            return "WalkForward_noble";
         if (!npc->isMale())
-            return "walkforward_spd09";
-        return "walkforward_mw";
+            return "WalkForward_spd09";
+        return "WalkForward_mw";
     }
 }

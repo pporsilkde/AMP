@@ -1,4 +1,5 @@
 #include <components/openmw-mp/TimedLog.hpp>
+#include <cmath>
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/soundmanager.hpp"
@@ -79,6 +80,7 @@ void DedicatedActor::setCell(MWWorld::CellStore *cellStore)
 void DedicatedActor::move(float dt)
 {
     ESM::Position refPos = ptr.getRefData().getPosition();
+    const ESM::Position previousRefPos = refPos;
     MWBase::World *world = MWBase::Environment::get().getWorld();
     const int maxInterpolationDistance = 40;
 
@@ -87,6 +89,7 @@ void DedicatedActor::move(float dt)
 
     // Don't apply linear interpolation if the DedicatedActor has just gone through a cell change, because
     // the interpolated position will be invalid, causing a slight hopping glitch
+    const bool wasCellChange = hasChangedCell;
     if (shouldInterpolate && !hasChangedCell)
     {
         static const int timeMultiplier = 15;
@@ -103,7 +106,44 @@ void DedicatedActor::move(float dt)
         hasChangedCell = false;
     }
 
+    // First apply the exact movement input supplied by the cell authority, just
+    // like EncoreMP. Some scripted/root-motion NPC paths, however, legitimately
+    // arrive with a zero direction while their network target keeps moving. In
+    // that case the remote CharacterController sees an idle actor and the model
+    // slides. Recover locomotion from the SAME interpolation that is visibly
+    // moving the DedicatedActor, without changing the packet or server state.
     setMovementSettings();
+
+    MWMechanics::Movement *move = &ptr.getClass().getMovementSettings(ptr);
+    constexpr float directionEpsilon = 0.001f;
+    const bool hasNetworkTranslation =
+        std::abs(direction.pos[0]) > directionEpsilon ||
+        std::abs(direction.pos[1]) > directionEpsilon ||
+        std::abs(direction.pos[2]) > directionEpsilon;
+
+    if (!hasNetworkTranslation && shouldInterpolate && !wasCellChange)
+    {
+        const float targetDx = position.pos[0] - previousRefPos.pos[0];
+        const float targetDy = position.pos[1] - previousRefPos.pos[1];
+        const float targetHorizontalSquared = targetDx * targetDx + targetDy * targetDy;
+
+        const float visibleDx = refPos.pos[0] - previousRefPos.pos[0];
+        const float visibleDy = refPos.pos[1] - previousRefPos.pos[1];
+        const float visibleHorizontalSquared = visibleDx * visibleDx + visibleDy * visibleDy;
+
+        // Require both a real network target offset and visible interpolation.
+        // This avoids false walk cycles from sub-pixel jitter and never converts
+        // a cell change/teleport into locomotion.
+        if (targetHorizontalSquared > 0.01f && visibleHorizontalSquared > 0.0001f)
+        {
+            const float yaw = position.rot[2];
+            const float localForward = -targetDx * std::sin(yaw) + targetDy * std::cos(yaw);
+            move->mPosition[0] = 0.f;
+            move->mPosition[1] = localForward < -directionEpsilon ? -1.f : 1.f;
+            move->mPosition[2] = 0.f;
+        }
+    }
+
     world->rotateObject(ptr, position.rot[0], position.rot[1], position.rot[2]);
 }
 

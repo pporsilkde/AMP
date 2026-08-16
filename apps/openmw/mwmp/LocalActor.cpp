@@ -115,17 +115,11 @@ void LocalActor::updatePosition(bool forceUpdate)
             std::abs(direction.rot[2]) > directionEpsilon ||
             !MWBase::Environment::get().getWorld()->isOnGround(ptr);
 
-        // Some AI/scripted movement paths change the actor's world position
-        // without leaving a movement vector for TES3MP to copy from the
-        // CharacterController.  Send a visual locomotion direction as well as
-        // the position so remote clients do not render an idle NPC sliding.
-        const float horizontalDeltaSquared = dx * dx + dy * dy;
-        if (!hasTranslationDirection && horizontalDeltaSquared > 0.25f && horizontalDeltaSquared < 65536.f)
-        {
-            const float yaw = ptrPosition.rot[2];
-            const float localForward = -dx * std::sin(yaw) + dy * std::cos(yaw);
-            direction.pos[1] = localForward < -directionEpsilon ? -1.f : 1.f;
-        }
+        // Keep the movement vector exactly as CharacterController produced it.
+        // EncoreMP treats direction as authoritative movement input; synthesizing
+        // it here made packet state depend on network/update timing. We still use
+        // actualPositionChanged above so scripted/root-motion movement continues
+        // to send ActorPosition packets even when CharacterController has no input.
     }
 
     if (forceUpdate || posIsChanging || posWasChanged)
