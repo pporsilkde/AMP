@@ -102,3 +102,11 @@ BUILD FIX20 - GUILogin MSVC build fix
 - Removed accidental Qt QString usage from non-Qt tes3mp client target.
 - Russian language selector label is encoded as explicit UTF-8 bytes for MyGUI.
 - Keeps FIX19 appearance sync and FIX18 launcher/wizard UTF-8 localization intact.
+
+
+BUILD FIX21 - Authoritative Remote Appearance / Late BaseInfo Race Fix
+- Removed legacy second ID_PLAYER_BASEINFO RequestData from Networking::newPlayer().
+- Once a player is visible, server ignores late client BaseInfo packets instead of forwarding them.
+- Prevents correct Imperial/Argonian/Orc/etc snapshot from being overwritten by default Dark Elf ESM player data.
+- Shapeshift/scale packets are unaffected.
+- Server-side only; no protocol change.

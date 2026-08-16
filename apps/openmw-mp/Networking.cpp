@@ -185,14 +185,32 @@ void Networking::processPlayerPacket(RakNet::Packet *packet)
     {
         LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Received ID_PLAYER_BASEINFO about %s", player->npc.mName.c_str());
 
+        // ArenaMP authoritative appearance gate:
+        // ID_PLAYER_BASEINFO is needed while the player is still hidden so the
+        // server can learn the login/CharGen identity. Once revealPlayer() has
+        // published the final server-side character, however, the server must no
+        // longer accept unsolicited BaseInfo responses from the client.
+        //
+        // Vanilla TES3MP's legacy newPlayer() flow requested BaseInfo again after
+        // loading. That reply may arrive after authentication and contains the
+        // local ESM `player` template (Dark Elf) instead of the saved character.
+        // Forwarding it used to overwrite the correct Imperial/Argonian/etc.
+        // snapshot on every other client. Shapeshift/scale has its own packet and
+        // remains unaffected by this gate.
+        if (player->isVisibleToOthers())
+        {
+            LOG_APPEND(TimedLog::LOG_INFO,
+                "- Ignoring late client BaseInfo; authoritative appearance remains race=%s head=%s hair=%s model=%s flags=%u",
+                player->npc.mRace.c_str(), player->npc.mHead.c_str(), player->npc.mHair.c_str(),
+                player->npc.mModel.c_str(), static_cast<unsigned int>(player->npc.mFlags));
+            return;
+        }
+
         myPacket->setPlayer(player);
         myPacket->Read();
         player->language = player->language == "RU" ? "RU" : "EN";
         LOG_APPEND(TimedLog::LOG_INFO, "- Client language: %s", player->language.c_str());
-        if (player->isVisibleToOthers())
-            myPacket->Send(true);
-        else
-            LOG_APPEND(TimedLog::LOG_INFO, "- Presence is still hidden; BaseInfo kept server-side only");
+        LOG_APPEND(TimedLog::LOG_INFO, "- Presence is still hidden; BaseInfo kept server-side only");
     }
 
     if (player->getLoadState() == Player::NOTLOADED)
@@ -384,7 +402,11 @@ void Networking::update(RakNet::Packet *packet, RakNet::BitStream &bsIn)
 
 void Networking::newPlayer(RakNet::RakNetGUID guid)
 {
-    playerPacketController->GetPacket(ID_PLAYER_BASEINFO)->RequestData(guid);
+    // Do NOT request ID_PLAYER_BASEINFO here. ArenaMP already receives BaseInfo
+    // before OnPlayerConnect and keeps the player hidden until login/CharGen is
+    // complete. A second legacy request can return after revealPlayer() with the
+    // client's default ESM `player` (Dark Elf), racing and overwriting the final
+    // authoritative appearance. Other runtime state is still requested normally.
     playerPacketController->GetPacket(ID_PLAYER_STATS_DYNAMIC)->RequestData(guid);
     playerPacketController->GetPacket(ID_PLAYER_POSITION)->RequestData(guid);
     playerPacketController->GetPacket(ID_PLAYER_CELL_CHANGE)->RequestData(guid);
