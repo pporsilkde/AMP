@@ -19,12 +19,6 @@ void PacketPlayerBook::Packet(RakNet::BitStream *newBitstream, bool send)
 
     RW(count, send);
 
-    if (!send && count > 1024)
-    {
-        packetValid = false;
-        return;
-    }
-
     if (!send)
     {
         player->bookChanges.clear();

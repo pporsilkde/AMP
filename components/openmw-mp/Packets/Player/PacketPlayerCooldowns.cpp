@@ -19,12 +19,6 @@ void PacketPlayerCooldowns::Packet(RakNet::BitStream *newBitstream, bool send)
 
     RW(count, send);
 
-    if (!send && count > 512)
-    {
-        packetValid = false;
-        return;
-    }
-
     if (!send)
     {
         player->cooldownChanges.clear();

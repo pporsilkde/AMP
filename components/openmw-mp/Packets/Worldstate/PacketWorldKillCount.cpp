@@ -20,13 +20,6 @@ void PacketWorldKillCount::Packet(RakNet::BitStream *newBitstream, bool send)
 
     RW(killChangesCount, send);
 
-    if (!send && killChangesCount > 1024)
-    {
-        worldstate->isValid = false;
-        packetValid = false;
-        return;
-    }
-
     if (!send)
     {
         worldstate->killChanges.clear();

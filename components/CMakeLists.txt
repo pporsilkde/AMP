@@ -46,7 +46,7 @@ add_component_dir (vfs
     )
 
 add_component_dir (resource
-    scenemanager keyframemanager imagemanager bulletshapemanager bulletshape niffilemanager objectcache multiobjectcache resourcesystem
+    scenemanager keyframemanager imagemanager ktx2loader bulletshapemanager bulletshape niffilemanager objectcache multiobjectcache resourcesystem
     resourcemanager stats animation
     )
 
@@ -370,6 +370,10 @@ target_link_libraries(components
     LZ4::LZ4
     )
 ENDIF (BUILD_OPENMW OR BUILD_OPENCS)
+IF ((BUILD_OPENMW OR BUILD_OPENCS) AND OPENMW_USE_KTX2)
+    target_link_libraries(components ktx_read)
+    target_compile_definitions(components PRIVATE OPENMW_USE_KTX2=1)
+ENDIF()
 target_link_libraries(components
     ${Boost_SYSTEM_LIBRARY}
     ${Boost_FILESYSTEM_LIBRARY}

@@ -28,12 +28,6 @@ void PacketPlayerStatsDynamic::Packet(RakNet::BitStream *newBitstream, bool send
 
         RW(count, send);
 
-    if (!send && count > 3)
-    {
-        packetValid = false;
-        return;
-    }
-
         if (!send)
         {
             player->statsDynamicIndexChanges.clear();

@@ -2,7 +2,6 @@
 #define OPENMW_PROCESSORCONTAINER_HPP
 
 #include "../ObjectProcessor.hpp"
-#include "../../CoreArenaMPSecurity.hpp"
 
 namespace mwmp
 {
@@ -16,9 +15,6 @@ namespace mwmp
 
         void Do(ObjectPacket &packet, Player &player, BaseObjectList &objectList) override
         {
-            if (!CoreArenaMPSecurity::ValidateObjectInteraction(player, objectList, ID_CONTAINER))
-                return;
-
             LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Received %s from %s", strPacketID.c_str(), player.npc.mName.c_str());
             LOG_APPEND(TimedLog::LOG_INFO, "- action: %i", objectList.action);
 

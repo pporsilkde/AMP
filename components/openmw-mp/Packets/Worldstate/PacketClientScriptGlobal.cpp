@@ -20,13 +20,6 @@ void PacketClientScriptGlobal::Packet(RakNet::BitStream *newBitstream, bool send
 
     RW(clientGlobalsCount, send);
 
-    if (!send && clientGlobalsCount > 1024)
-    {
-        worldstate->isValid = false;
-        packetValid = false;
-        return;
-    }
-
     if (!send)
     {
         worldstate->clientGlobals.clear();

@@ -87,8 +87,6 @@ void PacketRecordDynamic::Packet(RakNet::BitStream *newBitstream, bool send)
         LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR, "Processed invalid ID_RECORD_DYNAMIC packet with %i records, above the maximum of %i",
             worldstate->recordsCount, maxRecords);
         LOG_APPEND(TimedLog::LOG_ERROR, "- The packet was ignored after that point");
-        worldstate->isValid = false;
-        packetValid = false;
         return;
     }
 
@@ -940,8 +938,6 @@ void PacketRecordDynamic::ProcessEffects(ESM::EffectList &effectList, bool send)
 
     if (effectCount > maxEffects)
     {
-        worldstate->isValid = false;
-        packetValid = false;
         return;
     }
 
@@ -975,8 +971,6 @@ void PacketRecordDynamic::ProcessBodyParts(ESM::PartReferenceList &partList, boo
 
     if (partCount > maxParts)
     {
-        worldstate->isValid = false;
-        packetValid = false;
         return;
     }
 
@@ -1007,8 +1001,6 @@ void PacketRecordDynamic::ProcessInventoryList(std::vector<mwmp::Item> &inventor
 
     if (itemCount > maxItems)
     {
-        worldstate->isValid = false;
-        packetValid = false;
         return;
     }
 

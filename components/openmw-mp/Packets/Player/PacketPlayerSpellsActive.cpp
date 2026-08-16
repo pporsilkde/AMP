@@ -21,12 +21,6 @@ void PacketPlayerSpellsActive::Packet(RakNet::BitStream *newBitstream, bool send
 
     RW(count, send);
 
-    if (!send && count > 512)
-    {
-        packetValid = false;
-        return;
-    }
-
     if (!send)
     {
         player->spellsActiveChanges.activeSpells.clear();
@@ -63,7 +57,6 @@ void PacketPlayerSpellsActive::Packet(RakNet::BitStream *newBitstream, bool send
 
         if (effectCount > maxEffects)
         {
-            packetValid = false;
             return;
         }
 

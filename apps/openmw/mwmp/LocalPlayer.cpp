@@ -395,11 +395,6 @@ LocalPlayer::LocalPlayer()
     isPlayingAnimation = false;
     diedSinceArrestAttempt = false;
 
-    mSecurityPositionInitialized = false;
-    mSecurityPositionTime = std::chrono::steady_clock::now();
-    mSecurityLastSpeedStrike = std::chrono::steady_clock::time_point::min();
-    mSecuritySpeedStrikes = 0;
-
     mPersistentAnimationActive = false;
     mPersistentAnimationPlaying = false;
     mPersistentAnimationBlendMask = MWRender::Animation::BlendMask_All;
@@ -746,64 +741,15 @@ bool LocalPlayer::validateOutgoingPosition()
     if (!finitePosition(position) || !finitePosition(direction))
     {
         LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
-            "CoreArenaMP client security: blocked invalid outgoing position");
+            "CoreArenaMP data guard: blocked non-finite/absurd outgoing position");
         return false;
     }
-
-    const auto now = std::chrono::steady_clock::now();
-    if (!mSecurityPositionInitialized)
-    {
-        mSecurityPositionInitialized = true;
-        mSecurityLastPosition = position;
-        mSecurityPositionTime = now;
-        return true;
-    }
-
-    double dt = std::chrono::duration<double>(now - mSecurityPositionTime).count();
-    if (dt <= 0.0)
-        dt = 0.001;
-    if (dt > 5.0)
-    {
-        mSecurityLastPosition = position;
-        mSecurityPositionTime = now;
-        mSecuritySpeedStrikes = 0;
-        return true;
-    }
-
-    const double dx = position.pos[0] - mSecurityLastPosition.pos[0];
-    const double dy = position.pos[1] - mSecurityLastPosition.pos[1];
-    const double dz = position.pos[2] - mSecurityLastPosition.pos[2];
-    const double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
-    const double speed = distance / std::max(dt, 0.01);
-    const bool suspicious = distance > 4096.0 || (distance > 128.0 && speed > 1600.0);
-
-    if (suspicious)
-    {
-        const double sinceStrike = mSecurityLastSpeedStrike == std::chrono::steady_clock::time_point::min()
-            ? 999.0 : std::chrono::duration<double>(now - mSecurityLastSpeedStrike).count();
-        mSecurityLastSpeedStrike = now;
-        mSecuritySpeedStrikes = sinceStrike <= 3.0 ? mSecuritySpeedStrikes + 1 : 1;
-        if (mSecuritySpeedStrikes >= 2)
-        {
-            // Do not hide the sample from the authoritative server. It will
-            // reject and correct repeated impossible movement. Suppressing the
-            // packet here would let a memory-edited local world drift away
-            // without giving the server a chance to snap it back.
-            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
-                "CoreArenaMP client security: suspicious movement flagged for server validation (%.0f units/s)", speed);
-        }
-    }
-
-    mSecurityLastPosition = position;
-    mSecurityPositionTime = now;
     return true;
 }
 
 void LocalPlayer::resetOutgoingPositionSecurity()
 {
-    mSecurityPositionInitialized = false;
-    mSecuritySpeedStrikes = 0;
-    mSecurityLastSpeedStrike = std::chrono::steady_clock::time_point::min();
+    // Behavioral movement/speed detection intentionally disabled.
 }
 
 void LocalPlayer::updatePosition(bool forceUpdate)

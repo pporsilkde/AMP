@@ -78,7 +78,7 @@ function BaseScript.Initialize()
     BaseScript.RegisterModule("CoreArenaMP_BaseScript", BaseScript.version)
     BaseScript.RegisterModule("CoreArenaMP_DataManager", "1.1")
     log(enumerations.log.INFO,
-        "DataManager, protected hooks and native C++ security layer initialized")
+        "DataManager and native C++ data-tamper guard initialized")
     return true
 end
 

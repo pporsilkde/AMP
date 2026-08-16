@@ -94,6 +94,24 @@ std::string Misc::ResourceHelpers::correctResourcePath(const std::string &topLev
 
     std::string origExt = correctedPath;
 
+    // CoreArenaMP KTX2: keep NIF/ESM references untouched. A texture referenced
+    // as foo.dds or foo.tga can be transparently overridden by foo.ktx2.
+    // This makes gradual asset conversion safe and keeps vanilla/mod fallback.
+    std::string ktx2Path = correctedPath;
+    const std::string::size_type extPos = findExtension(ktx2Path);
+    if (extPos != std::string::npos)
+        ktx2Path.replace(extPos, ktx2Path.length() - extPos, ".ktx2");
+    else
+        ktx2Path += ".ktx2";
+
+    if (vfs->exists(ktx2Path))
+        return ktx2Path;
+
+    // Keep the old top-level basename fallback behavior for KTX2 as well.
+    std::string ktx2Fallback = topLevelDirectory + "\\" + getBasename(ktx2Path);
+    if (vfs->exists(ktx2Fallback))
+        return ktx2Fallback;
+
     // since we know all (GOTY edition or less) textures end
     // in .dds, we change the extension
     bool changedToDds = changeExtensionToDds(correctedPath);

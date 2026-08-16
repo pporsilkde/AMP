@@ -148,12 +148,6 @@ namespace mwmp
         bool validateOutgoingPosition();
         void resetOutgoingPositionSecurity();
 
-        bool mSecurityPositionInitialized;
-        ESM::Position mSecurityLastPosition;
-        std::chrono::steady_clock::time_point mSecurityPositionTime;
-        std::chrono::steady_clock::time_point mSecurityLastSpeedStrike;
-        unsigned mSecuritySpeedStrikes;
-
         bool mPersistentAnimationActive;
         bool mPersistentAnimationPlaying;
         std::string mPersistentAnimationGroup;

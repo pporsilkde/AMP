@@ -2,7 +2,6 @@
 #define OPENMW_BASEPACKET_HPP
 
 #include <string>
-#include <type_traits>
 #include <RakNetTypes.h>
 #include <BitStream.h>
 #include <PacketPriority.h>
@@ -50,19 +49,10 @@ namespace mwmp
         bool RW(templateType &data, uint32_t size, bool write)
         {
             if (write)
-            {
                 bs->Write(data, size);
-                return true;
-            }
-
-            const bool result = bs->Read(data, size);
-            if (!result)
-            {
-                packetValid = false;
-                if constexpr (std::is_arithmetic_v<templateType> || std::is_enum_v<templateType>)
-                    data = templateType{};
-            }
-            return result;
+            else
+                return bs->Read(data, size);
+            return true;
         }
 
         template<class templateType>
@@ -76,32 +66,22 @@ namespace mwmp
                     bs->Write(data);
                 return true;
             }
-
-            const bool result = compress ? bs->ReadCompressed(data) : bs->Read(data);
-            if (!result)
+            else
             {
-                packetValid = false;
-                if constexpr (std::is_arithmetic_v<templateType> || std::is_enum_v<templateType>)
-                    data = templateType{};
+                if (compress)
+                    return bs->ReadCompressed(data);
+                else
+                    return bs->Read(data);
             }
-            return result;
         }
 
         bool RW(bool &data, bool write)
         {
             if (write)
-            {
                 bs->Write(data);
-                return true;
-            }
-
-            const bool result = bs->Read(data);
-            if (!result)
-            {
-                packetValid = false;
-                data = false;
-            }
-            return result;
+            else
+                return bs->Read(data);
+            return true;
         }
 
         const static uint32_t maxStrSize = 64 * 1024; // 64 KiB
@@ -130,18 +110,11 @@ namespace mwmp
 
                 if (res)
                 {
-                    if (rstr.GetLength() > maxSize)
-                    {
-                        packetValid = false;
-                        rstr.Truncate(maxSize);
-                    }
+                    rstr.Truncate(rstr.GetLength() > maxSize ? maxSize : rstr.GetLength());
                     str = rstr.C_String();
                 }
                 else
-                {
-                    packetValid = false;
                     str = std::string();
-                }
             }
             return res;
         }

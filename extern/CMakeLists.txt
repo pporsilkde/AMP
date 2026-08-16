@@ -15,6 +15,49 @@ macro(FetchContent_MakeAvailableExcludeFromAll)
     endforeach()
 endmacro()
 
+# CoreArenaMP native KTX2 support. KTX-Software 4.4.2 is pinned because it is
+# the stable libktx line used by this legacy OpenMW/TES3MP branch. Only the
+# read/transcode library is built; tools, tests and GPU upload helpers are off.
+if(OPENMW_USE_KTX2 AND (BUILD_OPENMW OR BUILD_OPENCS))
+    if(CMAKE_VERSION VERSION_LESS 3.22)
+        message(FATAL_ERROR "OPENMW_USE_KTX2 requires CMake 3.22 or newer (KTX-Software 4.4.2).")
+    endif()
+
+    include(FetchContent)
+    set(KTX_FEATURE_TOOLS OFF CACHE BOOL "" FORCE)
+    set(KTX_FEATURE_TESTS OFF CACHE BOOL "" FORCE)
+    set(KTX_FEATURE_DOC OFF CACHE BOOL "" FORCE)
+    set(KTX_FEATURE_GL_UPLOAD OFF CACHE BOOL "" FORCE)
+    set(KTX_FEATURE_VK_UPLOAD OFF CACHE BOOL "" FORCE)
+    set(KTX_FEATURE_KTX1 OFF CACHE BOOL "" FORCE)
+    set(KTX_FEATURE_KTX2 ON CACHE BOOL "" FORCE)
+    set(KTX_FEATURE_LOADTEST_APPS OFF CACHE STRING "" FORCE)
+    set(KTX_FEATURE_ETC_UNPACK OFF CACHE BOOL "" FORCE)
+
+    if(DEFINED BUILD_SHARED_LIBS)
+        set(_arenamp_had_build_shared_libs TRUE)
+        set(_arenamp_saved_build_shared_libs ${BUILD_SHARED_LIBS})
+    else()
+        set(_arenamp_had_build_shared_libs FALSE)
+    endif()
+
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(ktxsoftware
+        URL https://github.com/KhronosGroup/KTX-Software/archive/refs/tags/v4.4.2.zip
+        SOURCE_DIR fetched/ktxsoftware
+    )
+    FetchContent_MakeAvailableExcludeFromAll(ktxsoftware)
+
+    if(_arenamp_had_build_shared_libs)
+        set(BUILD_SHARED_LIBS ${_arenamp_saved_build_shared_libs} CACHE BOOL "" FORCE)
+    else()
+        unset(BUILD_SHARED_LIBS CACHE)
+        unset(BUILD_SHARED_LIBS)
+    endif()
+    unset(_arenamp_had_build_shared_libs)
+    unset(_arenamp_saved_build_shared_libs)
+endif()
+
 if(NOT OPENMW_USE_SYSTEM_BULLET)
     cmake_minimum_required(VERSION 3.11) # for FetchContent
 

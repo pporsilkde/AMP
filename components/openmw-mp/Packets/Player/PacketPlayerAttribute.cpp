@@ -29,12 +29,6 @@ void PacketPlayerAttribute::Packet(RakNet::BitStream *newBitstream, bool send)
 
         RW(count, send);
 
-    if (!send && count > 8)
-    {
-        packetValid = false;
-        return;
-    }
-
         if (!send)
         {
             player->attributeIndexChanges.clear();

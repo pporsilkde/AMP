@@ -980,13 +980,10 @@ bool mwmp::CoreArenaMPSecurity::ValidatePlayerPacket(Player& player, std::uint8_
                     || (key.type != mwmp::QuickKey::UNASSIGNED && !saneId(key.itemId))) valid = false;
             break;
         case ID_PLAYER_CELL_STATE:
-            valid = player.cellStateChanges.size() <= 256;
-            for (const mwmp::CellState& state : player.cellStateChanges)
-                if ((state.type != mwmp::CellState::LOAD && state.type != mwmp::CellState::UNLOAD)
-                    || !saneCell(state.cell)) valid = false;
-            break;
         case ID_PLAYER_CELL_CHANGE:
-            valid = finiteVector3(player.previousCellPosition.pos) && saneCell(player.cell);
+            // Behavioral/cell-transition anti-cheat is intentionally disabled.
+            // Stock TES3MP handles these packets unchanged.
+            valid = true;
             break;
         case ID_PLAYER_ANIM_PLAY:
             valid = saneAnimation(player.animation);
@@ -1022,91 +1019,19 @@ bool mwmp::CoreArenaMPSecurity::ValidatePlayerPacket(Player& player, std::uint8_
         return false;
     }
 
-    if (!checkRate(player, packetId))
-    {
-        LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
-            "CoreArenaMP security: rate-limited player packet %u from pid %u",
-            static_cast<unsigned>(packetId), player.getId());
-        return false;
-    }
     return true;
 }
 
 bool mwmp::CoreArenaMPSecurity::ValidatePlayerPosition(Player& player)
 {
-    if (!checkRate(player, ID_PLAYER_POSITION, 240))
-    {
-        LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
-            "CoreArenaMP security: rate-limited position packets from pid %u", player.getId());
-        return false;
-    }
-
-    const Clock::time_point now = Clock::now();
-    std::lock_guard<std::mutex> lock(sMutex);
-    SecurityState& state = sStates[player.guid.g];
-
+    // Speed/teleport/rate behavior checks are intentionally disabled.
+    // Only reject values that cannot represent a legitimate numeric state.
     if (!finitePosition(player.position) || !finitePosition(player.direction))
     {
         LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
-            "CoreArenaMP security: rejected non-finite/absurd position from pid %u", player.getId());
-        if (state.positionInitialized)
-        {
-            player.position = state.acceptedPosition;
-            player.direction = state.acceptedDirection;
-        }
+            "CoreArenaMP data guard: rejected non-finite/absurd position from pid %u", player.getId());
         return false;
     }
-
-    if (!state.positionInitialized)
-    {
-        state.positionInitialized = true;
-        state.acceptedPosition = player.position;
-        state.acceptedDirection = player.direction;
-        state.positionTime = now;
-        return true;
-    }
-
-    double dt = std::chrono::duration<double>(now - state.positionTime).count();
-    if (dt <= 0.0) dt = 0.001;
-    if (dt > 5.0)
-    {
-        state.acceptedPosition = player.position;
-        state.acceptedDirection = player.direction;
-        state.positionTime = now;
-        state.speedStrikes = 0;
-        return true;
-    }
-
-    const double dx = static_cast<double>(player.position.pos[0] - state.acceptedPosition.pos[0]);
-    const double dy = static_cast<double>(player.position.pos[1] - state.acceptedPosition.pos[1]);
-    const double dz = static_cast<double>(player.position.pos[2] - state.acceptedPosition.pos[2]);
-    const double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
-    const double speed = distance / std::max(dt, 0.01);
-    const bool suspicious = distance > 4096.0 || (distance > 128.0 && speed > 1600.0);
-
-    if (suspicious)
-    {
-        const double sinceStrike = state.lastSpeedStrike == Clock::time_point::min()
-            ? 999.0 : std::chrono::duration<double>(now - state.lastSpeedStrike).count();
-        state.lastSpeedStrike = now;
-        state.speedStrikes = sinceStrike <= 3.0 ? state.speedStrikes + 1 : 1;
-
-        // Never accept the first anomalous jump into the authoritative state.
-        // Strikes are kept only to distinguish a single lag spike from repeated
-        // speed-hack behaviour in logs; both are snapped back safely.
-        LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
-            "CoreArenaMP security: dropped suspicious movement from pid %u (%.0f units/s, %.0f units, strike %u)",
-            player.getId(), speed, distance, state.speedStrikes);
-        player.position = state.acceptedPosition;
-        player.direction = state.acceptedDirection;
-        return false;
-    }
-    else if (state.speedStrikes > 0 && std::chrono::duration<double>(now - state.lastSpeedStrike).count() > 2.0)
-        --state.speedStrikes;
-
-    state.acceptedPosition = player.position;
-    state.acceptedDirection = player.direction;
-    state.positionTime = now;
     return true;
 }
 
@@ -1131,296 +1056,38 @@ bool mwmp::CoreArenaMPSecurity::ValidatePlayerInventory(Player& player)
                 "CoreArenaMP security: rejected invalid inventory item data from pid %u", player.getId());
             return false;
         }
-        totalCount += item.count;
-        if (totalCount > 2000000)
-        {
-            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
-                "CoreArenaMP security: rejected excessive inventory delta from pid %u", player.getId());
-            return false;
-        }
     }
 
-    if (!checkRate(player, ID_PLAYER_INVENTORY))
-    {
-        LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
-            "CoreArenaMP security: rate-limited inventory changes from pid %u", player.getId());
-        return false;
-    }
     return true;
 }
 
 bool mwmp::CoreArenaMPSecurity::ValidateObjectPacket(
-    Player& player, const BaseObjectList& objectList, std::uint8_t packetId)
+    Player&, const BaseObjectList&, std::uint8_t)
 {
-    if (objectList.packetOrigin > mwmp::SERVER_SCRIPT || objectList.packetOrigin == mwmp::SERVER_SCRIPT
-        || objectList.originClientScript.size() > 256 || objectList.baseObjects.size() > 1024 || !saneCell(objectList.cell))
-        return false;
-
-    if (packetId == ID_CONSOLE_COMMAND
-        && (!player.consoleAllowed || objectList.consoleCommand.empty() || objectList.consoleCommand.size() > 4096))
-        return false;
-
-    for (const BaseObject& object : objectList.baseObjects)
-        if (!finiteObject(object, packetId))
-        {
-            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
-                "CoreArenaMP security: rejected invalid object/numeric data in packet %u from pid %u",
-                static_cast<unsigned>(packetId), player.getId());
-            return false;
-        }
-
-    if (!checkRate(player, packetId, 256))
-    {
-        LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
-            "CoreArenaMP security: rate-limited object packet %u from pid %u",
-            static_cast<unsigned>(packetId), player.getId());
-        return false;
-    }
     return true;
 }
-
 bool mwmp::CoreArenaMPSecurity::ValidateObjectInteraction(
-    Player& player, const BaseObjectList& objectList, std::uint8_t packetId)
+    Player&, const BaseObjectList&, std::uint8_t)
 {
-    // The generic ObjectProcessor already ran ValidateObjectPacket before this
-    // packet-specific interaction validator. Do not deserialize/rate-count the
-    // same packet twice here.
-    if (objectList.baseObjects.empty() || objectList.baseObjects.size() > 256)
-        return false;
-    if ((packetId == ID_OBJECT_ACTIVATE || packetId == ID_OBJECT_DIALOGUE_CHOICE) && objectList.baseObjects.size() != 1)
-        return false;
-    if (packetId == ID_CONTAINER && objectList.baseObjects.size() > 8)
-        return false;
-    if (packetId == ID_CONTAINER && (objectList.action > BaseObjectList::REQUEST
-        || objectList.containerSubAction > BaseObjectList::RESTOCK_RESULT))
-        return false;
-    if (packetId == ID_CONTAINER)
-    {
-        for (const BaseObject& object : objectList.baseObjects)
-        {
-            for (const ContainerItem& item : object.containerItems)
-            {
-                if ((objectList.action == BaseObjectList::SET || objectList.action == BaseObjectList::ADD)
-                    && item.count <= 0)
-                    return false;
-                if (objectList.action == BaseObjectList::REMOVE && item.actionCount <= 0)
-                    return false;
-            }
-        }
-    }
-
-    if (packetId == ID_OBJECT_ACTIVATE && objectList.packetOrigin == mwmp::CLIENT_GAMEPLAY)
-    {
-        const BaseObject& object = objectList.baseObjects.front();
-        if (!object.activatingActor.isPlayer || object.activatingActor.guid.g != player.guid.g)
-        {
-            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
-                "CoreArenaMP security: rejected spoofed activating actor from pid %u", player.getId());
-            return false;
-        }
-    }
-
-    if (!checkRate(player, packetId))
-    {
-        LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
-            "CoreArenaMP security: rate-limited %s from pid %u", packetName(packetId), player.getId());
-        return false;
-    }
-
-    const Clock::time_point now = Clock::now();
-    std::lock_guard<std::mutex> lock(sMutex);
-    SecurityState& state = sStates[player.guid.g];
-    const std::string key = interactionKey(objectList, packetId);
-    if (!state.interactionKey.empty() && !key.empty())
-    {
-        const double age = std::chrono::duration<double>(now - state.interactionTime).count();
-        const bool mixedInteraction = state.interactionPacket != packetId;
-        const bool differentTarget = state.interactionKey != key;
-        if (age < 0.25 && mixedInteraction && differentTarget)
-        {
-            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
-                "CoreArenaMP security: blocked concurrent interaction from pid %u", player.getId());
-            return false;
-        }
-    }
-    state.interactionKey = key;
-    state.interactionPacket = packetId;
-    state.interactionTime = now;
-
-    // Authoritative cross-player locks adapted from the old Nirn lock concept.
-    // Container packets may contain several objects, so every object is checked
-    // before any lease is acquired. This makes the acquisition effectively
-    // atomic: a rejected multi-container packet never leaves a partial lock.
-    std::vector<std::string> lockKeys;
-    lockKeys.reserve(objectList.baseObjects.size());
-    for (const BaseObject& object : objectList.baseObjects)
-    {
-        const std::string objectKey = interactionKeyForObject(objectList, object, packetId);
-        if (!objectKey.empty())
-            lockKeys.push_back(objectKey);
-    }
-
-    for (const std::string& objectKey : lockKeys)
-    {
-        auto it = sInteractionLocks.find(objectKey);
-        if (it == sInteractionLocks.end())
-            continue;
-        const double lockAge = std::chrono::duration<double>(now - it->second.touched).count();
-        if (it->second.ownerGuid != 0 && it->second.ownerGuid != player.guid.g && lockAge < 8.0)
-        {
-            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
-                "CoreArenaMP security: blocked cross-player object race on %s from pid %u",
-                packetName(packetId), player.getId());
-            return false;
-        }
-    }
-
-    for (const std::string& objectKey : lockKeys)
-    {
-        InteractionLock& targetLock = sInteractionLocks[objectKey];
-        targetLock.ownerGuid = player.guid.g;
-        targetLock.touched = now;
-    }
-
-    if (sInteractionLocks.size() > 4096)
-    {
-        for (auto it = sInteractionLocks.begin(); it != sInteractionLocks.end();)
-        {
-            if (std::chrono::duration<double>(now - it->second.touched).count() > 12.0)
-                it = sInteractionLocks.erase(it);
-            else
-                ++it;
-        }
-    }
     return true;
 }
-
 bool mwmp::CoreArenaMPSecurity::ValidateActorPacket(
-    Player& player, const BaseActorList& actorList, std::uint8_t packetId)
+    Player&, const BaseActorList&, std::uint8_t)
 {
-    if (actorList.baseActors.size() > 1024 || !saneCell(actorList.cell))
-        return false;
-    if (packetId == ID_ACTOR_LIST && actorList.action > mwmp::BaseActorList::REQUEST)
-        return false;
-
-    // Actor state is authoritative per cell. The stock processors already
-    // enforced this for movement/combat, but AI/equipment/list/test packets
-    // historically reached Lua or other clients from any cell visitor. Keep
-    // the follower cell-change exception in its dedicated processor; every
-    // other client-originated actor-state packet must come from the cell
-    // authority. This also prevents a modified client from rewriting NPC state.
-    if (packetId != ID_ACTOR_CELL_CHANGE)
-    {
-        Cell* serverCell = CellController::get()->getCell(const_cast<ESM::Cell*>(&actorList.cell));
-        if (serverCell == nullptr || serverCell->getAuthority() == nullptr
-            || *serverCell->getAuthority() != actorList.guid)
-        {
-            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
-                "CoreArenaMP security: rejected non-authoritative actor packet %u from pid %u",
-                static_cast<unsigned>(packetId), player.getId());
-            return false;
-        }
-
-        // A client never needs to request an actor list from the server;
-        // REQUEST is server->client. The legitimate reply is SET from the
-        // authority selected for the cell.
-        if (packetId == ID_ACTOR_LIST && actorList.action == mwmp::BaseActorList::REQUEST)
-            return false;
-    }
-
-    for (const BaseActor& actor : actorList.baseActors)
-        if (!saneActor(actor, packetId))
-        {
-            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
-                "CoreArenaMP security: rejected invalid actor/numeric packet %u from pid %u",
-                static_cast<unsigned>(packetId), player.getId());
-            return false;
-        }
-    return checkRate(player, packetId, 128);
+    return true;
 }
-
 bool mwmp::CoreArenaMPSecurity::ValidateWorldstatePacket(
-    Player& player, const BaseWorldstate& worldstate, std::uint8_t packetId)
+    Player&, const BaseWorldstate&, std::uint8_t)
 {
-    bool valid = true;
-    switch (packetId)
-    {
-        case ID_CLIENT_SCRIPT_GLOBAL:
-            valid = worldstate.clientGlobals.size() <= 1024;
-            for (const mwmp::ClientVariable& variable : worldstate.clientGlobals)
-            {
-                if (!saneId(variable.id) || variable.variableType < mwmp::VARIABLE_TYPE::SHORT
-                    || variable.variableType > mwmp::VARIABLE_TYPE::STRING) valid = false;
-                if (variable.variableType == mwmp::VARIABLE_TYPE::FLOAT && !finiteBounded(variable.floatValue)) valid = false;
-                if ((variable.variableType == mwmp::VARIABLE_TYPE::SHORT || variable.variableType == mwmp::VARIABLE_TYPE::LONG
-                    || variable.variableType == mwmp::VARIABLE_TYPE::INT) && !boundedSigned(variable.intValue, kHugeInt)) valid = false;
-                if (variable.variableType == mwmp::VARIABLE_TYPE::STRING && variable.stringValue.size() > 65536) valid = false;
-            }
-            break;
-        case ID_WORLD_KILL_COUNT:
-            valid = worldstate.killChanges.size() <= 1024;
-            for (const mwmp::Kill& kill : worldstate.killChanges)
-                if (!saneId(kill.refId) || kill.number < 0 || kill.number > 10000000) valid = false;
-            break;
-        case ID_WORLD_MAP:
-            valid = worldstate.mapTiles.size() <= 1024;
-            for (const mwmp::MapTile& tile : worldstate.mapTiles)
-                if (!boundedSigned(tile.x, 1000000) || !boundedSigned(tile.y, 1000000)
-                    || tile.imageData.size() > static_cast<std::size_t>(mwmp::maxImageDataSize)) valid = false;
-            break;
-        case ID_WORLD_WEATHER:
-            valid = saneId(worldstate.weather.region, true) && worldstate.weather.currentWeather >= -1 && worldstate.weather.currentWeather <= 64
-                && worldstate.weather.nextWeather >= -1 && worldstate.weather.nextWeather <= 64
-                && worldstate.weather.queuedWeather >= -1 && worldstate.weather.queuedWeather <= 64
-                && finiteNonNegative(worldstate.weather.transitionFactor, 1.01f);
-            break;
-        case ID_RECORD_DYNAMIC:
-            valid = saneClientCreatedDynamicRecords(worldstate);
-            break;
-        default:
-            break;
-    }
-
-    if (!valid)
-    {
-        LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
-            "CoreArenaMP security: rejected invalid world/numeric packet %u from pid %u",
-            static_cast<unsigned>(packetId), player.getId());
-        return false;
-    }
-    return checkRate(player, packetId, 64);
+    return true;
 }
-
-void mwmp::CoreArenaMPSecurity::ResetPosition(Player& player)
+void mwmp::CoreArenaMPSecurity::ResetPosition(Player&)
 {
-    std::lock_guard<std::mutex> lock(sMutex);
-    SecurityState& state = sStates[player.guid.g];
-    state.positionInitialized = false;
-    state.speedStrikes = 0;
-    state.interactionKey.clear();
-    state.interactionPacket = 0;
-    state.interactionTime = Clock::time_point::min();
-
-    // A cell change conclusively ends any local NPC/container session. Release
-    // CoreArenaMP object locks immediately instead of waiting for their TTL.
-    for (auto it = sInteractionLocks.begin(); it != sInteractionLocks.end();)
-    {
-        if (it->second.ownerGuid == player.guid.g)
-            it = sInteractionLocks.erase(it);
-        else
-            ++it;
-    }
+    // Behavioral movement tracking disabled.
 }
-
 void mwmp::CoreArenaMPSecurity::ForgetPlayer(Player& player)
 {
     std::lock_guard<std::mutex> lock(sMutex);
     sStates.erase(player.guid.g);
-    for (auto it = sInteractionLocks.begin(); it != sInteractionLocks.end();)
-    {
-        if (it->second.ownerGuid == player.guid.g)
-            it = sInteractionLocks.erase(it);
-        else
-            ++it;
-    }
 }
+
