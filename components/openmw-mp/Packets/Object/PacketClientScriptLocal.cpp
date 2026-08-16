@@ -20,6 +20,13 @@ void PacketClientScriptLocal::Object(BaseObject &baseObject, bool send)
 
     RW(clientLocalsCount, send);
 
+    if (!send && clientLocalsCount > 1024)
+    {
+        objectList->isValid = false;
+        packetValid = false;
+        return;
+    }
+
     if (!send)
     {
         baseObject.clientLocals.clear();

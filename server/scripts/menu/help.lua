@@ -1,5 +1,15 @@
 Menus["help player"] = {
     text = color.Orange .. "Player command list:\n" ..
+        color.Yellow .. "// [text]\n" ..
+            color.White .. "Local OOC chat; without text switches to this channel\n" ..
+        color.Yellow .. "/// [text]\n" ..
+            color.White .. "Global OOC chat; without text switches to this channel\n" ..
+        color.Yellow .. "/w [text]  /s [text]  /sh [text]\n" ..
+            color.White .. "Whisper / normal speech / shout; without text switches speech channel\n" ..
+        color.Yellow .. "/rp\n" ..
+            color.White .. "Toggle RP mode\n" ..
+        color.Yellow .. "/color\n" ..
+            color.White .. "Choose your chat name color\n" ..
         color.Yellow .. "/invite <pid>\n" ..
             color.White .. "Invite a player to become your ally, with your AI followers being more forgiving towards " ..
             "your allies\n" ..
@@ -23,8 +33,7 @@ Menus["help player"] = {
             color.Yellow .. "(/a)\n" ..
         color.Yellow .. "/speech <type> <index>\n" ..
             color.White .. "Play a certain speech on yourself, with a list of valid inputs being provided " ..
-            "if you use invalid ones " ..
-            color.Yellow .. "(/s)\n" ..
+            "if you use invalid ones\n" ..
         color.Yellow .. "/craft\n" ..
             color.White .. "Open up a small crafting menu used as a scripting example\n" ..
         color.Yellow .. "/help\n" ..

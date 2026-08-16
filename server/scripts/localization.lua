@@ -4,6 +4,124 @@ local dictionaries = {}
 local native = {}
 local wrappersInstalled = false
 
+-- ArenaMP hard fallback for the messages that are needed before and during login.
+-- Never let an internal localization key (for example "core.welcome_login") leak
+-- into the client if a dictionary fails to load or an older config is mixed in.
+local missingLookupWarnings = {}
+
+local function safeColor(name)
+    if type(color) == "table" and type(color[name]) == "string" then
+        return color[name]
+    end
+    return ""
+end
+
+local function getCoreConfigText(language, key)
+    if type(config) ~= "table" then
+        return nil
+    end
+
+    if key == "welcome_login" or key == "welcome_register" then
+        local startup = config.startupMessage
+        if type(startup) == "table" then
+            local langTable = startup[language]
+            if type(langTable) ~= "table" then
+                langTable = startup.EN or startup.RU
+            end
+            if type(langTable) == "table" then
+                local mode = key == "welcome_login" and "login" or "register"
+                if type(langTable[mode]) == "string" then
+                    return langTable[mode]
+                end
+            end
+        end
+    elseif key == "chat_instructions" then
+        if language == "EN" and type(config.chatWindowInstructionsEN) == "string" then
+            return config.chatWindowInstructionsEN
+        end
+        if type(config.chatWindowInstructions) == "string" then
+            return config.chatWindowInstructions
+        end
+    elseif key == "startup_welcome" then
+        if type(config.startupScriptsInstructions) == "string" then
+            return config.startupScriptsInstructions
+        end
+    end
+
+    return nil
+end
+
+local function getCoreFallback(language, key)
+    local cDefault = safeColor("Default")
+    local cGood = safeColor("PaleGreen")
+    local cBad = safeColor("RosyBrown")
+    local cSky = safeColor("SkyBlue")
+    local cAccent = safeColor("Turquoise")
+
+    local fallback = {
+        EN = {
+            command_required = "Please enter a command after /.\n",
+            command_invalid = "Unknown command. Use /help for the command list.\n",
+            login_dialog_title = "Enter your password:",
+            register_dialog_title = "Create new password:",
+            register_dialog_note = "Use a unique password for this server.",
+            login_success = cGood .. "You have successfully logged in.\n" .. cDefault,
+            register_success = cGood .. "You have successfully registered.\n" .. cDefault,
+            incorrect_password = cBad .. "Incorrect password!\n" .. cDefault,
+            password_empty = cBad .. "Password can not be empty.\n" .. cDefault,
+            account_banned = cBad .. "{name}" .. cDefault .. " is banned from this server.\n",
+            auth_failed = cBad .. "{name}" .. cDefault .. " failed to log in.\n",
+            max_ip_clients = cBad .. "{name}" .. cDefault .. " was kicked: the server allows up to {max} clients from one IP address.\n",
+            player_joined = cGood .. "{name} joined the server.\n" .. cDefault,
+            player_left = cBad .. "{name} left the server.\n" .. cDefault,
+            welcome_login = cSky .. "Welcome to the server\nArenaMP, " .. cAccent .. "{name}" .. cDefault ..
+                "\nPlayers online: {count}.\nYou have {seconds} sec. to log in.\n",
+            welcome_register = cSky .. "Welcome to the server\nArenaMP, " .. cAccent .. "{name}" .. cDefault ..
+                "\nPlayers online: {count}.\nYou have {seconds} sec. to register.\n",
+            chat_instructions = "[Chat - Y] [Hide chat - F5] [All available commands - /help]\n",
+            startup_welcome = " \n"
+        },
+        RU = {
+            command_required = "После символа / укажите команду.\n",
+            command_invalid = "Неизвестная команда. Используйте /help для списка команд.\n",
+            login_dialog_title = "Введите пароль:",
+            register_dialog_title = "Создайте новый пароль:",
+            register_dialog_note = "Используйте уникальный пароль для этого сервера.",
+            login_success = cGood .. "Вы успешно авторизовались.\n" .. cDefault,
+            register_success = cGood .. "Вы успешно зарегистрировались.\n" .. cDefault,
+            incorrect_password = cBad .. "Неверный пароль!\n" .. cDefault,
+            password_empty = cBad .. "Пароль не может быть пустым.\n" .. cDefault,
+            account_banned = cBad .. "{name}" .. cDefault .. " заблокирован на этом сервере.\n",
+            auth_failed = cBad .. "{name}" .. cDefault .. " не успел авторизоваться.\n",
+            max_ip_clients = cBad .. "{name}" .. cDefault .. " был кикнут: сервер допускает максимум {max} клиентов с одного IP адреса.\n",
+            player_joined = cGood .. "{name} зашёл(ла) на сервер.\n" .. cDefault,
+            player_left = cBad .. "{name} покинул(а) сервер.\n" .. cDefault,
+            welcome_login = cSky .. "Добро пожаловать на сервер\nArenaMP, " .. cAccent .. "{name}" .. cDefault ..
+                "\nНа сервере сейчас {count} игрок(ов).\nУ вас есть {seconds} сек. чтобы авторизоваться.\n",
+            welcome_register = cSky .. "Добро пожаловать на сервер\nArenaMP, " .. cAccent .. "{name}" .. cDefault ..
+                "\nНа сервере сейчас {count} игрок(ов).\nУ вас есть {seconds} сек. чтобы зарегистрироваться.\n",
+            chat_instructions = "[Написать в чат - Y] [Скрыть чат - F5] [Все доступные команды - /help]\n",
+            startup_welcome = " \n"
+        }
+    }
+
+    local langTable = fallback[language] or fallback.EN
+    return langTable[key] or fallback.EN[key]
+end
+
+local function warnMissingLookup(namespace, key)
+    local id = tostring(namespace) .. "." .. tostring(key)
+    if missingLookupWarnings[id] then
+        return
+    end
+    missingLookupWarnings[id] = true
+
+    if tes3mp ~= nil and tes3mp.LogMessage ~= nil and enumerations ~= nil and enumerations.log ~= nil then
+        tes3mp.LogMessage(enumerations.log.ERROR,
+            "Missing localization entry " .. id .. "; using safe fallback instead of exposing the key to clients")
+    end
+end
+
 local function normalizeLanguage(language)
     if type(language) ~= "string" then
         return "EN"
@@ -117,7 +235,42 @@ local function getAutomaticList(language, tableName)
     return result
 end
 
+local function normalizeLegacyStartupText(language, text)
+    if type(text) ~= "string" or text == "" then
+        return text
+    end
+
+    -- Older CoreScripts builds may still send their original verbose startup
+    -- banner directly. Collapse it to ArenaMP's compact config message before
+    -- normal localization, even for EN clients. This also protects mixed
+    -- installs where an older config.lua is accidentally left in place.
+    if string.find(text, "/invite <pid>", 1, true) ~= nil and
+        string.find(text, "Chat Window Mode", 1, true) ~= nil and
+        string.find(text, "friendly fire", 1, true) ~= nil then
+
+        if language == "RU" and type(config) == "table" and type(config.chatWindowInstructions) == "string" then
+            return config.chatWindowInstructions
+        elseif type(config) == "table" and type(config.chatWindowInstructionsEN) == "string" then
+            return config.chatWindowInstructionsEN
+        end
+    end
+
+    -- Old ArenaMP startupScriptsInstructions contained a separate welcome line.
+    -- The current greeting already contains the welcome and online count, so
+    -- suppress the duplicate legacy line.
+    if string.find(text, "Welcome to ArenaMP!", 1, true) ~= nil and #text < 128 then
+        if type(config) == "table" and type(config.startupScriptsInstructions) == "string" then
+            return config.startupScriptsInstructions
+        end
+        return " \n"
+    end
+
+    return text
+end
+
 local function translateAutomatic(language, text)
+    text = normalizeLegacyStartupText(language, text)
+
     if language == "EN" or type(text) ~= "string" or text == "" then
         return text
     end
@@ -233,9 +386,28 @@ end
 
 function localization.Get(pidOrLanguage, namespace, key, variables)
     local language = resolveLanguage(pidOrLanguage)
+
+    -- These values intentionally live in config.lua. Resolve them before the
+    -- dictionary so the old compact ArenaMP welcome/config format remains the
+    -- single source of truth.
+    if namespace == "core" then
+        local configText = getCoreConfigText(language, key)
+        if configText ~= nil then
+            return applyVariables(configText, variables)
+        end
+    end
+
     local dictionary = dictionaries[namespace]
     if type(dictionary) ~= "table" then
-        return namespace .. "." .. tostring(key)
+        warnMissingLookup(namespace, key)
+        if namespace == "core" then
+            local fallback = getCoreFallback(language, key)
+            if fallback ~= nil then
+                return applyVariables(fallback, variables)
+            end
+        end
+        -- Do not ever expose internal namespace.key tokens in the game chat.
+        return ""
     end
 
     local languageTable = dictionary[language]
@@ -249,7 +421,13 @@ function localization.Get(pidOrLanguage, namespace, key, variables)
         text = englishTable[key]
     end
     if text == nil then
-        return namespace .. "." .. tostring(key)
+        warnMissingLookup(namespace, key)
+        if namespace == "core" then
+            text = getCoreFallback(language, key)
+        end
+        if text == nil then
+            return ""
+        end
     end
 
     return applyVariables(text, variables)

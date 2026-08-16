@@ -21,6 +21,12 @@ void PacketPlayerFaction::Packet(RakNet::BitStream *newBitstream, bool send)
 
     RW(count, send);
 
+    if (!send && count > 128)
+    {
+        packetValid = false;
+        return;
+    }
+
     if (!send)
     {
         player->factionChanges.factions.clear();

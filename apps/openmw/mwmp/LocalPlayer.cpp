@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <exception>
 #include <sstream>
 #include <components/esm/esmwriter.hpp>
@@ -56,6 +57,194 @@
 namespace
 {
     constexpr float sNetworkPoseTransitionSeconds = 0.18f;
+
+    bool validateOutgoingInventoryChanges(const mwmp::InventoryChanges& changes)
+    {
+        if (changes.action < mwmp::InventoryChanges::SET || changes.action > mwmp::InventoryChanges::REMOVE
+            || changes.items.size() > 1024)
+            return false;
+
+        std::int64_t totalCount = 0;
+        for (const mwmp::Item& item : changes.items)
+        {
+            if (item.refId.empty() || item.refId.size() > 256 || item.soul.size() > 256
+                || item.count <= 0 || item.count > 1000000
+                || !(item.charge == -1 || (item.charge >= 0 && item.charge <= 100000000))
+                || !std::isfinite(item.enchantmentCharge)
+                || !(item.enchantmentCharge == -1.f || (item.enchantmentCharge >= 0.f && item.enchantmentCharge <= 100000000.f)))
+                return false;
+
+            totalCount += item.count;
+            if (totalCount > 2000000)
+                return false;
+        }
+        return true;
+    }
+
+    bool clientFinite(float value, float limit = 100000000.f)
+    {
+        return std::isfinite(value) && std::abs(value) <= limit;
+    }
+
+    bool clientFinite(double value, double limit = 100000000.0)
+    {
+        return std::isfinite(value) && std::abs(value) <= limit;
+    }
+
+    bool clientNonNegative(float value, float limit = 100000000.f)
+    {
+        return std::isfinite(value) && value >= 0.f && value <= limit;
+    }
+
+    bool clientNonNegative(double value, double limit = 100000000.0)
+    {
+        return std::isfinite(value) && value >= 0.0 && value <= limit;
+    }
+
+    template <class T>
+    bool clientSaneStat(const ESM::StatState<T>& stat, double limit, bool allowNegativeCurrent)
+    {
+        const double base = static_cast<double>(stat.mBase);
+        const double mod = static_cast<double>(stat.mMod);
+        const double current = static_cast<double>(stat.mCurrent);
+        return std::isfinite(base) && std::isfinite(mod) && std::isfinite(current)
+            && base >= 0.0 && base <= limit
+            && std::abs(mod) <= limit * 10.0
+            && (allowNegativeCurrent ? std::abs(current) <= limit * 10.0
+                                     : (current >= 0.0 && current <= limit * 10.0))
+            && clientNonNegative(stat.mDamage, static_cast<float>(limit * 10.0))
+            && clientNonNegative(stat.mProgress, static_cast<float>(limit * 10.0));
+    }
+
+    bool clientFinitePosition(const ESM::Position& position)
+    {
+        for (int i = 0; i < 3; ++i)
+            if (!clientFinite(position.pos[i]) || !clientFinite(position.rot[i], 1000000.f))
+                return false;
+        return true;
+    }
+
+    bool clientFiniteProjectile(const mwmp::ProjectileOrigin& projectile)
+    {
+        for (int i = 0; i < 3; ++i)
+            if (!clientFinite(projectile.origin[i])) return false;
+        for (int i = 0; i < 4; ++i)
+            if (!clientFinite(projectile.orientation[i], 1000000.f)) return false;
+        return true;
+    }
+
+    bool clientSaneActiveSpells(const mwmp::SpellsActiveChanges& changes)
+    {
+        if (changes.action < mwmp::SpellsActiveChanges::SET || changes.action > mwmp::SpellsActiveChanges::REMOVE
+            || changes.activeSpells.size() > 512)
+            return false;
+        for (const mwmp::ActiveSpell& spell : changes.activeSpells)
+        {
+            if (spell.id.empty() || spell.id.size() > 256 || spell.timestampDay < 0 || spell.timestampDay > 10000000
+                || !clientNonNegative(spell.timestampHour, 24.01))
+                return false;
+            if (spell.params.mEffects.size() > 256 || spell.params.mDisplayName.size() > 512)
+                return false;
+            for (const ESM::ActiveEffect& effect : spell.params.mEffects)
+            {
+                if (effect.mEffectId < 0 || effect.mEffectId > 100000 || effect.mArg < -1 || effect.mArg > 100000
+                    || !clientFinite(effect.mMagnitude, 1000000.f)
+                    || !clientNonNegative(effect.mDuration, 10000000.f)
+                    || !clientNonNegative(effect.mTimeLeft, 10000000.f)
+                    || effect.mTimeLeft > effect.mDuration + 5.f)
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    bool clientSaneAttack(const mwmp::Attack& attack)
+    {
+        if (attack.type != mwmp::Attack::MELEE && attack.type != mwmp::Attack::RANGED)
+            return false;
+        if (attack.type == mwmp::Attack::RANGED
+            && (!clientNonNegative(attack.attackStrength, 10.f) || !clientFiniteProjectile(attack.projectileOrigin)))
+            return false;
+        if (attack.isHit)
+        {
+            if (!clientNonNegative(attack.damage, 1000000.f)) return false;
+            for (int i = 0; i < 3; ++i) if (!clientFinite(attack.hitPosition.pos[i])) return false;
+        }
+        return true;
+    }
+
+    bool clientSaneCast(const mwmp::Cast& cast, const mwmp::BasePlayer& player)
+    {
+        if (cast.type != mwmp::Cast::REGULAR && cast.type != mwmp::Cast::ITEM)
+            return false;
+        if (cast.hasProjectile && (!clientFiniteProjectile(cast.projectileOrigin)
+            || !clientFinitePosition(player.position) || !clientFinitePosition(player.direction)))
+            return false;
+        return true;
+    }
+
+    bool validateOutgoingNumerics(const mwmp::BasePlayer& player, unsigned char packetId)
+    {
+        switch (packetId)
+        {
+            case ID_PLAYER_STATS_DYNAMIC:
+                for (int i = 0; i < 3; ++i) if (!clientSaneStat(player.creatureStats.mDynamic[i], 10000000.0, true)) return false;
+                return true;
+            case ID_PLAYER_ATTRIBUTE:
+                for (int i = 0; i < 8; ++i)
+                    if (!clientSaneStat(player.creatureStats.mAttributes[i], 10000.0, false)
+                        || player.npcStats.mSkillIncrease[i] < 0 || player.npcStats.mSkillIncrease[i] > 1000000) return false;
+                return true;
+            case ID_PLAYER_SKILL:
+                for (int i = 0; i < 27; ++i) if (!clientSaneStat(player.npcStats.mSkills[i], 10000.0, false)) return false;
+                return true;
+            case ID_PLAYER_LEVEL:
+                return player.creatureStats.mLevel >= 1 && player.creatureStats.mLevel <= 10000
+                    && player.npcStats.mLevelProgress >= 0 && player.npcStats.mLevelProgress <= 10000000;
+            case ID_PLAYER_BOUNTY:
+                return player.npcStats.mBounty >= 0 && player.npcStats.mBounty <= 100000000;
+            case ID_PLAYER_REPUTATION:
+                return player.npcStats.mReputation >= 0 && player.npcStats.mReputation <= 1000000;
+            case ID_PLAYER_ATTACK:
+                return clientSaneAttack(player.attack);
+            case ID_PLAYER_CAST:
+                return clientSaneCast(player.cast, player);
+            case ID_PLAYER_SPELLS_ACTIVE:
+                return clientSaneActiveSpells(player.spellsActiveChanges);
+            case ID_PLAYER_COOLDOWNS:
+                for (const mwmp::SpellCooldown& cooldown : player.cooldownChanges)
+                    if (cooldown.id.empty() || cooldown.id.size() > 256 || cooldown.startTimestampDay < 0
+                        || cooldown.startTimestampDay > 10000000 || !clientNonNegative(cooldown.startTimestampHour, 24.01)) return false;
+                return player.cooldownChanges.size() <= 512;
+            case ID_PLAYER_SHAPESHIFT:
+                return clientNonNegative(player.scale, 100.f) && player.scale > 0.f;
+            case ID_PLAYER_ITEM_USE:
+                return player.usedItem.count > 0 && player.usedItem.count <= 1000000
+                    && (player.usedItem.charge == -1 || (player.usedItem.charge >= 0 && player.usedItem.charge <= 100000000))
+                    && clientFinite(player.usedItem.enchantmentCharge)
+                    && (player.usedItem.enchantmentCharge == -1.f || player.usedItem.enchantmentCharge >= 0.f)
+                    && player.itemUseDrawState >= 0 && player.itemUseDrawState <= 4;
+            case ID_PLAYER_MISCELLANEOUS:
+                if (player.miscellaneousChangeType == mwmp::MISCELLANEOUS_CHANGE_TYPE::MARK_LOCATION)
+                {
+                    for (int i = 0; i < 3; ++i) if (!clientFinite(player.markPosition.pos[i])) return false;
+                    return clientFinite(player.markPosition.rot[0], 1000000.f) && clientFinite(player.markPosition.rot[2], 1000000.f);
+                }
+                return true;
+            default:
+                return true;
+        }
+    }
+
+    bool allowOutgoingNumericPacket(const mwmp::BasePlayer& player, unsigned char packetId)
+    {
+        if (validateOutgoingNumerics(player, packetId))
+            return true;
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR,
+            "CoreArenaMP client security: blocked invalid/negative numeric packet %u", static_cast<unsigned>(packetId));
+        return false;
+    }
+
     int getPlayerPoseBlendMask(const MWWorld::Ptr& ptr, int requestedMask)
     {
         int result = requestedMask;
@@ -205,6 +394,11 @@ LocalPlayer::LocalPlayer()
     isReceivingQuickKeys = false;
     isPlayingAnimation = false;
     diedSinceArrestAttempt = false;
+
+    mSecurityPositionInitialized = false;
+    mSecurityPositionTime = std::chrono::steady_clock::now();
+    mSecurityLastSpeedStrike = std::chrono::steady_clock::time_point::min();
+    mSecuritySpeedStrikes = 0;
 
     mPersistentAnimationActive = false;
     mPersistentAnimationPlaying = false;
@@ -408,6 +602,8 @@ void LocalPlayer::updateStatsDynamic(bool forceUpdate)
         creatureStats.mDead = ptrCreatureStats->isDead();
 
         exchangeFullInfo = false;
+        if (!allowOutgoingNumericPacket(*this, ID_PLAYER_STATS_DYNAMIC))
+            return;
         getNetworking()->getPlayerPacket(ID_PLAYER_STATS_DYNAMIC)->setPlayer(this);
         getNetworking()->getPlayerPacket(ID_PLAYER_STATS_DYNAMIC)->Send();
     }
@@ -442,6 +638,8 @@ void LocalPlayer::updateAttributes(bool forceUpdate)
     if (attributeIndexChanges.size() > 0)
     {
         exchangeFullInfo = false;
+        if (!allowOutgoingNumericPacket(*this, ID_PLAYER_ATTRIBUTE))
+            return;
         getNetworking()->getPlayerPacket(ID_PLAYER_ATTRIBUTE)->setPlayer(this);
         getNetworking()->getPlayerPacket(ID_PLAYER_ATTRIBUTE)->Send();
     }
@@ -476,6 +674,8 @@ void LocalPlayer::updateSkills(bool forceUpdate)
     if (skillIndexChanges.size() > 0)
     {
         exchangeFullInfo = false;
+        if (!allowOutgoingNumericPacket(*this, ID_PLAYER_SKILL))
+            return;
         getNetworking()->getPlayerPacket(ID_PLAYER_SKILL)->setPlayer(this);
         getNetworking()->getPlayerPacket(ID_PLAYER_SKILL)->Send();
     }
@@ -492,6 +692,8 @@ void LocalPlayer::updateLevel(bool forceUpdate)
     {
         creatureStats.mLevel = ptrNpcStats.getLevel();
         npcStats.mLevelProgress = ptrNpcStats.getLevelProgress();
+        if (!allowOutgoingNumericPacket(*this, ID_PLAYER_LEVEL))
+            return;
         getNetworking()->getPlayerPacket(ID_PLAYER_LEVEL)->setPlayer(this);
         getNetworking()->getPlayerPacket(ID_PLAYER_LEVEL)->Send();
     }
@@ -505,6 +707,8 @@ void LocalPlayer::updateBounty(bool forceUpdate)
     if (ptrNpcStats.getBounty() != npcStats.mBounty || forceUpdate)
     {
         npcStats.mBounty = ptrNpcStats.getBounty();
+        if (!allowOutgoingNumericPacket(*this, ID_PLAYER_BOUNTY))
+            return;
         getNetworking()->getPlayerPacket(ID_PLAYER_BOUNTY)->setPlayer(this);
         getNetworking()->getPlayerPacket(ID_PLAYER_BOUNTY)->Send();
     }
@@ -518,9 +722,88 @@ void LocalPlayer::updateReputation(bool forceUpdate)
     if (ptrNpcStats.getReputation() != npcStats.mReputation || forceUpdate)
     {
         npcStats.mReputation = ptrNpcStats.getReputation();
+        if (!allowOutgoingNumericPacket(*this, ID_PLAYER_REPUTATION))
+            return;
         getNetworking()->getPlayerPacket(ID_PLAYER_REPUTATION)->setPlayer(this);
         getNetworking()->getPlayerPacket(ID_PLAYER_REPUTATION)->Send();
     }
+}
+
+bool LocalPlayer::validateOutgoingPosition()
+{
+    auto finitePosition = [](const ESM::Position& value)
+    {
+        for (int i = 0; i < 3; ++i)
+        {
+            if (!std::isfinite(value.pos[i]) || !std::isfinite(value.rot[i]))
+                return false;
+            if (std::abs(value.pos[i]) > 100000000.f || std::abs(value.rot[i]) > 1000000.f)
+                return false;
+        }
+        return true;
+    };
+
+    if (!finitePosition(position) || !finitePosition(direction))
+    {
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
+            "CoreArenaMP client security: blocked invalid outgoing position");
+        return false;
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+    if (!mSecurityPositionInitialized)
+    {
+        mSecurityPositionInitialized = true;
+        mSecurityLastPosition = position;
+        mSecurityPositionTime = now;
+        return true;
+    }
+
+    double dt = std::chrono::duration<double>(now - mSecurityPositionTime).count();
+    if (dt <= 0.0)
+        dt = 0.001;
+    if (dt > 5.0)
+    {
+        mSecurityLastPosition = position;
+        mSecurityPositionTime = now;
+        mSecuritySpeedStrikes = 0;
+        return true;
+    }
+
+    const double dx = position.pos[0] - mSecurityLastPosition.pos[0];
+    const double dy = position.pos[1] - mSecurityLastPosition.pos[1];
+    const double dz = position.pos[2] - mSecurityLastPosition.pos[2];
+    const double distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+    const double speed = distance / std::max(dt, 0.01);
+    const bool suspicious = distance > 4096.0 || (distance > 128.0 && speed > 1600.0);
+
+    if (suspicious)
+    {
+        const double sinceStrike = mSecurityLastSpeedStrike == std::chrono::steady_clock::time_point::min()
+            ? 999.0 : std::chrono::duration<double>(now - mSecurityLastSpeedStrike).count();
+        mSecurityLastSpeedStrike = now;
+        mSecuritySpeedStrikes = sinceStrike <= 3.0 ? mSecuritySpeedStrikes + 1 : 1;
+        if (mSecuritySpeedStrikes >= 2)
+        {
+            // Do not hide the sample from the authoritative server. It will
+            // reject and correct repeated impossible movement. Suppressing the
+            // packet here would let a memory-edited local world drift away
+            // without giving the server a chance to snap it back.
+            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
+                "CoreArenaMP client security: suspicious movement flagged for server validation (%.0f units/s)", speed);
+        }
+    }
+
+    mSecurityLastPosition = position;
+    mSecurityPositionTime = now;
+    return true;
+}
+
+void LocalPlayer::resetOutgoingPositionSecurity()
+{
+    mSecurityPositionInitialized = false;
+    mSecuritySpeedStrikes = 0;
+    mSecurityLastSpeedStrike = std::chrono::steady_clock::time_point::min();
 }
 
 void LocalPlayer::updatePosition(bool forceUpdate)
@@ -558,8 +841,11 @@ void LocalPlayer::updatePosition(bool forceUpdate)
         if (!isJumping && !world->isOnGround(ptrPlayer) && !world->isFlying(ptrPlayer))
             isJumping = true;
 
-        getNetworking()->getPlayerPacket(ID_PLAYER_POSITION)->setPlayer(this);
-        getNetworking()->getPlayerPacket(ID_PLAYER_POSITION)->Send();
+        if (validateOutgoingPosition())
+        {
+            getNetworking()->getPlayerPacket(ID_PLAYER_POSITION)->setPlayer(this);
+            getNetworking()->getPlayerPacket(ID_PLAYER_POSITION)->Send();
+        }
     }
     else if (isJumping && world->isOnGround(ptrPlayer))
     {
@@ -571,8 +857,11 @@ void LocalPlayer::updatePosition(bool forceUpdate)
     {
         sentJumpEnd = true;
         position = ptrPlayer.getRefData().getPosition();
-        getNetworking()->getPlayerPacket(ID_PLAYER_POSITION)->setPlayer(this);
-        getNetworking()->getPlayerPacket(ID_PLAYER_POSITION)->Send();
+        if (validateOutgoingPosition())
+        {
+            getNetworking()->getPlayerPacket(ID_PLAYER_POSITION)->setPlayer(this);
+            getNetworking()->getPlayerPacket(ID_PLAYER_POSITION)->Send();
+        }
     }
 }
 
@@ -601,7 +890,10 @@ void LocalPlayer::updateCell(bool forceUpdate)
         previousCellPosition = position;
 
         // Make sure the position is updated before a cell packet is sent, or else
-        // cell change events in server scripts will have the wrong player position
+        // cell change events in server scripts will have the wrong player position.
+        // A cell transition is also a legitimate teleport baseline for the C++
+        // speed/tamper guard.
+        resetOutgoingPositionSecurity();
         updatePosition(true);
 
         getNetworking()->getPlayerPacket(ID_PLAYER_CELL_CHANGE)->setPlayer(this);
@@ -740,16 +1032,20 @@ void LocalPlayer::updateAttackOrCast()
 {
     if (attack.shouldSend)
     {
-        getNetworking()->getPlayerPacket(ID_PLAYER_ATTACK)->setPlayer(this);
-        getNetworking()->getPlayerPacket(ID_PLAYER_ATTACK)->Send();
-
+        if (allowOutgoingNumericPacket(*this, ID_PLAYER_ATTACK))
+        {
+            getNetworking()->getPlayerPacket(ID_PLAYER_ATTACK)->setPlayer(this);
+            getNetworking()->getPlayerPacket(ID_PLAYER_ATTACK)->Send();
+        }
         attack.shouldSend = false;
     }
     else if (cast.shouldSend)
     {
-        getNetworking()->getPlayerPacket(ID_PLAYER_CAST)->setPlayer(this);
-        getNetworking()->getPlayerPacket(ID_PLAYER_CAST)->Send();
-
+        if (allowOutgoingNumericPacket(*this, ID_PLAYER_CAST))
+        {
+            getNetworking()->getPlayerPacket(ID_PLAYER_CAST)->setPlayer(this);
+            getNetworking()->getPlayerPacket(ID_PLAYER_CAST)->Send();
+        }
         cast.shouldSend = false;
         cast.hasProjectile = false;
     }
@@ -1665,6 +1961,12 @@ void LocalPlayer::sendInventory()
     }
 
     inventoryChanges.action = InventoryChanges::SET;
+    if (!validateOutgoingInventoryChanges(inventoryChanges))
+    {
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR, "CoreArenaMP security: blocked invalid outgoing inventory snapshot");
+        inventoryChanges.items.clear();
+        return;
+    }
     getNetworking()->getPlayerPacket(ID_PLAYER_INVENTORY)->setPlayer(this);
     getNetworking()->getPlayerPacket(ID_PLAYER_INVENTORY)->Send();
 }
@@ -1677,6 +1979,12 @@ void LocalPlayer::sendItemChange(const mwmp::Item& item, unsigned int action)
     inventoryChanges.items.clear();
     inventoryChanges.items.push_back(item);
     inventoryChanges.action = action;
+    if (!validateOutgoingInventoryChanges(inventoryChanges))
+    {
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR, "CoreArenaMP security: blocked invalid outgoing inventory change");
+        inventoryChanges.items.clear();
+        return;
+    }
 
     getNetworking()->getPlayerPacket(ID_PLAYER_INVENTORY)->setPlayer(this);
     getNetworking()->getPlayerPacket(ID_PLAYER_INVENTORY)->Send();
@@ -1705,6 +2013,12 @@ void LocalPlayer::sendItemChange(const std::string& refId, int count, unsigned i
     inventoryChanges.items.push_back(item);
 
     inventoryChanges.action = action;
+    if (!validateOutgoingInventoryChanges(inventoryChanges))
+    {
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR, "CoreArenaMP security: blocked invalid outgoing inventory change");
+        inventoryChanges.items.clear();
+        return;
+    }
     getNetworking()->getPlayerPacket(ID_PLAYER_INVENTORY)->setPlayer(this);
     getNetworking()->getPlayerPacket(ID_PLAYER_INVENTORY)->Send();
 }
@@ -1729,8 +2043,18 @@ void LocalPlayer::sendStoredItemRemovals()
     }
 
     inventoryChanges.action = mwmp::InventoryChanges::ACTION_TYPE::REMOVE;
-    getNetworking()->getPlayerPacket(ID_PLAYER_INVENTORY)->setPlayer(this);
-    getNetworking()->getPlayerPacket(ID_PLAYER_INVENTORY)->Send();
+    if (!inventoryChanges.items.empty() && !validateOutgoingInventoryChanges(inventoryChanges))
+    {
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR, "CoreArenaMP security: blocked invalid outgoing stored inventory removals");
+        inventoryChanges.items.clear();
+        storedItemRemovals.clear();
+        return;
+    }
+    if (!inventoryChanges.items.empty())
+    {
+        getNetworking()->getPlayerPacket(ID_PLAYER_INVENTORY)->setPlayer(this);
+        getNetworking()->getPlayerPacket(ID_PLAYER_INVENTORY)->Send();
+    }
 
     storedItemRemovals.clear();
 }
@@ -1781,14 +2105,21 @@ void LocalPlayer::sendSpellsActive()
     // Send spells in spellbook, while ignoring abilities, powers, etc.
     for (const auto& ptrSpell : activeSpells)
     {
-        mwmp::ActiveSpell packetSpell;
+        mwmp::ActiveSpell packetSpell{};
         packetSpell.id = ptrSpell.first;
+        packetSpell.isStackingSpell = MechanicsHelper::isStackingSpell(ptrSpell.first);
+        packetSpell.timestampDay = ptrSpell.second.mTimeStamp.getDay();
+        packetSpell.timestampHour = ptrSpell.second.mTimeStamp.getHour();
+        packetSpell.caster = MechanicsHelper::getTarget(
+            MWBase::Environment::get().getWorld()->searchPtrViaActorId(ptrSpell.second.mCasterActorId));
         packetSpell.params.mDisplayName = ptrSpell.second.mDisplayName;
         packetSpell.params.mEffects = ptrSpell.second.mEffects;
         spellsActiveChanges.activeSpells.push_back(packetSpell);
     }
 
     spellsActiveChanges.action = mwmp::SpellsActiveChanges::SET;
+    if (!allowOutgoingNumericPacket(*this, ID_PLAYER_SPELLS_ACTIVE))
+        return;
     getNetworking()->getPlayerPacket(ID_PLAYER_SPELLS_ACTIVE)->setPlayer(this);
     getNetworking()->getPlayerPacket(ID_PLAYER_SPELLS_ACTIVE)->Send();
 }
@@ -1804,7 +2135,7 @@ void LocalPlayer::sendSpellsActiveAddition(const std::string id, bool isStacking
 
     MWWorld::Ptr caster = MWBase::Environment::get().getWorld()->searchPtrViaActorId(params.mCasterActorId);
 
-    mwmp::ActiveSpell spell;
+    mwmp::ActiveSpell spell{};
     spell.id = id;
     spell.isStackingSpell = isStackingSpell;
     spell.caster = MechanicsHelper::getTarget(caster);
@@ -1818,6 +2149,8 @@ void LocalPlayer::sendSpellsActiveAddition(const std::string id, bool isStacking
         spell.isStackingSpell ? "true" : "false", spell.timestampDay, spell.timestampHour);
 
     spellsActiveChanges.action = mwmp::SpellsActiveChanges::ADD;
+    if (!allowOutgoingNumericPacket(*this, ID_PLAYER_SPELLS_ACTIVE))
+        return;
     getNetworking()->getPlayerPacket(ID_PLAYER_SPELLS_ACTIVE)->setPlayer(this);
     getNetworking()->getPlayerPacket(ID_PLAYER_SPELLS_ACTIVE)->Send();
 }
@@ -1830,7 +2163,7 @@ void LocalPlayer::sendSpellsActiveRemoval(const std::string id, bool isStackingS
 
     spellsActiveChanges.activeSpells.clear();
 
-    mwmp::ActiveSpell spell;
+    mwmp::ActiveSpell spell{};
     spell.id = id;
     spell.isStackingSpell = isStackingSpell;
     spell.timestampDay = timestamp.getDay();
@@ -1841,6 +2174,8 @@ void LocalPlayer::sendSpellsActiveRemoval(const std::string id, bool isStackingS
         spell.isStackingSpell ? "true" : "false", spell.timestampDay, spell.timestampHour);
 
     spellsActiveChanges.action = mwmp::SpellsActiveChanges::REMOVE;
+    if (!allowOutgoingNumericPacket(*this, ID_PLAYER_SPELLS_ACTIVE))
+        return;
     getNetworking()->getPlayerPacket(ID_PLAYER_SPELLS_ACTIVE)->setPlayer(this);
     getNetworking()->getPlayerPacket(ID_PLAYER_SPELLS_ACTIVE)->Send();
 }
@@ -1860,6 +2195,8 @@ void LocalPlayer::sendCooldownChange(std::string id, int startTimestampDay, floa
 
     cooldownChanges.push_back(spellCooldown);
 ;
+    if (!allowOutgoingNumericPacket(*this, ID_PLAYER_COOLDOWNS))
+        return;
     getNetworking()->getPlayerPacket(ID_PLAYER_COOLDOWNS)->setPlayer(this);
     getNetworking()->getPlayerPacket(ID_PLAYER_COOLDOWNS)->Send();
 }
@@ -2000,6 +2337,8 @@ void LocalPlayer::sendWerewolfState(bool werewolfState)
 
     LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Sending ID_PLAYER_SHAPESHIFT with isWerewolf of %s", isWerewolf ? "true" : "false");
 
+    if (!allowOutgoingNumericPacket(*this, ID_PLAYER_SHAPESHIFT))
+        return;
     getNetworking()->getPlayerPacket(ID_PLAYER_SHAPESHIFT)->setPlayer(this);
     getNetworking()->getPlayerPacket(ID_PLAYER_SHAPESHIFT)->Send();
 }
@@ -2010,6 +2349,8 @@ void LocalPlayer::sendMarkLocation(const ESM::Cell& newMarkCell, const ESM::Posi
     markCell = newMarkCell;
     markPosition = newMarkPosition;
 
+    if (!allowOutgoingNumericPacket(*this, ID_PLAYER_MISCELLANEOUS))
+        return;
     getNetworking()->getPlayerPacket(ID_PLAYER_MISCELLANEOUS)->setPlayer(this);
     getNetworking()->getPlayerPacket(ID_PLAYER_MISCELLANEOUS)->Send();
 }
@@ -2034,6 +2375,8 @@ void LocalPlayer::sendItemUse(const MWWorld::Ptr& itemPtr, bool itemMagicState, 
     usingItemMagic = itemMagicState;
     itemUseDrawState = currentDrawState;
 
+    if (!allowOutgoingNumericPacket(*this, ID_PLAYER_ITEM_USE))
+        return;
     getNetworking()->getPlayerPacket(ID_PLAYER_ITEM_USE)->setPlayer(this);
     getNetworking()->getPlayerPacket(ID_PLAYER_ITEM_USE)->Send();
 }

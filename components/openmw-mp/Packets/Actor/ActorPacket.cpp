@@ -42,6 +42,9 @@ void ActorPacket::Packet(RakNet::BitStream *newBitstream, bool send)
 
         Actor(actor, send);
 
+        if (!send && (!packetValid || !actorList->isValid))
+            return;
+
         if (!send)
             actorList->baseActors.push_back(actor);
     }
@@ -64,6 +67,7 @@ bool ActorPacket::PacketHeader(RakNet::BitStream *newBitstream, bool send)
     if (actorList->count > maxActors)
     {
         actorList->isValid = false;
+        packetValid = false;
         return false;
     }
 

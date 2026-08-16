@@ -1,5 +1,6 @@
 #include "ActorProcessor.hpp"
 #include "Networking.hpp"
+#include "CoreArenaMPSecurity.hpp"
 
 using namespace mwmp;
 
@@ -23,15 +24,29 @@ bool ActorProcessor::Process(RakNet::Packet &packet, BaseActorList &actorList) n
         if (processor.first == packet.data[0])
         {
             Player *player = Players::getPlayer(packet.guid);
+            if (player == nullptr)
+            {
+                LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
+                    "CoreArenaMP security: ignored actor packet from an unknown connection");
+                return true;
+            }
             ActorPacket *myPacket = Networking::get().getActorPacketController()->GetPacket(packet.data[0]);
 
             myPacket->setActorList(&actorList);
             actorList.isValid = true;
 
             if (!processor.second->avoidReading)
+            {
                 myPacket->Read();
+                if (!myPacket->isPacketValid())
+                {
+                    LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
+                        "CoreArenaMP security: rejected malformed actor packet before processing");
+                    return true;
+                }
+            }
 
-            if (actorList.isValid)
+            if (actorList.isValid && CoreArenaMPSecurity::ValidateActorPacket(*player, actorList, packet.data[0]))
                 processor.second->Do(*myPacket, *player, actorList);
             else
                 LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR, "Received %s that failed integrity check and was ignored!", processor.second->strPacketID.c_str());

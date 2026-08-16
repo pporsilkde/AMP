@@ -8,6 +8,8 @@ local ruExact = {
     ["You have successfully logged in.\n"] = "Вы успешно вошли в систему.\n",
     ["You have successfully registered.\n"] = "Вы успешно зарегистрировались.\n",
     ["You have died permanently."] = "Ваш персонаж погиб навсегда.",
+    ["Recovering"] = "Восстановление",
+    ["Recovering..."] = "Восстановление...",
     ["You are forbidden from entering that area."] = "Вам запрещено входить в эту область.",
     ["That container is currently unusable for synchronization reasons.\n"] =
         "Этот контейнер временно недоступен из-за синхронизации.\n",
@@ -36,6 +38,7 @@ local ruExact = {
     ["You need to be a moderator to run this command\n"] = "Для этой команды нужны права модератора.\n",
     ["Your model has been changed.\n"] = "Модель вашего персонажа изменена.\n",
     ["Please use a command after the / symbol.\n"] = "После символа / необходимо указать команду.\n",
+    ["Not a valid command. Type /help for more info.\n"] = "Неизвестная команда. Используйте /help для списка команд.\n",
     ["Not a valid argument. Use /setmomentum <pid> <x> <y> <z>\n"] =
         "Неверные параметры. Использование: /setmomentum <pid> <x> <y> <z>\n",
     ["Not a valid argument. Use /setdifficulty <pid> <value>\n"] =
@@ -142,16 +145,11 @@ for source, translation in pairs(menuExact) do
 end
 
 if config ~= nil then
-    if config.chatWindowInstructions ~= nil then
-        ruExact[config.chatWindowInstructions] = color.White .. "Нажмите " .. color.Yellow .. "Y" .. color.White ..
-            " для ввода сообщения или измените клавишу в настройках клиента.\nВведите " .. color.Yellow .. "/help" ..
-            color.White .. " для просмотра команд.\nВведите " .. color.Yellow .. "/invite <pid>" .. color.White ..
-            " для приглашения игрока в союзники: союзники и их спутники не реагируют на дружественный огонь.\nНажмите " ..
-            color.Yellow .. "F2" .. color.White .. " для переключения режима окна чата или измените " ..
-            color.Yellow .. "Chat Window Mode\n"
+    if config.chatWindowInstructionsEN ~= nil and config.chatWindowInstructions ~= nil then
+        ruExact[config.chatWindowInstructionsEN] = config.chatWindowInstructions
     end
     if config.startupScriptsInstructions ~= nil then
-        ruExact[config.startupScriptsInstructions] = color.White .. " Добро пожаловать в ArenaMP!\n"
+        ruExact[config.startupScriptsInstructions] = config.startupScriptsInstructions
     end
     if config.instancedSpawn ~= nil and config.instancedSpawn.text ~= nil then
         ruExact[config.instancedSpawn.text] =
@@ -221,6 +219,13 @@ local ruPatterns = {
 }
 
 local ruPhrases = {
+    ["Local OOC chat; without text switches to this channel"] = "Локальный OOC-чат; без текста переключает на этот канал",
+    ["Global OOC chat; without text switches to this channel"] = "Глобальный OOC-чат; без текста переключает на этот канал",
+    ["Whisper / normal speech / shout; without text switches speech channel"] = "Шёпот / обычная речь / крик; без текста переключает канал речи",
+    ["Toggle RP mode"] = "Включить/выключить RP-режим",
+    ["Choose your chat name color"] = "Выбрать цвет имени в чате",
+    ["Please use a command after the / symbol."] = "После символа / необходимо указать команду.",
+    ["Not a valid command. Type /help for more info."] = "Неизвестная команда. Используйте /help для списка команд.",
     ["You have successfully logged in.\n"] = "Вы успешно вошли в систему.\n",
     ["You have successfully registered.\n"] = "Вы успешно зарегистрировались.\n",
     [" has joined the server"] = " подключился к серверу",
@@ -448,38 +453,53 @@ end
 return {
     EN = {
         language_detected = "Client language detected: {language}",
+        command_required = "Please enter a command after /.\n",
+        command_invalid = "Unknown command. Use /help for the command list.\n",
         login_dialog_title = "Enter your password:",
         register_dialog_title = "Create new password:",
         register_dialog_note = "Use a unique password for this server.",
-        welcome_login = "Welcome {name}\nYou have {seconds} seconds to log in.\n",
-        welcome_register = "Welcome {name}\nYou have {seconds} seconds to register.\n",
-        login_success = "You have successfully logged in.\n",
-        register_success = "You have successfully registered.\n",
-        chat_instructions = config.chatWindowInstructions,
-        startup_welcome = config.startupScriptsInstructions,
+        welcome_login = "Welcome to the server\nArenaMP, {name}\nPlayers online: {count}.\n",
+        welcome_register = "Welcome to the server\nArenaMP, {name}\nPlayers online: {count}.\n",
+        login_success = color.PaleGreen .. "You have successfully logged in.\n" .. color.Default,
+        register_success = color.PaleGreen .. "You have successfully registered.\n" .. color.Default,
+        incorrect_password = color.RosyBrown .. "Incorrect password!\n" .. color.Default,
+        password_empty = color.RosyBrown .. "Password can not be empty.\n" .. color.Default,
+        account_banned = color.RosyBrown .. "{name}" .. color.Default .. " is banned from this server.\n",
+        auth_failed = color.RosyBrown .. "{name}" .. color.Default .. " failed to log in.\n",
+        max_ip_clients = color.RosyBrown .. "{name}" .. color.MediumSeaGreen ..
+            " was kicked: the server allows up to {max} clients from one IP address.\n" .. color.Default,
+        chat_instructions = "[Chat - Y] [Hide chat - F5] [All available commands - /help]\n",
+        startup_welcome = " \n",
         friendly_fire_disabled = "Friendly fire is disabled.",
         friendly_fire_enabled = "Friendly fire is enabled.",
-        friendly_fire_group = "Friendly fire is blocked between group allies."
+        friendly_fire_group = "Friendly fire is blocked between group allies.",
+        player_joined = color.PaleGreen .. "{name} joined the server.\n" .. color.Default,
+        player_left = color.DarkSalmon .. "{name} left the server.\n" .. color.Default
     },
     RU = {
         language_detected = "Определён язык клиента: {language}",
+        command_required = "После символа / укажите команду.\n",
+        command_invalid = "Неизвестная команда. Используйте /help для списка команд.\n",
         login_dialog_title = "Введите пароль:",
         register_dialog_title = "Создайте новый пароль:",
         register_dialog_note = "Используйте уникальный пароль для этого сервера.",
-        welcome_login = "Добро пожаловать, {name}!\nУ вас есть {seconds} секунд для входа.\n",
-        welcome_register = "Добро пожаловать, {name}!\nУ вас есть {seconds} секунд для регистрации.\n",
-        login_success = "Вы успешно вошли в систему.\n",
-        register_success = "Вы успешно зарегистрировались.\n",
-        chat_instructions = color.White .. "Нажмите " .. color.Yellow .. "Y" .. color.White ..
-            " для ввода сообщения или измените клавишу в настройках клиента.\nВведите " .. color.Yellow .. "/help" ..
-            color.White .. " для просмотра команд.\nВведите " .. color.Yellow .. "/invite <pid>" .. color.White ..
-            " для приглашения игрока в союзники: союзники и их спутники не реагируют на дружественный огонь.\nНажмите " ..
-            color.Yellow .. "F2" .. color.White .. " для переключения режима окна чата или измените " ..
-            color.Yellow .. "Chat Window Mode\n",
-        startup_welcome = color.White .. " Добро пожаловать в ArenaMP!\n",
+        welcome_login = "Добро пожаловать на сервер\nArenaMP, {name}\nНа сервере сейчас {count} игрок(ов).\n",
+        welcome_register = "Добро пожаловать на сервер\nArenaMP, {name}\nНа сервере сейчас {count} игрок(ов).\n",
+        login_success = color.PaleGreen .. "Вы успешно авторизовались.\n" .. color.Default,
+        register_success = color.PaleGreen .. "Вы успешно зарегистрировались.\n" .. color.Default,
+        incorrect_password = color.RosyBrown .. "Неверный пароль!\n" .. color.Default,
+        password_empty = color.RosyBrown .. "Пароль не может быть пустым.\n" .. color.Default,
+        account_banned = color.RosyBrown .. "{name}" .. color.Default .. " заблокирован на этом сервере.\n",
+        auth_failed = color.RosyBrown .. "{name}" .. color.Default .. " не успел авторизоваться.\n",
+        max_ip_clients = color.RosyBrown .. "{name}" .. color.MediumSeaGreen ..
+            " был кикнут: сервер допускает максимум {max} клиентов с одного IP адреса.\n" .. color.Default,
+        chat_instructions = "[Написать в чат - Y] [Скрыть чат - F5] [Все доступные команды - /help]\n",
+        startup_welcome = " \n",
         friendly_fire_disabled = "Дружественный огонь отключён.",
         friendly_fire_enabled = "Дружественный огонь включён.",
-        friendly_fire_group = "Дружественный огонь между союзниками группы заблокирован."
+        friendly_fire_group = "Дружественный огонь между союзниками группы заблокирован.",
+        player_joined = color.PaleGreen .. "{name} зашёл(ла) на сервер.\n" .. color.Default,
+        player_left = color.DarkSalmon .. "{name} покинул(а) сервер.\n" .. color.Default
     },
     automatic = {
         RU = {

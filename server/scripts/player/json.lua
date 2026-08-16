@@ -1,6 +1,7 @@
 require("config")
 fileHelper = require("fileHelper")
 tableHelper = require("tableHelper")
+local CoreArenaMP_DataManager = require("CoreArenaMP_DataManager")
 local BasePlayer = require("player.base")
 
 local Player = class("Player", BasePlayer)
@@ -22,7 +23,7 @@ function Player:__init(pid, playerName)
 end
 
 function Player:CreateAccount()
-    self.hasAccount = jsonInterface.save("player/" .. self.accountFile, self.data)
+    self.hasAccount = CoreArenaMP_DataManager.Save("player/" .. self.accountFile, self.data)
 
     if self.hasAccount then
         tes3mp.LogMessage(enumerations.log.INFO, "Successfully created JSON file for player " .. self.accountName)
@@ -36,18 +37,18 @@ end
 function Player:SaveToDrive()
     if self.hasAccount then
         tes3mp.LogMessage(enumerations.log.INFO, "Saving player " .. logicHandler.GetChatName(self.pid))
-        jsonInterface.save("player/" .. self.accountFile, self.data, config.playerKeyOrder)
+        CoreArenaMP_DataManager.Save("player/" .. self.accountFile, self.data, config.playerKeyOrder)
     end
 end
 
 function Player:QuicksaveToDrive()
     if self.hasAccount then
-        jsonInterface.quicksave("player/" .. self.accountFile, self.data)
+        CoreArenaMP_DataManager.Quicksave("player/" .. self.accountFile, self.data)
     end
 end
 
 function Player:LoadFromDrive()
-    self.data = jsonInterface.load("player/" .. self.accountFile)
+    self.data = CoreArenaMP_DataManager.Load("player/" .. self.accountFile)
 
     if self.data == nil then
         tes3mp.LogMessage(enumerations.log.ERROR, "player/" .. self.accountFile .. " cannot be read!")

@@ -117,3 +117,57 @@ localization.Message(pid, "example", "greeting", { name = Players[pid].name })
 ```
 
 The multiplayer protocol is `806`; client and server must be updated together.
+
+## CoreArenaMP persistence and native security (v18)
+
+The bundled server loads `CoreArenaMP_DataManager.lua` and
+`CoreArenaMP_BaseScript.lua` as internal CoreScripts. Player, cell, world and
+record-store JSON persistence goes through path validation and protected
+read/write wrappers. The launcher recreates required empty `server/data`
+subdirectories before starting the server so first-time profile creation does
+not depend on archive tools preserving empty folders.
+
+The launcher no longer overwrites a newly bundled `server/scripts/config.lua`
+with an old full copy from `userdata/server-config.lua`. The bundled CoreScript
+is the template; scalar user values are migrated on top of it. Before a changed
+legacy configuration is migrated, the launcher saves a timestamped
+`server-config.before-core-update-*.lua` backup in `userdata`.
+
+Native C++ validation is the authoritative boundary for untrusted multiplayer
+input. Version 18 adds:
+
+- finite-number (`NaN`/`Inf`) checks and semantic bounds for player, actor,
+  object and worldstate packet data;
+- semantic negative-value checks: fields such as base/max stats, item counts,
+  durations, costs and damage cannot be negative, while legitimate signed
+  coordinates, modifiers and protocol sentinel values remain supported;
+- validation for attributes, skills, dynamic stats, level/progress, bounty,
+  reputation, attacks, casts, spell lists, active spell effects, inventory,
+  equipment, factions, journal/quick-key data, object state, actor state,
+  client globals and dynamic records;
+- per-packet-type transactional rollback: if a player packet is malformed or
+  rejected, only the fields that packet attempted to modify are restored to the
+  previously authoritative server values before any Lua callback or broadcast;
+- server-authoritative movement validation and position rollback for impossible
+  speed/teleport samples;
+- actor authority enforcement for actor AI/equipment/stats/position/attack/cast
+  and other actor-state updates;
+- cross-player leases for NPC/container interaction, including atomic checking
+  of every object in a multi-container packet;
+- packet/list allocation caps, string size caps, malformed/truncated primitive
+  read handling and global packet-rate limits to reduce packet/OOM abuse;
+- unknown-connection and handshake/replay guards before player state is
+  dereferenced or initialized.
+
+The client contains matching preflight guards for malformed outgoing data and
+interaction spam. These checks improve robustness but are not trusted as the
+anti-cheat boundary: a modified client can remove them, so the server repeats
+validation independently.
+
+ArenaMP does **not** scan, terminate or hook ArtMoney/Cheat Engine processes.
+Instead, it rejects or rolls back invalid network state that memory editing
+tries to make the client submit. This avoids invasive process inspection and
+keeps the important checks on the server.
+
+See `COREARENAMP_SECURITY.md` for the exact negative-value policy, coverage and
+known limits.

@@ -3,7 +3,7 @@ local commandHandler = {}
 function commandHandler.ProcessCommand(pid, cmd)
 
     if cmd[1] == nil then
-        local message = "Please use a command after the / symbol.\n"
+        local message = localization.Get(pid, "core", "command_required")
         tes3mp.SendMessage(pid, color.Error .. message .. color.Default, false)
         return false
     else
@@ -1013,7 +1013,7 @@ function commandHandler.ProcessCommand(pid, cmd)
         menuHelper.DisplayMenu(pid, Players[pid].currentCustomMenu)
 
     else
-        local message = "Not a valid command. Type /help for more info.\n"
+        local message = localization.Get(pid, "core", "command_invalid")
         tes3mp.SendMessage(pid, color.Error .. message .. color.Default, false)
     end
 end

@@ -2,6 +2,7 @@
 #define OPENMW_PROCESSORPLAYERCELLCHANGE_HPP
 
 #include "../PlayerProcessor.hpp"
+#include "../../CoreArenaMPSecurity.hpp"
 #include "apps/openmw-mp/Networking.hpp"
 #include "apps/openmw-mp/Script/Script.hpp"
 #include <components/openmw-mp/Controllers/PlayerPacketController.hpp>
@@ -22,6 +23,7 @@ namespace mwmp
         {
             LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Received %s from %s", strPacketID.c_str(), player.npc.mName.c_str());
             LOG_APPEND(TimedLog::LOG_INFO, "- Moved to %s", player.cell.getShortDescription().c_str());
+            CoreArenaMPSecurity::ResetPosition(player);
 
             Script::Call<Script::CallbackIdentity("OnPlayerCellChange")>(player.getId());
 

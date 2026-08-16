@@ -30,6 +30,12 @@ void PacketPlayerEquipment::Packet(RakNet::BitStream *newBitstream, bool send)
 
         RW(count, send);
 
+    if (!send && count > 19)
+    {
+        packetValid = false;
+        return;
+    }
+
         if (!send)
         {
             player->equipmentIndexChanges.clear();
@@ -39,6 +45,11 @@ void PacketPlayerEquipment::Packet(RakNet::BitStream *newBitstream, bool send)
         for (auto &&equipmentIndex : player->equipmentIndexChanges)
         {
             RW(equipmentIndex, send);
+            if (!send && (equipmentIndex < 0 || equipmentIndex >= 19))
+            {
+                packetValid = false;
+                return;
+            }
             ExchangeItemInformation(player->equipmentItems[equipmentIndex], send);
         }
     }

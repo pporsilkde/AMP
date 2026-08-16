@@ -11,6 +11,9 @@
 #include <components/translation/translation.hpp>
 #include <components/openmw-mp/TimedLog.hpp>
 
+#include <chrono>
+#include <unordered_map>
+
 #include "../mwbase/world.hpp"
 #include "../mwbase/environment.hpp"
 #include "../mwbase/mechanicsmanager.hpp"
@@ -39,6 +42,90 @@
 #include "../mwworld/inventorystore.hpp"
 #include "../mwworld/manualref.hpp"
 #include "../mwworld/timestamp.hpp"
+
+namespace
+{
+    using SecurityClock = std::chrono::steady_clock;
+
+    struct ClientRateWindow
+    {
+        SecurityClock::time_point started = SecurityClock::now();
+        unsigned count = 0;
+    };
+
+    struct ClientInteractionGate
+    {
+        std::unordered_map<unsigned char, ClientRateWindow> rateWindows;
+        std::string key;
+        unsigned char packetId = 0;
+        SecurityClock::time_point changed = SecurityClock::time_point::min();
+    };
+
+    ClientInteractionGate sInteractionGate;
+
+    unsigned clientRateLimit(unsigned char packetId)
+    {
+        switch (packetId)
+        {
+            case ID_OBJECT_ACTIVATE: return 16;
+            case ID_OBJECT_DIALOGUE_CHOICE: return 24;
+            case ID_CONTAINER: return 64;
+            default: return 0;
+        }
+    }
+
+    std::string clientInteractionKey(const mwmp::BaseObjectList& list, unsigned char packetId)
+    {
+        if (list.baseObjects.empty())
+            return {};
+        const mwmp::BaseObject& object = list.baseObjects.front();
+        if (packetId == ID_OBJECT_ACTIVATE && object.isPlayer)
+            return list.cell.getShortDescription() + "|player|" + std::to_string(object.guid.g);
+        return list.cell.getShortDescription() + "|" + object.refId + "|"
+            + std::to_string(object.refNum) + "|" + std::to_string(object.mpNum);
+    }
+
+    bool allowOutgoingInteraction(const mwmp::BaseObjectList& list, unsigned char packetId)
+    {
+        if (list.baseObjects.empty())
+            return false;
+
+        const SecurityClock::time_point now = SecurityClock::now();
+        const unsigned limit = clientRateLimit(packetId);
+        if (limit != 0)
+        {
+            ClientRateWindow& window = sInteractionGate.rateWindows[packetId];
+            if (std::chrono::duration<double>(now - window.started).count() >= 1.0)
+            {
+                window.started = now;
+                window.count = 0;
+            }
+            if (++window.count > limit)
+            {
+                LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
+                    "CoreArenaMP client security: outgoing interaction rate limit reached");
+                return false;
+            }
+        }
+
+        const std::string key = clientInteractionKey(list, packetId);
+        if (!sInteractionGate.key.empty() && !key.empty())
+        {
+            const double age = std::chrono::duration<double>(now - sInteractionGate.changed).count();
+            if (age < 0.20 && sInteractionGate.packetId != packetId && sInteractionGate.key != key)
+            {
+                LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
+                    "CoreArenaMP client security: blocked simultaneous NPC/container interaction");
+                return false;
+            }
+        }
+
+        sInteractionGate.key = key;
+        sInteractionGate.packetId = packetId;
+        sInteractionGate.changed = now;
+        return true;
+    }
+}
 
 using namespace mwmp;
 
@@ -1511,6 +1598,8 @@ void ObjectList::addScriptMemberShort(std::string refId, int index, int shortVal
 
 void ObjectList::sendObjectActivate()
 {
+    if (!allowOutgoingInteraction(*this, ID_OBJECT_ACTIVATE))
+        return;
     mwmp::Main::get().getNetworking()->getObjectPacket(ID_OBJECT_ACTIVATE)->setObjectList(this);
     mwmp::Main::get().getNetworking()->getObjectPacket(ID_OBJECT_ACTIVATE)->Send();
 }
@@ -1563,6 +1652,8 @@ void ObjectList::sendObjectLock()
 
 void ObjectList::sendObjectDialogueChoice()
 {
+    if (!allowOutgoingInteraction(*this, ID_OBJECT_DIALOGUE_CHOICE))
+        return;
     mwmp::Main::get().getNetworking()->getObjectPacket(ID_OBJECT_DIALOGUE_CHOICE)->setObjectList(this);
     mwmp::Main::get().getNetworking()->getObjectPacket(ID_OBJECT_DIALOGUE_CHOICE)->Send();
 }
@@ -1697,6 +1788,9 @@ void ObjectList::sendScriptMemberShort()
 
 void ObjectList::sendContainer()
 {
+    if (!allowOutgoingInteraction(*this, ID_CONTAINER))
+        return;
+
     std::string debugMessage = "Sending ID_CONTAINER with action ";
     
     if (action == mwmp::BaseObjectList::SET)

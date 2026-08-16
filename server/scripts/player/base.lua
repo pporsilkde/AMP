@@ -645,7 +645,12 @@ function BasePlayer:Resurrect()
         end
 
         resurrectionText = resurrectionText .. ".\n"
-        tes3mp.Jail(self.pid, jailTime, true, true, "Recovering", resurrectionText)
+
+        -- tes3mp.Jail is not covered by the normal localized GUI wrappers,
+        -- so translate its caption and body explicitly for the current player.
+        local recoveringTitle = localization.TranslateText(self.pid, "Recovering")
+        resurrectionText = localization.TranslateText(self.pid, resurrectionText)
+        tes3mp.Jail(self.pid, jailTime, true, true, recoveringTitle, resurrectionText)
     end
 
     if config.bountyResetOnDeath then

@@ -17,6 +17,12 @@ void mwmp::PacketPlayerAlly::Packet(RakNet::BitStream *newBitstream, bool send)
 
     RW(count, send);
 
+    if (!send && count > 512)
+    {
+        packetValid = false;
+        return;
+    }
+
     if (!send)
     {
         player->alliedPlayers.clear();

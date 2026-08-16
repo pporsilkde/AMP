@@ -1,3 +1,4 @@
-ArenaMP bundled CoreScripts v16
-Source: user-provided server.zip
+ArenaMP bundled CoreScripts v18
+Source: ArenaMP cumulative CoreChat/RP/SystemMessages + CoreArenaMP DataManager/native security integration
 TES3MP protocol: 0.8.1
+Security: server-authoritative numeric validation, transactional rollback, actor authority, interaction leases, malformed packet guards, safe persistence

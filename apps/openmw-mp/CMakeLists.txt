@@ -50,6 +50,7 @@ set(SERVER
     Cell.cpp
     CellController.cpp
     Utils.cpp
+    CoreArenaMPSecurity.cpp
     Script/Script.cpp Script/ScriptFunction.cpp
     Script/ScriptFunctions.cpp
 
@@ -70,6 +71,7 @@ set(SERVER
 )
 
 set(SERVER_HEADER
+        CoreArenaMPSecurity.hpp
         Script/Types.hpp Script/Script.hpp Script/SystemInterface.hpp
         Script/ScriptFunction.hpp Script/Platform.hpp Script/Language.hpp
         Script/ScriptFunctions.hpp Script/API/TimerAPI.hpp Script/API/PublicFnAPI.hpp

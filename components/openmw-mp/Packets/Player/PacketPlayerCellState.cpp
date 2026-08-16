@@ -20,6 +20,12 @@ void mwmp::PacketPlayerCellState::Packet(RakNet::BitStream *newBitstream, bool s
 
     RW(count, send);
 
+    if (!send && count > 256)
+    {
+        packetValid = false;
+        return;
+    }
+
     if (!send)
     {
         player->cellStateChanges.clear();

@@ -1,5 +1,6 @@
 #include "Player.hpp"
 #include "Networking.hpp"
+#include "CoreArenaMPSecurity.hpp"
 
 TPlayers Players::players;
 TSlots Players::slots;
@@ -15,6 +16,7 @@ void Players::deletePlayer(RakNet::RakNetGUID guid)
         LOG_APPEND(TimedLog::LOG_INFO, "- Emptying slot %i", players[guid]->getId());
 
         slots[players[guid]->getId()] = 0;
+        mwmp::CoreArenaMPSecurity::ForgetPlayer(*players[guid]);
         delete players[guid];
         players.erase(guid);
     }

@@ -29,6 +29,12 @@ void PacketPlayerSkill::Packet(RakNet::BitStream *newBitstream, bool send)
 
         RW(count, send);
 
+    if (!send && count > 27)
+    {
+        packetValid = false;
+        return;
+    }
+
         if (!send)
         {
             player->skillIndexChanges.clear();

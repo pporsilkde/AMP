@@ -19,7 +19,7 @@ local getRanks = function(pid)
 end
 
 local invalidCommand = function(pid)
-    local message = "Not a valid command. Type /help for more info.\n"
+    local message = localization.Get(pid, "core", "command_invalid")
     tes3mp.SendMessage(pid, color.Error .. message .. color.Default, false)
 end
 

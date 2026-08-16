@@ -424,6 +424,22 @@ eventHandler.InitializeDefaultHandlers = function()
 
 end
 
+local function announcePlayerJoined(pid)
+    local player = Players[pid]
+    if player == nil or not player:IsLoggedIn() or player.arenaJoinAnnounced == true then
+        return
+    end
+
+    player.arenaJoinAnnounced = true
+    local joiningName = logicHandler.GetChatName(pid)
+    for recipientPid, recipient in pairs(Players) do
+        if recipientPid ~= pid and recipient ~= nil and recipient:IsLoggedIn() then
+            tes3mp.SendMessage(recipientPid, localization.Get(recipientPid, "core", "player_joined",
+                {name = joiningName}), false)
+        end
+    end
+end
+
 eventHandler.OnPlayerConnect = function(pid, playerName)
 
     Players[pid] = Player(pid, playerName)
@@ -480,7 +496,7 @@ eventHandler.OnPlayerConnect = function(pid, playerName)
 
         WorldInstance:LoadTime(pid, false)
 
-        local message = logicHandler.GetChatName(pid) .. " has joined the server"
+        local message
 
         local ipAddress = tes3mp.GetIP(pid)
         Players[pid].ipAddress = ipAddress
@@ -494,16 +510,15 @@ eventHandler.OnPlayerConnect = function(pid, playerName)
                 table.insert(otherPlayerNames, logicHandler.GetChatName(otherPid))
             end
 
-            message = message .. ", from the same IP address as " .. tableHelper.concatenateArrayValues(otherPlayerNames, 1, ", ")
+            local sameIpNote = color.Grey .. "[IP] " .. tableHelper.concatenateArrayValues(otherPlayerNames, 1, ", ") .. color.Default .. "\n"
+            tes3mp.SendMessage(pid, sameIpNote, false)
         end
 
-        message = message .. ".\n"
-        tes3mp.SendMessage(pid, message, true)
-
         if tableHelper.getCount(pidsByIpAddress[ipAddress]) + 1 > config.maxClientsPerIP then
-            message = logicHandler.GetChatName(pid) .. " has been kicked because this server allows a maximum of " ..
-                config.maxClientsPerIP .. " clients from the same IP address.\n"
-            tes3mp.SendMessage(pid, message, true)            
+            message = localization.Get(pid, "core", "max_ip_clients", {
+                name = logicHandler.GetChatName(pid), max = config.maxClientsPerIP
+            })
+            tes3mp.SendMessage(pid, message, false)
             tes3mp.Kick(pid)
             Players[pid] = nil
             return
@@ -513,11 +528,11 @@ eventHandler.OnPlayerConnect = function(pid, playerName)
 
         if Players[pid]:HasAccount() then
             message = localization.Get(pid, "core", "welcome_login",
-                { name = playerName, seconds = config.loginTime })
+                { name = playerName, seconds = config.loginTime, count = tableHelper.getCount(Players) })
             guiHelper.ShowLogin(pid)
         else
             message = localization.Get(pid, "core", "welcome_register",
-                { name = playerName, seconds = config.loginTime })
+                { name = playerName, seconds = config.loginTime, count = tableHelper.getCount(Players) })
             guiHelper.ShowRegister(pid)
         end
 
@@ -533,8 +548,17 @@ end
 
 eventHandler.OnPlayerDisconnect = function(pid)
 
-    local message = logicHandler.GetChatName(pid) .. " has left the server.\n"
-    tes3mp.SendMessage(pid, message, true)
+    -- Keep login/CharGen disconnects silent. Only players whose successful entry
+    -- was announced get a matching departure message.
+    if Players[pid] ~= nil and Players[pid]:IsLoggedIn() and Players[pid].arenaJoinAnnounced == true then
+        local leavingName = logicHandler.GetChatName(pid)
+        for recipientPid, recipient in pairs(Players) do
+            if recipientPid ~= pid and recipient ~= nil and recipient:IsLoggedIn() then
+                tes3mp.SendMessage(recipientPid, localization.Get(recipientPid, "core", "player_left",
+                    {name = leavingName}), false)
+            end
+        end
+    end
 
     -- If this player has disconnected before properly logging in, remove their pid
     -- from the table tracking IP addresses
@@ -703,7 +727,7 @@ eventHandler.OnGUIAction = function(pid, idGui, data)
             else
                 if idGui == guiHelper.ID.LOGIN then
                     if data == nil then
-                        Players[pid]:Message("Incorrect password!\n")
+                        Players[pid]:Message(localization.Get(pid, "core", "incorrect_password"))
                         guiHelper.ShowLogin(pid)
                         return
                     end
@@ -712,7 +736,7 @@ eventHandler.OnGUIAction = function(pid, idGui, data)
                     local passwordSalt = Players[pid].data.login.passwordSalt
 
                     if Players[pid].data.login.passwordHash ~= tes3mp.GetSHA256Hash(data .. passwordSalt) then
-                        Players[pid]:Message("Incorrect password!\n")
+                        Players[pid]:Message(localization.Get(pid, "core", "incorrect_password"))
                         guiHelper.ShowLogin(pid)
                         return
                     end
@@ -721,7 +745,8 @@ eventHandler.OnGUIAction = function(pid, idGui, data)
                     if tableHelper.containsValue(banList.playerNames, string.lower(Players[pid].accountName)) == true then
                         Players[pid]:SaveIpAddress()
 
-                        Players[pid]:Message(Players[pid].accountName .. " is banned from this server.\n")
+                        Players[pid]:Message(localization.Get(pid, "core", "account_banned",
+                            {name = Players[pid].accountName}))
                         tes3mp.BanAddress(tes3mp.GetIP(pid))
                     else
                         if Players[pid].loginTimerId ~= nil then
@@ -735,6 +760,8 @@ eventHandler.OnGUIAction = function(pid, idGui, data)
                         if WorldInstance:HasRunStartupScripts() == false then
                             Players[pid]:Message(localization.Get(pid, "core", "startup_welcome"))
                         end
+
+                        announcePlayerJoined(pid)
                     end
                 elseif idGui == guiHelper.ID.REGISTER then
                     if Players[pid]:HasAccount() then
@@ -745,7 +772,7 @@ eventHandler.OnGUIAction = function(pid, idGui, data)
                         tes3mp.BanAddress(tes3mp.GetIP(pid))
                         return
                     elseif data == nil then
-                        Players[pid]:Message("Password can not be empty\n")
+                        Players[pid]:Message(localization.Get(pid, "core", "password_empty"))
                         guiHelper.ShowRegister(pid)
                         return
                     end
@@ -817,6 +844,7 @@ eventHandler.OnPlayerEndCharGen = function(pid)
         local eventStatus = customEventHooks.triggerValidators("OnPlayerEndCharGen", {pid})
         if eventStatus.validDefaultHandler then
             Players[pid]:EndCharGen()
+            announcePlayerJoined(pid)
         end
         customEventHooks.triggerHandlers("OnPlayerEndCharGen", eventStatus, {pid})
         customEventHooks.triggerHandlers("OnPlayerAuthentified", eventStatus, {pid})

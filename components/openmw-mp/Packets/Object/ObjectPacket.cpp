@@ -39,6 +39,9 @@ void ObjectPacket::Packet(RakNet::BitStream *newBitstream, bool send)
 
         Object(baseObject, send);
 
+        if (!send && (!packetValid || !objectList->isValid))
+            return;
+
         if (!send)
             objectList->baseObjects.push_back(baseObject);
     }
@@ -63,6 +66,7 @@ bool ObjectPacket::PacketHeader(RakNet::BitStream *newBitstream, bool send)
     if (objectList->baseObjectCount > maxObjects)
     {
         objectList->isValid = false;
+        packetValid = false;
         return false;
     }
 

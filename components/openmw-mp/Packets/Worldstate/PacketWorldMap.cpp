@@ -20,6 +20,13 @@ void PacketWorldMap::Packet(RakNet::BitStream *newBitstream, bool send)
 
     RW(changesCount, send);
 
+    if (!send && changesCount > 1024)
+    {
+        worldstate->isValid = false;
+        packetValid = false;
+        return;
+    }
+
     if (!send)
     {
         worldstate->mapTiles.clear();
@@ -43,6 +50,8 @@ void PacketWorldMap::Packet(RakNet::BitStream *newBitstream, bool send)
             LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR, "Processed invalid ID_WORLD_MAP packet where tile %i, %i had an imageDataSize of %i",
                 mapTile.x, mapTile.y, imageDataSize);
             LOG_APPEND(TimedLog::LOG_ERROR, "- The packet was ignored after that point");
+            worldstate->isValid = false;
+            packetValid = false;
             return;
         }
 

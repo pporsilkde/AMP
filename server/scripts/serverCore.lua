@@ -15,13 +15,24 @@ end
 require("color")
 require("config")
 localization = require("localization")
-localization.LoadDictionary("core", "locales.core")
+local coreLocaleLoaded = localization.LoadDictionary("core", "locales.core")
+local coreChatLocaleLoaded = localization.LoadDictionary("coreChat", "locales.coreChat")
+if not coreLocaleLoaded then
+    tes3mp.LogMessage(enumerations.log.ERROR,
+        "ArenaMP core localization dictionary failed to load; safe built-in fallbacks are active")
+end
+if not coreChatLocaleLoaded then
+    tes3mp.LogMessage(enumerations.log.ERROR,
+        "ArenaMP coreChat localization dictionary failed to load; missing chat texts will be suppressed instead of exposing keys")
+end
 localization.InstallWrappers()
 friendlyFire = require("friendlyFire")
 require("time")
 
 customEventHooks = require("customEventHooks")
 customCommandHooks = require("customCommandHooks")
+CoreArenaMP_DataManager = require("CoreArenaMP_DataManager")
+CoreArenaMP_BaseScript = require("CoreArenaMP_BaseScript")
 logicHandler = require("logicHandler")
 eventHandler = require("eventHandler")
 guiHelper = require("guiHelper")
@@ -29,6 +40,7 @@ animHelper = require("animHelper")
 speechHelper = require("speechHelper")
 menuHelper = require("menuHelper")
 require("defaultCommands")
+coreChat = require("coreChat")
 require("customScripts")
 
 Database = nil
@@ -188,6 +200,9 @@ function OnServerInit()
 
     if eventStatus.validDefaultHandler then
         friendlyFire.Initialize()
+        if not CoreArenaMP_BaseScript.Initialize() then
+            return
+        end
         logicHandler.InitializeWorld()
 
         for priorityLevel, recordStoreTypes in ipairs(config.recordStoreLoadOrder) do

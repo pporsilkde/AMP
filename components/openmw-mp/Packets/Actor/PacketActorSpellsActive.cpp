@@ -20,6 +20,13 @@ void PacketActorSpellsActive::Actor(BaseActor &actor, bool send)
 
     RW(count, send);
 
+    if (!send && count > 512)
+    {
+        actorList->isValid = false;
+        packetValid = false;
+        return;
+    }
+
     if (!send)
     {
         actor.spellsActiveChanges.activeSpells.clear();
@@ -56,6 +63,7 @@ void PacketActorSpellsActive::Actor(BaseActor &actor, bool send)
 
         if (effectCount > maxEffects)
         {
+            actorList->isValid = false;
             return;
         }
 

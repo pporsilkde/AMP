@@ -222,15 +222,40 @@ config.vrSettings = {
 config.defaultTimeTable = { year = 427, month = 7, day = 16, hour = 9,
     daysPassed = 1, dayTimeScale = 30, nightTimeScale = 40 }
 
--- The chat window instructions that show up when players join the server
-config.chatWindowInstructions = color.White .. "Use " .. color.Yellow .. "Y" .. color.White .. " by default to chat or change it" ..
-    " from your client config.\nType in " .. color.Yellow .. "/help" .. color.White .. " to see the commands" ..
-    " available to you.\nType in " .. color.Yellow .. "/invite <pid>" .. color.White .. " to invite a player to become " ..
-    "your ally so their followers don't react to your friendly fire.\nUse " .. color.Yellow .. "F2" .. color.White ..
-    " by default to hide the chat window or use the " .. color.Yellow .. "Chat Window Mode\n"
+-- The chat window instructions that show up when players join the server.
+-- Keep the original compact ArenaMP/Nirn formatting here so it is easy to edit.
+config.chatWindowInstructions = color.SkyBlue .. "[Написать в чат - " .. color.Turquoise .. "Y" .. color.SkyBlue .. "] [Скрыть чат - " .. color.Turquoise .. "F5" .. color.SkyBlue .. "] [Все доступные команды  - " .. color.Turquoise .. "/help" .. color.SkyBlue .. "]\n" .. color.Green .. "Вопросы? -> morrowind.site\n"
 
--- The startup scripts instructions that show up when the startup scripts have not been run yet
-config.startupScriptsInstructions = color.White .. " Welcome to ArenaMP!\n"
+-- English equivalent used only for EN clients when per-client localization is enabled.
+config.chatWindowInstructionsEN = color.SkyBlue .. "[Chat - " .. color.Turquoise .. "Y" .. color.SkyBlue .. "] [Hide chat - " .. color.Turquoise .. "F5" .. color.SkyBlue .. "] [All available commands  - " .. color.Turquoise .. "/help" .. color.SkyBlue .. "]\n" .. color.Green .. "Questions? -> morrowind.site\n"
+
+-- Compact pre-login greeting shown before the password/registration dialog.
+-- Placeholders: {name} = player name, {count} = online count, {seconds} = login timeout.
+config.startupMessage = {
+    EN = {
+        login = color.SkyBlue .. "Welcome to the server" .. color.Default .. "\nArenaMP, " ..
+            color.Turquoise .. "{name}" .. color.Default .. "\n" .. color.SkyBlue .. "Players online: " ..
+            color.Turquoise .. "{count}" .. color.SkyBlue .. ".\nYou have " .. color.Turquoise .. "{seconds}" ..
+            color.SkyBlue .. " sec. to" .. color.Default .. " log in.\n",
+        register = color.SkyBlue .. "Welcome to the server" .. color.Default .. "\nArenaMP, " ..
+            color.Turquoise .. "{name}" .. color.Default .. "\n" .. color.SkyBlue .. "Players online: " ..
+            color.Turquoise .. "{count}" .. color.SkyBlue .. ".\nYou have " .. color.Turquoise .. "{seconds}" ..
+            color.SkyBlue .. " sec. to" .. color.Default .. " register.\n"
+    },
+    RU = {
+        login = color.SkyBlue .. "Добро пожаловать на сервер" .. color.Default .. "\nArenaMP, " ..
+            color.Turquoise .. "{name}" .. color.Default .. "\n" .. color.SkyBlue .. "На сервере сейчас " ..
+            color.Turquoise .. "{count}" .. color.SkyBlue .. " игрок(ов).\nУ вас есть " .. color.Turquoise .. "{seconds}" ..
+            color.SkyBlue .. " сек. чтобы" .. color.Default .. " авторизоваться.\n",
+        register = color.SkyBlue .. "Добро пожаловать на сервер" .. color.Default .. "\nArenaMP, " ..
+            color.Turquoise .. "{name}" .. color.Default .. "\n" .. color.SkyBlue .. "На сервере сейчас " ..
+            color.Turquoise .. "{count}" .. color.SkyBlue .. " игрок(ов).\nУ вас есть " .. color.Turquoise .. "{seconds}" ..
+            color.SkyBlue .. " сек. чтобы" .. color.Default .. " зарегистрироваться.\n"
+    }
+}
+
+-- Exactly as in the old server: keep this effectively empty so no second startup banner is printed.
+config.startupScriptsInstructions = color.SkyBlue .. " \n"
 
 -- Which ingame startup scripts should be run via the /runstartup command
 -- Note: These affect the world and must not be run for every player who joins.

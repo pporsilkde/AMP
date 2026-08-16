@@ -21,6 +21,12 @@ void PacketPlayerInventory::Packet(RakNet::BitStream *newBitstream, bool send)
 
     RW(count, send);
 
+    if (!send && count > 1024)
+    {
+        packetValid = false;
+        return;
+    }
+
     if (!send)
     {
         player->inventoryChanges.items.clear();

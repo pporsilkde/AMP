@@ -21,6 +21,7 @@
 #include "MasterClient.hpp"
 #include "Cell.hpp"
 #include "CellController.hpp"
+#include "CoreArenaMPSecurity.hpp"
 #include "processors/PlayerProcessor.hpp"
 #include "processors/ActorProcessor.hpp"
 #include "processors/ObjectProcessor.hpp"
@@ -104,12 +105,21 @@ const std::string& Networking::getStartLocation() const
 void Networking::processSystemPacket(RakNet::Packet *packet)
 {
     Player *player = Players::getPlayer(packet->guid);
+    if (player == nullptr)
+    {
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
+            "CoreArenaMP security: ignored system packet from unknown GUID %lu", packet->guid.g);
+        return;
+    }
 
     SystemPacket *myPacket = systemPacketController->GetPacket(packet->data[0]);
 
     if (packet->data[0] == ID_SYSTEM_HANDSHAKE)
     {
-        myPacket->setSystem(&baseSystem);
+        // Decode client-controlled handshake text into a local object instead
+        // of mutating the Networking-wide BaseSystem before validation.
+        BaseSystem handshakeSystem(packet->guid);
+        myPacket->setSystem(&handshakeSystem);
         myPacket->Read();
 
         if (!myPacket->isPacketValid())
@@ -126,12 +136,12 @@ void Networking::processSystemPacket(RakNet::Packet *packet)
             return;
         }
 
-        if (baseSystem.serverPassword != serverPassword)
+        if (handshakeSystem.serverPassword != serverPassword)
         {
             if (isPassworded())
             {
                 LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "Wrong server password %s used by client at %s",
-                    baseSystem.serverPassword.c_str(), packet->systemAddress.ToString());
+                    handshakeSystem.serverPassword.c_str(), packet->systemAddress.ToString());
                 kickPlayer(player->guid);
                 return;
             }
@@ -149,6 +159,12 @@ void Networking::processSystemPacket(RakNet::Packet *packet)
 void Networking::processPlayerPacket(RakNet::Packet *packet)
 {
     Player *player = Players::getPlayer(packet->guid);
+    if (player == nullptr)
+    {
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
+            "CoreArenaMP security: ignored player packet from unknown GUID %lu", packet->guid.g);
+        return;
+    }
 
     PlayerPacket *myPacket = playerPacketController->GetPacket(packet->data[0]);
 
@@ -168,6 +184,16 @@ void Networking::processPlayerPacket(RakNet::Packet *packet)
 
     if (packet->data[0] == ID_LOADED)
     {
+        // ID_LOADED is a one-shot login transition. Replaying it after the
+        // player has entered POSTLOADED used to call OnPlayerConnect again and
+        // could reset/re-enter login state from a modified client.
+        if (player->getLoadState() == Player::POSTLOADED)
+        {
+            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
+                "CoreArenaMP security: ignored replayed ID_LOADED from pid %u", player->getId());
+            return;
+        }
+
         player->setLoadState(Player::LOADED);
 
         unsigned short pid = Players::getPlayer(packet->guid)->getId();
@@ -198,7 +224,21 @@ void Networking::processPlayerPacket(RakNet::Packet *packet)
         }
 
         myPacket->setPlayer(player);
+
+        // BaseInfo is handled before the normal PlayerProcessor, so give it
+        // the same transactional read/rollback guarantee.
+        RakNet::BitStream rollbackStream;
+        myPacket->Packet(&rollbackStream, true);
         myPacket->Read();
+        if (!myPacket->isPacketValid() || !CoreArenaMPSecurity::ValidatePlayerPacket(*player, ID_PLAYER_BASEINFO))
+        {
+            rollbackStream.IgnoreBytes(BasePacket::headerSize());
+            myPacket->Packet(&rollbackStream, false);
+            myPacket->setPlayer(player);
+            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
+                "CoreArenaMP security: rejected malformed BaseInfo from %s", packet->systemAddress.ToString());
+            return;
+        }
         player->language = player->language == "RU" ? "RU" : "EN";
         LOG_APPEND(TimedLog::LOG_INFO, "- Client language: %s", player->language.c_str());
         LOG_APPEND(TimedLog::LOG_INFO,
@@ -232,6 +272,12 @@ void Networking::processPlayerPacket(RakNet::Packet *packet)
 void Networking::processActorPacket(RakNet::Packet *packet)
 {
     Player *player = Players::getPlayer(packet->guid);
+    if (player == nullptr)
+    {
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
+            "CoreArenaMP security: ignored actor packet from unknown GUID %lu", packet->guid.g);
+        return;
+    }
 
     if (!player->isHandshaked() || player->getLoadState() != Player::POSTLOADED)
         return;
@@ -244,6 +290,12 @@ void Networking::processActorPacket(RakNet::Packet *packet)
 void Networking::processObjectPacket(RakNet::Packet *packet)
 {
     Player *player = Players::getPlayer(packet->guid);
+    if (player == nullptr)
+    {
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
+            "CoreArenaMP security: ignored object packet from unknown GUID %lu", packet->guid.g);
+        return;
+    }
 
     if (!player->isHandshaked() || player->getLoadState() != Player::POSTLOADED)
         return;
@@ -256,6 +308,12 @@ void Networking::processObjectPacket(RakNet::Packet *packet)
 void Networking::processWorldstatePacket(RakNet::Packet *packet)
 {
     Player *player = Players::getPlayer(packet->guid);
+    if (player == nullptr)
+    {
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
+            "CoreArenaMP security: ignored worldstate packet from unknown GUID %lu", packet->guid.g);
+        return;
+    }
 
     if (!player->isHandshaked() || player->getLoadState() != Player::POSTLOADED)
         return;
@@ -294,6 +352,12 @@ bool Networking::preInit(RakNet::Packet *packet, RakNet::BitStream &bsIn)
 
     const bool syncCapable = packetPreInit.supportsManifestSync();
     const uint8_t phase = packetPreInit.getManifestPhase();
+    if (syncCapable && phase != PacketPreInit::PHASE_REQUEST && phase != PacketPreInit::PHASE_VERIFY)
+    {
+        LOG_APPEND(TimedLog::LOG_WARN, "- Invalid client manifest phase: %u", static_cast<unsigned>(phase));
+        peer->CloseConnection(packet->systemAddress, false);
+        return false;
+    }
 
     // ArenaMP FIX12: when enforcement is enabled, a new client first receives
     // the authoritative content order and optional groundcover list. No player
