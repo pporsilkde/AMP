@@ -60,7 +60,7 @@ namespace mwmp
 
         // The language names are intentionally self-identifying so the selector
         // remains understandable before a language has been chosen.
-        mLanguage->addItem(QString::fromUtf8(u8"\u0420\u0443\u0441\u0441\u043A\u0438\u0439"));
+        mLanguage->addItem("\xD0\xA0\xD1\x83\xD1\x81\xD1\x81\xD0\xBA\xD0\xB8\xD0\xB9");
         mLanguage->addItem("English");
 
         setLogin(Settings::Manager::getString("name", "Login"));

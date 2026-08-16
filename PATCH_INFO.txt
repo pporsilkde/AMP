@@ -97,3 +97,8 @@ BUILD FIX18 - RU UI ENCODING FIX
 - Built-in Russian translation table is ASCII-only via Unicode escapes.
 - Hardcoded Russian language selector text is source-codepage independent.
 - Fixes D0/D1 mojibake in Launcher/Wizard/Host Mode/graphics labels.
+
+BUILD FIX20 - GUILogin MSVC build fix
+- Removed accidental Qt QString usage from non-Qt tes3mp client target.
+- Russian language selector label is encoded as explicit UTF-8 bytes for MyGUI.
+- Keeps FIX19 appearance sync and FIX18 launcher/wizard UTF-8 localization intact.
