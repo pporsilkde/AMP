@@ -4,6 +4,7 @@
 #include <components/openmw-mp/Base/BaseActor.hpp>
 #include "../mwmechanics/aisequence.hpp"
 #include "../mwworld/manualref.hpp"
+#include "InteractionAnimationSync.hpp"
 
 namespace mwmp
 {
@@ -24,6 +25,8 @@ namespace mwmp
         void setEquipment();
         void setAi();
         void playAnimation();
+        void cancelInteractionAnimation();
+        void updateInteractionAnimation();
         void playSound();
 
         bool hasItem(std::string itemId, int charge);
@@ -42,6 +45,9 @@ namespace mwmp
 
         bool hasReceivedInitialEquipment;
         bool hasChangedCell;
+
+        bool mInteractionAnimationActive;
+        InteractionAnimationData mInteractionAnimation;
     };
 }
 

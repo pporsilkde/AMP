@@ -22,6 +22,11 @@ namespace mwmp
             LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Received %s from %s", strPacketID.c_str(), player.npc.mName.c_str());
 
             CellController::get()->update(&player);
+
+            // Cell-state packets are the authoritative AOI boundary. A login
+            // teleport can finish after SetPlayerVisible(), so repeat the safe
+            // bidirectional snapshot exchange once the shared loaded cell is known.
+            Networking::getPtr()->exchangePlayerSnapshots(&player);
         }
     };
 }

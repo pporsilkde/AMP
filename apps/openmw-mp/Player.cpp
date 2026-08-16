@@ -68,9 +68,10 @@ Player::Player(RakNet::RakNetGUID guid) : BasePlayer(guid)
 {
     handshakeCounter = 0;
     loadState = NOTLOADED;
-    // FIX24: rollback the login/registration presence gate.
-    // Players participate in normal TES3MP presence immediately after connecting.
-    visibleToOthers = true;
+    // Do not let remote clients instantiate the temporary local ESM `player`
+    // record. Login/CharGen calls Networking::revealPlayer() only after the
+    // final race, head, hair, sex and model have been restored.
+    visibleToOthers = false;
     appearanceAuthoritative = false;
 }
 

@@ -307,8 +307,8 @@ function BasePlayer:FinishLogin()
 
         self.loggedIn = true
 
-        -- FIX24: players are no longer hidden during login. This call now only
-        -- locks the restored BaseInfo as authoritative after authentication.
+        -- Publish the restored race/head/hair only after authentication and the
+        -- account character snapshot have been fully loaded.
         tes3mp.SetPlayerVisible(self.pid, true)
 
         if self.data.alliedPlayers == nil then self.data.alliedPlayers = {} end
@@ -407,8 +407,8 @@ function BasePlayer:EndCharGen()
         end
     end
 
-    -- FIX24: CharGen no longer uses a hidden presence stage. Mark the final
-    -- race/head/hair as authoritative without issuing a reveal snapshot.
+    -- New accounts remain private through the entire registration/CharGen flow.
+    -- Publish only the final character snapshot.
     tes3mp.SetPlayerVisible(self.pid, true)
 
     self:RunPlayerSpecificStartupScripts()

@@ -19,6 +19,8 @@ namespace  mwmp
         ~Networking();
 
         void newPlayer(RakNet::RakNetGUID guid);
+        void revealPlayer(Player* player);
+        void exchangePlayerSnapshots(Player* player);
         void disconnectPlayer(RakNet::RakNetGUID guid);
         void kickPlayer(RakNet::RakNetGUID guid, bool sendNotification = true);
         
@@ -77,6 +79,7 @@ namespace  mwmp
         PacketPreInit::PluginContainer &getSamples();
         PacketPreInit::PluginContainer &getGroundcoverSamples();
     private:
+        void sendPlayerSnapshot(Player* player, RakNet::RakNetGUID destination);
         bool preInit(RakNet::Packet *packet, RakNet::BitStream &bsIn);
         std::string serverPassword;
         std::string startLocation;

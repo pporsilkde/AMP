@@ -824,8 +824,6 @@ namespace MWMechanics
 
         const AiSequence& aiSequence = stats.getAiSequence();
         const AiPackageTypeId activeAi = aiSequence.getTypeId();
-        const bool walkingWander = moving && !controller->isTurning()
-            && activeAi == AiPackageTypeId::Wander;
         const bool hasDirectedAi = (activeAi != AiPackageTypeId::None
             && activeAi != AiPackageTypeId::Wander)
             || aiSequence.hasPackage(AiPackageTypeId::Follow)
@@ -836,7 +834,7 @@ namespace MWMechanics
             || !Settings::Manager::getBool("dynamic dialogue actors", "GUI")
             || stats.isDead() || stats.getKnockedDown() || stats.getAiSequence().isInCombat()
             || hasDirectedAi
-            || stats.getDrawState() != DrawState_Nothing || (moving && !walkingWander) || constructionSetAnimation
+            || stats.getDrawState() != DrawState_Nothing || moving || constructionSetAnimation
             || controller->hasQueuedAnimation()
             || world->isSwimming(ptr) || MWBase::Environment::get().getSoundManager()->sayActive(ptr)
             || dialogueTarget || ArenaMW::isConsumingAnimationActive(ptr);
@@ -1023,8 +1021,6 @@ namespace MWMechanics
             if (candidate.mReligiousOnly && !religiousContext)
                 continue;
             if (candidate.mFormalOnly && !formalContext)
-                continue;
-            if (walkingWander && !candidate.mAllowWhileWalking)
                 continue;
             if (animation->hasAnimation(candidate.mGroup))
                 available.push_back(&candidate);

@@ -2397,6 +2397,12 @@ void LocalPlayer::updateInteractionAnimation(float dt)
     if (!mInteractionAnimationActive)
         return;
 
+    if (playerPoseIsBlocked(getPlayerPtr(), isJumping))
+    {
+        cancelInteractionAnimation(true);
+        return;
+    }
+
     ensureInteractionAnimationProp(getPlayerPtr(), mInteractionAnimation);
 
     const float elapsed = std::max(0.f, dt);

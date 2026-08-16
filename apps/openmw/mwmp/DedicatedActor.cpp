@@ -32,6 +32,26 @@
 #include "MechanicsHelper.hpp"
 #include "InteractionAnimationSync.hpp"
 
+namespace
+{
+    bool interactionAnimationIsBlocked(const MWWorld::Ptr& ptr)
+    {
+        if (ptr.isEmpty())
+            return true;
+
+        const MWMechanics::CreatureStats& stats = ptr.getClass().getCreatureStats(ptr);
+        const MWMechanics::Movement& movement = ptr.getClass().getMovementSettings(ptr);
+        const bool moving = std::abs(movement.mPosition[0]) > 0.05f
+            || std::abs(movement.mPosition[1]) > 0.05f
+            || std::abs(movement.mPosition[2]) > 0.05f;
+
+        return moving || stats.isDead() || stats.getKnockedDown()
+            || stats.getAiSequence().isInCombat()
+            || stats.getDrawState() != MWMechanics::DrawState_Nothing
+            || MWBase::Environment::get().getWorld()->isSwimming(ptr);
+    }
+}
+
 using namespace mwmp;
 
 DedicatedActor::DedicatedActor()
@@ -48,11 +68,13 @@ DedicatedActor::DedicatedActor()
 
     attack.pressed = false;
     cast.pressed = false;
+
+    mInteractionAnimationActive = false;
 }
 
 DedicatedActor::~DedicatedActor()
 {
-
+    cancelInteractionAnimation();
 }
 
 void DedicatedActor::update(float dt)
@@ -64,6 +86,7 @@ void DedicatedActor::update(float dt)
         setAnimFlags();
     }
 
+    updateInteractionAnimation();
     setStatsDynamic();
 }
 
@@ -375,9 +398,18 @@ void DedicatedActor::playAnimation()
         if (decodeInteractionAnimation(animation.groupname, interactionData))
         {
             if (interactionData.stop)
-                stopInteractionAnimation(ptr, interactionData);
-            else
-                playInteractionAnimation(ptr, interactionData);
+            {
+                if (mInteractionAnimationActive)
+                    cancelInteractionAnimation();
+                else
+                    stopInteractionAnimation(ptr, interactionData);
+            }
+            else if (!interactionAnimationIsBlocked(ptr))
+            {
+                cancelInteractionAnimation();
+                mInteractionAnimation = interactionData;
+                mInteractionAnimationActive = playInteractionAnimation(ptr, mInteractionAnimation);
+            }
             animation.groupname.clear();
             return;
         }
@@ -387,6 +419,33 @@ void DedicatedActor::playAnimation()
 
         animation.groupname.clear();
     }
+}
+
+void DedicatedActor::cancelInteractionAnimation()
+{
+    if (!mInteractionAnimationActive)
+        return;
+
+    stopInteractionAnimation(ptr, mInteractionAnimation);
+    mInteractionAnimation = InteractionAnimationData();
+    mInteractionAnimationActive = false;
+}
+
+void DedicatedActor::updateInteractionAnimation()
+{
+    if (!mInteractionAnimationActive)
+        return;
+
+    // Network interpolation may begin before the authority's reliable stop
+    // packet arrives. Cancel locally on the first moving frame so a cosmetic
+    // ArmsFolded/ArmsAtBack/gesture layer can never suppress locomotion.
+    if (interactionAnimationIsBlocked(ptr))
+    {
+        cancelInteractionAnimation();
+        return;
+    }
+
+    ensureInteractionAnimationProp(ptr, mInteractionAnimation);
 }
 
 void DedicatedActor::playSound()

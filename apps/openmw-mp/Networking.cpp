@@ -185,11 +185,9 @@ void Networking::processPlayerPacket(RakNet::Packet *packet)
     {
         LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Received ID_PLAYER_BASEINFO about %s", player->npc.mName.c_str());
 
-        // FIX24: appearance authority is independent from player visibility.
-        // The unstable login/registration presence gate has been rolled back, so
-        // players are visible immediately. We still reject late legacy BaseInfo
-        // after the saved/CharGen appearance has been finalized, preventing the
-        // local ESM `player` template (Dark Elf) from overwriting race/head/hair.
+        // The server owns appearance after login/CharGen has been finalized.
+        // Reject any late reply containing the client's temporary local ESM
+        // `player` record (the stock Dark Elf template).
         if (player->isAppearanceAuthoritative())
         {
             LOG_APPEND(TimedLog::LOG_INFO,
@@ -203,15 +201,17 @@ void Networking::processPlayerPacket(RakNet::Packet *packet)
         myPacket->Read();
         player->language = player->language == "RU" ? "RU" : "EN";
         LOG_APPEND(TimedLog::LOG_INFO, "- Client language: %s", player->language.c_str());
-        LOG_APPEND(TimedLog::LOG_INFO, "- BaseInfo accepted during login/CharGen");
+        LOG_APPEND(TimedLog::LOG_INFO,
+            "- BaseInfo accepted privately during login/CharGen: race=%s head=%s hair=%s model=%s flags=%u",
+            player->npc.mRace.c_str(), player->npc.mHead.c_str(), player->npc.mHair.c_str(),
+            player->npc.mModel.c_str(), static_cast<unsigned int>(player->npc.mFlags));
 
-        // BUILD FIX28: keep EncoreMP's proven BaseInfo propagation model, but
-        // scope it to players who actually share a loaded cell. This is the
-        // important part that FIX24/FIX27 had lost: the final CharGen BaseInfo
-        // (race/head/hair/sex) must reach an already-present remote client before
-        // we lock the appearance as authoritative. Global Send(true) is not used
-        // because ArenaMP has private/instanced cells.
-        player->sendToLoaded(myPacket);
+        // A connecting player is deliberately hidden. Publishing this packet now
+        // would let other clients instantiate the temporary Dark Elf before the
+        // account/CharGen data is restored. revealPlayer() publishes one final,
+        // ordered snapshot once the appearance becomes authoritative.
+        if (player->isVisibleToOthers())
+            player->sendToLoaded(myPacket);
     }
 
     if (player->getLoadState() == Player::NOTLOADED)
@@ -418,7 +418,83 @@ void Networking::newPlayer(RakNet::RakNetGUID guid)
     // legacy second BaseInfo RequestData here, which was the source of the Dunmer
     // appearance overwrite race fixed in FIX21.
     LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO,
-        "Presence gate disabled for %lu; using normal cell-local player synchronization", guid.g);
+        "Deferring remote player snapshots for %lu until authentication/CharGen is complete", guid.g);
+}
+
+void Networking::sendPlayerSnapshot(Player* player, RakNet::RakNetGUID destination)
+{
+    if (player == nullptr || destination == RakNet::UNASSIGNED_CRABNET_GUID)
+        return;
+
+    // BaseInfo must be first: it creates the DedicatedPlayer. Position and Cell
+    // then place that already-valid race/head/hair model in the destination cell.
+    static const unsigned char packetIds[] = {
+        ID_PLAYER_BASEINFO,
+        ID_PLAYER_SHAPESHIFT,
+        ID_PLAYER_STATS_DYNAMIC,
+        ID_PLAYER_ATTRIBUTE,
+        ID_PLAYER_SKILL,
+        ID_PLAYER_POSITION,
+        ID_PLAYER_CELL_CHANGE,
+        ID_PLAYER_EQUIPMENT,
+        ID_PLAYER_ANIM_FLAGS
+    };
+
+    const bool previousExchangeState = player->exchangeFullInfo;
+    player->exchangeFullInfo = true;
+
+    for (unsigned char packetId : packetIds)
+    {
+        PlayerPacket* packet = playerPacketController->GetPacket(packetId);
+        packet->setPlayer(player);
+        packet->Send(destination);
+    }
+
+    player->exchangeFullInfo = previousExchangeState;
+}
+
+void Networking::exchangePlayerSnapshots(Player* player)
+{
+    if (player == nullptr || !player->isVisibleToOthers()
+        || !player->isAppearanceAuthoritative()
+        || player->getLoadState() != Player::POSTLOADED)
+        return;
+
+    player->forEachLoaded([this](Player* subject, Player* other)
+    {
+        if (other == nullptr || !other->isAppearanceAuthoritative()
+            || other->getLoadState() != Player::POSTLOADED)
+            return;
+
+        sendPlayerSnapshot(subject, other->guid);
+        sendPlayerSnapshot(other, subject->guid);
+
+        LOG_APPEND(TimedLog::LOG_INFO,
+            "- Exchanged authoritative cell-local snapshots: %s (%s/%s/%s) <-> %s (%s/%s/%s)",
+            subject->npc.mName.c_str(), subject->npc.mRace.c_str(), subject->npc.mHead.c_str(),
+            subject->npc.mHair.c_str(), other->npc.mName.c_str(), other->npc.mRace.c_str(),
+            other->npc.mHead.c_str(), other->npc.mHair.c_str());
+    });
+}
+
+void Networking::revealPlayer(Player* player)
+{
+    if (player == nullptr)
+        return;
+
+    player->setAppearanceAuthoritative(true);
+    player->setVisibleToOthers(true);
+
+    LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO,
+        "Publishing authoritative appearance for %s (%i): race=%s head=%s hair=%s model=%s flags=%u",
+        player->npc.mName.c_str(), player->getId(), player->npc.mRace.c_str(),
+        player->npc.mHead.c_str(), player->npc.mHair.c_str(), player->npc.mModel.c_str(),
+        static_cast<unsigned int>(player->npc.mFlags));
+
+    // If loaded-cell membership is already known, publish immediately. If the
+    // login teleport is still being processed, ProcessorPlayerCellState and
+    // ProcessorPlayerCellChange call this exchange again once AOI overlap exists.
+    exchangePlayerSnapshots(player);
 }
 
 void Networking::disconnectPlayer(RakNet::RakNetGUID guid)

@@ -595,29 +595,10 @@ void StatsFunctions::SetPlayerVisible(unsigned short pid, bool state) noexcept
     Player *player;
     GET_PLAYER(pid, player, );
 
-    // FIX24 compatibility behavior: the old login/registration hide/reveal gate
-    // is disabled. Existing Lua calls at FinishLogin/EndCharGen now only mark the
-    // current BaseInfo as authoritative so late legacy client data cannot replace
-    // the saved race/head/hair. No reveal snapshot is emitted here.
     if (state)
-    {
-        player->setVisibleToOthers(true);
-        player->setAppearanceAuthoritative(true);
-
-        // BUILD FIX28: after Login/CharGen has finalized the server-side
-        // appearance, push one authoritative BaseInfo snapshot to players who
-        // actually share a loaded cell. This mirrors EncoreMP's successful
-        // BaseInfo refresh without reintroducing the unstable hide/reveal gate
-        // or cross-instance global publication.
-        mwmp::PlayerPacket *baseInfoPacket = mwmp::Networking::get().getPlayerPacketController()->GetPacket(ID_PLAYER_BASEINFO);
-        baseInfoPacket->setPlayer(player);
-        player->sendToLoaded(baseInfoPacket);
-    }
+        mwmp::Networking::getPtr()->revealPlayer(player);
     else
     {
-        // Keep the public API usable for explicit scripts, but normal ArenaMP login
-        // no longer calls the hidden state. Unlock BaseInfo if a script deliberately
-        // hides a player for its own flow.
         player->setVisibleToOthers(false);
         player->setAppearanceAuthoritative(false);
     }
@@ -633,9 +614,8 @@ void StatsFunctions::SendBaseInfo(unsigned short pid) noexcept
     
     packet->Send(false);
 
-    // BUILD FIX28: EncoreMP broadcasts BaseInfo changes immediately. ArenaMP
-    // keeps that behavior, but only to clients sharing a loaded cell so private
-    // instances cannot create remote DedicatedPlayers in unrelated cells.
+    // Runtime race/head/hair changes are published only after login/CharGen.
+    // During authentication this remains a private reply to the owning client.
     if (player->isVisibleToOthers())
         player->sendToLoaded(packet);
 }

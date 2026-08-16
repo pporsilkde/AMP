@@ -298,6 +298,21 @@ void DedicatedPlayer::setBaseInfo()
     if (!RecordHelper::doesRecordIdExist<ESM::Race>(npc.mRace))
         npc.mRace = previousRace;
 
+    bool rendererIdentityChanged = false;
+    if (reference && !ptr.isEmpty() && ptr.getTypeName() == typeid(ESM::NPC).name())
+    {
+        const ESM::NPC* currentNpc = ptr.get<ESM::NPC>()->mBase;
+        if (currentNpc != nullptr)
+        {
+            rendererIdentityChanged =
+                !Misc::StringUtils::ciEqual(currentNpc->mRace, npc.mRace)
+                || !Misc::StringUtils::ciEqual(currentNpc->mHead, npc.mHead)
+                || !Misc::StringUtils::ciEqual(currentNpc->mHair, npc.mHair)
+                || !Misc::StringUtils::ciEqual(currentNpc->mModel, npc.mModel)
+                || currentNpc->mFlags != npc.mFlags;
+        }
+    }
+
     if (!reference)
     {
         npc.mId = RecordHelper::createRecord(npc)->mId;
@@ -305,15 +320,20 @@ void DedicatedPlayer::setBaseInfo()
     }
     else
     {
-        // BUILD FIX28 / EncoreMP-safe path: never delete/recreate ManualRef for
-        // a BaseInfo update. RecordHelper::overrideRecord() updates the dynamic
-        // NPC record and updatePtrsWithRefId() retargets live Ptr base records;
-        // disable/enable then refreshes the render/mechanics representation.
+        // EncoreMP-safe path: never delete/recreate ManualRef for a BaseInfo
+        // update. The dynamic store assigns the NPC record in place. Rebuild only
+        // the rendering representation when race/head/hair/model/sex changed.
         // Keeping the same live reference avoids the auth-time use-after-free
-        // seen with FIX19's deleteReference()/createReference() rebuild.
+        // caused by deleteReference()/createReference().
         RecordHelper::overrideRecord(npc);
-        if (!ptr.isEmpty())
+        if (!ptr.isEmpty() && rendererIdentityChanged)
+        {
+            LOG_APPEND(TimedLog::LOG_INFO,
+                "- Refreshing remote appearance in place: race=%s head=%s hair=%s model=%s flags=%u",
+                npc.mRace.c_str(), npc.mHead.c_str(), npc.mHair.c_str(), npc.mModel.c_str(),
+                static_cast<unsigned int>(npc.mFlags));
             reloadPtr();
+        }
     }
 
     // Only set equipment if the player isn't disguised as a creature
@@ -672,6 +692,12 @@ void DedicatedPlayer::updateInteractionAnimation(float dt)
 {
     if (!mInteractionAnimationActive)
         return;
+
+    if (playerPoseIsBlocked(getPtr(), isJumping))
+    {
+        cancelInteractionAnimation();
+        return;
+    }
 
     ensureInteractionAnimationProp(getPtr(), mInteractionAnimation);
 
