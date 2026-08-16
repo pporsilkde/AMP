@@ -175,7 +175,7 @@ function BasePlayer:Register(clientPasswordHash)
     self.data.settings.consoleAllowed = "default"
 
     if not self.hasAccount then
-        tes3mp.SetCharGenStage(self.pid, 1, 4)
+        tes3mp.SetCharGenStage(self.pid, 1, 5)
     end
 end
 
@@ -307,6 +307,12 @@ function BasePlayer:FinishLogin()
 
         self.loggedIn = true
 
+        -- Do not expose a connecting player to the world until authentication and
+        -- the saved character have both been fully restored. The server sends one
+        -- complete snapshot here, so other clients create the correct race/head/hair
+        -- instead of the temporary ESM "player" body used during startup.
+        tes3mp.SetPlayerVisible(self.pid, true)
+
         if self.data.alliedPlayers == nil then self.data.alliedPlayers = {} end
 
         for _, otherAccountName in ipairs(self.data.alliedPlayers) do
@@ -402,6 +408,11 @@ function BasePlayer:EndCharGen()
             self:LoadItemChanges(spawnUsed.items, enumerations.inventory.ADD)
         end
     end
+
+    -- New accounts stay invisible for the whole registration + CharGen flow.
+    -- Reveal only after the final CharGen BaseInfo has been received/saved and the
+    -- final spawn cell/position are known.
+    tes3mp.SetPlayerVisible(self.pid, true)
 
     self:RunPlayerSpecificStartupScripts()
 end

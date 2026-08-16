@@ -590,6 +590,17 @@ void StatsFunctions::SetCharGenStage(unsigned short pid, int currentStage, int e
     packet->Send(false);
 }
 
+void StatsFunctions::SetPlayerVisible(unsigned short pid, bool state) noexcept
+{
+    Player *player;
+    GET_PLAYER(pid, player, );
+
+    if (state)
+        mwmp::Networking::getPtr()->revealPlayer(player);
+    else
+        player->setVisibleToOthers(false);
+}
+
 void StatsFunctions::SendBaseInfo(unsigned short pid) noexcept
 {
     Player *player;
@@ -599,7 +610,8 @@ void StatsFunctions::SendBaseInfo(unsigned short pid) noexcept
     packet->setPlayer(player);
     
     packet->Send(false);
-    packet->Send(true);
+    if (player->isVisibleToOthers())
+        packet->Send(true);
 }
 
 void StatsFunctions::SendStatsDynamic(unsigned short pid) noexcept

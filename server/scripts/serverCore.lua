@@ -296,43 +296,67 @@ function OnServerScriptCrash(errorMessage)
     customEventHooks.triggerHandlers("OnServerExit", customEventHooks.makeEventStatus(true, true), {errorMessage})
 end
 
-function LoadDataFileList(filename)
+local function ParseDataFileEntries(entries, label)
     local dataFileList = {}
-    tes3mp.LogMessage(enumerations.log.INFO, "Reading " .. filename)
-
-    local jsonDataFileList = jsonInterface.load(filename)
-
-    if jsonDataFileList == nil then
-        tes3mp.LogMessage(enumerations.log.ERROR, "Data file list " .. filename .. " cannot be read!")
-        tes3mp.StopServer(2)
-    else
-        -- Fix numerical keys to print plugins in the correct order
-        tableHelper.fixNumericalKeys(jsonDataFileList, true)
-
-        for listIndex, pluginEntry in ipairs(jsonDataFileList) do
-            for entryIndex, checksumStringArray in pairs(pluginEntry) do
-
-                dataFileList[listIndex] = {}
-                dataFileList[listIndex].name = entryIndex
-
-                local checksums = {}
-                local debugMessage = ("- %d: \"%s\": ["):format(listIndex, entryIndex)
-
-                for _, checksumString in ipairs(checksumStringArray) do
-
-                    debugMessage = debugMessage .. ("%X, "):format(tonumber(checksumString, 16))
-                    table.insert(checksums, tonumber(checksumString, 16))
-                end
-                dataFileList[listIndex].checksums = checksums
-                table.insert(dataFileList[listIndex], "")
-
-                debugMessage = debugMessage .. "\b\b]"
-                tes3mp.LogAppend(enumerations.log.WARN, debugMessage)
-            end
-        end
-
+    if type(entries) ~= "table" then
         return dataFileList
     end
+
+    tableHelper.fixNumericalKeys(entries, true)
+    for listIndex, pluginEntry in ipairs(entries) do
+        for entryName, checksumStringArray in pairs(pluginEntry) do
+            local entry = { name = entryName, checksums = {} }
+            local debugMessage = ("- %s %d: \"%s\": ["):format(label, listIndex, entryName)
+
+            if type(checksumStringArray) == "table" then
+                for _, checksumString in ipairs(checksumStringArray) do
+                    local checksum = tonumber(checksumString, 16)
+                    if checksum ~= nil then
+                        debugMessage = debugMessage .. ("%X, "):format(checksum)
+                        table.insert(entry.checksums, checksum)
+                    end
+                end
+            end
+
+            if #entry.checksums > 0 then
+                debugMessage = debugMessage .. "\b\b]"
+            else
+                debugMessage = debugMessage .. "any]"
+            end
+            tes3mp.LogAppend(enumerations.log.WARN, debugMessage)
+            table.insert(dataFileList, entry)
+        end
+    end
+    return dataFileList
+end
+
+-- FIX12 supports both the original top-level array and the ArenaMP v2 object:
+-- { "content": [...], "groundcover": [...] }. Groundcover is always optional.
+function LoadDataFileManifest(filename)
+    tes3mp.LogMessage(enumerations.log.INFO, "Reading " .. filename)
+    local jsonManifest = jsonInterface.load(filename)
+
+    if jsonManifest == nil then
+        tes3mp.LogMessage(enumerations.log.ERROR, "Data file list " .. filename .. " cannot be read!")
+        tes3mp.StopServer(2)
+        return {}, {}
+    end
+
+    local contentEntries = jsonManifest
+    local groundcoverEntries = {}
+    if type(jsonManifest.content) == "table" or type(jsonManifest.groundcover) == "table" then
+        contentEntries = jsonManifest.content or {}
+        groundcoverEntries = jsonManifest.groundcover or {}
+    end
+
+    return ParseDataFileEntries(contentEntries, "content"),
+        ParseDataFileEntries(groundcoverEntries, "groundcover(optional)")
+end
+
+-- Compatibility for custom scripts that still call the old helper directly.
+function LoadDataFileList(filename)
+    local content = LoadDataFileManifest(filename)
+    return content
 end
 
 function OnRequestDataFileList()
@@ -345,7 +369,7 @@ function OnRequestDataFileList()
     end
     tes3mp.SetStartLocation(startLocation)
 
-    local dataFileList = LoadDataFileList("requiredDataFiles.json")
+    local dataFileList, groundcoverList = LoadDataFileManifest("requiredDataFiles.json")
 
     for _, entry in ipairs(dataFileList) do
         local name = entry.name
@@ -356,6 +380,19 @@ function OnRequestDataFileList()
         else
             for _, checksum in ipairs(entry.checksums) do
                 tes3mp.AddDataFileRequirement(name, checksum)
+            end
+        end
+    end
+
+    -- Groundcover is an instruction, not an admission requirement. A FIX12
+    -- client enables it only if the file exists locally (and its optional CRC
+    -- matches); otherwise it is skipped without rejecting or crashing.
+    for _, entry in ipairs(groundcoverList) do
+        if tableHelper.isEmpty(entry.checksums) then
+            tes3mp.AddGroundcoverRequirement(entry.name, "")
+        else
+            for _, checksum in ipairs(entry.checksums) do
+                tes3mp.AddGroundcoverRequirement(entry.name, checksum)
             end
         end
     end

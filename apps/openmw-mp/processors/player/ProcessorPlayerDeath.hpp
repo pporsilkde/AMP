@@ -20,7 +20,8 @@ namespace mwmp
 
             player.creatureStats.mDead = true;
 
-            packet.Send(true);
+            if (player.isVisibleToOthers())
+                packet.Send(true);
 
             Script::Call<Script::CallbackIdentity("OnPlayerDeath")>(player.getId());
         }

@@ -17,7 +17,8 @@ namespace mwmp
         {
             DEBUG_PRINTF(strPacketID.c_str());
 
-            packet.Send(true);
+            if (player.isVisibleToOthers())
+                packet.Send(true);
 
             Script::Call<Script::CallbackIdentity("OnPlayerDisposition")>(player.getId());
         }

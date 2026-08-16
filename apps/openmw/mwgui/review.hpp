@@ -1,6 +1,11 @@
 #ifndef MWGUI_REVIEW_H
 #define MWGUI_REVIEW_H
 
+#include <memory>
+
+#include <MyGUI_ImageBox.h>
+#include <MyGUI_RenderManager.h>
+
 #include <components/esm/attr.hpp>
 #include <components/esm/loadclas.hpp>
 #include "windowbase.hpp"
@@ -9,6 +14,21 @@
 namespace ESM
 {
     struct Spell;
+}
+
+namespace osg
+{
+    class Group;
+}
+
+namespace Resource
+{
+    class ResourceSystem;
+}
+
+namespace MWRender
+{
+    class RaceSelectionPreview;
 }
 
 namespace MWGui
@@ -24,7 +44,8 @@ namespace MWGui
         };
         typedef std::vector<int> SkillList;
 
-        ReviewDialog();
+        ReviewDialog(osg::Group* parent, Resource::ResourceSystem* resourceSystem);
+        ~ReviewDialog() override;
 
         bool exit() override { return false; }
 
@@ -32,6 +53,7 @@ namespace MWGui
         void setRace(const std::string &raceId);
         void setClass(const ESM::Class& class_);
         void setBirthSign (const std::string &signId);
+        void setPlayerScale(float scale);
 
         void setHealth(const MWMechanics::DynamicStat<float>& value);
         void setMagicka(const MWMechanics::DynamicStat<float>& value);
@@ -43,6 +65,7 @@ namespace MWGui
         void setSkillValue(ESM::Skill::SkillEnum skillId, const MWMechanics::SkillValue& value);
 
         void onOpen() override;
+        void onClose() override;
 
         void onFrame(float duration) override;
 
@@ -72,6 +95,9 @@ namespace MWGui
         void onBirthSignClicked(MyGUI::Widget* _sender);
 
         void onMouseWheel(MyGUI::Widget* _sender, int _rel);
+        void onPreviewMousePressed(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
+        void onPreviewMouseDrag(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
+        void onPreviewMouseWheel(MyGUI::Widget* sender, int rel);
 
     private:
         void addSkills(const SkillList &skills, const std::string &titleId, const std::string &titleDefault, MyGUI::IntCoord &coord1, MyGUI::IntCoord &coord2);
@@ -81,6 +107,19 @@ namespace MWGui
         void addItem(const std::string& text, MyGUI::IntCoord &coord1, MyGUI::IntCoord &coord2);
         void addItem(const ESM::Spell* spell, MyGUI::IntCoord &coord1, MyGUI::IntCoord &coord2);
         void updateSkillArea();
+
+        osg::Group* mParent;
+        Resource::ResourceSystem* mResourceSystem;
+        MyGUI::ImageBox* mPreviewImage;
+        std::unique_ptr<MWRender::RaceSelectionPreview> mPreview;
+        std::unique_ptr<MyGUI::ITexture> mPreviewTexture;
+        float mPlayerScale;
+        float mPreviewAngle;
+        float mPreviewZoom;
+        float mPreviewOffsetX;
+        float mPreviewOffsetZ;
+        int mPreviewDragX;
+        int mPreviewDragY;
 
         MyGUI::TextBox *mNameWidget, *mRaceWidget, *mClassWidget, *mBirthSignWidget;
         MyGUI::ScrollView* mSkillView;

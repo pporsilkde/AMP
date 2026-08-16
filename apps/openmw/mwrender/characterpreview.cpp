@@ -1,5 +1,6 @@
 #include "characterpreview.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 #include <osg/Material>
@@ -461,10 +462,16 @@ namespace MWRender
 
     RaceSelectionPreview::RaceSelectionPreview(osg::Group* parent, Resource::ResourceSystem* resourceSystem)
         : CharacterPreview(parent, resourceSystem, MWMechanics::getPlayer(),
-            512, 512, osg::Vec3f(0, 125, 8), osg::Vec3f(0,0,8))
+            512, 640, osg::Vec3f(0, 650, 70), osg::Vec3f(0, 0, 70))
         , mBase (*mCharacter.get<ESM::NPC>()->mBase)
         , mRef(&mBase)
-        , mPitchRadians(osg::DegreesToRadians(6.f))
+        , mPitchRadians(osg::DegreesToRadians(2.f))
+        , mUserScale(1.f)
+        , mViewZoom(1.f)
+        , mViewOffsetX(0.f)
+        , mViewOffsetZ(0.f)
+        , mIdlePoseTimer(3.5f)
+        , mIdlePoseIndex(0)
     {
         mCharacter = MWWorld::Ptr(&mRef, nullptr);
     }
@@ -485,6 +492,99 @@ namespace MWRender
         mBase = proto;
         mBase.mId = "player";
         rebuild();
+    }
+
+    void RaceSelectionPreview::applyView()
+    {
+        if (!mAnimation)
+            return;
+
+        osg::Vec3f raceScale(1.f, 1.f, 1.f);
+        mCharacter.getClass().adjustScale(mCharacter, raceScale, true);
+        mNode->setScale(raceScale * mUserScale);
+
+        // ArenaMW CharGen camera. Zoom is deliberately centred on the current view
+        // target: mouse-wheel zoom must never make the body drift vertically.  The
+        // dedicated face/hair focus is expressed only through mViewOffsetZ, while
+        // ordinary zoom changes distance and nothing else.
+        const float raceHeightScale = std::max(0.7f, raceScale.z());
+        const float visualHeightScale = raceHeightScale * mUserScale;
+        const float zoom = std::max(0.85f, std::min(2.35f, mViewZoom));
+        const float tallFit = 1.f + std::max(0.f, mUserScale - 1.f) * 0.55f;
+        const float distance = 710.f * raceHeightScale * tallFit / zoom;
+        const float focusZ = (78.f + mViewOffsetZ) * visualHeightScale;
+        const float x = mViewOffsetX * raceHeightScale;
+        mCamera->setViewMatrixAsLookAt(
+            osg::Vec3f(x, distance, focusZ),
+            osg::Vec3f(x, 0.f, focusZ),
+            osg::Vec3f(0.f, 0.f, 1.f));
+        redraw();
+    }
+
+    void RaceSelectionPreview::setUserScale(float scale)
+    {
+        mUserScale = std::max(0.85f, std::min(1.15f, scale));
+        applyView();
+    }
+
+    void RaceSelectionPreview::setViewZoom(float zoom)
+    {
+        mViewZoom = std::max(0.85f, std::min(2.35f, zoom));
+        applyView();
+    }
+
+    void RaceSelectionPreview::setViewOffset(float x, float z)
+    {
+        // Deliberately narrow limits: the character can be inspected, but cannot be
+        // dragged completely out of the preview and then "lost".
+        mViewOffsetX = std::max(-45.f, std::min(45.f, x));
+        mViewOffsetZ = std::max(-40.f, std::min(40.f, z));
+        applyView();
+    }
+
+    void RaceSelectionPreview::resetView()
+    {
+        mViewZoom = 1.f;
+        mViewOffsetX = 0.f;
+        mViewOffsetZ = 0.f;
+        applyView();
+    }
+
+    void RaceSelectionPreview::playNextIdlePose()
+    {
+        if (!mAnimation)
+            return;
+
+        static const char* poses[] = { "idle2", "idle3", "idle4", "idle" };
+        constexpr unsigned int poseCount = sizeof(poses) / sizeof(poses[0]);
+        for (unsigned int offset = 0; offset < poseCount; ++offset)
+        {
+            const unsigned int index = (mIdlePoseIndex + offset) % poseCount;
+            if (!mAnimation->hasAnimation(poses[index]))
+                continue;
+
+            if (!mCurrentAnimGroup.empty() && mAnimation->getInfo(mCurrentAnimGroup))
+                mAnimation->disable(mCurrentAnimGroup);
+            mCurrentAnimGroup = poses[index];
+            mAnimation->play(mCurrentAnimGroup, 1, Animation::BlendMask_All, false,
+                1.0f, "start", "stop", 0.0f, 0);
+            mIdlePoseIndex = (index + 1) % poseCount;
+            mIdlePoseTimer = 5.5f;
+            return;
+        }
+    }
+
+    void RaceSelectionPreview::update(float duration)
+    {
+        if (!mAnimation)
+            return;
+
+        mIdlePoseTimer -= duration;
+        if (mIdlePoseTimer <= 0.f)
+            playNextIdlePose();
+
+        mAnimation->runAnimation(duration);
+        redraw();
     }
 
     class UpdateCameraCallback : public osg::NodeCallback
@@ -523,21 +623,24 @@ namespace MWRender
     void RaceSelectionPreview::onSetup ()
     {
         CharacterPreview::onSetup();
-        mAnimation->play("idle", 1, Animation::BlendMask_All, false, 1.0f, "start", "stop", 0.0f, 0);
+        // Start in the familiar neutral pose, then periodically move into another
+        // available waiting idle so the preview feels alive rather than mannequin-like.
+        mCurrentAnimGroup = "idle";
+        mAnimation->play(mCurrentAnimGroup, 1, Animation::BlendMask_All, false, 1.0f, "start", "stop", 0.0f, 0);
+        mIdlePoseTimer = 3.5f;
+        mIdlePoseIndex = 0;
         mAnimation->runAnimation(0.f);
 
-        // attach camera to follow the head node
+        // ArenaMW CharGen: render the complete actor instead of the historical
+        // head-only portrait.  Race proportions and the user 0.85..1.15 scale
+        // are visible immediately, while the actor keeps a live idle animation.
         if (mUpdateCameraCallback)
-            mCamera->removeUpdateCallback(mUpdateCameraCallback);
-
-        const osg::Node* head = mAnimation->getNode("Bip01 Head");
-        if (head)
         {
-            mUpdateCameraCallback = new UpdateCameraCallback(head, mPosition, mLookAt);
-            mCamera->addUpdateCallback(mUpdateCameraCallback);
+            mCamera->removeUpdateCallback(mUpdateCameraCallback);
+            mUpdateCameraCallback = nullptr;
         }
-        else
-            Log(Debug::Error) << "Error: Bip01 Head node not found";
+
+        applyView();
     }
 
 }

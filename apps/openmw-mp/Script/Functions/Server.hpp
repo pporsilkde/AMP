@@ -39,6 +39,7 @@
     SCRIPT_API_ENTRY("SetRuleValue", ServerFunctions::SetRuleValue),\
     \
     SCRIPT_API_ENTRY("AddDataFileRequirement", ServerFunctions::AddDataFileRequirement),\
+    SCRIPT_API_ENTRY("AddGroundcoverRequirement", ServerFunctions::AddGroundcoverRequirement),\
     \
     SCRIPT_API_ENTRY("DoesFileExist", ServerFunctions::DoesFileExist),\
     SCRIPT_API_ENTRY("GetModDir", ServerFunctions::GetModDir),\
@@ -315,6 +316,7 @@ public:
      * @param checksumString A string with the CRC32 checksum required.
      */
     static void AddDataFileRequirement(const char *dataFilename, const char *checksumString) noexcept;
+    static void AddGroundcoverRequirement(const char *dataFilename, const char *checksumString) noexcept;
 
     // All methods below are deprecated versions of methods from above
 

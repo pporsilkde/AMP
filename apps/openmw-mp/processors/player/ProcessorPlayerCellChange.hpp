@@ -68,10 +68,13 @@ namespace mwmp
                 LOG_APPEND(TimedLog::LOG_INFO, "- Finished information exchange with %s", other->npc.mName.c_str());
             });
 
-            playerController->GetPacket(ID_PLAYER_POSITION)->setPlayer(&player);
-            playerController->GetPacket(ID_PLAYER_POSITION)->Send();
-            packet.setPlayer(&player);
-            packet.Send(true); //send to other clients
+            if (player.isVisibleToOthers())
+            {
+                playerController->GetPacket(ID_PLAYER_POSITION)->setPlayer(&player);
+                playerController->GetPacket(ID_PLAYER_POSITION)->Send();
+                packet.setPlayer(&player);
+                packet.Send(true); // send to other visible clients after authentication
+            }
 
             LOG_APPEND(TimedLog::LOG_INFO, "- Finished processing ID_PLAYER_CELL_CHANGE", player.cell.getShortDescription().c_str());
 

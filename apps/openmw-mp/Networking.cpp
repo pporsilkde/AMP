@@ -10,6 +10,7 @@
 #include <components/openmw-mp/Packets/PacketPreInit.hpp>
 
 #include <iostream>
+#include <algorithm>
 #include <Script/Script.hpp>
 #include <Script/API/TimerAPI.hpp>
 #include <chrono>
@@ -188,7 +189,10 @@ void Networking::processPlayerPacket(RakNet::Packet *packet)
         myPacket->Read();
         player->language = player->language == "RU" ? "RU" : "EN";
         LOG_APPEND(TimedLog::LOG_INFO, "- Client language: %s", player->language.c_str());
-        myPacket->Send(true);
+        if (player->isVisibleToOthers())
+            myPacket->Send(true);
+        else
+            LOG_APPEND(TimedLog::LOG_INFO, "- Presence is still hidden; BaseInfo kept server-side only");
     }
 
     if (player->getLoadState() == Player::NOTLOADED)
@@ -249,71 +253,102 @@ bool Networking::preInit(RakNet::Packet *packet, RakNet::BitStream &bsIn)
         LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "%s sent wrong first packet (ID_GAME_PREINIT was expected)",
                            packet->systemAddress.ToString());
         peer->CloseConnection(packet->systemAddress, true);
+        return false;
     }
 
     LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Received ID_GAME_PREINIT from %s", packet->systemAddress.ToString());
     PacketPreInit::PluginContainer dataFiles;
+    PacketPreInit::PluginContainer clientGroundcover;
 
     PacketPreInit packetPreInit(peer);
     packetPreInit.SetReadStream(&bsIn);
     packetPreInit.setChecksums(&dataFiles);
+    packetPreInit.setGroundcoverChecksums(&clientGroundcover);
     packetPreInit.Read();
 
-    if (!packetPreInit.isPacketValid() || dataFiles.empty())
+    if (!packetPreInit.isPacketValid())
     {
         LOG_APPEND(TimedLog::LOG_ERROR, "- Packet was invalid");
-        peer->CloseConnection(packet->systemAddress, false); // close connection without notification
+        peer->CloseConnection(packet->systemAddress, false);
         return false;
     }
 
-    auto dataFile = dataFiles.begin();
-    if (samples.size() == dataFiles.size())
+    const bool syncCapable = packetPreInit.supportsManifestSync();
+    const uint8_t phase = packetPreInit.getManifestPhase();
+
+    // ArenaMP FIX12: when enforcement is enabled, a new client first receives
+    // the authoritative content order and optional groundcover list. No player
+    // object is created yet, so this remains entirely before world/login state.
+    if (dataFileEnforcementState && syncCapable && phase == PacketPreInit::PHASE_REQUEST)
     {
-        for (int i = 0; dataFile != dataFiles.end(); dataFile++, i++)
+        LOG_APPEND(TimedLog::LOG_INFO,
+            "- Sending launch manifest before hash verification (%d content, %d optional groundcover)",
+            static_cast<int>(samples.size()), static_cast<int>(groundcoverSamples.size()));
+        RakNet::BitStream manifestStream;
+        packetPreInit.SetSendStream(&manifestStream);
+        packetPreInit.setChecksums(&samples);
+        packetPreInit.setGroundcoverChecksums(&groundcoverSamples);
+        packetPreInit.setStartLocation(startLocation);
+        packetPreInit.setManifestPhase(PacketPreInit::PHASE_MANIFEST);
+        packetPreInit.Send(packet->systemAddress);
+        return false;
+    }
+
+    bool matches = samples.size() == dataFiles.size();
+    if (matches)
+    {
+        for (std::size_t i = 0; i < samples.size(); ++i)
         {
-            LOG_APPEND(TimedLog::LOG_INFO, "- idx: %i\tchecksum: %X\tfile: %s", i, dataFile->second[0], dataFile->first.c_str());
-            // Check if the filenames match, ignoring case
-            if (Misc::StringUtils::ciEqual(samples[i].first, dataFile->first))
+            const PacketPreInit::PluginPair& required = samples[i];
+            const PacketPreInit::PluginPair& supplied = dataFiles[i];
+            const unsigned suppliedHash = supplied.second.empty() ? 0 : supplied.second.front();
+            LOG_APPEND(TimedLog::LOG_INFO, "- idx: %i\tchecksum: %X\tfile: %s",
+                static_cast<int>(i), suppliedHash, supplied.first.c_str());
+
+            if (!Misc::StringUtils::ciEqual(required.first, supplied.first) || supplied.second.empty())
             {
-                auto &hashList = samples[i].second;
-                // Proceed if no checksums have been listed for this dataFile on the server
-                if (hashList.empty())
-                    continue;
-                auto it = find(hashList.begin(), hashList.end(), dataFile->second[0]);
-                // Break the loop if the client's checksum isn't among those accepted by
-                // the server
-                if (it == hashList.end())
-                    break;
-            }
-            else // name is incorrect
+                matches = false;
                 break;
+            }
+
+            // An empty required hash list means that any checksum is accepted.
+            if (!required.second.empty()
+                && std::find(required.second.begin(), required.second.end(), suppliedHash) == required.second.end())
+            {
+                matches = false;
+                break;
+            }
         }
     }
-    RakNet::BitStream bs;
-    packetPreInit.SetSendStream(&bs);
+
+    RakNet::BitStream responseStream;
+    packetPreInit.SetSendStream(&responseStream);
     packetPreInit.setStartLocation(startLocation);
 
-    // If the loop above was broken, then the client's data files do not match the server's
-    if (dataFileEnforcementState && dataFile != dataFiles.end())
+    if (dataFileEnforcementState && !matches)
     {
         LOG_APPEND(TimedLog::LOG_INFO, "- Client was not allowed to connect due to incompatible data files");
         packetPreInit.setChecksums(&samples);
+        packetPreInit.setGroundcoverChecksums(&groundcoverSamples);
+        if (syncCapable)
+            packetPreInit.setManifestPhase(PacketPreInit::PHASE_REJECTED);
         packetPreInit.Send(packet->systemAddress);
         peer->CloseConnection(packet->systemAddress, true);
-    }
-    else
-    {
-        LOG_APPEND(TimedLog::LOG_INFO, "- Client was allowed to connect");
-        PacketPreInit::PluginContainer tmp;
-        packetPreInit.setChecksums(&tmp);
-        packetPreInit.Send(packet->systemAddress);
-        Players::newPlayer(packet->guid); // create player if connection allowed
-        systemPacketController->SetStream(&bsIn, nullptr); // and request handshake
-        systemPacketController->GetPacket(ID_SYSTEM_HANDSHAKE)->RequestData(packet->guid);
-        return true;
+        return false;
     }
 
-    return false;
+    LOG_APPEND(TimedLog::LOG_INFO, "- Client was allowed to connect");
+    PacketPreInit::PluginContainer empty;
+    packetPreInit.setChecksums(&empty);
+    packetPreInit.setGroundcoverChecksums(&empty);
+    if (syncCapable)
+        packetPreInit.setManifestPhase(PacketPreInit::PHASE_ACCEPTED);
+    packetPreInit.Send(packet->systemAddress);
+
+    Players::newPlayer(packet->guid);
+    systemPacketController->SetStream(&bsIn, nullptr);
+    systemPacketController->GetPacket(ID_SYSTEM_HANDSHAKE)->RequestData(packet->guid);
+    return true;
 }
 
 void Networking::update(RakNet::Packet *packet, RakNet::BitStream &bsIn)
@@ -369,7 +404,7 @@ void Networking::newPlayer(RakNet::RakNetGUID guid)
         else if (pl->second == nullptr) continue;
 
         // If we are iterating over a player who has inputted their name, proceed
-        else if (pl->second->getLoadState() == Player::POSTLOADED)
+        else if (pl->second->getLoadState() == Player::POSTLOADED && pl->second->isVisibleToOthers())
         {
             playerPacketController->GetPacket(ID_PLAYER_BASEINFO)->setPlayer(pl->second);
             playerPacketController->GetPacket(ID_PLAYER_STATS_DYNAMIC)->setPlayer(pl->second);
@@ -393,6 +428,45 @@ void Networking::newPlayer(RakNet::RakNetGUID guid)
 
 }
 
+void Networking::revealPlayer(Player* player)
+{
+    if (player == nullptr || player->isVisibleToOthers())
+        return;
+
+    player->setVisibleToOthers(true);
+    LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Revealing authenticated player %s (%i) to other clients",
+        player->npc.mName.c_str(), player->getId());
+    LOG_APPEND(TimedLog::LOG_INFO, "- Appearance snapshot: race=%s head=%s hair=%s model=%s flags=%u",
+        player->npc.mRace.c_str(), player->npc.mHead.c_str(), player->npc.mHair.c_str(),
+        player->npc.mModel.c_str(), static_cast<unsigned int>(player->npc.mFlags));
+
+    const unsigned char packetIds[] = {
+        ID_PLAYER_BASEINFO,
+        ID_PLAYER_SHAPESHIFT,
+        ID_PLAYER_STATS_DYNAMIC,
+        ID_PLAYER_ATTRIBUTE,
+        ID_PLAYER_SKILL,
+        ID_PLAYER_POSITION,
+        ID_PLAYER_CELL_CHANGE,
+        ID_PLAYER_EQUIPMENT
+    };
+
+    for (const auto& entry : *players)
+    {
+        Player* other = entry.second;
+        if (other == nullptr || other == player || !other->isVisibleToOthers()
+            || other->getLoadState() != Player::POSTLOADED)
+            continue;
+
+        for (unsigned char packetId : packetIds)
+        {
+            PlayerPacket* packet = playerPacketController->GetPacket(packetId);
+            packet->setPlayer(player);
+            packet->Send(other->guid);
+        }
+    }
+}
+
 void Networking::disconnectPlayer(RakNet::RakNetGUID guid)
 {
     Player *player = Players::getPlayer(guid);
@@ -400,8 +474,11 @@ void Networking::disconnectPlayer(RakNet::RakNetGUID guid)
         return;
     Script::Call<Script::CallbackIdentity("OnPlayerDisconnect")>(player->getId());
 
-    playerPacketController->GetPacket(ID_USER_DISCONNECTED)->setPlayer(player);
-    playerPacketController->GetPacket(ID_USER_DISCONNECTED)->Send(true);
+    if (player->isVisibleToOthers())
+    {
+        playerPacketController->GetPacket(ID_USER_DISCONNECTED)->setPlayer(player);
+        playerPacketController->GetPacket(ID_USER_DISCONNECTED)->Send(true);
+    }
     Players::deletePlayer(guid);
 }
 
@@ -644,4 +721,9 @@ void Networking::postInit()
 PacketPreInit::PluginContainer &Networking::getSamples()
 {
     return samples;
+}
+
+PacketPreInit::PluginContainer &Networking::getGroundcoverSamples()
+{
+    return groundcoverSamples;
 }

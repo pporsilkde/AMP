@@ -1,5 +1,7 @@
 #include "charactercreation.hpp"
 
+#include <algorithm>
+
 #include <components/debug/debuglog.hpp>
 #include <components/fallback/fallback.hpp>
 #include <components/misc/rng.hpp>
@@ -21,14 +23,13 @@
 /*
     Start of tes3mp addition
 
-    Include additional headers for multiplayer purposes
+    Account login remains ArenaMP-owned while the visual character creator is
+    shared with ArenaMW.
 */
 #include "../mwmp/Main.hpp"
 #include "../mwmp/LocalPlayer.hpp"
 #include "../mwmp/GUI/GUILogin.hpp"
-/*
-    End of tes3mp addition
-*/
+/* End of tes3mp addition */
 
 #include "race.hpp"
 #include "class.hpp"
@@ -108,6 +109,10 @@ namespace MWGui
         , mCreateClassDialog(nullptr)
         , mBirthSignDialog(nullptr)
         , mReviewDialog(nullptr)
+        , mPendingReviewDialog(-1)
+        , mEditingFromReview(false)
+        , mDeferredAction(DA_None)
+        , mPendingOpenMode(-1)
         , mGenerateClassStep(0)
     {
         mCreationStage = CSE_NotStarted;
@@ -182,10 +187,252 @@ namespace MWGui
         mPlayerMinorSkills = minor;
     }
 
+    void CharacterCreation::closeRaceDialog()
+    {
+        if (!mRaceDialog)
+            return;
+        MWBase::Environment::get().getWindowManager()->removeDialog(mRaceDialog);
+        mRaceDialog = nullptr;
+    }
+
+    void CharacterCreation::closeReviewDialog()
+    {
+        if (!mReviewDialog)
+            return;
+        MWBase::Environment::get().getWindowManager()->removeDialog(mReviewDialog);
+        mReviewDialog = nullptr;
+    }
+
+    void CharacterCreation::finishStageDeferred(CSE currentStage, int nextMode)
+    {
+        MWBase::Environment::get().getWindowManager()->popGuiMode();
+
+        // ArenaMP servers own the linear CharGen state. Keep the local state in
+        // lock-step with the completed visual stage, while preserving the deferred
+        // modal switching used by the modern ArenaMW creator.
+        if (!mEditingFromReview && mwmp::Main::isInitialized())
+            mwmp::Main::get().getLocalPlayer()->charGenState.currentStage = static_cast<int>(currentStage);
+
+        if (mCreationStage == CSE_ReviewNext)
+            mPendingOpenMode = GM_Review;
+        else if (mCreationStage >= currentStage)
+            mPendingOpenMode = nextMode;
+        else
+            mCreationStage = currentStage;
+    }
+
+    void CharacterCreation::returnToReviewDeferred()
+    {
+        mEditingFromReview = false;
+        MWBase::Environment::get().getWindowManager()->popGuiMode();
+        mPendingOpenMode = GM_Review;
+    }
+
     void CharacterCreation::onFrame(float duration)
     {
+        // Open the next GUI mode only on the frame AFTER the old modal was removed.
+        // WindowManager::cleanupGarbage() runs after CharacterCreation::onFrame(), so
+        // this guarantees old MyGUI widgets, RTT textures and preview animations are
+        // destroyed before a new chargen window is constructed.
+        if (mPendingOpenMode >= 0)
+        {
+            const int mode = mPendingOpenMode;
+            mPendingOpenMode = -1;
+            MWBase::Environment::get().getWindowManager()->pushGuiMode(static_cast<GuiMode>(mode));
+            return;
+        }
+
+        // Review edit buttons only enqueue an intent from their MyGUI callback.
+        if (mPendingReviewDialog >= 0)
+        {
+            const int dialog = mPendingReviewDialog;
+            mPendingReviewDialog = -1;
+            mEditingFromReview = true;
+
+            closeReviewDialog();
+            MWBase::Environment::get().getWindowManager()->popGuiMode();
+
+            switch (dialog)
+            {
+                case ReviewDialog::NAME_DIALOG:
+                    // The server has already bound the network account name. Do
+                    // not reopen the account card from character review.
+                    mEditingFromReview = false;
+                    mPendingOpenMode = GM_Review;
+                    break;
+                case ReviewDialog::RACE_DIALOG:
+                    mPendingOpenMode = GM_Race;
+                    break;
+                case ReviewDialog::CLASS_DIALOG:
+                    mPendingOpenMode = GM_Class;
+                    break;
+                case ReviewDialog::BIRTHSIGN_DIALOG:
+                    mPendingOpenMode = GM_Birth;
+                    break;
+                default:
+                    mEditingFromReview = false;
+                    mPendingOpenMode = GM_Review;
+                    break;
+            }
+            return;
+        }
+
+        if (mDeferredAction != DA_None)
+        {
+            const DeferredAction action = mDeferredAction;
+            mDeferredAction = DA_None;
+
+            if (action == DA_NameDone)
+            {
+                if (mNameDialog)
+                {
+                    mPlayerName = mNameDialog->getLogin();
+                    const std::string loginPassword = mNameDialog->getPassword();
+                    const std::string loginLanguage = mNameDialog->getLanguage();
+                    if (mPlayerName.length() > 31)
+                        mPlayerName = mPlayerName.substr(0, 31);
+
+                    Settings::Manager::setString("name", "Login", mPlayerName);
+                    Settings::Manager::setString("password", "Login", loginPassword);
+                    Settings::Manager::setString("interface language", "General", loginLanguage);
+                    Settings::Manager::saveUser();
+                    MWBase::Environment::get().getWindowManager()->setArenaLanguage(loginLanguage);
+                    MWBase::Environment::get().getMechanicsManager()->setPlayerName(mPlayerName);
+                    MWBase::Environment::get().getWindowManager()->removeDialog(mNameDialog);
+                    mNameDialog = nullptr;
+                }
+
+                if (mEditingFromReview)
+                    returnToReviewDeferred();
+                else
+                    finishStageDeferred(CSE_NameChosen, GM_Race);
+                return;
+            }
+
+            if (action == DA_UnifiedDone)
+            {
+                if (!mRaceDialog)
+                    return;
+
+                const RaceDialog::Page page = mRaceDialog->getPage();
+                if (page == RaceDialog::Page_Appearance)
+                {
+                    const ESM::NPC race = mRaceDialog->getResult();
+                    const float playerScale = mRaceDialog->getPlayerScale();
+                    mPlayerRaceId = race.mRace;
+                    if (!mPlayerRaceId.empty())
+                    {
+                        MWBase::Environment::get().getMechanicsManager()->setPlayerRace(
+                            race.mRace, race.isMale(), race.mHead, race.mHair);
+                        MWBase::Environment::get().getWindowManager()->getInventoryWindow()->rebuildAvatar();
+                    }
+                    MWBase::Environment::get().getWorld()->scaleObject(MWMechanics::getPlayer(), playerScale);
+                    updatePlayerHealth();
+                    closeRaceDialog();
+                    if (mEditingFromReview)
+                        returnToReviewDeferred();
+                    else
+                        finishStageDeferred(CSE_RaceChosen, GM_Class);
+                    return;
+                }
+
+                if (page == RaceDialog::Page_Class)
+                {
+                    mPlayerClass = mRaceDialog->getClassResult();
+                    mPlayerClassImageId = mRaceDialog->getClassImageId();
+                    const bool customClass = mRaceDialog->isCustomClass();
+                    if (customClass)
+                        MWBase::Environment::get().getMechanicsManager()->setPlayerClass(mPlayerClass);
+                    else if (!mPlayerClass.mId.empty())
+                        MWBase::Environment::get().getMechanicsManager()->setPlayerClass(mPlayerClass.mId);
+                    updatePlayerHealth();
+                    closeRaceDialog();
+                    if (mEditingFromReview)
+                        returnToReviewDeferred();
+                    else
+                        finishStageDeferred(CSE_ClassChosen, GM_Birth);
+                    return;
+                }
+
+                mPlayerBirthSignId = mRaceDialog->getBirthId();
+                if (!mPlayerBirthSignId.empty())
+                    MWBase::Environment::get().getMechanicsManager()->setPlayerBirthsign(mPlayerBirthSignId);
+                updatePlayerHealth();
+                closeRaceDialog();
+                if (mEditingFromReview)
+                    returnToReviewDeferred();
+                else
+                    finishStageDeferred(CSE_BirthSignChosen, GM_Review);
+                return;
+            }
+
+            if (action == DA_UnifiedBack)
+            {
+                if (!mRaceDialog)
+                    return;
+                const RaceDialog::Page page = mRaceDialog->getPage();
+                closeRaceDialog();
+
+                if (mEditingFromReview)
+                {
+                    returnToReviewDeferred();
+                    return;
+                }
+
+                MWBase::Environment::get().getWindowManager()->popGuiMode();
+                if (mCreationStage == CSE_ReviewNext)
+                    mPendingOpenMode = GM_Review;
+                else if (page == RaceDialog::Page_Appearance)
+                {
+                    // Account name is already bound by the server. The appearance
+                    // page intentionally has no Back button in MP. Treat an
+                    // unexpected back event as a no-op instead of reopening login.
+                    if (mwmp::Main::isInitialized())
+                        mwmp::Main::get().getLocalPlayer()->charGenState.currentStage = 1;
+                    mPendingOpenMode = GM_Race;
+                }
+                else if (page == RaceDialog::Page_Class)
+                {
+                    if (mwmp::Main::isInitialized())
+                        mwmp::Main::get().getLocalPlayer()->charGenState.currentStage = 1;
+                    mPendingOpenMode = GM_Race;
+                }
+                else
+                {
+                    if (mwmp::Main::isInitialized())
+                        mwmp::Main::get().getLocalPlayer()->charGenState.currentStage = 2;
+                    mPendingOpenMode = GM_Class;
+                }
+                return;
+            }
+
+            if (action == DA_ReviewDone)
+            {
+                if (mwmp::Main::isInitialized())
+                    mwmp::Main::get().getLocalPlayer()->charGenState.currentStage = 5;
+                closeReviewDialog();
+                mEditingFromReview = false;
+                MWBase::Environment::get().getWindowManager()->popGuiMode();
+                return;
+            }
+
+            if (action == DA_ReviewBack)
+            {
+                closeReviewDialog();
+                mEditingFromReview = false;
+                mCreationStage = CSE_ReviewBack;
+                if (mwmp::Main::isInitialized())
+                    mwmp::Main::get().getLocalPlayer()->charGenState.currentStage = 3;
+                MWBase::Environment::get().getWindowManager()->popGuiMode();
+                mPendingOpenMode = GM_Birth;
+                return;
+            }
+        }
+
         if (mReviewDialog)
             mReviewDialog->onFrame(duration);
+        if (mRaceDialog)
+            mRaceDialog->onFrame(duration);
     }
 
     void CharacterCreation::spawnDialog(const char id)
@@ -198,11 +445,6 @@ namespace MWGui
                     MWBase::Environment::get().getWindowManager()->removeDialog(mNameDialog);
                     mNameDialog = nullptr;
                     mNameDialog = new mwmp::GUILogin();
-
-                    // ArenaMP uses one account card instead of the old sequential
-                    // character-name and server-password dialogs. The actual TES3MP
-                    // password packet is still sent later when the server asks for it,
-                    // preserving compatibility with unmodified servers.
                     if (mPlayerName.empty())
                         mPlayerName = Settings::Manager::getString("name", "Login");
                     mNameDialog->setLogin(mPlayerName);
@@ -215,113 +457,69 @@ namespace MWGui
                     break;
 
                 case GM_Race:
-                    MWBase::Environment::get().getWindowManager()->removeDialog(mRaceDialog);
-                    mRaceDialog = nullptr;
-                    mRaceDialog = new RaceDialog(mParent, mResourceSystem);
-                    mRaceDialog->setNextButtonShow(mCreationStage >= CSE_RaceChosen);
-                    mRaceDialog->setRaceId(mPlayerRaceId);
-                    mRaceDialog->eventDone += MyGUI::newDelegate(this, &CharacterCreation::onRaceDialogDone);
-                    mRaceDialog->eventBack += MyGUI::newDelegate(this, &CharacterCreation::onRaceDialogBack);
+                    if (!mRaceDialog)
+                    {
+                        mRaceDialog = new RaceDialog(mParent, mResourceSystem);
+                        mRaceDialog->eventDone += MyGUI::newDelegate(this, &CharacterCreation::onUnifiedDialogDone);
+                        mRaceDialog->eventBack += MyGUI::newDelegate(this, &CharacterCreation::onUnifiedDialogBack);
+                    }
+                    if (!mPlayerRaceId.empty())
+                        mRaceDialog->setRaceId(mPlayerRaceId);
+                    mRaceDialog->setPlayerScale(MWMechanics::getPlayer().getCellRef().getScale());
+                    mRaceDialog->setPage(RaceDialog::Page_Appearance);
                     mRaceDialog->setVisible(true);
                     if (mCreationStage < CSE_NameChosen)
                         mCreationStage = CSE_NameChosen;
                     break;
 
                 case GM_Class:
-                    MWBase::Environment::get().getWindowManager()->removeDialog(mClassChoiceDialog);
-                    mClassChoiceDialog = nullptr;
-                    mClassChoiceDialog = new ClassChoiceDialog();
-                    mClassChoiceDialog->eventButtonSelected += MyGUI::newDelegate(this, &CharacterCreation::onClassChoice);
-                    mClassChoiceDialog->setVisible(true);
-                    if (mCreationStage < CSE_RaceChosen)
-                        mCreationStage = CSE_RaceChosen;
-                    break;
-
                 case GM_ClassPick:
-                    MWBase::Environment::get().getWindowManager()->removeDialog(mPickClassDialog);
-                    mPickClassDialog = nullptr;
-                    mPickClassDialog = new PickClassDialog();
-                    mPickClassDialog->setNextButtonShow(mCreationStage >= CSE_ClassChosen);
-                    mPickClassDialog->setClassId(mPlayerClass.mId);
-                    mPickClassDialog->eventDone += MyGUI::newDelegate(this, &CharacterCreation::onPickClassDialogDone);
-                    mPickClassDialog->eventBack += MyGUI::newDelegate(this, &CharacterCreation::onPickClassDialogBack);
-                    mPickClassDialog->setVisible(true);
+                case GM_ClassCreate:
+                case GM_ClassGenerate:
+                    // ArenaMW: all historical class entry points open the same modern
+                    // profile editor. The question-based generator is intentionally bypassed.
+                    if (!mRaceDialog)
+                    {
+                        mRaceDialog = new RaceDialog(mParent, mResourceSystem);
+                        mRaceDialog->eventDone += MyGUI::newDelegate(this, &CharacterCreation::onUnifiedDialogDone);
+                        mRaceDialog->eventBack += MyGUI::newDelegate(this, &CharacterCreation::onUnifiedDialogBack);
+                    }
+                    if (!mPlayerClass.mName.empty() || !mPlayerClass.mId.empty())
+                        mRaceDialog->setClass(mPlayerClass);
+                    if (!mPlayerClassImageId.empty())
+                        mRaceDialog->setClassImageId(mPlayerClassImageId);
+                    mRaceDialog->setPage(RaceDialog::Page_Class);
+                    mRaceDialog->setVisible(true);
                     if (mCreationStage < CSE_RaceChosen)
                         mCreationStage = CSE_RaceChosen;
                     break;
 
                 case GM_Birth:
-                    MWBase::Environment::get().getWindowManager()->removeDialog(mBirthSignDialog);
-                    mBirthSignDialog = nullptr;
-                    mBirthSignDialog = new BirthDialog();
-                    mBirthSignDialog->setNextButtonShow(mCreationStage >= CSE_BirthSignChosen);
-                    mBirthSignDialog->setBirthId(mPlayerBirthSignId);
-                    mBirthSignDialog->eventDone += MyGUI::newDelegate(this, &CharacterCreation::onBirthSignDialogDone);
-                    mBirthSignDialog->eventBack += MyGUI::newDelegate(this, &CharacterCreation::onBirthSignDialogBack);
-                    mBirthSignDialog->setVisible(true);
+                    if (!mRaceDialog)
+                    {
+                        mRaceDialog = new RaceDialog(mParent, mResourceSystem);
+                        mRaceDialog->eventDone += MyGUI::newDelegate(this, &CharacterCreation::onUnifiedDialogDone);
+                        mRaceDialog->eventBack += MyGUI::newDelegate(this, &CharacterCreation::onUnifiedDialogBack);
+                    }
+                    if (!mPlayerBirthSignId.empty())
+                        mRaceDialog->setBirthId(mPlayerBirthSignId);
+                    mRaceDialog->setPage(RaceDialog::Page_Birth);
+                    mRaceDialog->setVisible(true);
                     if (mCreationStage < CSE_ClassChosen)
                         mCreationStage = CSE_ClassChosen;
                     break;
 
-                case GM_ClassCreate:
-                    if (!mCreateClassDialog)
-                    {
-                        mCreateClassDialog = new CreateClassDialog();
-                        mCreateClassDialog->eventDone += MyGUI::newDelegate(this, &CharacterCreation::onCreateClassDialogDone);
-                        mCreateClassDialog->eventBack += MyGUI::newDelegate(this, &CharacterCreation::onCreateClassDialogBack);
-                    }
-                    mCreateClassDialog->setNextButtonShow(mCreationStage >= CSE_ClassChosen);
-                    mCreateClassDialog->setVisible(true);
-                    if (mCreationStage < CSE_RaceChosen)
-                        mCreationStage = CSE_RaceChosen;
-                    break;
-                case GM_ClassGenerate:
-                    mGenerateClassStep = 0;
-                    mGenerateClass = "";
-                    mGenerateClassSpecializations[0] = 0;
-                    mGenerateClassSpecializations[1] = 0;
-                    mGenerateClassSpecializations[2] = 0;
-                    showClassQuestionDialog();
-                    if (mCreationStage < CSE_RaceChosen)
-                        mCreationStage = CSE_RaceChosen;
-                    break;
                 case GM_Review:
-                    MWBase::Environment::get().getWindowManager()->removeDialog(mReviewDialog);
-                    mReviewDialog = nullptr;
-                    mReviewDialog = new ReviewDialog();
-
-                    MWBase::World *world = MWBase::Environment::get().getWorld();
-
-                    const ESM::NPC *playerNpc = world->getPlayerPtr().get<ESM::NPC>()->mBase;
-
-                    const MWWorld::Player player = world->getPlayer();
-
-                    const ESM::Class *playerClass = world->getStore().get<ESM::Class>().find(playerNpc->mClass);
-
-                    mReviewDialog->setPlayerName(playerNpc->mName);
-                    mReviewDialog->setRace(playerNpc->mRace);
-                    mReviewDialog->setClass(*playerClass);
-                    mReviewDialog->setBirthSign(player.getBirthSign());
-
-                    MWWorld::Ptr playerPtr = MWMechanics::getPlayer();
-                    const MWMechanics::CreatureStats& stats = playerPtr.getClass().getCreatureStats(playerPtr);
-
-                    mReviewDialog->setHealth(stats.getHealth());
-                    mReviewDialog->setMagicka(stats.getMagicka());
-                    mReviewDialog->setFatigue(stats.getFatigue());
-                    for (auto& attributePair : mPlayerAttributes)
+                    // Review is reconstructed after every edit. Animated preview/RTT
+                    // resources from the previous modal are fully destroyed first.
+                    if (!mReviewDialog)
                     {
-                        mReviewDialog->setAttribute(static_cast<ESM::Attribute::AttributeID> (attributePair.first), attributePair.second);
+                        mReviewDialog = new ReviewDialog(mParent, mResourceSystem);
+                        mReviewDialog->eventDone += MyGUI::newDelegate(this, &CharacterCreation::onReviewDialogDone);
+                        mReviewDialog->eventBack += MyGUI::newDelegate(this, &CharacterCreation::onReviewDialogBack);
+                        mReviewDialog->eventActivateDialog += MyGUI::newDelegate(this, &CharacterCreation::onReviewActivateDialog);
                     }
-                    for (auto& skillPair : mPlayerSkillValues)
-                    {
-                        mReviewDialog->setSkillValue(static_cast<ESM::Skill::SkillEnum> (skillPair.first), skillPair.second);
-                    }
-                    mReviewDialog->configureSkills(mPlayerMajorSkills, mPlayerMinorSkills);
-
-                    mReviewDialog->eventDone += MyGUI::newDelegate(this, &CharacterCreation::onReviewDialogDone);
-                    mReviewDialog->eventBack += MyGUI::newDelegate(this, &CharacterCreation::onReviewDialogBack);
-                    mReviewDialog->eventActivateDialog += MyGUI::newDelegate(this, &CharacterCreation::onReviewActivateDialog);
+                    populateReviewDialog();
                     mReviewDialog->setVisible(true);
                     if (mCreationStage < CSE_BirthSignChosen)
                         mCreationStage = CSE_BirthSignChosen;
@@ -334,56 +532,66 @@ namespace MWGui
         }
     }
 
-    void CharacterCreation::onReviewDialogDone(WindowBase* parWindow)
+    void CharacterCreation::populateReviewDialog()
     {
-        MWBase::Environment::get().getWindowManager()->removeDialog(mReviewDialog);
-        mReviewDialog = nullptr;
+        if (!mReviewDialog)
+            return;
 
-        MWBase::Environment::get().getWindowManager()->popGuiMode();
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        const ESM::NPC* playerNpc = world->getPlayerPtr().get<ESM::NPC>()->mBase;
+        const MWWorld::Player player = world->getPlayer();
+        const ESM::Class* playerClass = world->getStore().get<ESM::Class>().search(playerNpc->mClass);
+
+        mReviewDialog->setPlayerName(playerNpc->mName);
+        mReviewDialog->setRace(playerNpc->mRace);
+        if (playerClass)
+            mReviewDialog->setClass(*playerClass);
+        mReviewDialog->setBirthSign(player.getBirthSign());
+        mReviewDialog->setPlayerScale(MWMechanics::getPlayer().getCellRef().getScale());
+
+        MWWorld::Ptr playerPtr = MWMechanics::getPlayer();
+        const MWMechanics::CreatureStats& stats = playerPtr.getClass().getCreatureStats(playerPtr);
+        mReviewDialog->setHealth(stats.getHealth());
+        mReviewDialog->setMagicka(stats.getMagicka());
+        mReviewDialog->setFatigue(stats.getFatigue());
+        for (auto& attributePair : mPlayerAttributes)
+            mReviewDialog->setAttribute(static_cast<ESM::Attribute::AttributeID>(attributePair.first), attributePair.second);
+        for (auto& skillPair : mPlayerSkillValues)
+            mReviewDialog->setSkillValue(static_cast<ESM::Skill::SkillEnum>(skillPair.first), skillPair.second);
+        mReviewDialog->configureSkills(mPlayerMajorSkills, mPlayerMinorSkills);
+    }
+
+    void CharacterCreation::onUnifiedDialogDone(WindowBase*)
+    {
+        if (mRaceDialog && mDeferredAction == DA_None)
+            mDeferredAction = DA_UnifiedDone;
+    }
+
+    void CharacterCreation::onUnifiedDialogBack()
+    {
+        if (mRaceDialog && mDeferredAction == DA_None)
+            mDeferredAction = DA_UnifiedBack;
+    }
+
+    void CharacterCreation::onReviewDialogDone(WindowBase*)
+    {
+        if (mReviewDialog && mDeferredAction == DA_None)
+            mDeferredAction = DA_ReviewDone;
     }
 
     void CharacterCreation::onReviewDialogBack()
     {
-        MWBase::Environment::get().getWindowManager()->removeDialog(mReviewDialog);
-        mReviewDialog = nullptr;
-        mCreationStage = CSE_ReviewBack;
-
-        MWBase::Environment::get().getWindowManager()->popGuiMode();
-        MWBase::Environment::get().getWindowManager()->pushGuiMode(GM_Birth);
-
-        /*
-            Start of tes3mp addition
-
-            Decrease the character generation stage tracked for the LocalPlayer
-        */
-        mwmp::Main::get().getLocalPlayer()->charGenState.currentStage--;
-        /*
-            End of tes3mp addition
-        */
+        if (mReviewDialog && mDeferredAction == DA_None)
+            mDeferredAction = DA_ReviewBack;
     }
 
     void CharacterCreation::onReviewActivateDialog(int parDialog)
     {
-        MWBase::Environment::get().getWindowManager()->removeDialog(mReviewDialog);
-        mReviewDialog = nullptr;
-        mCreationStage = CSE_ReviewNext;
-
-        MWBase::Environment::get().getWindowManager()->popGuiMode();
-
-        switch(parDialog)
-        {
-            case ReviewDialog::NAME_DIALOG:
-                MWBase::Environment::get().getWindowManager()->pushGuiMode(GM_Name);
-                break;
-            case ReviewDialog::RACE_DIALOG:
-                MWBase::Environment::get().getWindowManager()->pushGuiMode(GM_Race);
-                break;
-            case ReviewDialog::CLASS_DIALOG:
-                MWBase::Environment::get().getWindowManager()->pushGuiMode(GM_Class);
-                break;
-            case ReviewDialog::BIRTHSIGN_DIALOG:
-                MWBase::Environment::get().getWindowManager()->pushGuiMode(GM_Birth);
-        };
+        // Never close, hide or switch a modal from its own MyGUI callback. onFrame()
+        // tears the Review RTT down, waits for WindowManager garbage cleanup, and only
+        // then opens the requested editor on the following frame.
+        if (mPendingReviewDialog < 0 && !mEditingFromReview && mDeferredAction == DA_None)
+            mPendingReviewDialog = parDialog;
     }
 
     void CharacterCreation::selectPickedClass()
@@ -412,16 +620,6 @@ namespace MWGui
         selectPickedClass();
 
         handleDialogDone(CSE_ClassChosen, GM_Birth);
-
-        /*
-            Start of tes3mp addition
-
-            Increase the character generation stage tracked for the LocalPlayer
-        */
-        mwmp::Main::get().getLocalPlayer()->charGenState.currentStage++;
-        /*
-            End of tes3mp addition
-        */
     }
 
     void CharacterCreation::onPickClassDialogBack()
@@ -452,65 +650,15 @@ namespace MWGui
                 break;
             case ClassChoiceDialog::Class_Back:
                 MWBase::Environment::get().getWindowManager()->pushGuiMode(GM_Race);
-
-                /*
-                    Start of tes3mp addition
-
-                    Decrease the character generation stage tracked for the LocalPlayer
-                */
-                mwmp::Main::get().getLocalPlayer()->charGenState.currentStage--;
-                /*
-                    End of tes3mp addition
-                */
                 break;
 
         };
     }
 
-    void CharacterCreation::onNameDialogDone(WindowBase* parWindow)
+    void CharacterCreation::onNameDialogDone(WindowBase*)
     {
-        if (mNameDialog)
-        {
-            mPlayerName = mNameDialog->getLogin();
-            const std::string loginPassword = mNameDialog->getPassword();
-            const std::string loginLanguage = mNameDialog->getLanguage();
-
-            /*
-                Start of tes3mp change (major)
-
-                Ensure names are not longer than the original game's 31 character maximum
-            */
-            if (mPlayerName.length() > 31)
-                mPlayerName = mPlayerName.substr(0, 31);
-            /*
-                End of tes3mp change (major)
-            */
-
-            // Keep account details in the regular user settings file. The language is
-            // also applied immediately so ID_PLAYER_BASEINFO reports the user's chosen
-            // server-interface language on this very connection.
-            Settings::Manager::setString("name", "Login", mPlayerName);
-            Settings::Manager::setString("password", "Login", loginPassword);
-            Settings::Manager::setString("interface language", "General", loginLanguage);
-            Settings::Manager::saveUser();
-            MWBase::Environment::get().getWindowManager()->setArenaLanguage(loginLanguage);
-
-            MWBase::Environment::get().getMechanicsManager()->setPlayerName(mPlayerName);
-            MWBase::Environment::get().getWindowManager()->removeDialog(mNameDialog);
-            mNameDialog = nullptr;
-        }
-
-        handleDialogDone(CSE_NameChosen, GM_Race);
-
-        /*
-            Start of tes3mp addition
-
-            Increase the character generation stage tracked for the LocalPlayer
-        */
-        mwmp::Main::get().getLocalPlayer()->charGenState.currentStage++;
-        /*
-            End of tes3mp addition
-        */
+        if (mNameDialog && mDeferredAction == DA_None)
+            mDeferredAction = DA_NameDone;
     }
 
     void CharacterCreation::selectRace()
@@ -549,16 +697,6 @@ namespace MWGui
         selectRace();
 
         handleDialogDone(CSE_RaceChosen, GM_Class);
-
-        /*
-            Start of tes3mp addition
-
-            Increase the character generation stage tracked for the LocalPlayer
-        */
-        mwmp::Main::get().getLocalPlayer()->charGenState.currentStage++;
-        /*
-            End of tes3mp addition
-        */
     }
 
     void CharacterCreation::selectBirthSign()
@@ -580,16 +718,6 @@ namespace MWGui
         selectBirthSign();
 
         handleDialogDone(CSE_BirthSignChosen, GM_Review);
-
-        /*
-            Start of tes3mp addition
-
-            Increase the character generation stage tracked for the LocalPlayer
-        */
-        mwmp::Main::get().getLocalPlayer()->charGenState.currentStage++;
-        /*
-            End of tes3mp addition
-        */
     }
 
     void CharacterCreation::onBirthSignDialogBack()
@@ -598,16 +726,6 @@ namespace MWGui
 
         MWBase::Environment::get().getWindowManager()->popGuiMode();
         MWBase::Environment::get().getWindowManager()->pushGuiMode(GM_Class);
-
-        /*
-            Start of tes3mp addition
-
-            Decrease the character generation stage tracked for the LocalPlayer
-        */
-        mwmp::Main::get().getLocalPlayer()->charGenState.currentStage--;
-        /*
-            End of tes3mp addition
-        */
     }
 
     void CharacterCreation::selectCreatedClass()
@@ -649,16 +767,6 @@ namespace MWGui
         selectCreatedClass();
 
         handleDialogDone(CSE_ClassChosen, GM_Birth);
-
-        /*
-            Start of tes3mp addition
-
-            Increase the character generation stage tracked for the LocalPlayer
-        */
-        mwmp::Main::get().getLocalPlayer()->charGenState.currentStage++;
-        /*
-            End of tes3mp addition
-        */
     }
 
     void CharacterCreation::onCreateClassDialogBack()
@@ -668,16 +776,6 @@ namespace MWGui
 
         MWBase::Environment::get().getWindowManager()->popGuiMode();
         MWBase::Environment::get().getWindowManager()->pushGuiMode(GM_Class);
-
-        /*
-            Start of tes3mp addition
-
-            Decrease the character generation stage tracked for the LocalPlayer
-        */
-        mwmp::Main::get().getLocalPlayer()->charGenState.currentStage--;
-        /*
-            End of tes3mp addition
-        */
     }
 
     void CharacterCreation::onClassQuestionChosen(int _index)
@@ -870,16 +968,6 @@ namespace MWGui
         selectGeneratedClass();
 
         handleDialogDone(CSE_ClassChosen, GM_Birth);
-
-        /*
-            Start of tes3mp addition
-
-            Increase the character generation stage tracked for the LocalPlayer
-        */
-        mwmp::Main::get().getLocalPlayer()->charGenState.currentStage++;
-        /*
-            End of tes3mp addition
-        */
     }
 
     CharacterCreation::~CharacterCreation()
@@ -902,22 +990,10 @@ namespace MWGui
         {
             MWBase::Environment::get().getWindowManager()->pushGuiMode(GM_Review);
         }
-        /*
-            Start of tes3mp change (major)
-
-            Servers have control over character generation in multiplayer, which is why
-            the automatic transition to the next character generation menu has been
-            commented out here
-        */
-        /*
         else if (mCreationStage >= currentStage)
         {
             MWBase::Environment::get().getWindowManager()->pushGuiMode((GuiMode)nextMode);
         }
-        */
-        /*
-            End of tes3mp change (major)
-        */
         else
         {
             mCreationStage = currentStage;

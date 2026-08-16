@@ -71,6 +71,7 @@ namespace Launcher
         void vanillaServerCompatibilityChanged(bool enabled);
         void hideChatHistoryChanged(bool enabled);
         void serverRunningChanged(bool running, const QString& address, const QString& port);
+        void updateServerDataFileHashes();
 
     private:
         bool setup();
@@ -88,6 +89,7 @@ namespace Launcher
         QString primaryDataDirectory() const;
         bool isLocalServerAddress(const QString& address) const;
         void writeClientEndpoint(const QString& address, const QString& port) const;
+        QString resolveSelectedDataFilePath(const QString& fileName, const QStringList& selectedPaths) const;
 
         void setVersionLabel();
         void updateWatermarkPosition();

@@ -74,12 +74,30 @@ namespace MWGui
     CreateClassDialog* mCreateClassDialog;
     BirthDialog* mBirthSignDialog;
     ReviewDialog* mReviewDialog;
+    int mPendingReviewDialog;
+    bool mEditingFromReview;
+
+    // CharGen windows with RTT/animation must never destroy or switch themselves
+    // from inside a MyGUI callback. All closing and mode changes are processed by
+    // CharacterCreation::onFrame, with the next GUI mode opened one frame later.
+    enum DeferredAction
+    {
+        DA_None,
+        DA_NameDone,
+        DA_UnifiedDone,
+        DA_UnifiedBack,
+        DA_ReviewDone,
+        DA_ReviewBack
+    };
+    DeferredAction mDeferredAction;
+    int mPendingOpenMode;
 
     //Player data
     std::string mPlayerName;
     std::string mPlayerRaceId;
     std::string mPlayerBirthSignId;
     ESM::Class mPlayerClass;
+    std::string mPlayerClassImageId;
 
     //Class generation vars
     unsigned mGenerateClassStep;                 // Keeps track of current step in Generate Class dialog
@@ -119,6 +137,12 @@ namespace MWGui
     void onReviewDialogDone(WindowBase* parWindow);
     void onReviewDialogBack();
     void onReviewActivateDialog(int parDialog);
+    void populateReviewDialog();
+
+    // ArenaMW modern staged CharGen. Name remains the vanilla text dialog; Race,
+    // Class and Birthsign reuse one modern window shell and commit one stage at a time.
+    void onUnifiedDialogDone(WindowBase* parWindow);
+    void onUnifiedDialogBack();
 
     enum CSE    //Creation Stage Enum
     {
@@ -133,6 +157,10 @@ namespace MWGui
 
     CSE mCreationStage; // Which state the character creating is in, controls back/next/ok buttons
 
+    void closeRaceDialog();
+    void closeReviewDialog();
+    void finishStageDeferred(CSE currentStage, int nextMode);
+    void returnToReviewDeferred();
     void handleDialogDone(CSE currentStage, int nextMode);
     };
 }

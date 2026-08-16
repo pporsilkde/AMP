@@ -1,68 +1,50 @@
-ArenaMP CUMULATIVE — Modern Account Login + Language + Door Pursuit Fix
+ArenaMP BUILD FIX13 — ArenaMW AI r3 CharGen FIX9 MP/SERVER ADAPTED
+===================================================================
 
-Base: AMP.zip (ArenaMP/TES3MP project used in this conversation)
-Type: ChangedFilesOnly cumulative overlay
+Source patch:
+  ArenaMW_AMW7_AI_r3_CharGen_BUILD_FIX9_ChangedFilesOnly
+  ArenaMW baseline: AMW(7), 731f005b609b37f204f974c36c57496ce5a66beb
 
-This archive includes the prior adapted ArenaMP cumulative work (NPC/dialogue/AI World V1-V4/Luxora-native effects) plus the following changes:
+Target:
+  ArenaMP cumulative BUILD FIX12
 
-LOGIN / ACCOUNT UI
-- Replaces sequential name + server password windows with one modern ArenaMP account card.
-- Uses the original ArenaMW menu logo resource (textures/menu_arenamw.png).
-- Name and password are entered together.
-- RU / EN server-interface language selector is available on the same card.
-- The selected language is applied to ArenaMP-owned UI immediately and reaches LocalPlayer language before PLAYER_BASEINFO is sent.
-- Existing TES3MP password GUI protocol is preserved: the password collected by the card is automatically submitted when the server sends its normal PasswordDialog.
-- If the server rejects the password, the same account card is shown again in retry mode; the account name is locked for the current connection.
-- Ordinary in-game server TextInputDialog/PasswordDialog windows remain unchanged and unbranded.
+Ported CharGen:
+- modern unified Appearance / Class / Birthsign creator;
+- full-body character preview with rotate / pan / zoom;
+- FIX9 default bust framing: full head, shoulders, arms and upper torso;
+- preview framing resets after race / sex / face / hair / height changes;
+- modern class profiles, random class buttons and editable attributes/skills;
+- modern Birthsign page and final Review/Confirm screen;
+- CharGen RU/EN localization keys from ArenaMW FIX9;
+- specialization row alignment / calmer dark-gold specialization value from FIX9 layouts.
 
-NPC DOOR PURSUIT
-- Fixes the MP-only regression that cancelled all delayed hostile NPC door transitions.
-- Queue-time LocalActor authority validation is retained.
-- Forward pursuit is no longer rejected after the origin cell unloads and TES3MP drops the old LocalActor authority record.
-- ReturnHome still requires current authority at execution time.
-- Existing follower-cell-change bypass is used only for forward pursuit/follower transfers, not ReturnHome.
-- The visual 0.70–1.40 s delayed door transition remains enabled.
+ArenaMP/server adaptation:
+- GM_Name remains ArenaMP GUILogin (account name/password/language), not the SP TextInputDialog;
+- account name cannot be changed from Appearance Back or Review after the server binds it;
+- server-controlled CharGen is extended to stage 5:
+    1 Appearance -> 2 Class -> 3 Birthsign -> 4 Review -> 5 Finalize;
+- Back navigation updates LocalPlayer charGenState so the server remains authoritative;
+- review edits of Appearance/Class/Birthsign are local edits and do not desync the server stage;
+- height/scale chosen in CharGen is sent through ID_PLAYER_SHAPESHIFT before final ID_PLAYER_CHARGEN;
+- server presence gate now includes ID_PLAYER_SHAPESHIFT in the reveal snapshot, so other clients see final height immediately;
+- pre-auth / registration / CharGen invisibility from FIX10-FIX12 remains active until final Review confirmation;
+- final BaseInfo appearance sync (race/sex/head/hair) remains protected by the presence gate.
 
-INSTALL
-Copy the archive contents over the matching ArenaMP source tree, preserving directories, then build normally.
+AI r3 adaptation:
+- retained all existing ArenaMP authority checks, remote-player support and attack packet synchronization;
+- ported the newer AI r3 melee-pressure refinements from the supplied FIX9;
+- kept FIX7 rule: guards do NOT automatically join the player's side merely because an NPC attacked the player;
+- kept MP delayed door pursuit / ReturnHome authority logic;
+- kept MP DedicatedPlayer stealth/flee target handling;
+- no new packet ID and no protocol-version bump.
 
-BUILD FIX 1 (logs_86382046062)
-- Fixes MSVC C2039 in GUILogin.hpp: EventHandle_WindowBase is a nested typedef of MWGui::WindowBase in ArenaMP/OpenMW 0.47, not a direct MWGui namespace member.
-- Uses MWGui::WindowBase::EventHandle_WindowBase, matching the existing WindowBase API and callback signature.
-- No AI, networking, door-pursuit, shader, protocol, or layout behavior is changed by this build-only correction.
+Preserved from FIX12:
+- modern login + registration and RU/EN server messages;
+- player appearance/presence gate;
+- host network selector (Wi-Fi/Ethernet/Radmin/all interfaces/public advertise address);
+- Update Hash / requiredDataFiles v2 manifest sync / optional groundcover;
+- aggressive melee and all previous cumulative renderer/NPC fixes.
 
-
-BUILD FIX2 / UI REFINE:
-- Narrower one-column login card.
-- Name on first row, password below, language selector below.
-- Added Sign in / Exit buttons.
-- Shorter subtitle.
-- Immediate localisation refresh on language change.
-
-
-SERVER LANGUAGE FIX / BUILD FIX3:
-- Selected RU/EN is re-sent to server in PlayerBaseInfo before password reply.
-- Server localization reads tes3mp.GetLanguage(pid) as source of truth before Lua cache.
-- Players[pid].language is synchronized from the current engine flag.
-- OnPlayerConnect stores actual client language; config.serverLanguage remains an optional effective override.
-- Existing SendMessage/MessageBox/CustomMessageBox/InputDialog/PasswordDialog/ListBox wrappers continue to localize per recipient.
-
-
-BUILD FIX4 / MODERN REGISTRATION:
-- Dedicated ArenaMW-branded registration card after the server confirms the account is new.
-- Registration never auto-submits the cached password.
-- Account name is locked; password + confirmation + per-player language are shown together.
-- Password mismatch/empty confirmation are validated locally before the server receives the registration hash.
-- Existing-account fast login remains unchanged.
-- Manual failed login no longer causes one duplicate automatic resend.
-- Default server LOGIN=1 / REGISTER=2 flow remains protocol-compatible with stock TES3MP PasswordDialog handling.
-- Older clients receive concise localized registration prompts from CoreScripts.
-
-
-BUILD FIX5 / REGISTRATION STATE MACHINE:
-- Close/remove GM_TES3MP_InputBox before sending registration password.
-- Prevent duplicate TES3MP input GUI modes.
-- Registration detection falls back to PasswordDialog note text.
-- Stop login timeout after accepted login/registration.
-- Server log explicitly marks registration password acceptance and CharGen start.
-- Login and registration windows are 14 px taller for bottom spacing.
+Application:
+- CUMULATIVE archive: apply over the clean ArenaMP baseline used by this patch chain.
+- HOTFIX archive: apply only over BUILD FIX12.

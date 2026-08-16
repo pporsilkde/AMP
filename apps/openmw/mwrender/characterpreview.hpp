@@ -98,7 +98,7 @@ namespace MWRender
 
     protected:
 
-        bool renderHeadOnly() override { return true; }
+        bool renderHeadOnly() override { return false; }
         void onSetup() override;
 
     public:
@@ -106,6 +106,11 @@ namespace MWRender
         virtual ~RaceSelectionPreview();
 
         void setAngle(float angleRadians);
+        void setUserScale(float scale);
+        void setViewZoom(float zoom);
+        void setViewOffset(float x, float z);
+        void resetView();
+        void update(float duration);
 
         const ESM::NPC &getPrototype() const {
             return mBase;
@@ -117,7 +122,16 @@ namespace MWRender
 
         osg::ref_ptr<UpdateCameraCallback> mUpdateCameraCallback;
 
+        void applyView();
+        void playNextIdlePose();
+
         float mPitchRadians;
+        float mUserScale;
+        float mViewZoom;
+        float mViewOffsetX;
+        float mViewOffsetZ;
+        float mIdlePoseTimer;
+        unsigned int mIdlePoseIndex;
     };
 
 }

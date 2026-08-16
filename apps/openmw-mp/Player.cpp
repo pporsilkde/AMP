@@ -68,6 +68,7 @@ Player::Player(RakNet::RakNetGUID guid) : BasePlayer(guid)
 {
     handshakeCounter = 0;
     loadState = NOTLOADED;
+    visibleToOthers = false;
 }
 
 Player::~Player()
@@ -116,6 +117,16 @@ int Player::getLoadState()
     return loadState;
 }
 
+void Player::setVisibleToOthers(bool state)
+{
+    visibleToOthers = state;
+}
+
+bool Player::isVisibleToOthers() const
+{
+    return visibleToOthers;
+}
+
 Player *Players::getPlayer(unsigned short id)
 {
     auto it = slots.find(id);
@@ -131,6 +142,9 @@ CellController::TContainer *Player::getCells()
 
 void Player::sendToLoaded(mwmp::PlayerPacket *myPacket)
 {
+    if (!visibleToOthers)
+        return;
+
     std::list <Player*> plList;
 
     for (auto cell : cells)
@@ -142,7 +156,7 @@ void Player::sendToLoaded(mwmp::PlayerPacket *myPacket)
 
     for (auto pl : plList)
     {
-        if (pl == this) continue;
+        if (pl == this || !pl->isVisibleToOthers()) continue;
         myPacket->setPlayer(this);
         myPacket->Send(pl->guid);
     }
@@ -150,6 +164,9 @@ void Player::sendToLoaded(mwmp::PlayerPacket *myPacket)
 
 void Player::forEachLoaded(std::function<void(Player *pl, Player *other)> func)
 {
+    if (!visibleToOthers)
+        return;
+
     std::list <Player*> plList;
 
     for (auto cell : cells)
@@ -166,7 +183,7 @@ void Player::forEachLoaded(std::function<void(Player *pl, Player *other)> func)
 
     for (auto pl : plList)
     {
-        if (pl == this) continue;
+        if (pl == this || !pl->isVisibleToOthers()) continue;
         func(this, pl);
     }
 }

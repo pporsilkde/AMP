@@ -1,58 +1,69 @@
 #include "review.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 #include <MyGUI_ScrollView.h>
 #include <MyGUI_ImageBox.h>
 #include <MyGUI_Gui.h>
 
+#include <osg/Texture2D>
+
+#include <components/myguiplatform/myguitexture.hpp>
+
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
 #include "../mwbase/windowmanager.hpp"
 #include "../mwworld/esmstore.hpp"
 #include "../mwmechanics/autocalcspell.hpp"
+#include "../mwrender/characterpreview.hpp"
 
 #include "tooltips.hpp"
 
-namespace
-{
-    void adjustButtonSize(MyGUI::Button *button)
-    {
-        // adjust size of button to fit its text
-        MyGUI::IntSize size = button->getTextSize();
-        button->setSize(size.width + 24, button->getSize().height);
-    }
-}
-
 namespace MWGui
 {
-    ReviewDialog::ReviewDialog()
-        : WindowModal("openmw_chargen_review.layout"),
-          mUpdateSkillArea(false)
+    ReviewDialog::ReviewDialog(osg::Group* parent, Resource::ResourceSystem* resourceSystem)
+        : WindowModal("openmw_chargen_review.layout")
+        , mParent(parent)
+        , mResourceSystem(resourceSystem)
+        , mPreviewImage(nullptr)
+        , mPlayerScale(1.f)
+        , mPreviewAngle(0.f)
+        , mPreviewZoom(1.f)
+        , mPreviewOffsetX(0.f)
+        , mPreviewOffsetZ(-8.f)
+        , mPreviewDragX(0)
+        , mPreviewDragY(0)
+        , mUpdateSkillArea(false)
     {
         // Centre dialog
         center();
+
+        getWidget(mPreviewImage, "PreviewImage");
+        mPreviewImage->setNeedMouseFocus(true);
+        mPreviewImage->eventMouseButtonPressed += MyGUI::newDelegate(this, &ReviewDialog::onPreviewMousePressed);
+        mPreviewImage->eventMouseDrag += MyGUI::newDelegate(this, &ReviewDialog::onPreviewMouseDrag);
+        mPreviewImage->eventMouseWheel += MyGUI::newDelegate(this, &ReviewDialog::onPreviewMouseWheel);
 
         // Setup static stats
         MyGUI::Button* button;
         getWidget(mNameWidget, "NameText");
         getWidget(button, "NameButton");
-        adjustButtonSize(button);
-        button->eventMouseButtonClick += MyGUI::newDelegate(this, &ReviewDialog::onNameClicked);
+        // The network account name is immutable after authentication. Keep it
+        // visible in Review, but do not offer a client-side rename that the server
+        // cannot safely rebind mid-session.
+        button->setVisible(false);
 
         getWidget(mRaceWidget, "RaceText");
         getWidget(button, "RaceButton");
-        adjustButtonSize(button);
         button->eventMouseButtonClick += MyGUI::newDelegate(this, &ReviewDialog::onRaceClicked);
 
         getWidget(mClassWidget, "ClassText");
         getWidget(button, "ClassButton");
-        adjustButtonSize(button);
         button->eventMouseButtonClick += MyGUI::newDelegate(this, &ReviewDialog::onClassClicked);
 
         getWidget(mBirthSignWidget, "SignText");
         getWidget(button, "SignButton");
-        adjustButtonSize(button);
         button->eventMouseButtonClick += MyGUI::newDelegate(this, &ReviewDialog::onBirthSignClicked);
 
         // Setup dynamic stats
@@ -98,19 +109,58 @@ namespace MWGui
         okButton->eventMouseButtonClick += MyGUI::newDelegate(this, &ReviewDialog::onOkClicked);
     }
 
+    ReviewDialog::~ReviewDialog()
+    {
+        if (mPreviewImage)
+            mPreviewImage->setRenderItemTexture(nullptr);
+        mPreviewTexture.reset();
+        mPreview.reset();
+    }
+
+    void ReviewDialog::setPlayerScale(float scale)
+    {
+        mPlayerScale = std::max(0.85f, std::min(1.15f, scale));
+        if (mPreview)
+            mPreview->setUserScale(mPlayerScale);
+    }
+
     void ReviewDialog::onOpen()
     {
         WindowModal::onOpen();
         mUpdateSkillArea = true;
+
+        if (!mPreview)
+        {
+            mPreview.reset(new MWRender::RaceSelectionPreview(mParent, mResourceSystem));
+            mPreview->rebuild();
+            mPreview->setUserScale(mPlayerScale);
+            mPreview->setAngle(mPreviewAngle);
+            mPreview->setViewZoom(mPreviewZoom);
+            mPreview->setViewOffset(mPreviewOffsetX, mPreviewOffsetZ);
+            mPreviewTexture.reset(new osgMyGUI::OSGTexture(mPreview->getTexture()));
+            mPreviewImage->setRenderItemTexture(mPreviewTexture.get());
+            mPreviewImage->getSubWidgetMain()->_setUVSet(MyGUI::FloatRect(0.f, 0.f, 1.f, 1.f));
+        }
     }
 
-    void ReviewDialog::onFrame(float /*duration*/)
+    void ReviewDialog::onClose()
+    {
+        WindowModal::onClose();
+        if (mPreviewImage)
+            mPreviewImage->setRenderItemTexture(nullptr);
+        mPreviewTexture.reset();
+        mPreview.reset();
+    }
+
+    void ReviewDialog::onFrame(float duration)
     {
         if (mUpdateSkillArea)
         {
             updateSkillArea();
             mUpdateSkillArea = false;
         }
+        if (mPreview)
+            mPreview->update(duration);
     }
 
     void ReviewDialog::setPlayerName(const std::string &name)
@@ -488,6 +538,43 @@ namespace MWGui
             mSkillView->setViewOffset(MyGUI::IntPoint(0, 0));
         else
             mSkillView->setViewOffset(MyGUI::IntPoint(0, static_cast<int>(mSkillView->getViewOffset().top + _rel*0.3)));
+    }
+
+    void ReviewDialog::onPreviewMousePressed(MyGUI::Widget*, int left, int top, MyGUI::MouseButton)
+    {
+        mPreviewDragX = left;
+        mPreviewDragY = top;
+    }
+
+    void ReviewDialog::onPreviewMouseDrag(MyGUI::Widget*, int left, int top, MyGUI::MouseButton id)
+    {
+        const int dx = left - mPreviewDragX;
+        const int dy = top - mPreviewDragY;
+        mPreviewDragX = left;
+        mPreviewDragY = top;
+
+        if (id == MyGUI::MouseButton::Left)
+        {
+            mPreviewAngle += static_cast<float>(dx) * 0.012f;
+            if (mPreview)
+                mPreview->setAngle(mPreviewAngle);
+        }
+        else if (id == MyGUI::MouseButton::Right)
+        {
+            mPreviewOffsetX = std::max(-45.f, std::min(45.f, mPreviewOffsetX - static_cast<float>(dx) * 0.22f));
+            mPreviewOffsetZ = std::max(-40.f, std::min(40.f, mPreviewOffsetZ + static_cast<float>(dy) * 0.22f));
+            if (mPreview)
+                mPreview->setViewOffset(mPreviewOffsetX, mPreviewOffsetZ);
+        }
+    }
+
+    void ReviewDialog::onPreviewMouseWheel(MyGUI::Widget*, int rel)
+    {
+        if (rel == 0)
+            return;
+        mPreviewZoom = std::max(0.85f, std::min(2.35f, mPreviewZoom + (rel > 0 ? 0.12f : -0.12f)));
+        if (mPreview)
+            mPreview->setViewZoom(mPreviewZoom);
     }
 
 }

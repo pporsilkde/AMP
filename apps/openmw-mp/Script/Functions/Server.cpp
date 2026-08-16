@@ -225,6 +225,29 @@ void ServerFunctions::AddDataFileRequirement(const char *dataFilename, const cha
     }
 }
 
+
+void ServerFunctions::AddGroundcoverRequirement(const char *dataFilename, const char *checksumString) noexcept
+{
+    auto &samples = mwmp::Networking::getPtr()->getGroundcoverSamples();
+
+    auto it = std::find_if(samples.begin(), samples.end(), [&dataFilename](mwmp::PacketPreInit::PluginPair &item) {
+        return item.first == dataFilename;
+    });
+
+    if (it != samples.end())
+    {
+        if (strlen(checksumString) != 0)
+            it->second.push_back((unsigned)std::stoul(checksumString));
+    }
+    else
+    {
+        mwmp::PacketPreInit::HashList checksumList;
+        if (strlen(checksumString) != 0)
+            checksumList.push_back((unsigned)std::stoul(checksumString));
+        samples.emplace_back(dataFilename, checksumList);
+    }
+}
+
 // All methods below are deprecated versions of methods from above
 
 bool ServerFunctions::DoesFileExist(const char *filePath) noexcept

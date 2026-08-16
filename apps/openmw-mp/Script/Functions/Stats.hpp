@@ -73,6 +73,7 @@
     \
     SCRIPT_API_ENTRY("SetBounty", StatsFunctions::SetBounty),\
     SCRIPT_API_ENTRY("SetCharGenStage", StatsFunctions::SetCharGenStage),\
+    SCRIPT_API_ENTRY("SetPlayerVisible", StatsFunctions::SetPlayerVisible),\
     \
     SCRIPT_API_ENTRY("SendBaseInfo", StatsFunctions::SendBaseInfo),\
     \
@@ -618,6 +619,9 @@ public:
     * \return void
     */
     static void SetCharGenStage(unsigned short pid, int currentStage, int endStage) noexcept;
+
+    /** Reveal or hide a player from other clients. Revealing sends a full presence snapshot. */
+    static void SetPlayerVisible(unsigned short pid, bool state) noexcept;
 
     /**
     * \brief Send a PlayerBaseInfo packet with a player's name, race, head mesh,

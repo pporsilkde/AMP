@@ -13,6 +13,11 @@
 #include <QCloseEvent>
 #include <QTextCodec>
 #include <QLabel>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSaveFile>
+#include <boost/crc.hpp>
 #include <QResizeEvent>
 #include <QByteArray>
 #include <QTimer>
@@ -250,6 +255,8 @@ void Launcher::MainDialog::createPages()
     mPlayPage->setAutoRestartServer(autoRestartServer);
     mPlayPage->setVanillaServerCompatibility(vanillaServerCompatibility);
     mPlayPage->setHideChatHistory(hideChatHistory);
+    mPlayPage->setHostBindAddress(mLauncherSettings.value(
+        QStringLiteral("General/Server/bindAddress"), QStringLiteral("0.0.0.0")));
 
     mServerDialog->setAutoRestartEnabled(autoRestartServer);
 
@@ -276,20 +283,21 @@ void Launcher::MainDialog::createPages()
             }
         }
 
-        if (autoStartServer || autoRestartServer)
+        if (autoStartServer)
         {
-            addr = mServerDialog->displayAddress();
+            // The editable address is the endpoint advertised/shared with other
+            // players. Do not overwrite it with a LAN adapter merely because
+            // Host mode is enabled. The local host client uses a separate
+            // loopback/bind endpoint when launching.
             port = mServerDialog->configuredPort();
         }
 
         mPlayPage->setServerAddress(addr);
         mPlayPage->setServerPort(port);
 
-        const bool localEndpoint = isLocalServerAddress(addr);
-        const bool managedServer = localEndpoint && mServerDialog->isRunning();
+        const bool managedServer = mServerDialog->isRunning();
         const bool reachableServer = managedServer
-            || ((autoStartServer || autoRestartServer)
-                && localEndpoint && mServerDialog->isServerReachable(120));
+            || (autoStartServer && mServerDialog->isServerReachable(120));
         mPlayPage->setServerRunning(reachableServer, addr, port, managedServer);
         if (reachableServer)
         {
@@ -317,6 +325,7 @@ void Launcher::MainDialog::createPages()
     connect(mPlayPage, SIGNAL(autoRestartServerChanged(bool)), this, SLOT(autoRestartServerChanged(bool)));
     connect(mPlayPage, SIGNAL(vanillaServerCompatibilityChanged(bool)), this, SLOT(vanillaServerCompatibilityChanged(bool)));
     connect(mPlayPage, SIGNAL(hideChatHistoryChanged(bool)), this, SLOT(hideChatHistoryChanged(bool)));
+    connect(mPlayPage, SIGNAL(updateHashesRequested()), this, SLOT(updateServerDataFileHashes()));
     connect(mServerDialog, SIGNAL(runningChanged(bool,QString,QString)),
             this, SLOT(serverRunningChanged(bool,QString,QString)));
     connect(mServerDialog, SIGNAL(autoRestartChanged(bool)),
@@ -1097,6 +1106,9 @@ void Launcher::MainDialog::saveSettings()
         mLauncherSettings.remove(QStringLiteral("General/Server/vanillaBuild"));
         mLauncherSettings.setValue(QStringLiteral("General/Server/vanillaBuild"),
             mPlayPage->vanillaServerCompatibility() ? QStringLiteral("true") : QStringLiteral("false"));
+        mLauncherSettings.remove(QStringLiteral("General/Server/bindAddress"));
+        mLauncherSettings.setValue(QStringLiteral("General/Server/bindAddress"),
+            mPlayPage->hostBindAddress());
         mLauncherSettings.remove(QStringLiteral("General/Chat/hideHistory"));
         mLauncherSettings.setValue(QStringLiteral("General/Chat/hideHistory"),
             mPlayPage->hideChatHistory() ? QStringLiteral("true") : QStringLiteral("false"));
@@ -1244,8 +1256,7 @@ void Launcher::MainDialog::play()
     mPendingHideChatHistory = mPlayPage->hideChatHistory();
 
     bool startedNow = false;
-    const bool localServerMode =
-        mPlayPage->autoStartServer() || mPlayPage->autoRestartServer();
+    const bool localServerMode = mPlayPage->autoStartServer();
     if (localServerMode)
     {
         // Host mode overrides the remote endpoint and vanilla compatibility for
@@ -1255,6 +1266,15 @@ void Launcher::MainDialog::play()
 
         if (!mServerDialog->isRunning())
         {
+            QString bindError;
+            if (!mServerDialog->setConfiguredLocalAddress(mPlayPage->hostBindAddress(), &bindError))
+            {
+                QMessageBox::warning(this, tr("Invalid server interface"), bindError);
+                mPendingClientAddress.clear();
+                mPendingClientPort.clear();
+                return;
+            }
+
             QString portError;
             if (!mServerDialog->setConfiguredPort(mPlayPage->serverPort(), &portError))
             {
@@ -1265,10 +1285,10 @@ void Launcher::MainDialog::play()
             }
         }
 
-        // Resolve the LAN address before starting the process and keep it in a
-        // dedicated pending endpoint. launchClient() must not fall back to the
-        // stale localhost value that was present before Auto-Start.
-        mPendingClientAddress = mServerDialog->displayAddress();
+        // The host's own client must use a local endpoint. The value in the
+        // Server Address field may intentionally be a public WAN address and
+        // may not support NAT loopback on the user's router.
+        mPendingClientAddress = mServerDialog->localConnectAddress();
         mPendingClientPort = mServerDialog->configuredPort();
         writeClientEndpoint(mPendingClientAddress, mPendingClientPort);
 
@@ -1336,6 +1356,13 @@ void Launcher::MainDialog::runServer()
 
     if (!mServerDialog->isRunning())
     {
+        QString bindError;
+        if (!mServerDialog->setConfiguredLocalAddress(mPlayPage->hostBindAddress(), &bindError))
+        {
+            QMessageBox::warning(this, tr("Invalid server interface"), bindError);
+            return;
+        }
+
         QString portError;
         if (!mServerDialog->setConfiguredPort(mPlayPage->serverPort(), &portError))
         {
@@ -1352,6 +1379,142 @@ void Launcher::MainDialog::stopServer()
 {
     if (mServerDialog != nullptr)
         mServerDialog->stopServer();
+}
+
+
+QString Launcher::MainDialog::resolveSelectedDataFilePath(const QString& fileName, const QStringList& selectedPaths) const
+{
+    for (const QString& path : selectedPaths)
+    {
+        if (QFileInfo(path).fileName().compare(fileName, Qt::CaseInsensitive) == 0)
+            return path;
+    }
+
+    QStringList searchDirs;
+    if (!mGameSettings.getDataLocal().isEmpty())
+        searchDirs << mGameSettings.getDataLocal();
+    searchDirs << mGameSettings.getDataDirs();
+    for (const QString& dirPath : searchDirs)
+    {
+        const QString candidate = QDir(dirPath).filePath(fileName);
+        if (QFileInfo::exists(candidate))
+            return candidate;
+    }
+    return QString();
+}
+
+void Launcher::MainDialog::updateServerDataFileHashes()
+{
+    if (mPlayPage == nullptr || !mPlayPage->autoStartServer())
+        return;
+
+    // Pull the current UI selection into GameSettings first. This guarantees
+    // that JSON order is exactly the order visible on the Data Files page.
+    mDataFilesPage->saveSettings();
+    const QStringList selectedPaths = mDataFilesPage->selectedFilePaths();
+    const QStringList contentFiles = mGameSettings.getContentList();
+    const QStringList groundcoverFiles = mGameSettings.getGroundcoverList();
+
+    if (contentFiles.isEmpty())
+    {
+        QMessageBox::warning(this, tr("Update Hash"), tr("No content files are selected."));
+        return;
+    }
+
+    auto crc32ForPath = [](const QString& path, quint32* value) -> bool
+    {
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly))
+            return false;
+        boost::crc_32_type crc;
+        while (!file.atEnd())
+        {
+            const QByteArray chunk = file.read(1024 * 1024);
+            if (chunk.isEmpty() && file.error() != QFile::NoError)
+                return false;
+            crc.process_bytes(chunk.constData(), static_cast<std::size_t>(chunk.size()));
+        }
+        *value = crc.checksum();
+        return true;
+    };
+
+    auto makeEntry = [&](const QString& fileName, QJsonObject* entry, QString* error) -> bool
+    {
+        const QString path = resolveSelectedDataFilePath(fileName, selectedPaths);
+        if (path.isEmpty())
+        {
+            *error = tr("Selected data file was not found: %1").arg(fileName);
+            return false;
+        }
+        quint32 crc = 0;
+        if (!crc32ForPath(path, &crc))
+        {
+            *error = tr("Could not calculate CRC32 for %1").arg(QDir::toNativeSeparators(path));
+            return false;
+        }
+        const QString hash = QStringLiteral("0x")
+            + QString::number(crc, 16).rightJustified(8, QLatin1Char('0')).toUpper();
+        QJsonArray hashes;
+        hashes.append(hash);
+        entry->insert(fileName, hashes);
+        return true;
+    };
+
+    QJsonArray contentArray;
+    QJsonArray groundcoverArray;
+    QString error;
+    for (const QString& fileName : contentFiles)
+    {
+        QJsonObject entry;
+        if (!makeEntry(fileName, &entry, &error))
+        {
+            QMessageBox::critical(this, tr("Update Hash"), error);
+            return;
+        }
+        contentArray.append(entry);
+    }
+    for (const QString& fileName : groundcoverFiles)
+    {
+        QJsonObject entry;
+        if (!makeEntry(fileName, &entry, &error))
+        {
+            QMessageBox::critical(this, tr("Update Hash"), error);
+            return;
+        }
+        groundcoverArray.append(entry);
+    }
+
+    QJsonObject root;
+    root.insert(QStringLiteral("formatVersion"), 2);
+    root.insert(QStringLiteral("content"), contentArray);
+    root.insert(QStringLiteral("groundcover"), groundcoverArray);
+
+    const QString path = mServerDialog->requiredDataFilesPath();
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QSaveFile output(path);
+    if (!output.open(QIODevice::WriteOnly))
+    {
+        QMessageBox::critical(this, tr("Update Hash"),
+            tr("Could not write %1").arg(QDir::toNativeSeparators(path)));
+        return;
+    }
+    const QByteArray json = QJsonDocument(root).toJson(QJsonDocument::Indented);
+    if (output.write(json) != json.size() || !output.commit())
+    {
+        QMessageBox::critical(this, tr("Update Hash"),
+            tr("Could not finish writing %1").arg(QDir::toNativeSeparators(path)));
+        return;
+    }
+
+    // Keep build.ini in the same order as the generated server manifest.
+    writeBuildManifest();
+
+    QString status = tr("Server manifest updated.\n\nRequired content: %1\nOptional groundcover: %2\n\n%3")
+        .arg(contentFiles.size()).arg(groundcoverFiles.size())
+        .arg(QDir::toNativeSeparators(path));
+    if (mServerDialog->isRunning())
+        status += tr("\n\nRestart the server to apply the new manifest.");
+    QMessageBox::information(this, tr("Update Hash"), status);
 }
 
 void Launcher::MainDialog::autoStartServerChanged(bool enabled)

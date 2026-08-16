@@ -1,6 +1,7 @@
 #include "playpage.hpp"
 
 #include <QApplication>
+#include <QAbstractSocket>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDir>
@@ -10,10 +11,16 @@
 #include <QIntValidator>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QLabel>
+#include <QNetworkInterface>
+#include <QHostAddress>
+#include <QHBoxLayout>
+#include <QPushButton>
 #include <QPlainTextEdit>
 #include <QRegularExpression>
 #include <QStandardPaths>
 #include <QSpinBox>
+#include <QStringList>
 #include <QTextStream>
 #include <QVBoxLayout>
 
@@ -112,15 +119,64 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     : QWidget(parent)
     , mEmbeddedServerConsole(nullptr)
     , mSyncingServerSettingsTabs(false)
+    , mHostInterfaceLabel(nullptr)
+    , mHostInterfaceCombo(nullptr)
+    , mRefreshHostInterfacesButton(nullptr)
+    , mUpdateHashesButton(nullptr)
 {
     setObjectName("PlayPage");
     setupUi(this);
     serverPortEdit->setValidator(new QIntValidator(1, 65535, serverPortEdit));
 
+    // Host mode has a separate bind-interface selector.  The public/share
+    // address must not be confused with the address the local socket binds to:
+    // a router-owned WAN IP usually cannot be bound by the host machine.
+    mHostInterfaceLabel = new QLabel(tr("Server network interface:"), this);
+    mHostInterfaceLabel->setStyleSheet(QStringLiteral("font-size: 11pt; font-weight: 500;"));
+    mHostInterfaceCombo = new QComboBox(this);
+    mHostInterfaceCombo->setMinimumHeight(30);
+    mHostInterfaceCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    mRefreshHostInterfacesButton = new QPushButton(tr("Refresh"), this);
+    mRefreshHostInterfacesButton->setMinimumHeight(30);
+
+    // Host-only helper: regenerate server/data/requiredDataFiles.json from the
+    // exact content=/groundcover= selection currently active in the launcher.
+    mUpdateHashesButton = new QPushButton(tr("Update Hash"), this);
+    mUpdateHashesButton->setMinimumHeight(28);
+    mUpdateHashesButton->setToolTip(tr("Generate the server data-file manifest from the current Content Files order and CRC32 hashes."));
+
+    serverConnectionLayout->removeWidget(autoStartServerCheckBox);
+    QHBoxLayout* hostModeLayout = new QHBoxLayout();
+    hostModeLayout->setSpacing(8);
+    hostModeLayout->addWidget(autoStartServerCheckBox);
+    hostModeLayout->addStretch(1);
+    hostModeLayout->addWidget(mUpdateHashesButton);
+    serverConnectionLayout->addLayout(hostModeLayout, 2, 0, 1, 2);
+
+    QHBoxLayout* hostInterfaceLayout = new QHBoxLayout();
+    hostInterfaceLayout->setSpacing(8);
+    hostInterfaceLayout->addWidget(mHostInterfaceLabel);
+    hostInterfaceLayout->addWidget(mHostInterfaceCombo, 1);
+    hostInterfaceLayout->addWidget(mRefreshHostInterfacesButton);
+    serverConnectionLayout->addLayout(hostInterfaceLayout, 3, 0, 1, 2);
+
+    // Move the remaining Host-mode controls one row down.
+    serverConnectionLayout->removeWidget(autoRestartServerCheckBox);
+    serverConnectionLayout->removeWidget(vanillaServerCheckBox);
+    serverConnectionLayout->removeWidget(hideChatHistoryCheckBox);
+    serverConnectionLayout->addWidget(autoRestartServerCheckBox, 4, 0, 1, 2);
+    serverConnectionLayout->addWidget(vanillaServerCheckBox, 5, 0, 1, 2);
+    serverConnectionLayout->addWidget(hideChatHistoryCheckBox, 6, 0, 1, 2);
+
+    refreshHostInterfaces(QStringLiteral("0.0.0.0"));
+    updateHostModeUi(autoStartServerCheckBox->isChecked());
+
     connect(playButton, SIGNAL(clicked()), this, SLOT(slotPlayClicked()));
     connect(serverButton, SIGNAL(clicked()), this, SLOT(slotServerClicked()));
     connect(stopServerButton, SIGNAL(clicked()), this, SLOT(slotStopServerClicked()));
     connect(autoStartServerCheckBox, SIGNAL(toggled(bool)), this, SLOT(slotAutoStartServerToggled(bool)));
+    connect(mRefreshHostInterfacesButton, SIGNAL(clicked()), this, SLOT(slotRefreshHostInterfaces()));
+    connect(mUpdateHashesButton, SIGNAL(clicked()), this, SIGNAL(updateHashesRequested()));
     connect(autoRestartServerCheckBox, SIGNAL(toggled(bool)), this, SIGNAL(autoRestartServerChanged(bool)));
     connect(vanillaServerCheckBox, SIGNAL(toggled(bool)), this, SIGNAL(vanillaServerCompatibilityChanged(bool)));
     connect(hideChatHistoryCheckBox, SIGNAL(toggled(bool)), this, SIGNAL(hideChatHistoryChanged(bool)));
@@ -256,6 +312,95 @@ QString Launcher::PlayPage::serverPort() const
 {
     QString p = serverPortEdit->text().trimmed();
     return p.isEmpty() ? QString("25565") : p;
+}
+
+QString Launcher::PlayPage::hostBindAddress() const
+{
+    if (mHostInterfaceCombo == nullptr)
+        return QStringLiteral("0.0.0.0");
+
+    const QString address = mHostInterfaceCombo->currentData().toString().trimmed();
+    return address.isEmpty() ? QStringLiteral("0.0.0.0") : address;
+}
+
+void Launcher::PlayPage::setHostBindAddress(const QString& address)
+{
+    const QString wanted = address.trimmed().isEmpty() ? QStringLiteral("0.0.0.0") : address.trimmed();
+    refreshHostInterfaces(wanted);
+}
+
+void Launcher::PlayPage::refreshHostInterfaces(const QString& preferredAddress)
+{
+    if (mHostInterfaceCombo == nullptr)
+        return;
+
+    const QString previous = preferredAddress.isEmpty() ? hostBindAddress() : preferredAddress;
+    mHostInterfaceCombo->clear();
+    mHostInterfaceCombo->addItem(tr("All interfaces (recommended) — 0.0.0.0"), QStringLiteral("0.0.0.0"));
+    mHostInterfaceCombo->addItem(tr("Local only — 127.0.0.1"), QStringLiteral("127.0.0.1"));
+
+    QStringList seenAddresses;
+    const QList<QNetworkInterface> interfaces = QNetworkInterface::allInterfaces();
+    for (const QNetworkInterface& iface : interfaces)
+    {
+        if (!(iface.flags() & QNetworkInterface::IsUp) || !(iface.flags() & QNetworkInterface::IsRunning))
+            continue;
+
+        for (const QNetworkAddressEntry& entry : iface.addressEntries())
+        {
+            if (entry.ip().protocol() != QAbstractSocket::IPv4Protocol)
+                continue;
+
+            const QString address = entry.ip().toString();
+            if (address.isEmpty() || address == QLatin1String("0.0.0.0")
+                || address == QLatin1String("127.0.0.1") || address.startsWith(QLatin1String("169.254."))
+                || seenAddresses.contains(address))
+                continue;
+
+            seenAddresses.append(address);
+            QString name = iface.humanReadableName().trimmed();
+            if (name.isEmpty())
+                name = iface.name();
+            mHostInterfaceCombo->addItem(QStringLiteral("%1 — %2").arg(name, address), address);
+        }
+    }
+
+    int index = mHostInterfaceCombo->findData(previous);
+    if (index < 0)
+    {
+        // Keep a previously selected adapter address visible if the VPN is
+        // temporarily down. The user can refresh when it comes back.
+        if (!previous.isEmpty() && previous != QLatin1String("0.0.0.0"))
+        {
+            mHostInterfaceCombo->addItem(tr("Unavailable interface — %1").arg(previous), previous);
+            index = mHostInterfaceCombo->count() - 1;
+        }
+        else
+            index = 0;
+    }
+    mHostInterfaceCombo->setCurrentIndex(index);
+}
+
+void Launcher::PlayPage::updateHostModeUi(bool enabled)
+{
+    if (mHostInterfaceLabel != nullptr)
+        mHostInterfaceLabel->setVisible(enabled);
+    if (mHostInterfaceCombo != nullptr)
+        mHostInterfaceCombo->setVisible(enabled);
+    if (mRefreshHostInterfacesButton != nullptr)
+        mRefreshHostInterfacesButton->setVisible(enabled);
+    if (mUpdateHashesButton != nullptr)
+        mUpdateHashesButton->setVisible(enabled);
+
+    serverLabel->setText(enabled ? tr("Address for players:") : tr("Server Address:"));
+    serverAddressEdit->setPlaceholderText(enabled
+        ? tr("Radmin/VPN IP or public IP (optional)")
+        : tr("192.168.x.x"));
+    serverAddressEdit->setToolTip(enabled
+        ? tr("Address you give to other players. It is not used as the server bind address. "
+             "For a public Internet IP, forward the UDP server port on your router to this PC. "
+             "For Radmin VPN, enter the Radmin IPv4 address or leave this as your preferred share address.")
+        : QString());
 }
 
 void Launcher::PlayPage::switchToServerConsoleTab()
@@ -612,7 +757,15 @@ void Launcher::PlayPage::slotStopServerClicked()
 
 void Launcher::PlayPage::slotAutoStartServerToggled(bool enabled)
 {
+    updateHostModeUi(enabled);
+    if (enabled)
+        refreshHostInterfaces();
     emit autoStartServerChanged(enabled);
+}
+
+void Launcher::PlayPage::slotRefreshHostInterfaces()
+{
+    refreshHostInterfaces();
 }
 
 void Launcher::PlayPage::slotReloadServerSettings()

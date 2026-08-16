@@ -141,7 +141,7 @@ void Main::configure(const boost::program_options::variables_map &variables)
     resourceDir = variables["resources"].as<Files::EscapePath>().mPath.string();
 }
 
-bool Main::init(std::vector<std::string> &content, Files::Collections &collections)
+bool Main::init(std::vector<std::string> &content, std::vector<std::string> &groundcover, Files::Collections &collections)
 {
     assert(!pMain);
     pMain = new Main();
@@ -168,7 +168,7 @@ bool Main::init(std::vector<std::string> &content, Files::Collections &collectio
     }
     get().mLocalSystem->serverPassword = serverPassword;
 
-    pMain->mNetworking->connect(pMain->server, pMain->port, content, collections);
+    pMain->mNetworking->connect(pMain->server, pMain->port, content, groundcover, collections);
 
     return pMain->mNetworking->isConnected();
 }

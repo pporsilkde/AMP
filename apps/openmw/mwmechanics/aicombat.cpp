@@ -219,11 +219,33 @@ namespace MWMechanics
                 return false;
             }
 
+            bool meleePressureMovement = false;
             if (storage.mCurrentAction.get())
             {
                 bool ranged = false;
                 storage.mCurrentAction->getCombatRange(ranged);
-                updateFormationDestination(actor, target, duration, storage, ranged);
+                const float distToTarget = MWBase::Environment::get().getWorld()->getHitDistance(actor, target);
+                const float meleeCommitRange = std::max(260.f, storage.mAttackRange * 1.45f);
+                meleePressureMovement = Settings::Manager::getBool("combat melee pressure", "Game")
+                    && !ranged && storage.mCurrentAction->isAttackingOrSpell() && storage.mLOS
+                    && distToTarget <= meleeCommitRange;
+
+                // Formation slots are an approach tool. Once a melee fighter has
+                // committed to striking distance, continuing to chase a flank
+                // slot is exactly what creates the unpleasant left/right pendulum.
+                if (meleePressureMovement)
+                {
+                    // With direct geometric LOS, stale formation/custom flank
+                    // destinations should never pull a committed melee fighter
+                    // sideways away from the target.
+                    if (storage.mFormationActive || (storage.mUseCustomDestination && storage.mGeometricLOS))
+                        mPathFinder.clearPath();
+                    storage.mFormationActive = false;
+                    if (storage.mGeometricLOS)
+                        storage.mUseCustomDestination = false;
+                }
+                else
+                    updateFormationDestination(actor, target, duration, storage, ranged);
 
                 const bool usesAlternateDestination = storage.mUseCustomDestination || storage.mFormationActive;
                 const float targetReachedTolerance = storage.mLOS && !usesAlternateDestination
@@ -244,7 +266,7 @@ namespace MWMechanics
 
             storage.updateCombatMove(duration);
             updateTacticalMovement(actor, target, duration, storage, characterController);
-            if (storage.mReadyToAttack || storage.hasTacticalMovement())
+            if (storage.mReadyToAttack || storage.hasTacticalMovement() || meleePressureMovement)
                 updateActorsMovement(actor, duration, storage);
             storage.updateAttack(characterController);
 
@@ -478,19 +500,18 @@ namespace MWMechanics
                 {
                     storage.mUseCustomDestination = false;
 
-                    // A transient navmesh failure at point-blank range should not
-                    // make an aggressive melee NPC suddenly run away. If the
-                    // target is visible and close, keep direct forward pressure;
-                    // the existing stuck recovery will handle a real obstacle.
-                    const bool closeMeleePressure = !isRangedCombat && storage.mLOS
-                        && Settings::Manager::getBool("combat melee pressure", "Game")
-                        && distToTarget <= std::max(420.f, rangeAttack * 1.85f);
-                    if (closeMeleePressure)
+                    // A transient navmesh miss at arm's length must not turn an
+                    // otherwise valid melee attack into panic/flee. With direct
+                    // geometric LOS, keep pressure for a short distance and let
+                    // the normal path builder retry on the following updates.
+                    const bool closeVisibleMelee = Settings::Manager::getBool("combat melee pressure", "Game")
+                        && !isRangedCombat && storage.mGeometricLOS
+                        && distToTarget <= std::max(420.f, rangeAttack * 1.75f);
+                    if (closeVisibleMelee)
                     {
-                        storage.mMeleeCommitTimer = std::max(storage.mMeleeCommitTimer,
-                            Settings::Manager::getFloat("combat melee commit time", "Game"));
+                        mPathFinder.clearPath();
                         storage.mMovement.mPosition[0] = 0.f;
-                        storage.mMovement.mPosition[1] = 1.f;
+                        storage.mMovement.mPosition[1] = 0.9f;
                     }
                     else
                     {
@@ -574,6 +595,9 @@ namespace MWMechanics
     void AiCombat::updateTacticalMovement(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, float duration,
         AiCombatStorage& storage, CharacterController& characterController)
     {
+        // Only the client that currently owns this actor may make tactical AI
+        // movement decisions. Other clients receive the resulting movement/attack
+        // state through ArenaMP synchronization.
         if (mwmp::Main::isInitialized()
             && !mwmp::Main::get().getCellController()->isLocalActor(actor))
         {
@@ -594,9 +618,10 @@ namespace MWMechanics
         const bool bipedal = actor.getClass().isBipedal(actor);
         bool ranged = false;
         storage.mCurrentAction->getCombatRange(ranged);
-        const bool meleePressure = !ranged && Settings::Manager::getBool("combat melee pressure", "Game")
-            && (storage.mAttack || storage.mMeleeCommitTimer > 0.f
-                || distToTarget <= std::max(280.f, storage.mAttackRange * 1.25f));
+        const bool aggressiveMelee = Settings::Manager::getBool("combat melee pressure", "Game")
+            && !ranged && storage.mCurrentAction->isAttackingOrSpell();
+        const float meleeCommitRange = std::max(260.f, storage.mAttackRange * 1.45f);
+        const bool meleePressureRange = aggressiveMelee && storage.mLOS && distToTarget <= meleeCommitRange;
 
         storage.mTacticalCooldown = std::max(0.f, storage.mTacticalCooldown - duration);
         storage.mTacticalDecisionTimer = std::max(0.f, storage.mTacticalDecisionTimer - duration);
@@ -633,34 +658,15 @@ namespace MWMechanics
         {
             storage.mStuckDuration = 0.f;
             storage.mTacticalState = AiCombatStorage::Tactical_Unstuck;
-            storage.mTacticalTimer = 0.8f;
+            storage.mTacticalTimer = 0.45f;
             storage.mTacticalCooldown = 1.2f;
             storage.stopAttack();
-            // A blocked fighter should not jitter sideways or spam jump. Stop
-            // lateral movement and back away in one stable opposite direction.
-            storage.mMovement.mPosition[0] = 0.f;
-            storage.mMovement.mPosition[1] = -1.f;
-            stats.setMovementFlag(CreatureStats::Flag_ForceMoveJump, false);
-            storage.mJumpTimer = 0.f;
+            storage.mMovement.mPosition[0] = Misc::Rng::rollProbability() < 0.5 ? -1.f : 1.f;
+            storage.mMovement.mPosition[1] = 0.65f;
+            stats.setMovementFlag(CreatureStats::Flag_ForceMoveJump, true);
+            storage.mJumpTimer = 0.32f;
             characterController.setAttackingOrSpell(false);
             mPathFinder.clearPath();
-        }
-
-        if (meleePressure
-            && (storage.mTacticalState == AiCombatStorage::Tactical_StrafeLeft
-                || storage.mTacticalState == AiCombatStorage::Tactical_StrafeRight
-                || storage.mTacticalState == AiCombatStorage::Tactical_CircleLeft
-                || storage.mTacticalState == AiCombatStorage::Tactical_CircleRight
-                || storage.mTacticalState == AiCombatStorage::Tactical_JumpDodge
-                || storage.mTacticalState == AiCombatStorage::Tactical_SneakApproach))
-        {
-            storage.mTacticalState = AiCombatStorage::Tactical_None;
-            storage.mTacticalTimer = 0.f;
-            storage.mMovement.mPosition[0] = 0.f;
-            stats.setMovementFlag(CreatureStats::Flag_ForceMoveJump, false);
-            stats.setMovementFlag(CreatureStats::Flag_ForceSneak, false);
-            storage.mJumpTimer = 0.f;
-            storage.mSneakTimer = 0.f;
         }
 
         if (storage.mTacticalState != AiCombatStorage::Tactical_None)
@@ -674,24 +680,43 @@ namespace MWMechanics
             }
         }
 
-        if (storage.mTacticalState == AiCombatStorage::Tactical_None
-            && storage.mTacticalCooldown <= 0.f && storage.mTacticalDecisionTimer <= 0.f
-            && !meleePressure)
-        {
-            // Tactical movement is deliberate rather than constantly re-rolled.
-            // Close melee is handled by the commitment path above.
-            storage.mTacticalDecisionTimer = 0.60f;
-            const float roll = Misc::Rng::rollClosedProbability();
-            const float hpMax = stats.getHealth().getModified();
-            const float hpRatio = hpMax > 0.f ? stats.getHealth().getCurrent() / hpMax : 1.f;
+        const float hpMax = stats.getHealth().getModified();
+        const float hpRatio = hpMax > 0.f ? stats.getHealth().getCurrent() / hpMax : 1.f;
 
-            if (hpRatio < 0.22f && distToTarget < 500.f && roll < 0.25f)
+        // Do not let close-range tactical decoration interrupt an actual melee
+        // commitment. Real stuck recovery is kept, and a critically wounded
+        // fighter may still retreat after the current swing has finished.
+        if (meleePressureRange && storage.mTacticalState != AiCombatStorage::Tactical_Unstuck)
+        {
+            const bool criticallyRetreating = storage.mTacticalState == AiCombatStorage::Tactical_Retreat
+                && hpRatio < 0.20f && !storage.mAttack && storage.mMeleeCommitTimer <= 0.f;
+            if (!criticallyRetreating && storage.mTacticalState != AiCombatStorage::Tactical_None)
+                clearTacticalMovement(actor, storage);
+        }
+
+        if (storage.mTacticalState == AiCombatStorage::Tactical_None
+            && storage.mTacticalCooldown <= 0.f && storage.mTacticalDecisionTimer <= 0.f)
+        {
+            storage.mTacticalDecisionTimer = 0.45f;
+            const float roll = Misc::Rng::rollClosedProbability();
+
+            const bool wantsRetreat = ranged
+                ? (hpRatio < 0.35f && distToTarget < 500.f && roll < 0.45f)
+                : (hpRatio < 0.20f && distToTarget < 450.f && !storage.mAttack
+                    && storage.mMeleeCommitTimer <= 0.f && roll < 0.25f);
+            if (wantsRetreat)
             {
                 storage.mTacticalState = AiCombatStorage::Tactical_Retreat;
-                storage.mTacticalTimer = 0.65f;
-                storage.mTacticalCooldown = 1.8f;
+                storage.mTacticalTimer = 0.55f;
+                storage.mTacticalCooldown = ranged ? 1.8f : 2.4f;
             }
-            else if (bipedal && distToTarget < std::max(300.f, storage.mAttackRange * 1.35f) && roll < 0.04f)
+            else if (meleePressureRange)
+            {
+                // Close melee is intentionally boring in the good sense: face
+                // the target, press, swing, recover, swing again.
+            }
+            else if (bipedal && distToTarget < std::max(300.f, storage.mAttackRange * 1.35f)
+                && roll < (ranged ? 0.08f : 0.05f))
             {
                 storage.mTacticalState = AiCombatStorage::Tactical_JumpDodge;
                 storage.mTacticalTimer = 0.38f;
@@ -701,7 +726,8 @@ namespace MWMechanics
                 storage.stopAttack();
                 characterController.setAttackingOrSpell(false);
             }
-            else if (distToTarget < std::max(380.f, storage.mAttackRange * 1.6f) && roll < 0.16f)
+            else if (distToTarget < std::max(380.f, storage.mAttackRange * 1.6f)
+                && roll < (ranged ? 0.35f : 0.12f))
             {
                 const bool left = Misc::Rng::rollProbability() < 0.5;
                 storage.mTacticalState = left
@@ -709,7 +735,7 @@ namespace MWMechanics
                 storage.mTacticalTimer = 0.45f + 0.35f * Misc::Rng::rollClosedProbability();
                 storage.mTacticalCooldown = 1.2f + 1.5f * Misc::Rng::rollClosedProbability();
             }
-            else if (!ranged && distToTarget < 650.f && roll < 0.24f)
+            else if (!ranged && distToTarget < 650.f && roll < 0.20f)
             {
                 const bool left = Misc::Rng::rollProbability() < 0.5;
                 storage.mTacticalState = left
@@ -752,19 +778,24 @@ namespace MWMechanics
                 characterController.setAttackingOrSpell(false);
                 break;
             case AiCombatStorage::Tactical_JumpDodge:
+            case AiCombatStorage::Tactical_Unstuck:
                 if (storage.mMovement.mPosition[0] == 0.f)
                     storage.mMovement.mPosition[0] = Misc::Rng::rollProbability() < 0.5 ? -1.f : 1.f;
-                storage.mMovement.mPosition[1] = -0.2f;
-                break;
-            case AiCombatStorage::Tactical_Unstuck:
-                storage.stopAttack();
-                storage.mMovement.mPosition[0] = 0.f;
-                storage.mMovement.mPosition[1] = -1.f;
-                characterController.setAttackingOrSpell(false);
+                storage.mMovement.mPosition[1] = storage.mTacticalState == AiCombatStorage::Tactical_Unstuck ? 0.65f : -0.2f;
                 break;
             case AiCombatStorage::Tactical_SneakApproach:
             case AiCombatStorage::Tactical_None:
                 break;
+        }
+
+        if (meleePressureRange && storage.mTacticalState == AiCombatStorage::Tactical_None)
+        {
+            storage.mMovement.mPosition[0] = 0.f;
+            const float closeStop = std::max(32.f, storage.mAttackRange * 0.35f);
+            if (distToTarget > closeStop)
+                storage.mMovement.mPosition[1] = storage.mMeleeCommitTimer > 0.f ? 0.85f : 1.f;
+            else
+                storage.mMovement.mPosition[1] = storage.mMeleeCommitTimer > 0.f ? 0.18f : 0.f;
         }
     }
 
@@ -887,12 +918,8 @@ namespace MWMechanics
         AiCombatStorage& storage, bool ranged)
     {
         storage.mFormationUpdateTimer = std::max(0.f, storage.mFormationUpdateTimer - duration);
-        const float formationDistance = MWBase::Environment::get().getWorld()->getHitDistance(actor, target);
-        const bool closeMeleePressure = !ranged && Settings::Manager::getBool("combat melee pressure", "Game")
-            && (storage.mAttack || storage.mMeleeCommitTimer > 0.f
-                || formationDistance <= std::max(300.f, storage.mAttackRange * 1.35f));
         if (!Settings::Manager::getBool("combat formation slots", "Game") || !storage.mLOS
-            || storage.mSearchingLastKnown || storage.mUseCustomDestination || closeMeleePressure)
+            || storage.mSearchingLastKnown || storage.mUseCustomDestination)
         {
             storage.mFormationActive = false;
             return;
@@ -1311,7 +1338,8 @@ namespace MWMechanics
             // if actor is within range of target's weapon.
             if (std::abs(angleToTarget) > osg::PI / 4)
                 moveDuration = 0.2f;
-            else if (distToTarget <= rangeAttackOfTarget && Misc::Rng::rollClosedProbability() < 0.10)
+            else if (distToTarget <= rangeAttackOfTarget
+                && Misc::Rng::rollClosedProbability() < (Settings::Manager::getBool("combat melee pressure", "Game") ? 0.10f : 0.25f))
                 moveDuration = 0.1f + 0.1f * Misc::Rng::rollClosedProbability();
             if (moveDuration > 0)
             {
@@ -1377,15 +1405,18 @@ namespace MWMechanics
                 /*
                     End of tes3mp addition
                 */
-
-                if (!distantCombat && Settings::Manager::getBool("combat melee pressure", "Game"))
+                const bool meleePressure = !distantCombat
+                    && Settings::Manager::getBool("combat melee pressure", "Game");
+                if (meleePressure)
                 {
-                    const float minStrength = std::max(0.f, std::min(1.f,
+                    float minStrength = std::max(0.f, std::min(1.f,
                         Settings::Manager::getFloat("combat melee charge min", "Game")));
-                    const float maxStrength = std::max(minStrength, std::min(1.f,
+                    float maxStrength = std::max(0.f, std::min(1.f,
                         Settings::Manager::getFloat("combat melee charge max", "Game")));
+                    if (maxStrength < minStrength)
+                        std::swap(maxStrength, minStrength);
                     mStrength = minStrength + (maxStrength - minStrength) * Misc::Rng::rollClosedProbability();
-                    mMeleeCommitTimer = std::max(mMeleeCommitTimer,
+                    mMeleeCommitTimer = std::max(0.15f,
                         Settings::Manager::getFloat("combat melee commit time", "Game"));
                 }
                 else
@@ -1405,15 +1436,14 @@ namespace MWMechanics
                 {
                     MWBase::Environment::get().getDialogueManager()->say(actor, "attack");
                 }
-                if (!distantCombat && Settings::Manager::getBool("combat melee pressure", "Game"))
+                float attackCooldown = std::min(baseDelay + 0.01 * Misc::Rng::roll0to99(), baseDelay + 0.9);
+                if (meleePressure)
                 {
-                    const float cooldownScale = std::max(0.35f, std::min(1.f,
+                    const float cooldownScale = std::max(0.2f, std::min(1.5f,
                         Settings::Manager::getFloat("combat melee cooldown scale", "Game")));
-                    baseDelay *= cooldownScale;
-                    mAttackCooldown = std::min(baseDelay + 0.006f * Misc::Rng::roll0to99(), baseDelay + 0.45f);
+                    attackCooldown *= cooldownScale;
                 }
-                else
-                    mAttackCooldown = std::min(baseDelay + 0.01 * Misc::Rng::roll0to99(), baseDelay + 0.9);
+                mAttackCooldown = std::max(0.05f, attackCooldown);
             }
             else
                 mAttackCooldown -= AI_REACTION_TIME;
@@ -1422,9 +1452,12 @@ namespace MWMechanics
 
     void AiCombatStorage::updateAttack(CharacterController& characterController)
     {
-        if (mAttack && (characterController.getAttackStrength() >= mStrength || characterController.readyToPrepareAttack()))
+        if (mAttack)
         {
-            mAttack = false;
+            const bool charged = characterController.getAttackStrength() >= mStrength;
+            const bool animationReset = characterController.readyToPrepareAttack();
+            if (charged || (animationReset && mMeleeCommitTimer <= 0.f))
+                mAttack = false;
         }
         characterController.setAttackingOrSpell(mAttack);
     }
@@ -1436,6 +1469,7 @@ namespace MWMechanics
         mMovement.mPosition[2] = 0;
         mReadyToAttack = false;
         mAttack = false;
+        mMeleeCommitTimer = 0.f;
     }
 
     void AiCombatStorage::startFleeing()

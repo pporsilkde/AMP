@@ -29,6 +29,9 @@ namespace Launcher
         QString displayAddress() const;
         QString configuredPort() const;
         bool setConfiguredPort(const QString& port, QString* errorMessage = nullptr);
+        bool setConfiguredLocalAddress(const QString& address, QString* errorMessage = nullptr);
+        QString localConnectAddress() const;
+        QString requiredDataFilesPath() const;
         bool autoRestartEnabled() const;
         void setAutoRestartEnabled(bool enabled);
 

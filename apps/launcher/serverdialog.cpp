@@ -10,6 +10,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHostAddress>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
@@ -363,6 +364,45 @@ bool Launcher::ServerDialog::setConfiguredPort(const QString& port, QString* err
 
     return setIniValue(readServerConfig().configPath, QStringLiteral("General"),
         QStringLiteral("port"), QString::number(parsedPort), errorMessage);
+}
+
+bool Launcher::ServerDialog::setConfiguredLocalAddress(const QString& address, QString* errorMessage)
+{
+    const QString value = address.trimmed().isEmpty() ? QStringLiteral("0.0.0.0") : address.trimmed();
+    QHostAddress parsed;
+    if (!parsed.setAddress(value) || parsed.protocol() != QAbstractSocket::IPv4Protocol)
+    {
+        if (errorMessage)
+            *errorMessage = tr("Server bind address must be a valid IPv4 address.");
+        return false;
+    }
+
+    QString preparationError;
+    if (!preparePortableServer(&preparationError))
+    {
+        if (errorMessage)
+            *errorMessage = preparationError;
+        return false;
+    }
+
+    mCachedDisplayAddress.clear();
+    mCachedDisplayAddressAtMs = 0;
+    return setIniValue(readServerConfig().configPath, QStringLiteral("General"),
+        QStringLiteral("localAddress"), value, errorMessage);
+}
+
+QString Launcher::ServerDialog::localConnectAddress() const
+{
+    const QString bindAddress = readServerConfig().localAddress.trimmed();
+    if (bindAddress.isEmpty() || bindAddress == QLatin1String("0.0.0.0"))
+        return QStringLiteral("127.0.0.1");
+    return bindAddress;
+}
+
+QString Launcher::ServerDialog::requiredDataFilesPath() const
+{
+    return QDir(QDir(serverRuntimeBasePath()).filePath(QStringLiteral("server/data")))
+        .filePath(QStringLiteral("requiredDataFiles.json"));
 }
 
 bool Launcher::ServerDialog::autoRestartEnabled() const

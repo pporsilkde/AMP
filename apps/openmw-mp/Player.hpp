@@ -62,6 +62,9 @@ public:
     void setLoadState(int state);
     int getLoadState();
 
+    void setVisibleToOthers(bool state);
+    bool isVisibleToOthers() const;
+
     virtual ~Player();
 
     CellController::TContainer *getCells();
@@ -73,6 +76,7 @@ private:
     CellController::TContainer cells;
     int loadState;
     int handshakeCounter;
+    bool visibleToOthers;
 
 };
 

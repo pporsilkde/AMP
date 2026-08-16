@@ -1,4 +1,5 @@
 #include <stdexcept>
+#include <algorithm>
 #include <iostream>
 #include <string>
 
@@ -268,7 +269,7 @@ void Networking::update()
     }
 }
 
-void Networking::connect(const std::string &ip, unsigned short port, std::vector<std::string> &content, Files::Collections &collections)
+void Networking::connect(const std::string &ip, unsigned short port, std::vector<std::string> &content, std::vector<std::string> &groundcover, Files::Collections &collections)
 {
     RakNet::SystemAddress master;
     master.SetBinaryAddress(ip.c_str());
@@ -362,79 +363,206 @@ void Networking::connect(const std::string &ip, unsigned short port, std::vector
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "tes3mp", errmsg.c_str(), 0);
     }
     else
-        preInit(content, collections);
+        preInit(content, groundcover, collections);
 
     getLocalPlayer()->guid = getLocalSystem()->guid = peer->GetMyGUID();
 }
 
-void Networking::preInit(std::vector<std::string> &content, Files::Collections &collections)
+void Networking::preInit(std::vector<std::string> &content, std::vector<std::string> &groundcover, Files::Collections &collections)
 {
-    PacketPreInit::PluginContainer checksums;
-    std::vector<std::string>::const_iterator it(content.begin());
-    for (int idx = 0; it != content.end(); ++it, ++idx)
+    auto makeChecksums = [&](const std::vector<std::string>& files, PacketPreInit::PluginContainer& output)
     {
-        boost::filesystem::path filename(*it);
-        const Files::MultiDirCollection& col = collections.getCollection(filename.extension().string());
-        if (col.doesExist(*it))
+        output.clear();
+        int idx = 0;
+        for (const std::string& name : files)
         {
+            boost::filesystem::path filename(name);
+            const Files::MultiDirCollection& col = collections.getCollection(filename.extension().string());
+            if (!col.doesExist(name))
+                throw std::runtime_error("Plugin doesn't exist: " + name);
+
             PacketPreInit::HashList hashList;
-            unsigned crc32 = Utils::crc32Checksum(col.getPath(*it).string());
+            const unsigned crc32 = Utils::crc32Checksum(col.getPath(name).string());
             hashList.push_back(crc32);
-            checksums.push_back(make_pair(*it, hashList));
-
-            LOG_APPEND(TimedLog::LOG_WARN, "idx: %d\tchecksum: %X\tfile: %s\n", idx, crc32, col.getPath(*it).string().c_str());
+            output.push_back(std::make_pair(name, hashList));
+            LOG_APPEND(TimedLog::LOG_WARN, "idx: %d\tchecksum: %X\tfile: %s\n",
+                idx++, crc32, col.getPath(name).string().c_str());
         }
-        else
-            throw std::runtime_error("Plugin doesn't exist.");
-    }
+    };
 
-    PacketPreInit packetPreInit(peer);
-    RakNet::BitStream bs;
+    auto receiveResponse = [&](PacketPreInit::PluginContainer& required,
+                               PacketPreInit::PluginContainer& optionalGroundcover,
+                               uint8_t& phase, bool& supportsSync) -> bool
+    {
+        bool done = false;
+        while (!done)
+        {
+            RakNet::Packet *packet = peer->Receive();
+            if (!packet)
+            {
+                RakSleep(100);
+                continue;
+            }
+
+            RakNet::BitStream bsIn(&packet->data[0], packet->length, false);
+            unsigned char packetId;
+            bsIn.Read(packetId);
+            switch (packetId)
+            {
+                case ID_DISCONNECTION_NOTIFICATION:
+                case ID_CONNECTION_LOST:
+                    connected = false;
+                    done = true;
+                    break;
+                case ID_GAME_PREINIT:
+                {
+                    bsIn.IgnoreBytes((unsigned) RakNet::RakNetGUID::size());
+                    PacketPreInit response(peer);
+                    response.setChecksums(&required);
+                    response.setGroundcoverChecksums(&optionalGroundcover);
+                    response.Packet(&bsIn, false);
+                    if (!response.isPacketValid())
+                    {
+                        connected = false;
+                        peer->DeallocatePacket(packet);
+                        return false;
+                    }
+                    startLocation = response.getStartLocation();
+                    phase = response.getManifestPhase();
+                    supportsSync = response.supportsManifestSync();
+                    done = true;
+                    break;
+                }
+            }
+            peer->DeallocatePacket(packet);
+        }
+        return connected;
+    };
+
+    PacketPreInit::PluginContainer currentChecksums;
+    makeChecksums(content, currentChecksums);
+
+    // New ArenaMP clients announce manifest-sync support in the trailing phase
+    // byte. Old servers simply ignore the extension and keep the legacy flow.
+    PacketPreInit::PluginContainer emptyGroundcover;
+    PacketPreInit request(peer);
+    RakNet::BitStream requestStream;
     RakNet::RakNetGUID guid;
-    packetPreInit.setChecksums(&checksums);
-    packetPreInit.setGUID(guid);
-    packetPreInit.SetSendStream(&bs);
-    packetPreInit.Send(serverAddr);
+    request.setChecksums(&currentChecksums);
+    request.setGroundcoverChecksums(&emptyGroundcover);
+    request.setManifestPhase(PacketPreInit::PHASE_REQUEST);
+    request.setGUID(guid);
+    request.SetSendStream(&requestStream);
+    request.Send(serverAddr);
 
-    PacketPreInit::PluginContainer checksumsResponse;
-    bool done = false;
-    while (!done)
+    PacketPreInit::PluginContainer responseChecksums;
+    PacketPreInit::PluginContainer responseGroundcover;
+    uint8_t responsePhase = PacketPreInit::PHASE_REQUEST;
+    bool serverSupportsSync = false;
+    if (!receiveResponse(responseChecksums, responseGroundcover, responsePhase, serverSupportsSync))
+        return;
+
+    if (serverSupportsSync && responsePhase == PacketPreInit::PHASE_MANIFEST)
     {
-        RakNet::Packet *packet = peer->Receive();
-        if (!packet)
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO,
+            "Server data-file manifest received: %d required content file(s), %d optional groundcover file(s)",
+            static_cast<int>(responseChecksums.size()), static_cast<int>(responseGroundcover.size()));
+
+        std::vector<std::string> orderedContent;
+        PacketPreInit::PluginContainer verificationChecksums;
+        int index = 0;
+        for (const PacketPreInit::PluginPair& requirement : responseChecksums)
         {
-            RakSleep(500);
-            continue;
+            boost::filesystem::path filename(requirement.first);
+            const Files::MultiDirCollection& col = collections.getCollection(filename.extension().string());
+            if (!col.doesExist(requirement.first))
+            {
+                LOG_APPEND(TimedLog::LOG_ERROR, "Required server content is missing: %s", requirement.first.c_str());
+                continue;
+            }
+
+            const unsigned crc32 = Utils::crc32Checksum(col.getPath(requirement.first).string());
+            PacketPreInit::HashList hashList(1, crc32);
+            verificationChecksums.push_back(std::make_pair(requirement.first, hashList));
+            orderedContent.push_back(requirement.first);
+            LOG_APPEND(TimedLog::LOG_INFO, "Server order %d: %s [%X]", index++, requirement.first.c_str(), crc32);
         }
 
-        RakNet::BitStream bsIn(&packet->data[0], packet->length, false);
-        unsigned char packetId;
-        bsIn.Read(packetId);
-        switch(packetId)
+        // The Engine has not loaded ESM/ESP records yet, so changing this vector
+        // here safely changes the order for this launch only without rewriting
+        // the user's persistent OpenMW profile.
+        content = orderedContent;
+
+        std::vector<std::string> orderedGroundcover;
+        for (const PacketPreInit::PluginPair& recommendation : responseGroundcover)
         {
-            case ID_DISCONNECTION_NOTIFICATION:
-            case ID_CONNECTION_LOST:
-                done = true;
-                break;
-            case ID_GAME_PREINIT:
-                bsIn.IgnoreBytes((unsigned) RakNet::RakNetGUID::size());
-                packetPreInit.setChecksums(&checksumsResponse);
-                packetPreInit.Packet(&bsIn, false);
-                if (packetPreInit.isPacketValid())
-                    startLocation = packetPreInit.getStartLocation();
-                done = true;
-                break;
+            boost::filesystem::path filename(recommendation.first);
+            const Files::MultiDirCollection& col = collections.getCollection(filename.extension().string());
+            if (!col.doesExist(recommendation.first))
+            {
+                LOG_APPEND(TimedLog::LOG_INFO, "Optional groundcover not installed, skipping: %s",
+                    recommendation.first.c_str());
+                continue;
+            }
+
+            const unsigned crc32 = Utils::crc32Checksum(col.getPath(recommendation.first).string());
+            const bool hashAllowed = recommendation.second.empty()
+                || std::find(recommendation.second.begin(), recommendation.second.end(), crc32) != recommendation.second.end();
+            if (!hashAllowed)
+            {
+                LOG_APPEND(TimedLog::LOG_WARN,
+                    "Optional groundcover has a different hash and will be skipped: %s [%X]",
+                    recommendation.first.c_str(), crc32);
+                continue;
+            }
+            orderedGroundcover.push_back(recommendation.first);
+            LOG_APPEND(TimedLog::LOG_INFO, "Optional groundcover enabled: %s [%X]",
+                recommendation.first.c_str(), crc32);
+        }
+        groundcover = orderedGroundcover;
+
+        // Second pre-init: hashes are now calculated in the exact order supplied
+        // by the server. Missing required files result in a shorter container and
+        // are rejected cleanly by the server before the world is loaded.
+        PacketPreInit verify(peer);
+        RakNet::BitStream verifyStream;
+        verify.setChecksums(&verificationChecksums);
+        verify.setGroundcoverChecksums(&emptyGroundcover);
+        verify.setManifestPhase(PacketPreInit::PHASE_VERIFY);
+        verify.setGUID(guid);
+        verify.SetSendStream(&verifyStream);
+        verify.Send(serverAddr);
+
+        PacketPreInit::PluginContainer verifyResponse;
+        PacketPreInit::PluginContainer ignoredGroundcover;
+        uint8_t verifyPhase = PacketPreInit::PHASE_REQUEST;
+        bool verifySupportsSync = false;
+        if (!receiveResponse(verifyResponse, ignoredGroundcover, verifyPhase, verifySupportsSync))
+            return;
+
+        if (verifySupportsSync && verifyPhase == PacketPreInit::PHASE_ACCEPTED)
+        {
+            LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Server content order and hashes accepted");
+            return;
         }
 
-        peer->DeallocatePacket(packet);
+        const PacketPreInit::PluginContainer& expected = verifyResponse.empty()
+            ? responseChecksums : verifyResponse;
+        const std::string errmsg = listDiscrepancies(verificationChecksums, expected);
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR, errmsg.c_str());
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR, listComparison(verificationChecksums, expected, true).c_str());
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ArenaMP", errmsg.c_str(), 0);
+        connected = false;
+        return;
     }
 
-    if (!checksumsResponse.empty()) // something wrong
+    // Legacy server path: an empty response means accepted; a returned plugin
+    // list is the traditional mismatch response.
+    if (!responseChecksums.empty())
     {
-        std::string errmsg = listDiscrepancies(checksums, checksumsResponse);
-
-        LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR, listDiscrepancies(checksums, checksumsResponse).c_str());
-        LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR, listComparison(checksums, checksumsResponse, true).c_str());
+        const std::string errmsg = listDiscrepancies(currentChecksums, responseChecksums);
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR, errmsg.c_str());
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR, listComparison(currentChecksums, responseChecksums, true).c_str());
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "tes3mp", errmsg.c_str(), 0);
         connected = false;
     }

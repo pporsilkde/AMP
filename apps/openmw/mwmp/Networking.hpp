@@ -29,7 +29,7 @@ namespace mwmp
     public:
         Networking();
         ~Networking();
-        void connect(const std::string& ip, unsigned short port, std::vector<std::string> &content, Files::Collections &collections);
+        void connect(const std::string& ip, unsigned short port, std::vector<std::string> &content, std::vector<std::string> &groundcover, Files::Collections &collections);
         void update();
 
         SystemPacket *getSystemPacket(RakNet::MessageID id);
@@ -71,7 +71,7 @@ namespace mwmp
 
         void receiveMessage(RakNet::Packet *packet);
 
-        void preInit(std::vector<std::string> &content, Files::Collections &collections);
+        void preInit(std::vector<std::string> &content, std::vector<std::string> &groundcover, Files::Collections &collections);
     };
 }
 

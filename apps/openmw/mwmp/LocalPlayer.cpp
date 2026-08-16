@@ -327,9 +327,17 @@ bool LocalPlayer::processCharGen()
         getNetworking()->getPlayerPacket(ID_PLAYER_BASEINFO)->Send();
 
         // Send stats packets if this is the 2nd round of CharGen that
-        // only happens for new characters
+        // only happens for new characters. The modern CharGen also allows a
+        // height/scale choice; synchronize it before ID_PLAYER_CHARGEN so the
+        // server's presence gate can reveal the player with the final scale.
         if (charGenState.endStage != 1)
         {
+            scale = ptrPlayer.getCellRef().getScale();
+            LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO,
+                "Sending ID_PLAYER_SHAPESHIFT with CharGen scale %.3f", scale);
+            getNetworking()->getPlayerPacket(ID_PLAYER_SHAPESHIFT)->setPlayer(this);
+            getNetworking()->getPlayerPacket(ID_PLAYER_SHAPESHIFT)->Send();
+
             updateStatsDynamic(true);
             updateAttributes(true);
             updateSkills(true);

@@ -1,14 +1,41 @@
-VALIDATION
-==========
-- git diff --check: OK
-- XML parse: tes3mp_login.layout, tes3mp_text_input.layout, openmw_settings_window.layout: OK
-- RU/EN ArenaMP localisation: no duplicate keys; login keys present: OK
-- Login layout required widgets/resource references: OK
-- Runtime ArenaLocalization language switch bridge: OK (static source assertion)
-- TES3MP password protocol path retained: OK (static source assertion)
-- Door pursuit delayed queue + forward/ReturnHome authority split: OK (static source assertion)
-- menu_arenamw.png included through files/vfs/CMakeLists.txt: OK
-- CMake configure reached dependency discovery but full configure/build could not continue in this environment because system OpenGL development libraries/headers are not installed.
-- CI log logs_86382046062 inspected: 18 reported compiler errors reduce to one unique root cause, GUILogin.hpp(37) C2039.
-- GUILogin eventDone type checked against AMP/apps/openmw/mwgui/windowbase.hpp: MWGui::WindowBase::EventHandle_WindowBase: OK.
-- Existing GUIController callback remains void onAccountLoginDone(MWGui::WindowBase*): compatible with the delegate type.
+ArenaMP BUILD FIX13 static validation
+====================================
+
+[OK] no merge markers: files/mygui/openmw_chargen_race.layout
+[OK] no merge markers: files/mygui/openmw_chargen_review.layout
+[OK] no merge markers: files/vfs/l10n/arenamp/en.ini
+[OK] no merge markers: files/vfs/l10n/arenamp/ru.ini
+[OK] no merge markers: apps/openmw-mp/Networking.cpp
+[OK] no merge markers: apps/openmw/mwrender/characterpreview.cpp
+[OK] no merge markers: apps/openmw/mwrender/characterpreview.hpp
+[OK] no merge markers: apps/openmw/mwgui/charactercreation.cpp
+[OK] no merge markers: apps/openmw/mwgui/charactercreation.hpp
+[OK] no merge markers: apps/openmw/mwgui/race.cpp
+[OK] no merge markers: apps/openmw/mwgui/race.hpp
+[OK] no merge markers: apps/openmw/mwgui/review.cpp
+[OK] no merge markers: apps/openmw/mwgui/review.hpp
+[OK] no merge markers: apps/openmw/mwmechanics/aicombat.cpp
+[OK] no merge markers: apps/openmw/mwmp/LocalPlayer.cpp
+[OK] no merge markers: server/scripts/player/base.lua
+[OK] valid XML: files/mygui/openmw_chargen_race.layout
+[OK] valid XML: files/mygui/openmw_chargen_review.layout
+[OK] all getWidget IDs exist: apps/openmw/mwgui/race.cpp
+[OK] all getWidget IDs exist: apps/openmw/mwgui/review.cpp
+[OK] CharGen localization complete: en
+[OK] CharGen localization complete: ru
+[OK] ArenaMP GUILogin retained
+[OK] Appearance cannot go back to account name
+[OK] Review network stage finalizes at 5
+[OK] Server new-character endStage is 5
+[OK] CharGen scale packet sent
+[OK] reveal snapshot includes shapeshift
+[OK] AI local-authority tactical gate retained
+[OK] DedicatedPlayer combat target support retained
+[OK] TES3MP attack sync retained
+[OK] latest melee pressure movement ported
+
+Checks: 32
+Passed: 32
+Failed: 0
+
+Full C++ compile/link was not executed in this container; CI remains the final compiler validation.

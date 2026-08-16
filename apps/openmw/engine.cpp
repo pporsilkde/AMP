@@ -1218,7 +1218,7 @@ void OMW::Engine::go()
 
         Attempt multiplayer initialization and proceed no further if it fails
     */
-    if (!mwmp::Main::init(mContentFiles, mFileCollections))
+    if (!mwmp::Main::init(mContentFiles, mGroundcoverFiles, mFileCollections))
         return;
     /*
         End of tes3mp change (major)

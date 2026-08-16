@@ -6,6 +6,9 @@
 #include <QString>
 
 class QWidget;
+class QLabel;
+class QComboBox;
+class QPushButton;
 
 namespace Launcher
 {
@@ -30,6 +33,8 @@ namespace Launcher
         QString buildName() const;
         QString serverAddress() const;
         QString serverPort() const;
+        QString hostBindAddress() const;
+        void setHostBindAddress(const QString& address);
         bool autoStartServer() const;
         bool autoRestartServer() const;
         bool vanillaServerCompatibility() const;
@@ -47,12 +52,14 @@ namespace Launcher
         void autoRestartServerChanged(bool enabled);
         void vanillaServerCompatibilityChanged(bool enabled);
         void hideChatHistoryChanged(bool enabled);
+        void updateHashesRequested();
 
     private slots:
         void slotPlayClicked();
         void slotServerClicked();
         void slotStopServerClicked();
         void slotAutoStartServerToggled(bool enabled);
+        void slotRefreshHostInterfaces();
         void slotReloadServerSettings();
         void slotSaveServerSettings();
         void slotApplyFormToRawConfig();
@@ -67,8 +74,14 @@ namespace Launcher
         QString updatedConfigFromForm(const QString& input) const;
         void populateFormFromConfig(const QString& text);
         void setServerSettingsStatus(const QString& text, bool isError = false);
+        void refreshHostInterfaces(const QString& preferredAddress = QString());
+        void updateHostModeUi(bool enabled);
         QWidget* mEmbeddedServerConsole;
         bool mSyncingServerSettingsTabs;
+        QLabel* mHostInterfaceLabel;
+        QComboBox* mHostInterfaceCombo;
+        QPushButton* mRefreshHostInterfacesButton;
+        QPushButton* mUpdateHashesButton;
     };
 }
 #endif
