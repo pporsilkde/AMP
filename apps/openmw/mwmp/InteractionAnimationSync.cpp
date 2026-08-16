@@ -246,15 +246,27 @@ namespace mwmp
         bool animationPlaying = false;
         if (animation->hasAnimation(data.group))
         {
-            MWRender::Animation::AnimPriority priority(MWMechanics::Priority_Weapon);
+            // Never use Priority_Persistent for synchronized cosmetic/interaction
+            // animations. In the 0.47 animation runner, the presence of any
+            // Persistent state makes runAnimation() skip every non-persistent
+            // state. On a DedicatedActor that freezes Walk/Run while network
+            // interpolation keeps changing the actor position, producing the
+            // classic "sliding with frozen legs" bug whenever ArmsFolded,
+            // ArmsAtBack, gestures, etc. are active.
+            //
+            // Keep unselected bone groups at Default and give only the requested
+            // groups ordinary non-persistent priorities. This mirrors the
+            // authority-side dialogue/ambient animation path and allows lower-body
+            // locomotion to continue independently under arm-only poses.
+            MWRender::Animation::AnimPriority priority(MWMechanics::Priority_Default);
             if (data.blendMask & MWRender::Animation::BlendMask_LowerBody)
-                priority[MWRender::Animation::BoneGroup_LowerBody] = MWMechanics::Priority_Persistent;
+                priority[MWRender::Animation::BoneGroup_LowerBody] = MWMechanics::Priority_Movement;
             if (data.blendMask & MWRender::Animation::BlendMask_Torso)
-                priority[MWRender::Animation::BoneGroup_Torso] = MWMechanics::Priority_Persistent;
+                priority[MWRender::Animation::BoneGroup_Torso] = MWMechanics::Priority_Weapon;
             if (data.blendMask & MWRender::Animation::BlendMask_LeftArm)
-                priority[MWRender::Animation::BoneGroup_LeftArm] = MWMechanics::Priority_Persistent;
+                priority[MWRender::Animation::BoneGroup_LeftArm] = MWMechanics::Priority_Weapon;
             if (data.blendMask & MWRender::Animation::BlendMask_RightArm)
-                priority[MWRender::Animation::BoneGroup_RightArm] = MWMechanics::Priority_Persistent;
+                priority[MWRender::Animation::BoneGroup_RightArm] = MWMechanics::Priority_Weapon;
 
             if (animation->isPlaying(data.group))
                 animation->disable(data.group);
