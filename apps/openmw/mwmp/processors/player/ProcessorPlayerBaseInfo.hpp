@@ -45,7 +45,13 @@ namespace mwmp
                     packet.Read();
                 }
 
-                static_cast<DedicatedPlayer*>(player)->setBaseInfo();
+                DedicatedPlayer* dedicatedPlayer = static_cast<DedicatedPlayer*>(player);
+                LOG_APPEND(TimedLog::LOG_INFO,
+                    "- Remote appearance payload: race=%s head=%s hair=%s model=%s flags=%u",
+                    dedicatedPlayer->npc.mRace.c_str(), dedicatedPlayer->npc.mHead.c_str(),
+                    dedicatedPlayer->npc.mHair.c_str(), dedicatedPlayer->npc.mModel.c_str(),
+                    static_cast<unsigned int>(dedicatedPlayer->npc.mFlags));
+                dedicatedPlayer->setBaseInfo();
             }
         }
     };

@@ -390,42 +390,14 @@ void Networking::newPlayer(RakNet::RakNetGUID guid)
     playerPacketController->GetPacket(ID_PLAYER_CELL_CHANGE)->RequestData(guid);
     playerPacketController->GetPacket(ID_PLAYER_EQUIPMENT)->RequestData(guid);
 
-    LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "Sending info about other players to %lu", guid.g);
-
-    for (TPlayers::iterator pl = players->begin(); pl != players->end(); pl++) //sending other players to new player
-    {
-        // If we are iterating over the new player, don't send the packets below
-        if (pl->first == guid) continue;
-
-        // If an invalid key makes it into the Players map, ignore it
-        else if (pl->first == RakNet::UNASSIGNED_CRABNET_GUID) continue;
-
-        // if player not fully connected
-        else if (pl->second == nullptr) continue;
-
-        // If we are iterating over a player who has inputted their name, proceed
-        else if (pl->second->getLoadState() == Player::POSTLOADED && pl->second->isVisibleToOthers())
-        {
-            playerPacketController->GetPacket(ID_PLAYER_BASEINFO)->setPlayer(pl->second);
-            playerPacketController->GetPacket(ID_PLAYER_STATS_DYNAMIC)->setPlayer(pl->second);
-            playerPacketController->GetPacket(ID_PLAYER_ATTRIBUTE)->setPlayer(pl->second);
-            playerPacketController->GetPacket(ID_PLAYER_SKILL)->setPlayer(pl->second);
-            playerPacketController->GetPacket(ID_PLAYER_POSITION)->setPlayer(pl->second);
-            playerPacketController->GetPacket(ID_PLAYER_CELL_CHANGE)->setPlayer(pl->second);
-            playerPacketController->GetPacket(ID_PLAYER_EQUIPMENT)->setPlayer(pl->second);
-
-            playerPacketController->GetPacket(ID_PLAYER_BASEINFO)->Send(guid);
-            playerPacketController->GetPacket(ID_PLAYER_STATS_DYNAMIC)->Send(guid);
-            playerPacketController->GetPacket(ID_PLAYER_ATTRIBUTE)->Send(guid);
-            playerPacketController->GetPacket(ID_PLAYER_SKILL)->Send(guid);
-            playerPacketController->GetPacket(ID_PLAYER_POSITION)->Send(guid);
-            playerPacketController->GetPacket(ID_PLAYER_CELL_CHANGE)->Send(guid);
-            playerPacketController->GetPacket(ID_PLAYER_EQUIPMENT)->Send(guid);
-        }
-    }
-
-    LOG_APPEND(TimedLog::LOG_WARN, "- Done");
-
+    // ArenaMP presence gate: do not publish already-visible players to a client
+    // while it is still authenticating or running CharGen. DedicatedPlayer objects
+    // created at this stage used to be based on the local ESM "player" template and
+    // could keep that Dunmer body even after the final BaseInfo arrived.
+    // revealPlayer() performs a bidirectional authoritative snapshot exchange once
+    // the client is actually ready to exist in the multiplayer world.
+    LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO,
+        "Deferring remote player snapshots for %lu until authentication/CharGen is complete", guid.g);
 }
 
 void Networking::revealPlayer(Player* player)
@@ -451,6 +423,22 @@ void Networking::revealPlayer(Player* player)
         ID_PLAYER_EQUIPMENT
     };
 
+    const auto sendSnapshot = [this, &packetIds](Player* subject, RakNet::RakNetGUID destination)
+    {
+        if (subject == nullptr)
+            return;
+
+        for (unsigned char packetId : packetIds)
+        {
+            PlayerPacket* packet = playerPacketController->GetPacket(packetId);
+            packet->setPlayer(subject);
+            packet->Send(destination);
+        }
+    };
+
+    // Exchange complete snapshots in BOTH directions. This is deliberately done
+    // only after the joining player has finished authentication/CharGen, so neither
+    // side ever has to instantiate a temporary default-Dunmer representation.
     for (const auto& entry : *players)
     {
         Player* other = entry.second;
@@ -458,12 +446,12 @@ void Networking::revealPlayer(Player* player)
             || other->getLoadState() != Player::POSTLOADED)
             continue;
 
-        for (unsigned char packetId : packetIds)
-        {
-            PlayerPacket* packet = playerPacketController->GetPacket(packetId);
-            packet->setPlayer(player);
-            packet->Send(other->guid);
-        }
+        sendSnapshot(player, other->guid);
+        sendSnapshot(other, player->guid);
+
+        LOG_APPEND(TimedLog::LOG_INFO,
+            "- Exchanged appearance snapshots: %s <-> %s",
+            player->npc.mName.c_str(), other->npc.mName.c_str());
     }
 }
 

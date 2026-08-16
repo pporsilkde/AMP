@@ -95,6 +95,13 @@ openmw_add_executable(openmw-launcher
     ${UI_HDRS}
 )
 
+# ArenaMP: the built-in RU translator is UTF-8 source. MSVC otherwise
+# interprets non-ASCII literals using the build machine code page, which
+# produces mojibake (D0/D1-style text) on Russian UI builds.
+if (MSVC)
+    target_compile_options(openmw-launcher PRIVATE /utf-8)
+endif()
+
 if (WIN32)
     INSTALL(TARGETS openmw-launcher RUNTIME DESTINATION ".")
 endif (WIN32)

@@ -298,6 +298,25 @@ void DedicatedPlayer::setBaseInfo()
     if (!RecordHelper::doesRecordIdExist<ESM::Race>(npc.mRace))
         npc.mRace = previousRace;
 
+    bool rebuildNpcReference = false;
+
+    if (reference && !ptr.isEmpty() && ptr.getTypeName() == typeid(ESM::NPC).name())
+    {
+        // The network packet has already updated BasePlayer::npc, while ptr still
+        // points at the previously instantiated dynamic NPC record. Comparing the
+        // two lets us detect every field that changes the rendered body/skeleton.
+        const ESM::NPC* currentNpc = ptr.get<ESM::NPC>()->mBase;
+        if (currentNpc != nullptr)
+        {
+            rebuildNpcReference =
+                !Misc::StringUtils::ciEqual(currentNpc->mRace, npc.mRace)
+                || !Misc::StringUtils::ciEqual(currentNpc->mHead, npc.mHead)
+                || !Misc::StringUtils::ciEqual(currentNpc->mHair, npc.mHair)
+                || !Misc::StringUtils::ciEqual(currentNpc->mModel, npc.mModel)
+                || currentNpc->mFlags != npc.mFlags;
+        }
+    }
+
     if (!reference)
     {
         npc.mId = RecordHelper::createRecord(npc)->mId;
@@ -306,11 +325,31 @@ void DedicatedPlayer::setBaseInfo()
     else
     {
         RecordHelper::overrideRecord(npc);
-        reloadPtr();
+
+        if (rebuildNpcReference)
+        {
+            LOG_APPEND(TimedLog::LOG_INFO,
+                "- Rebuilding remote player appearance: race=%s head=%s hair=%s model=%s flags=%u",
+                npc.mRace.c_str(), npc.mHead.c_str(), npc.mHair.c_str(), npc.mModel.c_str(),
+                static_cast<unsigned int>(npc.mFlags));
+
+            // disable()/enable() is not enough for a race/head/sex change: OpenMW
+            // can retain the old NpcAnimation/body-part cache. Recreate the world
+            // reference so the renderer resolves the final network identity anew.
+            deleteReference();
+            createReference(npc.mId);
+
+            // Keep the existing network scale until the ordered Shapeshift packet
+            // arrives. Stats/attributes/skills follow BaseInfo in the full snapshot
+            // and are deliberately not applied early here.
+            MWBase::Environment::get().getWorld()->scaleObject(ptr, scale);
+        }
+        else
+            reloadPtr();
     }
 
     // Only set equipment if the player isn't disguised as a creature
-    if (ptr.getTypeName() == typeid(ESM::NPC).name())
+    if (!ptr.isEmpty() && ptr.getTypeName() == typeid(ESM::NPC).name())
         setEquipment();
 
     previousRace = npc.mRace;

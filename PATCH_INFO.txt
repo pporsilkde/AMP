@@ -90,3 +90,10 @@ BUILD FIX17 - Host Mode Admin / CO-OP-MMO / RU UI
 - requiredDataFiles.json and banlist.json are preserved by Full server reset.
 - Launcher and Wizard use Russian UI only when the OS/system locale is Russian; every other locale uses English.
 - Removed fragile typographic bullet/em-dash UI status strings that produced mojibake on some Windows builds; graphics GPU labels now use ASCII separators.
+
+
+BUILD FIX18 - RU UI ENCODING FIX
+- Launcher and Wizard compile with MSVC /utf-8.
+- Built-in Russian translation table is ASCII-only via Unicode escapes.
+- Hardcoded Russian language selector text is source-codepage independent.
+- Fixes D0/D1 mojibake in Launcher/Wizard/Host Mode/graphics labels.
