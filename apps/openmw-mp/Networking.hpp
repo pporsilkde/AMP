@@ -19,7 +19,6 @@ namespace  mwmp
         ~Networking();
 
         void newPlayer(RakNet::RakNetGUID guid);
-        void revealPlayer(Player* player);
         void disconnectPlayer(RakNet::RakNetGUID guid);
         void kickPlayer(RakNet::RakNetGUID guid, bool sendNotification = true);
         

@@ -34,9 +34,9 @@ namespace mwmp
                 other->exchangeFullInfo = true;
 
                 // A remote DedicatedPlayer is created by ID_PLAYER_BASEINFO.
-                // Since revealPlayer() no longer publishes players globally across
-                // unrelated private instances, send authoritative BaseInfo first
-                // whenever two players actually share a loaded cell.
+                // FIX24 uses normal immediate presence, while remote snapshots remain
+                // cell-local so unrelated private instances never cross-publish.
+                // Send BaseInfo first whenever two players actually share a loaded cell.
                 playerController->GetPacket(ID_PLAYER_BASEINFO)->setPlayer(other);
                 playerController->GetPacket(ID_PLAYER_STATS_DYNAMIC)->setPlayer(other);
                 playerController->GetPacket(ID_PLAYER_ATTRIBUTE)->setPlayer(other);
@@ -81,7 +81,7 @@ namespace mwmp
                 playerController->GetPacket(ID_PLAYER_POSITION)->setPlayer(&player);
                 playerController->GetPacket(ID_PLAYER_POSITION)->Send();
                 packet.setPlayer(&player);
-                packet.Send(true); // send to other visible clients after authentication
+                packet.Send(true); // send to other clients in normal immediate-presence flow
             }
 
             LOG_APPEND(TimedLog::LOG_INFO, "- Finished processing ID_PLAYER_CELL_CHANGE", player.cell.getShortDescription().c_str());

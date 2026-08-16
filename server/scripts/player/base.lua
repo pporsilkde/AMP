@@ -307,10 +307,8 @@ function BasePlayer:FinishLogin()
 
         self.loggedIn = true
 
-        -- Do not expose a connecting player to the world until authentication and
-        -- the saved character have both been fully restored. The server sends one
-        -- complete snapshot here, so other clients create the correct race/head/hair
-        -- instead of the temporary ESM "player" body used during startup.
+        -- FIX24: players are no longer hidden during login. This call now only
+        -- locks the restored BaseInfo as authoritative after authentication.
         tes3mp.SetPlayerVisible(self.pid, true)
 
         if self.data.alliedPlayers == nil then self.data.alliedPlayers = {} end
@@ -409,9 +407,8 @@ function BasePlayer:EndCharGen()
         end
     end
 
-    -- New accounts stay invisible for the whole registration + CharGen flow.
-    -- Reveal only after the final CharGen BaseInfo has been received/saved and the
-    -- final spawn cell/position are known.
+    -- FIX24: CharGen no longer uses a hidden presence stage. Mark the final
+    -- race/head/hair as authoritative without issuing a reveal snapshot.
     tes3mp.SetPlayerVisible(self.pid, true)
 
     self:RunPlayerSpecificStartupScripts()

@@ -110,3 +110,12 @@ BUILD FIX21 - Authoritative Remote Appearance / Late BaseInfo Race Fix
 - Prevents correct Imperial/Argonian/Orc/etc snapshot from being overwritten by default Dark Elf ESM player data.
 - Shapeshift/scale packets are unaffected.
 - Server-side only; no protocol change.
+
+BUILD FIX24 - Presence Gate Rollback / Stable Immediate Presence
+- Rolled back the login/registration/CharGen hide -> reveal presence gate.
+- New server Player objects are visible immediately again, matching normal TES3MP flow.
+- Removed Networking::revealPlayer() and its bulk reveal snapshot exchange.
+- Decoupled FIX21 authoritative BaseInfo from visibility via appearanceAuthoritative.
+- Existing SetPlayerVisible(true) login/CharGen calls now finalize/lock appearance only.
+- Kept late-default-Dunmer BaseInfo protection, FIX22 instance AOI and FIX23 NPC locomotion sync.
+- Server-side only; no protocol/commit change.

@@ -65,6 +65,9 @@ public:
     void setVisibleToOthers(bool state);
     bool isVisibleToOthers() const;
 
+    void setAppearanceAuthoritative(bool state);
+    bool isAppearanceAuthoritative() const;
+
     virtual ~Player();
 
     CellController::TContainer *getCells();
@@ -77,6 +80,7 @@ private:
     int loadState;
     int handshakeCounter;
     bool visibleToOthers;
+    bool appearanceAuthoritative;
 
 };
 

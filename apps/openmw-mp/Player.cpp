@@ -68,7 +68,10 @@ Player::Player(RakNet::RakNetGUID guid) : BasePlayer(guid)
 {
     handshakeCounter = 0;
     loadState = NOTLOADED;
-    visibleToOthers = false;
+    // FIX24: rollback the login/registration presence gate.
+    // Players participate in normal TES3MP presence immediately after connecting.
+    visibleToOthers = true;
+    appearanceAuthoritative = false;
 }
 
 Player::~Player()
@@ -125,6 +128,16 @@ void Player::setVisibleToOthers(bool state)
 bool Player::isVisibleToOthers() const
 {
     return visibleToOthers;
+}
+
+void Player::setAppearanceAuthoritative(bool state)
+{
+    appearanceAuthoritative = state;
+}
+
+bool Player::isAppearanceAuthoritative() const
+{
+    return appearanceAuthoritative;
 }
 
 Player *Players::getPlayer(unsigned short id)

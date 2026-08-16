@@ -185,19 +185,12 @@ void Networking::processPlayerPacket(RakNet::Packet *packet)
     {
         LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Received ID_PLAYER_BASEINFO about %s", player->npc.mName.c_str());
 
-        // ArenaMP authoritative appearance gate:
-        // ID_PLAYER_BASEINFO is needed while the player is still hidden so the
-        // server can learn the login/CharGen identity. Once revealPlayer() has
-        // published the final server-side character, however, the server must no
-        // longer accept unsolicited BaseInfo responses from the client.
-        //
-        // Vanilla TES3MP's legacy newPlayer() flow requested BaseInfo again after
-        // loading. That reply may arrive after authentication and contains the
-        // local ESM `player` template (Dark Elf) instead of the saved character.
-        // Forwarding it used to overwrite the correct Imperial/Argonian/etc.
-        // snapshot on every other client. Shapeshift/scale has its own packet and
-        // remains unaffected by this gate.
-        if (player->isVisibleToOthers())
+        // FIX24: appearance authority is independent from player visibility.
+        // The unstable login/registration presence gate has been rolled back, so
+        // players are visible immediately. We still reject late legacy BaseInfo
+        // after the saved/CharGen appearance has been finalized, preventing the
+        // local ESM `player` template (Dark Elf) from overwriting race/head/hair.
+        if (player->isAppearanceAuthoritative())
         {
             LOG_APPEND(TimedLog::LOG_INFO,
                 "- Ignoring late client BaseInfo; authoritative appearance remains race=%s head=%s hair=%s model=%s flags=%u",
@@ -210,7 +203,7 @@ void Networking::processPlayerPacket(RakNet::Packet *packet)
         myPacket->Read();
         player->language = player->language == "RU" ? "RU" : "EN";
         LOG_APPEND(TimedLog::LOG_INFO, "- Client language: %s", player->language.c_str());
-        LOG_APPEND(TimedLog::LOG_INFO, "- Presence is still hidden; BaseInfo kept server-side only");
+        LOG_APPEND(TimedLog::LOG_INFO, "- BaseInfo accepted during login/CharGen");
     }
 
     if (player->getLoadState() == Player::NOTLOADED)
@@ -403,8 +396,7 @@ void Networking::update(RakNet::Packet *packet, RakNet::BitStream &bsIn)
 void Networking::newPlayer(RakNet::RakNetGUID guid)
 {
     // Do NOT request ID_PLAYER_BASEINFO here. ArenaMP already receives BaseInfo
-    // before OnPlayerConnect and keeps the player hidden until login/CharGen is
-    // complete. A second legacy request can return after revealPlayer() with the
+    // before OnPlayerConnect. A second legacy request can return later with the
     // client's default ESM `player` (Dark Elf), racing and overwriting the final
     // authoritative appearance. Other runtime state is still requested normally.
     playerPacketController->GetPacket(ID_PLAYER_STATS_DYNAMIC)->RequestData(guid);
@@ -412,81 +404,13 @@ void Networking::newPlayer(RakNet::RakNetGUID guid)
     playerPacketController->GetPacket(ID_PLAYER_CELL_CHANGE)->RequestData(guid);
     playerPacketController->GetPacket(ID_PLAYER_EQUIPMENT)->RequestData(guid);
 
-    // ArenaMP presence gate: do not publish already-visible players to a client
-    // while it is still authenticating or running CharGen. DedicatedPlayer objects
-    // created at this stage used to be based on the local ESM "player" template and
-    // could keep that Dunmer body even after the final BaseInfo arrived.
-    // revealPlayer() performs a bidirectional authoritative snapshot exchange once
-    // the client is actually ready to exist in the multiplayer world.
+    // FIX24: the login/registration presence gate is disabled. Players are visible
+    // immediately and normal cell-overlap/interest synchronization decides when a
+    // remote DedicatedPlayer is exchanged. We intentionally still do not issue the
+    // legacy second BaseInfo RequestData here, which was the source of the Dunmer
+    // appearance overwrite race fixed in FIX21.
     LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO,
-        "Deferring remote player snapshots for %lu until authentication/CharGen is complete", guid.g);
-}
-
-void Networking::revealPlayer(Player* player)
-{
-    if (player == nullptr || player->isVisibleToOthers())
-        return;
-
-    player->setVisibleToOthers(true);
-    LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Revealing authenticated player %s (%i) to other clients",
-        player->npc.mName.c_str(), player->getId());
-    LOG_APPEND(TimedLog::LOG_INFO, "- Appearance snapshot: race=%s head=%s hair=%s model=%s flags=%u",
-        player->npc.mRace.c_str(), player->npc.mHead.c_str(), player->npc.mHair.c_str(),
-        player->npc.mModel.c_str(), static_cast<unsigned int>(player->npc.mFlags));
-
-    const unsigned char packetIds[] = {
-        ID_PLAYER_BASEINFO,
-        ID_PLAYER_SHAPESHIFT,
-        ID_PLAYER_STATS_DYNAMIC,
-        ID_PLAYER_ATTRIBUTE,
-        ID_PLAYER_SKILL,
-        ID_PLAYER_POSITION,
-        ID_PLAYER_CELL_CHANGE,
-        ID_PLAYER_EQUIPMENT
-    };
-
-    const auto sendSnapshot = [this, &packetIds](Player* subject, RakNet::RakNetGUID destination)
-    {
-        if (subject == nullptr)
-            return;
-
-        for (unsigned char packetId : packetIds)
-        {
-            PlayerPacket* packet = playerPacketController->GetPacket(packetId);
-            packet->setPlayer(subject);
-            packet->Send(destination);
-        }
-    };
-
-    // Exchange snapshots only with players whose loaded-cell sets overlap.
-    //
-    // This is critical for instanced interiors. An ArenaMP instance such as
-    // "... - Instance for Alice" is a dynamic cell record sent only to Alice.
-    // Sending Bob's full presence (especially ID_PLAYER_CELL_CHANGE) to Alice
-    // while they are in different private instances makes Alice receive a cell
-    // that does not exist in her local store. It can leave a DedicatedPlayer in
-    // an invalid cross-instance state and has caused client crashes when the
-    // second player enters an instance of the same base interior.
-    //
-    // Player::forEachLoaded() is the server-side interest filter: it only visits
-    // authenticated players that share at least one currently loaded cell. If no
-    // overlap exists yet, ProcessorPlayerCellChange will perform the same complete
-    // exchange once the clients actually become mutually relevant.
-    std::size_t exchangedPeerCount = 0;
-    player->forEachLoaded([&sendSnapshot, &exchangedPeerCount](Player* subject, Player* other)
-    {
-        sendSnapshot(subject, other->guid);
-        sendSnapshot(other, subject->guid);
-        ++exchangedPeerCount;
-
-        LOG_APPEND(TimedLog::LOG_INFO,
-            "- Exchanged cell-local appearance snapshots: %s <-> %s",
-            subject->npc.mName.c_str(), other->npc.mName.c_str());
-    });
-
-    if (exchangedPeerCount == 0)
-        LOG_APPEND(TimedLog::LOG_INFO,
-            "- No shared loaded cells; remote presence exchange deferred until cell overlap");
+        "Presence gate disabled for %lu; using normal cell-local player synchronization", guid.g);
 }
 
 void Networking::disconnectPlayer(RakNet::RakNetGUID guid)
