@@ -1,4 +1,5 @@
 #include <components/openmw-mp/TimedLog.hpp>
+#include <cmath>
 
 #include "../mwbase/environment.hpp"
 
@@ -87,25 +88,50 @@ void LocalActor::updateCell()
 
 void LocalActor::updatePosition(bool forceUpdate)
 {
+    const ESM::Position ptrPosition = ptr.getRefData().getPosition();
+    const float dx = ptrPosition.pos[0] - position.pos[0];
+    const float dy = ptrPosition.pos[1] - position.pos[1];
+    const float dz = ptrPosition.pos[2] - position.pos[2];
+    const float positionDeltaSquared = dx * dx + dy * dy + dz * dz;
+    const bool actualPositionChanged = positionDeltaSquared > 0.0625f; // ignore sub-0.25-unit jitter
+
     bool posIsChanging = false;
 
     if (creatureStats.mDead)
     {
-        ESM::Position ptrPosition = ptr.getRefData().getPosition();
-        posIsChanging = position.pos[0] != ptrPosition.pos[0] || position.pos[1] != ptrPosition.pos[1] ||
-            position.pos[2] != ptrPosition.pos[2];
+        posIsChanging = actualPositionChanged;
     }
     else
     {
-        posIsChanging = direction.pos[0] != 0 || direction.pos[1] != 0 || direction.pos[2] != 0 ||
-            direction.rot[0] != 0 || direction.rot[1] != 0 || direction.rot[2] != 0 ||
+        const float directionEpsilon = 0.001f;
+        const bool hasTranslationDirection =
+            std::abs(direction.pos[0]) > directionEpsilon ||
+            std::abs(direction.pos[1]) > directionEpsilon ||
+            std::abs(direction.pos[2]) > directionEpsilon;
+
+        posIsChanging = hasTranslationDirection || actualPositionChanged ||
+            std::abs(direction.rot[0]) > directionEpsilon ||
+            std::abs(direction.rot[1]) > directionEpsilon ||
+            std::abs(direction.rot[2]) > directionEpsilon ||
             !MWBase::Environment::get().getWorld()->isOnGround(ptr);
+
+        // Some AI/scripted movement paths change the actor's world position
+        // without leaving a movement vector for TES3MP to copy from the
+        // CharacterController.  Send a visual locomotion direction as well as
+        // the position so remote clients do not render an idle NPC sliding.
+        const float horizontalDeltaSquared = dx * dx + dy * dy;
+        if (!hasTranslationDirection && horizontalDeltaSquared > 0.25f && horizontalDeltaSquared < 65536.f)
+        {
+            const float yaw = ptrPosition.rot[2];
+            const float localForward = -dx * std::sin(yaw) + dy * std::cos(yaw);
+            direction.pos[1] = localForward < -directionEpsilon ? -1.f : 1.f;
+        }
     }
 
     if (forceUpdate || posIsChanging || posWasChanged)
     {
         posWasChanged = posIsChanging;
-        position = ptr.getRefData().getPosition();
+        position = ptrPosition;
         mwmp::Main::get().getNetworking()->getActorList()->addPositionActor(*this);
     }
 }

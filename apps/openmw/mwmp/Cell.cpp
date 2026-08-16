@@ -1,4 +1,5 @@
 #include <components/esm/cellid.hpp>
+#include <cmath>
 #include <components/openmw-mp/TimedLog.hpp>
 
 #include "../mwbase/environment.hpp"
@@ -140,8 +141,47 @@ void Cell::readPositions(ActorList& actorList)
         if (dedicatedActors.count(mapIndex) > 0)
         {
             DedicatedActor *actor = dedicatedActors[mapIndex];
+
+            // Remember the previous network target before replacing it. A normal
+            // live ActorPosition packet contains both the world position and the
+            // movement direction used by CharacterController for locomotion.
+            // Server-restored/cached actor positions historically only contain
+            // the world position and leave direction at zero. In that case the
+            // actor changes coordinates while staying in an idle animation.
+            const bool hadPositionData = actor->hasPositionData;
+            const ESM::Position previousPosition = actor->position;
+
             actor->position = baseActor.position;
             actor->direction = baseActor.direction;
+
+            // Recover locomotion from consecutive network positions when no
+            // movement vector was supplied. Authoritative positioning still
+            // comes exclusively from ActorPosition. Ignore large corrections
+            // and teleports so they never start an artificial walk cycle.
+            const float directionEpsilon = 0.001f;
+            const bool hasMovementDirection =
+                std::abs(actor->direction.pos[0]) > directionEpsilon ||
+                std::abs(actor->direction.pos[1]) > directionEpsilon ||
+                std::abs(actor->direction.pos[2]) > directionEpsilon;
+
+            if (hadPositionData && !hasMovementDirection)
+            {
+                const float dx = actor->position.pos[0] - previousPosition.pos[0];
+                const float dy = actor->position.pos[1] - previousPosition.pos[1];
+                const float horizontalDistanceSquared = dx * dx + dy * dy;
+
+                // Less than 0.5 units is jitter/noise. More than 256 units in a
+                // single packet is treated as a correction/teleport.
+                if (horizontalDistanceSquared > 0.25f && horizontalDistanceSquared < 65536.f)
+                {
+                    const float yaw = actor->position.rot[2];
+                    const float localForward = -dx * std::sin(yaw) + dy * std::cos(yaw);
+
+                    // A longitudinal movement input is enough for the normal
+                    // CharacterController to select a walk/run leg cycle.
+                    actor->direction.pos[1] = localForward < -directionEpsilon ? -1.f : 1.f;
+                }
+            }
 
             if (!actor->hasPositionData)
             {

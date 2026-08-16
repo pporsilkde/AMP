@@ -91,6 +91,11 @@ void Cell::readActorList(unsigned char packetID, const mwmp::BaseActorList *newA
 
                 cellActor->hasPositionData = true;
                 cellActor->position = newActor.position;
+                // Keep the movement vector together with the cached position.
+                // Otherwise a cached actor can be restored with coordinates but
+                // no locomotion direction and appear to slide until the next
+                // fresh live movement packet arrives.
+                cellActor->direction = newActor.direction;
                 break;
 
             case ID_ACTOR_STATS_DYNAMIC:
