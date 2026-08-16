@@ -18,6 +18,7 @@
 #include <QPushButton>
 #include <QPlainTextEdit>
 #include <QRegularExpression>
+#include <QSignalBlocker>
 #include <QStandardPaths>
 #include <QSpinBox>
 #include <QStringList>
@@ -123,6 +124,11 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     , mHostInterfaceCombo(nullptr)
     , mRefreshHostInterfacesButton(nullptr)
     , mUpdateHashesButton(nullptr)
+    , mEnforceRequiredCheckBox(nullptr)
+    , mServerModeLabel(nullptr)
+    , mServerModeCombo(nullptr)
+    , mClearCellsButton(nullptr)
+    , mResetServerButton(nullptr)
 {
     setObjectName("PlayPage");
     setupUi(this);
@@ -145,6 +151,24 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     mUpdateHashesButton->setMinimumHeight(28);
     mUpdateHashesButton->setToolTip(tr("Generate the server data-file manifest from the current Content Files order and CRC32 hashes."));
 
+    mEnforceRequiredCheckBox = new QCheckBox(tr("Enforce required DataFiles"), this);
+    mEnforceRequiredCheckBox->setToolTip(tr("Reject clients whose required content list, order or CRC32 hashes do not match the server manifest."));
+
+    mServerModeLabel = new QLabel(tr("Server mode:"), this);
+    mServerModeLabel->setStyleSheet(QStringLiteral("font-size: 11pt; font-weight: 500;"));
+    mServerModeCombo = new QComboBox(this);
+    mServerModeCombo->addItem(tr("CO-OP"), QStringLiteral("CO-OP"));
+    mServerModeCombo->addItem(tr("MMO"), QStringLiteral("MMO"));
+    mServerModeCombo->setMinimumHeight(28);
+    mServerModeCombo->setToolTip(tr("CO-OP shares story and progression between players. MMO keeps player progression separate while required world/actor networking remains enabled."));
+
+    mClearCellsButton = new QPushButton(tr("Clear server cells"), this);
+    mResetServerButton = new QPushButton(tr("Full server reset"), this);
+    mClearCellsButton->setMinimumHeight(28);
+    mResetServerButton->setMinimumHeight(28);
+    mClearCellsButton->setToolTip(tr("Delete saved cell state while keeping player accounts and world data."));
+    mResetServerButton->setToolTip(tr("Delete all persistent gameplay data. The data-file manifest and ban list are preserved."));
+
     serverConnectionLayout->removeWidget(autoStartServerCheckBox);
     QHBoxLayout* hostModeLayout = new QHBoxLayout();
     hostModeLayout->setSpacing(8);
@@ -160,13 +184,28 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     hostInterfaceLayout->addWidget(mRefreshHostInterfacesButton);
     serverConnectionLayout->addLayout(hostInterfaceLayout, 3, 0, 1, 2);
 
-    // Move the remaining Host-mode controls one row down.
+    // Compact two-column host controls.
     serverConnectionLayout->removeWidget(autoRestartServerCheckBox);
     serverConnectionLayout->removeWidget(vanillaServerCheckBox);
     serverConnectionLayout->removeWidget(hideChatHistoryCheckBox);
-    serverConnectionLayout->addWidget(autoRestartServerCheckBox, 4, 0, 1, 2);
-    serverConnectionLayout->addWidget(vanillaServerCheckBox, 5, 0, 1, 2);
-    serverConnectionLayout->addWidget(hideChatHistoryCheckBox, 6, 0, 1, 2);
+    serverConnectionLayout->addWidget(autoRestartServerCheckBox, 4, 0);
+    serverConnectionLayout->addWidget(mEnforceRequiredCheckBox, 4, 1);
+
+    QHBoxLayout* serverModeLayout = new QHBoxLayout();
+    serverModeLayout->setSpacing(8);
+    serverModeLayout->addWidget(mServerModeLabel);
+    serverModeLayout->addWidget(mServerModeCombo, 1);
+    serverConnectionLayout->addLayout(serverModeLayout, 5, 0, 1, 2);
+
+    QHBoxLayout* maintenanceLayout = new QHBoxLayout();
+    maintenanceLayout->setSpacing(8);
+    maintenanceLayout->addWidget(mClearCellsButton);
+    maintenanceLayout->addWidget(mResetServerButton);
+    maintenanceLayout->addStretch(1);
+    serverConnectionLayout->addLayout(maintenanceLayout, 6, 0, 1, 2);
+
+    serverConnectionLayout->addWidget(vanillaServerCheckBox, 7, 0, 1, 2);
+    serverConnectionLayout->addWidget(hideChatHistoryCheckBox, 8, 0, 1, 2);
 
     refreshHostInterfaces(QStringLiteral("0.0.0.0"));
     updateHostModeUi(autoStartServerCheckBox->isChecked());
@@ -176,7 +215,18 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     connect(stopServerButton, SIGNAL(clicked()), this, SLOT(slotStopServerClicked()));
     connect(autoStartServerCheckBox, SIGNAL(toggled(bool)), this, SLOT(slotAutoStartServerToggled(bool)));
     connect(mRefreshHostInterfacesButton, SIGNAL(clicked()), this, SLOT(slotRefreshHostInterfaces()));
-    connect(mUpdateHashesButton, SIGNAL(clicked()), this, SIGNAL(updateHashesRequested()));
+    connect(mUpdateHashesButton, SIGNAL(clicked()), this, SLOT(slotUpdateHashesClicked()));
+    connect(mEnforceRequiredCheckBox, SIGNAL(toggled(bool)), this, SLOT(slotEnforceRequiredToggled(bool)));
+    connect(enforceDataFilesCheckBox, &QCheckBox::toggled, this, [this](bool enabled)
+    {
+        if (mEnforceRequiredCheckBox == nullptr || mEnforceRequiredCheckBox->isChecked() == enabled)
+            return;
+        const QSignalBlocker blocker(mEnforceRequiredCheckBox);
+        mEnforceRequiredCheckBox->setChecked(enabled);
+    });
+    connect(mServerModeCombo, SIGNAL(currentIndexChanged(int)), this, SLOT(slotServerModeChanged(int)));
+    connect(mClearCellsButton, SIGNAL(clicked()), this, SIGNAL(clearServerCellsRequested()));
+    connect(mResetServerButton, SIGNAL(clicked()), this, SIGNAL(resetServerDataRequested()));
     connect(autoRestartServerCheckBox, SIGNAL(toggled(bool)), this, SIGNAL(autoRestartServerChanged(bool)));
     connect(vanillaServerCheckBox, SIGNAL(toggled(bool)), this, SIGNAL(vanillaServerCompatibilityChanged(bool)));
     connect(hideChatHistoryCheckBox, SIGNAL(toggled(bool)), this, SIGNAL(hideChatHistoryChanged(bool)));
@@ -239,6 +289,24 @@ void Launcher::PlayPage::setAutoStartServer(bool enabled)
 void Launcher::PlayPage::setAutoRestartServer(bool enabled)
 {
     autoRestartServerCheckBox->setChecked(enabled);
+}
+
+void Launcher::PlayPage::setEnforceDataFiles(bool enabled)
+{
+    if (mEnforceRequiredCheckBox != nullptr)
+    {
+        const QSignalBlocker blocker(mEnforceRequiredCheckBox);
+        mEnforceRequiredCheckBox->setChecked(enabled);
+    }
+    if (enforceDataFilesCheckBox != nullptr)
+        enforceDataFilesCheckBox->setChecked(enabled);
+}
+
+bool Launcher::PlayPage::enforceDataFiles() const
+{
+    return mEnforceRequiredCheckBox != nullptr
+        ? mEnforceRequiredCheckBox->isChecked()
+        : enforceDataFilesCheckBox->isChecked();
 }
 
 void Launcher::PlayPage::setVanillaServerCompatibility(bool enabled)
@@ -336,8 +404,8 @@ void Launcher::PlayPage::refreshHostInterfaces(const QString& preferredAddress)
 
     const QString previous = preferredAddress.isEmpty() ? hostBindAddress() : preferredAddress;
     mHostInterfaceCombo->clear();
-    mHostInterfaceCombo->addItem(tr("All interfaces (recommended) — 0.0.0.0"), QStringLiteral("0.0.0.0"));
-    mHostInterfaceCombo->addItem(tr("Local only — 127.0.0.1"), QStringLiteral("127.0.0.1"));
+    mHostInterfaceCombo->addItem(tr("All interfaces (recommended) - 0.0.0.0"), QStringLiteral("0.0.0.0"));
+    mHostInterfaceCombo->addItem(tr("Local only - 127.0.0.1"), QStringLiteral("127.0.0.1"));
 
     QStringList seenAddresses;
     const QList<QNetworkInterface> interfaces = QNetworkInterface::allInterfaces();
@@ -361,7 +429,7 @@ void Launcher::PlayPage::refreshHostInterfaces(const QString& preferredAddress)
             QString name = iface.humanReadableName().trimmed();
             if (name.isEmpty())
                 name = iface.name();
-            mHostInterfaceCombo->addItem(QStringLiteral("%1 — %2").arg(name, address), address);
+            mHostInterfaceCombo->addItem(QStringLiteral("%1 - %2").arg(name, address), address);
         }
     }
 
@@ -372,7 +440,7 @@ void Launcher::PlayPage::refreshHostInterfaces(const QString& preferredAddress)
         // temporarily down. The user can refresh when it comes back.
         if (!previous.isEmpty() && previous != QLatin1String("0.0.0.0"))
         {
-            mHostInterfaceCombo->addItem(tr("Unavailable interface — %1").arg(previous), previous);
+            mHostInterfaceCombo->addItem(tr("Unavailable interface - %1").arg(previous), previous);
             index = mHostInterfaceCombo->count() - 1;
         }
         else
@@ -391,6 +459,17 @@ void Launcher::PlayPage::updateHostModeUi(bool enabled)
         mRefreshHostInterfacesButton->setVisible(enabled);
     if (mUpdateHashesButton != nullptr)
         mUpdateHashesButton->setVisible(enabled);
+    autoRestartServerCheckBox->setVisible(enabled);
+    if (mEnforceRequiredCheckBox != nullptr)
+        mEnforceRequiredCheckBox->setVisible(enabled);
+    if (mServerModeLabel != nullptr)
+        mServerModeLabel->setVisible(enabled);
+    if (mServerModeCombo != nullptr)
+        mServerModeCombo->setVisible(enabled);
+    if (mClearCellsButton != nullptr)
+        mClearCellsButton->setVisible(enabled);
+    if (mResetServerButton != nullptr)
+        mResetServerButton->setVisible(enabled);
 
     serverLabel->setText(enabled ? tr("Address for players:") : tr("Server Address:"));
     serverAddressEdit->setPlaceholderText(enabled
@@ -534,6 +613,11 @@ void Launcher::PlayPage::populateFormFromConfig(const QString& text)
     loadCheckBox(enablePlacedObjectCollisionCheckBox, text, QStringLiteral("enablePlacedObjectCollision"));
     loadCheckBox(useActorCollisionForPlacedObjectsCheckBox, text, QStringLiteral("useActorCollisionForPlacedObjects"));
     loadCheckBox(enforceDataFilesCheckBox, text, QStringLiteral("enforceDataFiles"));
+    if (mEnforceRequiredCheckBox != nullptr)
+    {
+        const QSignalBlocker blocker(mEnforceRequiredCheckBox);
+        mEnforceRequiredCheckBox->setChecked(enforceDataFilesCheckBox->isChecked());
+    }
     loadCheckBox(ignoreScriptErrorsCheckBox, text, QStringLiteral("ignoreScriptErrors"));
 
     loadCheckBox(shareJournalCheckBox, text, QStringLiteral("shareJournal"));
@@ -546,6 +630,17 @@ void Launcher::PlayPage::populateFormFromConfig(const QString& text)
     loadCheckBox(shareMapExplorationCheckBox, text, QStringLiteral("shareMapExploration"));
     loadCheckBox(shareVideosCheckBox, text, QStringLiteral("shareVideos"));
     loadCheckBox(shareKillsCheckBox, text, QStringLiteral("shareKills"));
+
+    if (mServerModeCombo != nullptr)
+    {
+        const bool coop = shareJournalCheckBox->isChecked()
+            && shareFactionRanksCheckBox->isChecked()
+            && shareFactionReputationCheckBox->isChecked()
+            && shareTopicsCheckBox->isChecked()
+            && shareReputationCheckBox->isChecked();
+        const QSignalBlocker blocker(mServerModeCombo);
+        mServerModeCombo->setCurrentIndex(coop ? 0 : 1);
+    }
 
     loadComboBox(databaseTypeComboBox, text, QStringLiteral("databaseType"));
 }
@@ -766,6 +861,51 @@ void Launcher::PlayPage::slotAutoStartServerToggled(bool enabled)
 void Launcher::PlayPage::slotRefreshHostInterfaces()
 {
     refreshHostInterfaces();
+}
+
+void Launcher::PlayPage::slotUpdateHashesClicked()
+{
+    // A freshly generated manifest is only useful when enforcement is enabled.
+    if (mEnforceRequiredCheckBox != nullptr && !mEnforceRequiredCheckBox->isChecked())
+        mEnforceRequiredCheckBox->setChecked(true);
+    else if (!enforceDataFilesCheckBox->isChecked())
+        setEnforceDataFiles(true);
+
+    serverSettingsEditor->setPlainText(updatedConfigFromForm(serverSettingsEditor->toPlainText()));
+    saveServerSettings();
+    emit updateHashesRequested();
+}
+
+void Launcher::PlayPage::slotEnforceRequiredToggled(bool enabled)
+{
+    if (enforceDataFilesCheckBox->isChecked() != enabled)
+        enforceDataFilesCheckBox->setChecked(enabled);
+    serverSettingsEditor->setPlainText(updatedConfigFromForm(serverSettingsEditor->toPlainText()));
+    saveServerSettings();
+}
+
+void Launcher::PlayPage::applyServerModePreset(int index)
+{
+    const bool coop = index == 0;
+    gameModeEdit->setText(coop ? QStringLiteral("ArenaMP CO-OP") : QStringLiteral("ArenaMP MMO"));
+    shareJournalCheckBox->setChecked(coop);
+    shareFactionRanksCheckBox->setChecked(coop);
+    shareFactionExpulsionCheckBox->setChecked(coop);
+    shareFactionReputationCheckBox->setChecked(coop);
+    shareTopicsCheckBox->setChecked(coop);
+    // Crime bounty stays personal in both presets.
+    shareBountyCheckBox->setChecked(false);
+    shareReputationCheckBox->setChecked(coop);
+    shareMapExplorationCheckBox->setChecked(coop);
+    shareVideosCheckBox->setChecked(coop);
+    shareKillsCheckBox->setChecked(coop);
+}
+
+void Launcher::PlayPage::slotServerModeChanged(int index)
+{
+    applyServerModePreset(index);
+    serverSettingsEditor->setPlainText(updatedConfigFromForm(serverSettingsEditor->toPlainText()));
+    saveServerSettings();
 }
 
 void Launcher::PlayPage::slotReloadServerSettings()

@@ -71,3 +71,22 @@ The actual Git HEAD/build revision is intentionally left untouched. Recompiling 
 a new source commit therefore no longer changes ArenaMP network compatibility.
 The explicit legacy/vanilla compatibility mode remains separate and still advertises
 TES3MP_VANILLA_COMMIT_HASH when that mode is deliberately enabled.
+
+
+BUILD FIX16 — DedicatedPlayer null-map / cell-comparison crash fix
+- PlayerList::getPlayer(guid) no longer uses map::operator[] and cannot create guid -> nullptr entries.
+- getPlayersInCell() skips null/not-yet-instantiated remote players before ESM::Cell comparison.
+- deletePlayer() is safe for unknown/null GUID entries.
+- newPlayer() repairs a legacy null placeholder without leaking and avoids duplicate allocations.
+- cleanUp() clears the map after deleting players.
+- Fix is targeted at the captured 0xC0000005 dump in CellController::isSameCell (near-null ESM::Cell pointer 0x2e0 / read 0x338).
+
+BUILD FIX17 - Host Mode Admin / CO-OP-MMO / RU UI
+- Update Hash now forces config.enforceDataFiles = true and persists config.lua before manifest generation.
+- Host mode layout: Auto restart + Enforce DataFiles in two columns, CO-OP/MMO selector, maintenance buttons.
+- CO-OP preset enables shared journal/factions/topics/reputation/map/videos; bounty remains personal.
+- MMO preset disables shared player progression while core player/actor/world networking remains active.
+- Added Clear server cells (cell state only) and Full server reset (player/cell/world/map/custom/recordstore/database) with confirmation and server-stopped guard.
+- requiredDataFiles.json and banlist.json are preserved by Full server reset.
+- Launcher and Wizard use Russian UI only when the OS/system locale is Russian; every other locale uses English.
+- Removed fragile typographic bullet/em-dash UI status strings that produced mojibake on some Windows builds; graphics GPU labels now use ASCII separators.

@@ -166,6 +166,36 @@ namespace
 
         return writeTextFile(configPath, lines.join(lineEnding), errorMessage);
     }
+    bool clearDirectoryContents(const QString& directoryPath, QString* errorMessage)
+    {
+        QDir dir(directoryPath);
+        if (!dir.exists())
+            return QDir().mkpath(directoryPath);
+
+        const QFileInfoList entries = dir.entryInfoList(
+            QDir::NoDotAndDotDot | QDir::AllEntries | QDir::Hidden | QDir::System);
+        for (const QFileInfo& info : entries)
+        {
+            if (info.fileName() == QLatin1String(".gitkeep"))
+                continue;
+
+            bool ok = true;
+            if (info.isDir())
+                ok = QDir(info.absoluteFilePath()).removeRecursively();
+            else
+                ok = QFile::remove(info.absoluteFilePath());
+
+            if (!ok)
+            {
+                if (errorMessage)
+                    *errorMessage = QObject::tr("Could not remove server data: %1")
+                        .arg(QDir::toNativeSeparators(info.absoluteFilePath()));
+                return false;
+            }
+        }
+        return true;
+    }
+
 }
 
 Launcher::ServerDialog::ServerDialog(QWidget* parent)
@@ -414,6 +444,54 @@ void Launcher::ServerDialog::setAutoRestartEnabled(bool enabled)
 {
     if (mRestartCheckBox != nullptr)
         mRestartCheckBox->setChecked(enabled);
+}
+
+bool Launcher::ServerDialog::clearPersistentCells(QString* errorMessage) const
+{
+    if (isRunning())
+    {
+        if (errorMessage)
+            *errorMessage = tr("Stop the server before clearing persistent data.");
+        return false;
+    }
+
+    const QString cellPath = QDir(QDir(serverRuntimeBasePath()).filePath(QStringLiteral("server/data")))
+        .filePath(QStringLiteral("cell"));
+    return clearDirectoryContents(cellPath, errorMessage);
+}
+
+bool Launcher::ServerDialog::resetPersistentServerData(QString* errorMessage) const
+{
+    if (isRunning())
+    {
+        if (errorMessage)
+            *errorMessage = tr("Stop the server before clearing persistent data.");
+        return false;
+    }
+
+    const QDir dataDir(QDir(serverRuntimeBasePath()).filePath(QStringLiteral("server/data")));
+    const QStringList gameplayDirectories = QStringList()
+        << QStringLiteral("player") << QStringLiteral("cell") << QStringLiteral("world")
+        << QStringLiteral("map") << QStringLiteral("custom") << QStringLiteral("recordstore");
+
+    for (const QString& directory : gameplayDirectories)
+    {
+        if (!clearDirectoryContents(dataDir.filePath(directory), errorMessage))
+            return false;
+    }
+
+    // SQLite is optional, but when enabled it is persistent gameplay data too.
+    const QString databasePath = dataDir.filePath(QStringLiteral("database.db"));
+    if (QFileInfo::exists(databasePath) && !QFile::remove(databasePath))
+    {
+        if (errorMessage)
+            *errorMessage = tr("Could not remove server data: %1")
+                .arg(QDir::toNativeSeparators(databasePath));
+        return false;
+    }
+
+    // Intentionally preserve requiredDataFiles.json and banlist.json.
+    return true;
 }
 
 void Launcher::ServerDialog::processReadyReadStandardOutput()

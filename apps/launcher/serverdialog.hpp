@@ -34,6 +34,8 @@ namespace Launcher
         QString requiredDataFilesPath() const;
         bool autoRestartEnabled() const;
         void setAutoRestartEnabled(bool enabled);
+        bool clearPersistentCells(QString* errorMessage = nullptr) const;
+        bool resetPersistentServerData(QString* errorMessage = nullptr) const;
 
     public slots:
         void stopServer();

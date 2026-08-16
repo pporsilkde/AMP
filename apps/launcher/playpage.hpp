@@ -9,6 +9,7 @@ class QWidget;
 class QLabel;
 class QComboBox;
 class QPushButton;
+class QCheckBox;
 
 namespace Launcher
 {
@@ -37,6 +38,8 @@ namespace Launcher
         void setHostBindAddress(const QString& address);
         bool autoStartServer() const;
         bool autoRestartServer() const;
+        void setEnforceDataFiles(bool enabled);
+        bool enforceDataFiles() const;
         bool vanillaServerCompatibility() const;
         bool hideChatHistory() const;
 
@@ -53,6 +56,8 @@ namespace Launcher
         void vanillaServerCompatibilityChanged(bool enabled);
         void hideChatHistoryChanged(bool enabled);
         void updateHashesRequested();
+        void clearServerCellsRequested();
+        void resetServerDataRequested();
 
     private slots:
         void slotPlayClicked();
@@ -60,6 +65,9 @@ namespace Launcher
         void slotStopServerClicked();
         void slotAutoStartServerToggled(bool enabled);
         void slotRefreshHostInterfaces();
+        void slotUpdateHashesClicked();
+        void slotEnforceRequiredToggled(bool enabled);
+        void slotServerModeChanged(int index);
         void slotReloadServerSettings();
         void slotSaveServerSettings();
         void slotApplyFormToRawConfig();
@@ -76,12 +84,18 @@ namespace Launcher
         void setServerSettingsStatus(const QString& text, bool isError = false);
         void refreshHostInterfaces(const QString& preferredAddress = QString());
         void updateHostModeUi(bool enabled);
+        void applyServerModePreset(int index);
         QWidget* mEmbeddedServerConsole;
         bool mSyncingServerSettingsTabs;
         QLabel* mHostInterfaceLabel;
         QComboBox* mHostInterfaceCombo;
         QPushButton* mRefreshHostInterfacesButton;
         QPushButton* mUpdateHashesButton;
+        QCheckBox* mEnforceRequiredCheckBox;
+        QLabel* mServerModeLabel;
+        QComboBox* mServerModeCombo;
+        QPushButton* mClearCellsButton;
+        QPushButton* mResetServerButton;
     };
 }
 #endif

@@ -704,14 +704,14 @@ int Launcher::GraphicsPage::recommendQuality(const HardwareInfo& info) const
 
 void Launcher::GraphicsPage::updateHardwareLabels()
 {
-    QString gpuText = QStringLiteral("%1 — %2")
+    QString gpuText = QStringLiteral("%1 - %2")
         .arg(mHardwareInfo.vendor.toUpper(), mHardwareInfo.renderer);
     if (mHardwareInfo.dedicatedVramMb > 0)
         gpuText += tr(" (%1 MB dedicated VRAM)").arg(mHardwareInfo.dedicatedVramMb);
     if (mHardwareInfo.integrated)
-        gpuText += tr(" — integrated");
+        gpuText += tr(" - integrated");
     if (mHardwareInfo.softwareRenderer)
-        gpuText += tr(" — software renderer");
+        gpuText += tr(" - software renderer");
     qualityGpuLabel->setText(gpuText);
 
     const double megapixels = mHardwareInfo.displayMegapixelsTimes100 / 100.0;

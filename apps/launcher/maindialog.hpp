@@ -72,6 +72,8 @@ namespace Launcher
         void hideChatHistoryChanged(bool enabled);
         void serverRunningChanged(bool running, const QString& address, const QString& port);
         void updateServerDataFileHashes();
+        void clearServerCells();
+        void resetServerData();
 
     private:
         bool setup();

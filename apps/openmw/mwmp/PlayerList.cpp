@@ -35,33 +35,57 @@ void PlayerList::update(float dt)
 
 DedicatedPlayer *PlayerList::newPlayer(RakNet::RakNetGUID guid)
 {
+    // Never leave a null placeholder in playerList. Historically getPlayer(guid)
+    // used std::map::operator[], which could create guid -> nullptr entries when a
+    // packet for a not-yet-announced remote player arrived. A later HUD/worldstate
+    // cell scan then dereferenced that null entry while comparing ESM::Cell values.
+    auto existing = playerList.find(guid);
+    if (existing != playerList.end() && existing->second != nullptr)
+        return existing->second;
+
     LOG_APPEND(TimedLog::LOG_INFO, "- Creating new DedicatedPlayer with guid %s", guid.ToString());
 
-    playerList[guid] = new DedicatedPlayer(guid);
+    DedicatedPlayer* player = new DedicatedPlayer(guid);
+    if (existing != playerList.end())
+        existing->second = player;
+    else
+        playerList.emplace(guid, player);
 
     LOG_APPEND(TimedLog::LOG_INFO, "- There are now %i DedicatedPlayers", playerList.size());
 
-    return playerList[guid];
+    return player;
 }
 
 void PlayerList::deletePlayer(RakNet::RakNetGUID guid)
 {
-    if (playerList[guid]->reference)
-        playerList[guid]->deleteReference();
+    const auto it = playerList.find(guid);
+    if (it == playerList.end())
+        return;
 
-    delete playerList[guid];
-    playerList.erase(guid);
+    DedicatedPlayer* player = it->second;
+    if (player != nullptr)
+    {
+        if (player->reference)
+            player->deleteReference();
+        delete player;
+    }
+
+    playerList.erase(it);
 }
 
 void PlayerList::cleanUp()
 {
     for (auto &playerEntry : playerList)
         delete playerEntry.second;
+    playerList.clear();
 }
 
 DedicatedPlayer *PlayerList::getPlayer(RakNet::RakNetGUID guid)
 {
-    return playerList[guid];
+    // IMPORTANT: lookup must be non-mutating. operator[] inserts a nullptr for an
+    // unknown GUID and that poisoned entry can later be dereferenced by cell scans.
+    const auto it = playerList.find(guid);
+    return it != playerList.end() ? it->second : nullptr;
 }
 
 DedicatedPlayer *PlayerList::getPlayer(const MWWorld::Ptr &ptr)
@@ -103,13 +127,15 @@ std::vector<RakNet::RakNetGUID> PlayerList::getPlayersInCell(const ESM::Cell& ce
 
     for (auto& playerEntry : playerList)
     {
-        if (playerEntry.first != RakNet::UNASSIGNED_CRABNET_GUID)
-        {
-            if (Main::get().getCellController()->isSameCell(cell, playerEntry.second->cell))
-            {
-                playersInCell.push_back(playerEntry.first);
-            }
-        }
+        if (playerEntry.first == RakNet::UNASSIGNED_CRABNET_GUID)
+            continue;
+
+        DedicatedPlayer* player = playerEntry.second;
+        if (player == nullptr || player->getPtr().mRef == nullptr)
+            continue;
+
+        if (Main::get().getCellController()->isSameCell(cell, player->cell))
+            playersInCell.push_back(playerEntry.first);
     }
 
     return playersInCell;

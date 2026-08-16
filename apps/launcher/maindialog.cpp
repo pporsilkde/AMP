@@ -301,7 +301,7 @@ void Launcher::MainDialog::createPages()
         mPlayPage->setServerRunning(reachableServer, addr, port, managedServer);
         if (reachableServer)
         {
-            versionLabel->setText(tr("● Online server — %1:%2").arg(addr, port));
+            versionLabel->setText(tr("Online server - %1:%2").arg(addr, port));
             versionLabel->setStyleSheet(QStringLiteral("color: #188a3b; font-weight: 600;"));
         }
     }
@@ -326,6 +326,8 @@ void Launcher::MainDialog::createPages()
     connect(mPlayPage, SIGNAL(vanillaServerCompatibilityChanged(bool)), this, SLOT(vanillaServerCompatibilityChanged(bool)));
     connect(mPlayPage, SIGNAL(hideChatHistoryChanged(bool)), this, SLOT(hideChatHistoryChanged(bool)));
     connect(mPlayPage, SIGNAL(updateHashesRequested()), this, SLOT(updateServerDataFileHashes()));
+    connect(mPlayPage, SIGNAL(clearServerCellsRequested()), this, SLOT(clearServerCells()));
+    connect(mPlayPage, SIGNAL(resetServerDataRequested()), this, SLOT(resetServerData()));
     connect(mServerDialog, SIGNAL(runningChanged(bool,QString,QString)),
             this, SLOT(serverRunningChanged(bool,QString,QString)));
     connect(mServerDialog, SIGNAL(autoRestartChanged(bool)),
@@ -381,7 +383,7 @@ Launcher::FirstRunDialogResult Launcher::MainDialog::showFirstRunDialog()
 
 void Launcher::MainDialog::setVersionLabel()
 {
-    versionLabel->setText(tr("● Server stopped"));
+    versionLabel->setText(tr("Server stopped"));
     versionLabel->setStyleSheet(QStringLiteral("color: #777777; font-weight: 600;"));
 }
 
@@ -833,7 +835,7 @@ bool Launcher::MainDialog::writeBuildManifest()
     manifest.dataPath = Config::BuildManifest::portableDataPath(manifestPath, dataDir);
     manifest.language = mLauncherSettings.value(QStringLiteral("Settings/language"), QStringLiteral("English"));
     const bool localServerModeSelected = mPlayPage != nullptr
-        && (mPlayPage->autoStartServer() || mPlayPage->autoRestartServer());
+        && mPlayPage->autoStartServer();
 
     if (localServerModeSelected && existingManifestRead)
     {
@@ -1408,6 +1410,11 @@ void Launcher::MainDialog::updateServerDataFileHashes()
     if (mPlayPage == nullptr || !mPlayPage->autoStartServer())
         return;
 
+    // Hash generation and strict verification are one operation in Host mode.
+    mPlayPage->setEnforceDataFiles(true);
+    if (!mPlayPage->saveServerSettings())
+        return;
+
     // Pull the current UI selection into GameSettings first. This guarantees
     // that JSON order is exactly the order visible on the Data Files page.
     mDataFilesPage->saveSettings();
@@ -1517,6 +1524,62 @@ void Launcher::MainDialog::updateServerDataFileHashes()
     QMessageBox::information(this, tr("Update Hash"), status);
 }
 
+void Launcher::MainDialog::clearServerCells()
+{
+    if (mServerDialog == nullptr)
+        return;
+    if (mServerDialog->isRunning())
+    {
+        QMessageBox::warning(this, tr("Clear server cells"),
+            tr("Stop the server before clearing persistent data."));
+        return;
+    }
+
+    const QMessageBox::StandardButton answer = QMessageBox::warning(this,
+        tr("Clear server cells?"),
+        tr("This will delete all saved cell state. Player accounts and world data will be kept. Continue?"),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (answer != QMessageBox::Yes)
+        return;
+
+    QString error;
+    if (!mServerDialog->clearPersistentCells(&error))
+    {
+        QMessageBox::critical(this, tr("Clear server cells"),
+            tr("Server data reset failed: %1").arg(error));
+        return;
+    }
+    QMessageBox::information(this, tr("Clear server cells"), tr("All saved server cells were cleared."));
+}
+
+void Launcher::MainDialog::resetServerData()
+{
+    if (mServerDialog == nullptr)
+        return;
+    if (mServerDialog->isRunning())
+    {
+        QMessageBox::warning(this, tr("Full server reset"),
+            tr("Stop the server before clearing persistent data."));
+        return;
+    }
+
+    const QMessageBox::StandardButton answer = QMessageBox::critical(this,
+        tr("Full server reset?"),
+        tr("This will delete player accounts, cells, world state, maps, custom data, record stores and the server database. requiredDataFiles.json and banlist.json will be kept. Continue?"),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+    if (answer != QMessageBox::Yes)
+        return;
+
+    QString error;
+    if (!mServerDialog->resetPersistentServerData(&error))
+    {
+        QMessageBox::critical(this, tr("Full server reset"),
+            tr("Server data reset failed: %1").arg(error));
+        return;
+    }
+    QMessageBox::information(this, tr("Full server reset"), tr("Server gameplay data was fully reset."));
+}
+
 void Launcher::MainDialog::autoStartServerChanged(bool enabled)
 {
     mLauncherSettings.remove(QStringLiteral("General/Server/autoStart"));
@@ -1561,12 +1624,12 @@ void Launcher::MainDialog::serverRunningChanged(bool running, const QString& add
     {
         if (running)
         {
-            versionLabel->setText(tr("● Online server — %1:%2").arg(address, port));
+            versionLabel->setText(tr("Online server - %1:%2").arg(address, port));
             versionLabel->setStyleSheet(QStringLiteral("color: #188a3b; font-weight: 600;"));
         }
         else
         {
-            versionLabel->setText(tr("● Server stopped"));
+            versionLabel->setText(tr("Server stopped"));
             versionLabel->setStyleSheet(QStringLiteral("color: #777777; font-weight: 600;"));
         }
     }

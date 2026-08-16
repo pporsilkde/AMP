@@ -1,6 +1,8 @@
 #include <QApplication>
 #include <QDir>
 
+#include <components/misc/arenarussiantranslator.hpp>
+
 #include "mainwizard.hpp"
 
 #ifdef MAC_OS_X_VERSION_MIN_REQUIRED
@@ -13,6 +15,12 @@ int main(int argc, char *argv[])
 {
 
     QApplication app(argc, argv);
+
+    // Use Russian only on a Russian Windows/system locale. All other
+    // locales deliberately stay English to avoid partial/mixed UI.
+    ArenaUi::RussianTranslator arenaTranslator;
+    if (ArenaUi::useRussianSystemUi())
+        app.installTranslator(&arenaTranslator);
 
     // Now we make sure the current dir is set to application path
     QDir dir(QCoreApplication::applicationDirPath());
