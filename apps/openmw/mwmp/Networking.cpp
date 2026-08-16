@@ -293,7 +293,11 @@ void Networking::connect(const std::string &ip, unsigned short port, std::vector
             advertisedProtocol, TES3MP_VANILLA_COMMIT_HASH);
     }
     else
-        commitHashString = Version::getOpenmwVersion(Main::getResDir()).mCommitHash;
+    {
+        // ArenaMP uses a stable compatibility identity instead of the current
+        // source Git HEAD, so independently rebuilt client/server stay compatible.
+        commitHashString = TES3MP_COMPAT_COMMIT_HASH;
+    }
 
     // Remove carriage returns added to version files on Windows.
     commitHashString.erase(std::remove(commitHashString.begin(), commitHashString.end(), '\r'), commitHashString.end());

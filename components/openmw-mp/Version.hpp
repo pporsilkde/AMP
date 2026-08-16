@@ -4,6 +4,11 @@
 #define TES3MP_VERSION "0.8.1"
 #define TES3MP_PROTO_VERSION 806
 
+// Stable ArenaMP/TES3MP network compatibility identity.
+// This is intentionally independent from the Git HEAD used to compile the build,
+// so rebuilding client/server does not silently change their handshake identity.
+#define TES3MP_COMPAT_COMMIT_HASH "0f659371bcbaf9e7e6b94bd6bcb7a81970082234"
+
 // Official/vanilla TES3MP 0.8.1 build identity used by older servers.
 // Source version file:
 //   OpenMW 0.47.0

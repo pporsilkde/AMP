@@ -48,3 +48,26 @@ Preserved from FIX12:
 Application:
 - CUMULATIVE archive: apply over the clean ArenaMP baseline used by this patch chain.
 - HOTFIX archive: apply only over BUILD FIX12.
+
+BUILD FIX14 — NEW APP ICONS
+- Replaced launcher, wizard and ArenaMP/TES3MP executable icons with the new supplied ArenaMW emblem.
+- Replaced launcher start/play icon and wizard Qt window icon with the same emblem.
+- ICO contains 16/24/32/48/64/128/256 layers with alpha transparency and safe padding.
+- No gameplay/network/server changes from FIX13.
+
+BUILD FIX15 — Stable multiplayer compatibility commit
+------------------------------------------------------
+Pinned the normal ArenaMP/TES3MP client and dedicated-server network identity to:
+0f659371bcbaf9e7e6b94bd6bcb7a81970082234
+
+This affects:
+- TES3MP client "Oldest compatible commit hash" log line;
+- TES3MP dedicated server "Oldest compatible commit hash" log line;
+- normal client RakNet connection password/handshake;
+- dedicated-server incoming RakNet password/handshake;
+- master-server CommitHash rule.
+
+The actual Git HEAD/build revision is intentionally left untouched. Recompiling from
+a new source commit therefore no longer changes ArenaMP network compatibility.
+The explicit legacy/vanilla compatibility mode remains separate and still advertises
+TES3MP_VANILLA_COMMIT_HASH when that mode is deliberately enabled.

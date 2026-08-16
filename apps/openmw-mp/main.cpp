@@ -202,7 +202,7 @@ int main(int argc, char *argv[])
 
     std::vector<std::string> plugins(Utils::split(mgr.getString("plugins", "Plugins"), ','));
 
-    std::string versionInfo = Utils::getVersionInfo("TES3MP dedicated server", TES3MP_VERSION, version.mCommitHash, TES3MP_PROTO_VERSION);
+    std::string versionInfo = Utils::getVersionInfo("TES3MP dedicated server", TES3MP_VERSION, TES3MP_COMPAT_COMMIT_HASH, TES3MP_PROTO_VERSION);
     LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "%s", versionInfo.c_str());
     
     Script::SetModDir(dataDirectory);
@@ -225,9 +225,9 @@ int main(int argc, char *argv[])
     std::stringstream sstr;
     sstr << TES3MP_VERSION;
     sstr << TES3MP_PROTO_VERSION;
-    // Remove carriage returns added to version file on Windows
-    version.mCommitHash.erase(std::remove(version.mCommitHash.begin(), version.mCommitHash.end(), '\r'), version.mCommitHash.end());
-    sstr << version.mCommitHash;
+    // Stable ArenaMP compatibility identity: do not derive the network password
+    // from the current Git HEAD, otherwise every rebuild becomes incompatible.
+    sstr << TES3MP_COMPAT_COMMIT_HASH;
 
     peer->SetIncomingPassword(sstr.str().c_str(), (int) sstr.str().size());
 
@@ -298,7 +298,7 @@ int main(int argc, char *argv[])
             networking.getMasterClient()->SetUpdateRate((unsigned) updateRate);
             std::string hostname = mgr.getString("hostname", "General");
             networking.getMasterClient()->SetHostname(hostname);
-            networking.getMasterClient()->SetRuleString("CommitHash", version.mCommitHash.substr(0, 10));
+            networking.getMasterClient()->SetRuleString("CommitHash", std::string(TES3MP_COMPAT_COMMIT_HASH).substr(0, 10));
 
             networking.getMasterClient()->Start();
         }
