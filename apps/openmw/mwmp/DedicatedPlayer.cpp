@@ -298,25 +298,6 @@ void DedicatedPlayer::setBaseInfo()
     if (!RecordHelper::doesRecordIdExist<ESM::Race>(npc.mRace))
         npc.mRace = previousRace;
 
-    bool rebuildNpcReference = false;
-
-    if (reference && !ptr.isEmpty() && ptr.getTypeName() == typeid(ESM::NPC).name())
-    {
-        // The network packet has already updated BasePlayer::npc, while ptr still
-        // points at the previously instantiated dynamic NPC record. Comparing the
-        // two lets us detect every field that changes the rendered body/skeleton.
-        const ESM::NPC* currentNpc = ptr.get<ESM::NPC>()->mBase;
-        if (currentNpc != nullptr)
-        {
-            rebuildNpcReference =
-                !Misc::StringUtils::ciEqual(currentNpc->mRace, npc.mRace)
-                || !Misc::StringUtils::ciEqual(currentNpc->mHead, npc.mHead)
-                || !Misc::StringUtils::ciEqual(currentNpc->mHair, npc.mHair)
-                || !Misc::StringUtils::ciEqual(currentNpc->mModel, npc.mModel)
-                || currentNpc->mFlags != npc.mFlags;
-        }
-    }
-
     if (!reference)
     {
         npc.mId = RecordHelper::createRecord(npc)->mId;
@@ -324,27 +305,14 @@ void DedicatedPlayer::setBaseInfo()
     }
     else
     {
+        // BUILD FIX28 / EncoreMP-safe path: never delete/recreate ManualRef for
+        // a BaseInfo update. RecordHelper::overrideRecord() updates the dynamic
+        // NPC record and updatePtrsWithRefId() retargets live Ptr base records;
+        // disable/enable then refreshes the render/mechanics representation.
+        // Keeping the same live reference avoids the auth-time use-after-free
+        // seen with FIX19's deleteReference()/createReference() rebuild.
         RecordHelper::overrideRecord(npc);
-
-        if (rebuildNpcReference)
-        {
-            LOG_APPEND(TimedLog::LOG_INFO,
-                "- Rebuilding remote player appearance: race=%s head=%s hair=%s model=%s flags=%u",
-                npc.mRace.c_str(), npc.mHead.c_str(), npc.mHair.c_str(), npc.mModel.c_str(),
-                static_cast<unsigned int>(npc.mFlags));
-
-            // disable()/enable() is not enough for a race/head/sex change: OpenMW
-            // can retain the old NpcAnimation/body-part cache. Recreate the world
-            // reference so the renderer resolves the final network identity anew.
-            deleteReference();
-            createReference(npc.mId);
-
-            // Keep the existing network scale until the ordered Shapeshift packet
-            // arrives. Stats/attributes/skills follow BaseInfo in the full snapshot
-            // and are deliberately not applied early here.
-            MWBase::Environment::get().getWorld()->scaleObject(ptr, scale);
-        }
-        else
+        if (!ptr.isEmpty())
             reloadPtr();
     }
 

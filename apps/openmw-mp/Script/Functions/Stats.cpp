@@ -603,6 +603,15 @@ void StatsFunctions::SetPlayerVisible(unsigned short pid, bool state) noexcept
     {
         player->setVisibleToOthers(true);
         player->setAppearanceAuthoritative(true);
+
+        // BUILD FIX28: after Login/CharGen has finalized the server-side
+        // appearance, push one authoritative BaseInfo snapshot to players who
+        // actually share a loaded cell. This mirrors EncoreMP's successful
+        // BaseInfo refresh without reintroducing the unstable hide/reveal gate
+        // or cross-instance global publication.
+        mwmp::PlayerPacket *baseInfoPacket = mwmp::Networking::get().getPlayerPacketController()->GetPacket(ID_PLAYER_BASEINFO);
+        baseInfoPacket->setPlayer(player);
+        player->sendToLoaded(baseInfoPacket);
     }
     else
     {
@@ -623,8 +632,12 @@ void StatsFunctions::SendBaseInfo(unsigned short pid) noexcept
     packet->setPlayer(player);
     
     packet->Send(false);
+
+    // BUILD FIX28: EncoreMP broadcasts BaseInfo changes immediately. ArenaMP
+    // keeps that behavior, but only to clients sharing a loaded cell so private
+    // instances cannot create remote DedicatedPlayers in unrelated cells.
     if (player->isVisibleToOthers())
-        packet->Send(true);
+        player->sendToLoaded(packet);
 }
 
 void StatsFunctions::SendStatsDynamic(unsigned short pid) noexcept

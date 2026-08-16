@@ -204,6 +204,14 @@ void Networking::processPlayerPacket(RakNet::Packet *packet)
         player->language = player->language == "RU" ? "RU" : "EN";
         LOG_APPEND(TimedLog::LOG_INFO, "- Client language: %s", player->language.c_str());
         LOG_APPEND(TimedLog::LOG_INFO, "- BaseInfo accepted during login/CharGen");
+
+        // BUILD FIX28: keep EncoreMP's proven BaseInfo propagation model, but
+        // scope it to players who actually share a loaded cell. This is the
+        // important part that FIX24/FIX27 had lost: the final CharGen BaseInfo
+        // (race/head/hair/sex) must reach an already-present remote client before
+        // we lock the appearance as authoritative. Global Send(true) is not used
+        // because ArenaMP has private/instanced cells.
+        player->sendToLoaded(myPacket);
     }
 
     if (player->getLoadState() == Player::NOTLOADED)
