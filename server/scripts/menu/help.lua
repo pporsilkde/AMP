@@ -17,27 +17,8 @@ Menus["help player"] = {
             color.White .. "Accept an invitation to become a player's ally\n" ..
         color.Yellow .. "/leave <pid>\n" ..
             color.White .. "Leave an alliance with a player\n" ..
-        color.Yellow .. "/message <pid> <text>\n" ..
-            color.White .. "Send a private message to a player " ..
-            color.Yellow .. "(/msg)\n" ..
-        color.Yellow .. "/me <text>\n" ..
-            color.White .. "Send a message written in the third person\n" ..
-        color.Yellow .. "/local <text>\n" ..
-            color.White .. "Send a message that only players in your area can read " ..
-            color.Yellow .. "(/l)\n" ..
         color.Yellow .. "/list\n" ..
-            color.White .. "List all players on the server\n" ..
-        color.Yellow .. "/anim <animation>\n" ..
-            color.White .. "Play an animation on yourself, with a list of valid inputs being provided " ..
-            "if you use an invalid one " ..
-            color.Yellow .. "(/a)\n" ..
-        color.Yellow .. "/speech <type> <index>\n" ..
-            color.White .. "Play a certain speech on yourself, with a list of valid inputs being provided " ..
-            "if you use invalid ones\n" ..
-        color.Yellow .. "/craft\n" ..
-            color.White .. "Open up a small crafting menu used as a scripting example\n" ..
-        color.Yellow .. "/help\n" ..
-            color.White .. "Get the list of available commands",
+            color.White .. "List all players on the server\n",
     buttons = {
         { caption = "Admin help",
             displayConditions = {
