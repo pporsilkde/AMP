@@ -757,12 +757,12 @@ namespace MWDialogue
         if(info != nullptr)
         {
             MWBase::WindowManager *winMgr = MWBase::Environment::get().getWindowManager();
-            if (winMgr->getSubtitlesEnabled())
+            if (winMgr->getSubtitlesEnabled()
+                && !winMgr->containsMode(MWGui::GM_Dialogue))
             /*
-                Start of tes3mp change (minor)
-
-                Prevent subtitles for NPC sounds from being added to a currently open dialogue window,
-                which wasn't a problem in regular OpenMW because time was frozen during dialogue
+                ArenaMP FIX26: voice captions are transient subtitles, not dialogue history.
+                While the dialogue GUI is displayed, suppress them completely instead of
+                letting ambient/network speech paint fragments over the conversation window.
             */
                 winMgr->messageBox(info->mResponse, MWGui::ShowInDialogueMode_Never);
             /*

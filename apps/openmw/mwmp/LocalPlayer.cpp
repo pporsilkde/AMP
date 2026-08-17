@@ -2435,6 +2435,7 @@ void LocalPlayer::playSpeech()
     MWBase::Environment::get().getSoundManager()->say(getPlayerPtr(), sound);
 
     MWBase::WindowManager *winMgr = MWBase::Environment::get().getWindowManager();
-    if (winMgr->getSubtitlesEnabled())
+    if (winMgr->getSubtitlesEnabled()
+        && !winMgr->containsMode(MWGui::GM_Dialogue))
         winMgr->messageBox(MWBase::Environment::get().getDialogueManager()->getVoiceCaption(sound), MWGui::ShowInDialogueMode_Never);
 }

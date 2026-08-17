@@ -95,7 +95,11 @@ namespace MWGui
         struct HorizontalCompassMarkerState
         {
             MyGUI::TextBox* mWidget = nullptr;
-            MWWorld::Ptr mActor;
+            // Object markers use mObject; non-reference markers such as teleport
+            // doors use a stable textual identity. This lets one fixed widget pool
+            // cover actors, Detect Key/Enchantment/Animal results and doors.
+            MWWorld::Ptr mObject;
+            std::string mIdentity;
             float mCurrentLeft = 0.f;
             float mTargetLeft = 0.f;
             float mAlpha = 0.f;

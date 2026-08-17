@@ -10,11 +10,17 @@ namespace mwmp
 {
     class ProcessorPlayerCellState : public PlayerProcessor
     {
-        PlayerPacketController *playerController;
+        PlayerPacketController *playerController = nullptr;
     public:
         ProcessorPlayerCellState()
         {
             BPP_INIT(ID_PLAYER_CELL_STATE)
+            // FIX26: this processor now sends targeted CellChange packets after
+            // CellState AOI updates, so it must initialize the packet controller
+            // exactly like ProcessorPlayerCellChange. The previous uninitialized
+            // pointer caused the Windows dedicated server to dereference garbage
+            // immediately after an instanced cell was loaded.
+            playerController = Networking::get().getPlayerPacketController();
         }
 
         void Do(PlayerPacket &packet, Player &player) override
@@ -45,7 +51,9 @@ namespace mwmp
             CellController::get()->update(&player);
 
             const std::set<RakNet::RakNetGUID> recipientsAfter = player.getLoadedPlayerGuids();
-            PlayerPacket* cellChangePacket = playerController->GetPacket(ID_PLAYER_CELL_CHANGE);
+            PlayerPacket* cellChangePacket = playerController
+                ? playerController->GetPacket(ID_PLAYER_CELL_CHANGE)
+                : nullptr;
 
             for (const RakNet::RakNetGUID& recipientGuid : recipientsBefore)
             {
@@ -65,8 +73,17 @@ namespace mwmp
                     // unloaded while the player's authoritative cell stayed the
                     // same. In that case the current cell is already correct, so
                     // a targeted CellChange safely removes the stale remote now.
-                    cellChangePacket->setPlayer(&player);
-                    cellChangePacket->Send(recipientGuid);
+                    if (cellChangePacket)
+                    {
+                        cellChangePacket->setPlayer(&player);
+                        cellChangePacket->Send(recipientGuid);
+                    }
+                    else
+                    {
+                        LOG_APPEND(TimedLog::LOG_ERROR,
+                            "- PlayerPacketController unavailable while shrinking CellState AOI; "
+                            "skipping targeted CellChange instead of crashing");
+                    }
                 }
             }
 

@@ -4,6 +4,7 @@
 #include <MyGUI_ProgressBar.h>
 #include <MyGUI_Button.h>
 #include <MyGUI_InputManager.h>
+#include <MyGUI_LanguageManager.h>
 #include <MyGUI_ImageBox.h>
 #include <MyGUI_ScrollView.h>
 #include <MyGUI_TextBox.h>
@@ -104,12 +105,17 @@ namespace
     {
         Enemy = 0,
         Player = 1,
-        Ally = 2
+        Ally = 2,
+        Door = 3,
+        DetectKey = 4,
+        DetectEnchantment = 5,
+        DetectCreature = 6
     };
 
     struct HorizontalCompassMarkerCandidate
     {
-        MWWorld::Ptr mActor;
+        MWWorld::Ptr mObject;
+        std::string mIdentity;
         int mLeft = 0;
         float mDistanceSquared = 0.f;
         HorizontalCompassMarkerKind mKind = HorizontalCompassMarkerKind::Ally;
@@ -125,8 +131,35 @@ namespace
                 return MyGUI::Colour(0.18f, 0.42f, 0.95f);
             case HorizontalCompassMarkerKind::Ally:
                 return MyGUI::Colour(0.14f, 0.74f, 0.22f);
+            case HorizontalCompassMarkerKind::Door:
+            case HorizontalCompassMarkerKind::DetectKey:
+            case HorizontalCompassMarkerKind::DetectEnchantment:
+            case HorizontalCompassMarkerKind::DetectCreature:
+                // Use the same sand/gold colour as normal Morrowind location text
+                // (for example the "Seyda Neen" HUD caption), not a hard-coded tint.
+                return MyGUI::Colour::parse(MyGUI::LanguageManager::getInstance().replaceTags("#{fontcolour=normal}"));
         }
         return MyGUI::Colour(1.f, 1.f, 1.f);
+    }
+
+    std::string getHorizontalCompassMarkerCaption(HorizontalCompassMarkerKind kind)
+    {
+        switch (kind)
+        {
+            case HorizontalCompassMarkerKind::Door:
+                return "⌂";
+            case HorizontalCompassMarkerKind::DetectKey:
+                return "○─";
+            case HorizontalCompassMarkerKind::DetectEnchantment:
+                return "✦";
+            case HorizontalCompassMarkerKind::DetectCreature:
+                return "△";
+            case HorizontalCompassMarkerKind::Enemy:
+            case HorizontalCompassMarkerKind::Player:
+            case HorizontalCompassMarkerKind::Ally:
+                return "●";
+        }
+        return "●";
     }
 }
 
@@ -353,10 +386,10 @@ namespace MWGui
         for (int i = 0; i < horizontalCompassMarkerCount; ++i)
         {
             MyGUI::TextBox* marker = mHorizontalCompass->createWidget<MyGUI::TextBox>("NormalText",
-                MyGUI::IntCoord(0, 4, 22, 22), MyGUI::Align::Default);
+                MyGUI::IntCoord(0, 3, 32, 22), MyGUI::Align::Default);
             marker->setCaption("●");
             marker->setFontName("CompassMarkerFont");
-            marker->setFontHeight(21);
+            marker->setFontHeight(18);
             marker->setTextAlign(MyGUI::Align::Center);
             marker->setTextShadow(true);
             marker->setTextShadowColour(MyGUI::Colour::Black);
@@ -860,7 +893,8 @@ namespace MWGui
         {
             for (HorizontalCompassMarkerState& state : mHorizontalCompassMarkers)
             {
-                state.mActor = MWWorld::Ptr();
+                state.mObject = MWWorld::Ptr();
+                state.mIdentity.clear();
                 state.mAlpha = 0.f;
                 state.mTargetAlpha = 0.f;
                 state.mSeen = false;
@@ -886,19 +920,20 @@ namespace MWGui
                 const MWWorld::Ptr player = world->getPlayerPtr();
                 if (!player.isEmpty() && player.isInCell())
                 {
-                    // Lower enum value has visual priority when one actor belongs to several groups.
-                    std::map<MWWorld::Ptr, HorizontalCompassMarkerKind> actors;
-                    const auto addActor = [&actors](const MWWorld::Ptr& actor, HorizontalCompassMarkerKind kind)
+                    // Lower enum value has visual priority when the same reference belongs
+                    // to several groups (for example an enemy also found by Detect Animal).
+                    std::map<MWWorld::Ptr, HorizontalCompassMarkerKind> objects;
+                    const auto addObject = [&objects](const MWWorld::Ptr& object, HorizontalCompassMarkerKind kind)
                     {
-                        if (actor.isEmpty())
+                        if (object.isEmpty())
                             return;
-                        const auto [it, inserted] = actors.emplace(actor, kind);
+                        const auto [it, inserted] = objects.emplace(object, kind);
                         if (!inserted && static_cast<int>(kind) < static_cast<int>(it->second))
                             it->second = kind;
                     };
 
                     for (const MWWorld::Ptr& enemy : mechanics->getActorsFighting(player))
-                        addActor(enemy, HorizontalCompassMarkerKind::Enemy);
+                        addObject(enemy, HorizontalCompassMarkerKind::Enemy);
 
                     std::set<MWWorld::Ptr> allies;
                     mechanics->getActorsSidingWith(player, allies);
@@ -906,7 +941,7 @@ namespace MWGui
                     {
                         // Network players have their own blue marker; followers and summons stay green.
                         if (!mwmp::PlayerList::isDedicatedPlayer(ally))
-                            addActor(ally, HorizontalCompassMarkerKind::Ally);
+                            addObject(ally, HorizontalCompassMarkerKind::Ally);
                     }
 
                     if (mwmp::Main::isInitialized() && mwmp::Main::get().getLocalPlayer())
@@ -917,16 +952,32 @@ namespace MWGui
                         {
                             mwmp::DedicatedPlayer* remotePlayer = mwmp::PlayerList::getPlayer(guid);
                             if (remotePlayer)
-                                addActor(remotePlayer->getPtr(), HorizontalCompassMarkerKind::Player);
+                                addObject(remotePlayer->getPtr(), HorizontalCompassMarkerKind::Player);
                         }
                     }
+
+                    // Reuse the engine's native detection logic. The effective magnitude
+                    // already combines spells, abilities, potions and enchanted items, so
+                    // these compass markers obey Detect Key / Detect Enchantment / Detect Animal
+                    // ranges exactly like the local-map magic markers do.
+                    const auto addDetected = [world, &player, &addObject](MWBase::World::DetectionType type,
+                        HorizontalCompassMarkerKind kind)
+                    {
+                        std::vector<MWWorld::Ptr> detected;
+                        world->listDetectedReferences(player, detected, type);
+                        for (const MWWorld::Ptr& object : detected)
+                            addObject(object, kind);
+                    };
+                    addDetected(MWBase::World::Detect_Key, HorizontalCompassMarkerKind::DetectKey);
+                    addDetected(MWBase::World::Detect_Enchantment, HorizontalCompassMarkerKind::DetectEnchantment);
+                    addDetected(MWBase::World::Detect_Creature, HorizontalCompassMarkerKind::DetectCreature);
 
                     constexpr float markerRange = 8192.f;
                     constexpr float markerRangeSquared = markerRange * markerRange;
                     constexpr float pixelsPerDegree = 4.f;
                     constexpr int compassInnerPadding = 10;
                     const int markerWidth = mHorizontalCompassMarkers.empty()
-                        ? 22
+                        ? 32
                         : mHorizontalCompassMarkers.front().mWidget->getWidth();
                     const osg::Vec3f playerPosition = player.getRefData().getPosition().asVec3();
                     const int compassWidth = mHorizontalCompass->getWidth();
@@ -936,38 +987,84 @@ namespace MWGui
                     const float maximumVisibleDegrees = maximumMarkerOffset / pixelsPerDegree;
 
                     std::vector<HorizontalCompassMarkerCandidate> candidates;
-                    candidates.reserve(actors.size());
-                    for (const auto& [actor, kind] : actors)
+                    candidates.reserve(objects.size() + 24);
+
+                    const auto appendCandidate = [&](const MWWorld::Ptr& object, const std::string& identity,
+                        HorizontalCompassMarkerKind kind, float worldX, float worldY, float distanceSquared)
                     {
-                        if (actor == player || !actor.isInCell() || actor.getCell() != player.getCell())
-                            continue;
-                        if (actor.getRefData().getCount() <= 0 || !actor.getRefData().isEnabled()
-                            || actor.getRefData().isDeleted())
-                            continue;
-                        if (!actor.getClass().isActor() || actor.getClass().getCreatureStats(actor).isDead())
-                            continue;
-
-                        const osg::Vec3f offset = actor.getRefData().getPosition().asVec3() - playerPosition;
-                        const float distanceSquared = offset.x() * offset.x() + offset.y() * offset.y();
                         if (distanceSquared > markerRangeSquared || distanceSquared < 1.f)
-                            continue;
+                            return;
 
-                        const float bearing = std::atan2(offset.x(), offset.y());
+                        const float bearing = std::atan2(worldX - playerPosition.x(), worldY - playerPosition.y());
                         float relativeAngle = bearing - mHorizontalCompassAngle;
                         while (relativeAngle > osg::PI)
                             relativeAngle -= osg::PI * 2.f;
                         while (relativeAngle < -osg::PI)
                             relativeAngle += osg::PI * 2.f;
 
-                        // Skyrim-like edge behaviour: targets outside the visible compass arc remain
-                        // pinned to the nearest edge, so enemies behind the player are never lost.
+                        // Skyrim-like edge behaviour: markers outside the visible compass arc
+                        // stay pinned to the nearest edge rather than disappearing behind you.
                         const float relativeDegrees = osg::RadiansToDegrees(relativeAngle);
                         const float displayedDegrees = std::max(-maximumVisibleDegrees,
                             std::min(maximumVisibleDegrees, relativeDegrees));
                         const int left = static_cast<int>(std::lround(
                             compassCenter + displayedDegrees * pixelsPerDegree - markerWidth * 0.5f));
 
-                        candidates.push_back({ actor, left, distanceSquared, kind });
+                        HorizontalCompassMarkerCandidate candidate;
+                        candidate.mObject = object;
+                        candidate.mIdentity = identity;
+                        candidate.mLeft = left;
+                        candidate.mDistanceSquared = distanceSquared;
+                        candidate.mKind = kind;
+                        candidates.push_back(candidate);
+                    };
+
+                    for (const auto& [object, kind] : objects)
+                    {
+                        if (object == player || !object.isInCell())
+                            continue;
+                        if (object.getRefData().getCount() <= 0 || !object.getRefData().isEnabled()
+                            || object.getRefData().isDeleted())
+                            continue;
+
+                        const bool actorMarker = kind == HorizontalCompassMarkerKind::Enemy
+                            || kind == HorizontalCompassMarkerKind::Player
+                            || kind == HorizontalCompassMarkerKind::Ally
+                            || kind == HorizontalCompassMarkerKind::DetectCreature;
+                        if (actorMarker)
+                        {
+                            if (!object.getClass().isActor() || object.getClass().getCreatureStats(object).isDead())
+                                continue;
+                            // Combat/follower/network-player markers are cell-local. Detect Animal
+                            // may originate in an adjacent active exterior and is allowed to remain.
+                            if (kind != HorizontalCompassMarkerKind::DetectCreature
+                                && object.getCell() != player.getCell())
+                                continue;
+                        }
+
+                        const osg::Vec3f position = object.getRefData().getPosition().asVec3();
+                        const float dx = position.x() - playerPosition.x();
+                        const float dy = position.y() - playerPosition.y();
+                        appendCandidate(object, std::string(), kind, position.x(), position.y(), dx * dx + dy * dy);
+                    }
+
+                    // In interiors, always expose teleport doors on the horizontal compass.
+                    // These are precisely the doors that lead through to another cell.
+                    if (!player.getCell()->getCell()->isExterior())
+                    {
+                        std::vector<MWBase::World::DoorMarker> doors;
+                        world->getDoorMarkers(player.getCell(), doors);
+                        for (const MWBase::World::DoorMarker& door : doors)
+                        {
+                            const float dx = door.x - playerPosition.x();
+                            const float dy = door.y - playerPosition.y();
+                            std::ostringstream identity;
+                            identity << "door:" << door.name << ':'
+                                << static_cast<int>(std::lround(door.x)) << ':'
+                                << static_cast<int>(std::lround(door.y));
+                            appendCandidate(MWWorld::Ptr(), identity.str(), HorizontalCompassMarkerKind::Door,
+                                door.x, door.y, dx * dx + dy * dy);
+                        }
                     }
 
                     std::sort(candidates.begin(), candidates.end(),
@@ -985,22 +1082,27 @@ namespace MWGui
                         const HorizontalCompassMarkerCandidate& candidate = candidates[candidateIndex];
                         HorizontalCompassMarkerState* selectedState = nullptr;
 
-                        // Keep the same widget attached to the same actor to avoid marker swapping.
+                        // Keep the same widget attached to the same object/door so markers
+                        // do not swap positions or blink between 75 ms scans.
                         for (HorizontalCompassMarkerState& state : mHorizontalCompassMarkers)
                         {
-                            if (!state.mActor.isEmpty() && state.mActor == candidate.mActor)
+                            const bool sameObject = !candidate.mObject.isEmpty()
+                                && !state.mObject.isEmpty() && state.mObject == candidate.mObject;
+                            const bool sameIdentity = candidate.mObject.isEmpty()
+                                && state.mObject.isEmpty() && !candidate.mIdentity.empty()
+                                && state.mIdentity == candidate.mIdentity;
+                            if (sameObject || sameIdentity)
                             {
                                 selectedState = &state;
                                 break;
                             }
                         }
 
-                        // Prefer a completely free marker. Otherwise recycle the least visible fading marker.
                         if (!selectedState)
                         {
                             for (HorizontalCompassMarkerState& state : mHorizontalCompassMarkers)
                             {
-                                if (!state.mSeen && state.mActor.isEmpty())
+                                if (!state.mSeen && state.mObject.isEmpty() && state.mIdentity.empty())
                                 {
                                     selectedState = &state;
                                     break;
@@ -1020,16 +1122,20 @@ namespace MWGui
                         if (!selectedState)
                             continue;
 
-                        const bool newActor = selectedState->mActor.isEmpty()
-                            || selectedState->mActor != candidate.mActor;
+                        const bool newMarker = (!candidate.mObject.isEmpty()
+                                && (selectedState->mObject.isEmpty() || selectedState->mObject != candidate.mObject))
+                            || (candidate.mObject.isEmpty()
+                                && (selectedState->mIdentity != candidate.mIdentity || !selectedState->mObject.isEmpty()));
                         const float oldTargetLeft = selectedState->mTargetLeft;
-                        selectedState->mActor = candidate.mActor;
+                        selectedState->mObject = candidate.mObject;
+                        selectedState->mIdentity = candidate.mIdentity;
                         selectedState->mSeen = true;
                         selectedState->mTargetLeft = static_cast<float>(candidate.mLeft);
                         selectedState->mTargetAlpha = 1.f;
+                        selectedState->mWidget->setCaption(getHorizontalCompassMarkerCaption(candidate.mKind));
                         selectedState->mWidget->setTextColour(getHorizontalCompassMarkerColour(candidate.mKind));
 
-                        if (newActor)
+                        if (newMarker)
                         {
                             selectedState->mCurrentLeft = selectedState->mTargetLeft;
                             selectedState->mAlpha = 0.f;
@@ -1075,12 +1181,13 @@ namespace MWGui
                 const float maximumLeft = static_cast<float>(std::max(
                     compassInnerPadding, mHorizontalCompass->getWidth() - compassInnerPadding - markerWidth));
                 state.mCurrentLeft = std::max(minimumLeft, std::min(maximumLeft, state.mCurrentLeft));
-                state.mWidget->setPosition(static_cast<int>(std::lround(state.mCurrentLeft)), 4);
+                state.mWidget->setPosition(static_cast<int>(std::lround(state.mCurrentLeft)), 3);
                 state.mWidget->setAlpha(state.mAlpha);
             }
             else
             {
-                state.mActor = MWWorld::Ptr();
+                state.mObject = MWWorld::Ptr();
+                state.mIdentity.clear();
                 state.mAlpha = 0.f;
                 state.mWidget->setAlpha(0.f);
             }
