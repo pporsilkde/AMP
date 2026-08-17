@@ -2,6 +2,7 @@
 #define OPENMW_PLAYER_HPP
 
 #include <map>
+#include <set>
 #include <string>
 #include <chrono>
 #include <RakNetTypes.h>
@@ -73,6 +74,12 @@ public:
     CellController::TContainer *getCells();
     void sendToLoaded(mwmp::PlayerPacket *myPacket);
 
+    // Snapshot the current AOI recipients. This is also used to remember
+    // players that were sharing a cell immediately before a CellState unload.
+    std::set<RakNet::RakNetGUID> getLoadedPlayerGuids() const;
+    void queueCellChangeRecipient(RakNet::RakNetGUID guid);
+    void sendToQueuedCellChangeRecipients(mwmp::PlayerPacket *myPacket);
+
     void forEachLoaded(std::function<void(Player *pl, Player *other)> func);
 
 private:
@@ -81,6 +88,12 @@ private:
     int handshakeCounter;
     bool visibleToOthers;
     bool appearanceAuthoritative;
+
+    // A PlayerCellState packet can remove the old-cell observers before the
+    // following PlayerCellChange packet is processed. Keep those departed AOI
+    // recipients long enough to send them the cell change that despawns the
+    // remote representation from their old active cell.
+    std::set<RakNet::RakNetGUID> pendingCellChangeRecipients;
 
 };
 

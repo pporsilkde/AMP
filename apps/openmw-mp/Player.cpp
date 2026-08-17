@@ -176,6 +176,58 @@ void Player::sendToLoaded(mwmp::PlayerPacket *myPacket)
     }
 }
 
+std::set<RakNet::RakNetGUID> Player::getLoadedPlayerGuids() const
+{
+    std::set<RakNet::RakNetGUID> result;
+
+    for (auto cell : cells)
+    {
+        if (cell == nullptr)
+            continue;
+
+        for (auto pl : *cell)
+        {
+            if (pl == nullptr || pl == this || !pl->isVisibleToOthers())
+                continue;
+            result.insert(pl->guid);
+        }
+    }
+
+    return result;
+}
+
+void Player::queueCellChangeRecipient(RakNet::RakNetGUID guid)
+{
+    if (guid == this->guid || guid == RakNet::UNASSIGNED_CRABNET_GUID)
+        return;
+    pendingCellChangeRecipients.insert(guid);
+}
+
+void Player::sendToQueuedCellChangeRecipients(mwmp::PlayerPacket *myPacket)
+{
+    if (pendingCellChangeRecipients.empty())
+        return;
+
+    // If AOI overlap was restored before the CellChange arrived, sendToLoaded()
+    // has already covered that peer and we should not send a duplicate.
+    const std::set<RakNet::RakNetGUID> currentRecipients = getLoadedPlayerGuids();
+
+    for (const RakNet::RakNetGUID& recipientGuid : pendingCellChangeRecipients)
+    {
+        if (currentRecipients.count(recipientGuid) != 0)
+            continue;
+
+        Player* recipient = Players::getPlayer(recipientGuid);
+        if (recipient == nullptr || !recipient->isVisibleToOthers())
+            continue;
+
+        myPacket->setPlayer(this);
+        myPacket->Send(recipientGuid);
+    }
+
+    pendingCellChangeRecipients.clear();
+}
+
 void Player::forEachLoaded(std::function<void(Player *pl, Player *other)> func)
 {
     if (!visibleToOthers)

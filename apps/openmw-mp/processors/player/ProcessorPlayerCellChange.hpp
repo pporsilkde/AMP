@@ -37,6 +37,13 @@ namespace mwmp
                 // clients sharing a loaded-cell AOI may move this DedicatedPlayer.
                 packet.setPlayer(&player);
                 player.sendToLoaded(&packet);
+
+                // CellState is processed first during a scene transition. It may
+                // have already removed players that remained in the previous room
+                // from this player's loaded-cell AOI. Send the same reliable cell
+                // change to those departed observers so their DedicatedPlayer is
+                // moved out of the old active scene instead of remaining at the door.
+                player.sendToQueuedCellChangeRecipients(&packet);
             }
 
             LOG_APPEND(TimedLog::LOG_INFO, "- Finished processing ID_PLAYER_CELL_CHANGE", player.cell.getShortDescription().c_str());
