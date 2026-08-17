@@ -31,8 +31,6 @@ require("time")
 
 customEventHooks = require("customEventHooks")
 customCommandHooks = require("customCommandHooks")
-CoreArenaMP_DataManager = require("CoreArenaMP_DataManager")
-CoreArenaMP_BaseScript = require("CoreArenaMP_BaseScript")
 logicHandler = require("logicHandler")
 eventHandler = require("eventHandler")
 guiHelper = require("guiHelper")
@@ -200,9 +198,6 @@ function OnServerInit()
 
     if eventStatus.validDefaultHandler then
         friendlyFire.Initialize()
-        if not CoreArenaMP_BaseScript.Initialize() then
-            return
-        end
         logicHandler.InitializeWorld()
 
         for priorityLevel, recordStoreTypes in ipairs(config.recordStoreLoadOrder) do

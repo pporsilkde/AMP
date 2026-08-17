@@ -11,7 +11,6 @@
 #include <components/translation/translation.hpp>
 #include <components/openmw-mp/TimedLog.hpp>
 
-
 #include "../mwbase/world.hpp"
 #include "../mwbase/environment.hpp"
 #include "../mwbase/mechanicsmanager.hpp"
@@ -1698,7 +1697,6 @@ void ObjectList::sendScriptMemberShort()
 
 void ObjectList::sendContainer()
 {
-
     std::string debugMessage = "Sending ID_CONTAINER with action ";
     
     if (action == mwmp::BaseObjectList::SET)

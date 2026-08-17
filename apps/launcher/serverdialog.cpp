@@ -704,40 +704,15 @@ bool Launcher::ServerDialog::preparePortableServer(QString* errorMessage) const
     const QString bundledServerPath = serverBaseDir.filePath(QStringLiteral("server"));
     const QString bundledCore = QDir(bundledServerPath).filePath(QStringLiteral("scripts/serverCore.lua"));
     const QString bundledConfig = QDir(bundledServerPath).filePath(QStringLiteral("scripts/config.lua"));
-    const QString bundledDataManager = QDir(bundledServerPath).filePath(QStringLiteral("scripts/CoreArenaMP_DataManager.lua"));
-    const QString bundledBaseScript = QDir(bundledServerPath).filePath(QStringLiteral("scripts/CoreArenaMP_BaseScript.lua"));
     const QString bundledVersion = QDir(bundledServerPath).filePath(QStringLiteral("ARENAMP_CORE_VERSION.txt"));
 
     if (!QFileInfo::exists(bundledCore) || !QFileInfo::exists(bundledConfig)
-        || !QFileInfo::exists(bundledDataManager) || !QFileInfo::exists(bundledBaseScript)
         || !QFileInfo::exists(bundledVersion))
     {
         if (errorMessage)
             *errorMessage = tr("The bundled ArenaMP server core is incomplete: %1")
                 .arg(QDir::toNativeSeparators(bundledServerPath));
         return false;
-    }
-
-    // The CoreScripts expect these JSON directories to exist. Some archive
-    // tools omit empty directories, which previously made first registration
-    // fail because player/*.json could not be created. Recreate them on every
-    // server preparation; mkpath is idempotent.
-    const QDir bundledServerDir(bundledServerPath);
-    const QString serverDataPath = bundledServerDir.filePath(QStringLiteral("data"));
-    const QStringList requiredDataDirectories = {
-        QStringLiteral("player"), QStringLiteral("cell"), QStringLiteral("world"),
-        QStringLiteral("recordstore"), QStringLiteral("map"), QStringLiteral("custom")
-    };
-    for (const QString& directory : requiredDataDirectories)
-    {
-        const QString path = QDir(serverDataPath).filePath(directory);
-        if (!QDir().mkpath(path))
-        {
-            if (errorMessage)
-                *errorMessage = tr("Could not create ArenaMP server data directory: %1")
-                    .arg(QDir::toNativeSeparators(path));
-            return false;
-        }
     }
 
     const QString userDataPath = QDir(runtimeDataBasePath()).filePath(QStringLiteral("userdata"));

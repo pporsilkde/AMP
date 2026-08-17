@@ -49,7 +49,6 @@ option(BUILD_BENCHMARKS         "Build benchmarks with Google Benchmark" OFF)
 option(BUILD_OPENMW_MP          "Build OpenMW-MP" ON)
 option(BUILD_BROWSER            "Build tes3mp Server Browser" ON)
 option(BUILD_MASTER             "Build tes3mp Master Server" ON)
-option(OPENMW_USE_KTX2          "Enable native KTX2/Basis Universal texture loading" ON)
 
 set(OpenGL_GL_PREFERENCE LEGACY)  # Use LEGACY as we use GL2; GLNVD is for GL3 and up.
 

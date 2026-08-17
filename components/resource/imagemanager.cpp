@@ -7,9 +7,6 @@
 #include <components/vfs/manager.hpp>
 
 #include "objectcache.hpp"
-#ifdef OPENMW_USE_KTX2
-#include "ktx2loader.hpp"
-#endif
 
 #ifdef OSG_LIBRARY_STATIC
 // This list of plugins should match with the list in the top-level CMakelists.txt.
@@ -64,13 +61,9 @@ namespace Resource
         switch(image->getPixelFormat())
         {
             case(GL_COMPRESSED_RGB_S3TC_DXT1_EXT):
-            case(GL_COMPRESSED_SRGB_S3TC_DXT1_EXT):
             case(GL_COMPRESSED_RGBA_S3TC_DXT1_EXT):
-            case(GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT):
             case(GL_COMPRESSED_RGBA_S3TC_DXT3_EXT):
-            case(GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT):
             case(GL_COMPRESSED_RGBA_S3TC_DXT5_EXT):
-            case(GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT):
             {
                 osg::GLExtensions* exts = osg::GLExtensions::Get(0, false);
                 if (exts && !exts->isTextureCompressionS3TCSupported
@@ -114,53 +107,16 @@ namespace Resource
             std::string ext;
             if (extPos != std::string::npos && extPos+1 < normalized.size())
                 ext = normalized.substr(extPos+1);
-            osg::ref_ptr<osg::Image> image;
-            osgDB::ReaderWriter* reader = nullptr;
-#ifdef OPENMW_USE_KTX2
-            if (ext == "ktx2")
+            osgDB::ReaderWriter* reader = osgDB::Registry::instance()->getReaderWriterForExtension(ext);
+            if (!reader)
             {
-                std::string ktxError;
-                image = loadKtx2Image(*stream, normalized, ktxError);
-                if (!image)
-                {
-                    Log(Debug::Error) << "Error loading native KTX2 " << filename << ": " << ktxError;
-
-                    // A broken/incompatible converted texture must never make a
-                    // mod unusable. Prefer the original DDS with the same base
-                    // name when it is still installed.
-                    const std::string::size_type dot = normalized.find_last_of('.');
-                    if (dot != std::string::npos)
-                    {
-                        static const char* fallbackExtensions[] = { ".dds", ".tga", ".png", ".bmp", ".jpeg", ".jpg" };
-                        for (const char* fallbackExtension : fallbackExtensions)
-                        {
-                            std::string fallback = normalized.substr(0, dot) + fallbackExtension;
-                            if (mVFS->exists(fallback))
-                            {
-                                Log(Debug::Warning) << "Falling back from KTX2 to " << fallback;
-                                return getImage(fallback);
-                            }
-                        }
-                    }
-
-                    mCache->addEntryToObjectCache(normalized, mWarningImage);
-                    return mWarningImage;
-                }
-            }
-            else
-#endif
-            {
-                reader = osgDB::Registry::instance()->getReaderWriterForExtension(ext);
-                if (!reader)
-                {
-                    Log(Debug::Error) << "Error loading " << filename << ": no readerwriter for '" << ext << "' found";
-                    mCache->addEntryToObjectCache(normalized, mWarningImage);
-                    return mWarningImage;
-                }
+                Log(Debug::Error) << "Error loading " << filename << ": no readerwriter for '" << ext << "' found";
+                mCache->addEntryToObjectCache(normalized, mWarningImage);
+                return mWarningImage;
             }
 
             bool killAlpha = false;
-            if (reader && reader->supportedExtensions().count("tga"))
+            if (reader->supportedExtensions().count("tga"))
             {
                 // Morrowind ignores the alpha channel of 16bpp TGA files even when the header says not to
                 unsigned char header[18];
@@ -182,17 +138,15 @@ namespace Resource
                 stream->seekg(0);
             }
 
-            if (!image)
+            osgDB::ReaderWriter::ReadResult result = reader->readImage(*stream, mOptions);
+            if (!result.success())
             {
-                osgDB::ReaderWriter::ReadResult result = reader->readImage(*stream, mOptions);
-                if (!result.success())
-                {
-                    Log(Debug::Error) << "Error loading " << filename << ": " << result.message() << " code " << result.status();
-                    mCache->addEntryToObjectCache(normalized, mWarningImage);
-                    return mWarningImage;
-                }
-                image = result.getImage();
+                Log(Debug::Error) << "Error loading " << filename << ": " << result.message() << " code " << result.status();
+                mCache->addEntryToObjectCache(normalized, mWarningImage);
+                return mWarningImage;
             }
+
+            osg::ref_ptr<osg::Image> image = result.getImage();
 
             image->setFileName(normalized);
             if (!checkSupported(image, filename))

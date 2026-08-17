@@ -4,7 +4,6 @@
 #include <QAbstractSocket>
 #include <QCheckBox>
 #include <QComboBox>
-#include <QDateTime>
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QFile>
@@ -19,7 +18,6 @@
 #include <QPushButton>
 #include <QPlainTextEdit>
 #include <QRegularExpression>
-#include <QSet>
 #include <QSignalBlocker>
 #include <QStandardPaths>
 #include <QSpinBox>
@@ -56,61 +54,6 @@ namespace
         QString result = text;
         result.replace(match.capturedStart(3), match.capturedLength(3), value);
         return result;
-    }
-
-    bool isPortableScalarConfigValue(QString value)
-    {
-        value = value.trimmed();
-        if (value.isEmpty())
-            return false;
-
-        // The launcher only migrates scalar user settings between bundled
-        // CoreScript versions. Tables/functions remain owned by the bundled
-        // template so a server update cannot be silently rolled back by an
-        // older userdata/server-config.lua.
-        static const QRegularExpression scalarPattern(QStringLiteral(
-            "^(?:true|false|[-+]?(?:\\d+(?:\\.\\d*)?|\\.\\d+)|\"(?:[^\"\\\\]|\\\\.)*\"|tes3mp\\.GetDataPath\\(\\))$"));
-        return scalarPattern.match(value).hasMatch();
-    }
-
-    QString mergePersistentConfigOntoBundledTemplate(const QString& bundledTemplate, const QString& persistentText)
-    {
-        if (bundledTemplate.isEmpty())
-            return persistentText;
-        if (persistentText.isEmpty())
-            return bundledTemplate;
-
-        QString merged = bundledTemplate;
-        QStringList preservedUnknownAssignments;
-        const QRegularExpression assignmentPattern(QStringLiteral(
-            "(^|\\n)\\s*config\\.([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*([^\\r\\n]+)"));
-        QRegularExpressionMatchIterator it = assignmentPattern.globalMatch(persistentText);
-        QSet<QString> seenKeys;
-
-        while (it.hasNext())
-        {
-            const QRegularExpressionMatch match = it.next();
-            const QString key = match.captured(2);
-            const QString value = match.captured(3).trimmed();
-            if (seenKeys.contains(key) || !isPortableScalarConfigValue(value))
-                continue;
-            seenKeys.insert(key);
-
-            QString bundledValue;
-            if (findConfigAssignment(merged, key, &bundledValue))
-                merged = replaceConfigAssignment(merged, key, value);
-            else
-                preservedUnknownAssignments.append(QStringLiteral("config.%1 = %2").arg(key, value));
-        }
-
-        if (!preservedUnknownAssignments.isEmpty())
-        {
-            merged += QStringLiteral("\n\n-- ArenaMP: scalar custom settings preserved from userdata/server-config.lua\n");
-            merged += preservedUnknownAssignments.join(QLatin1Char('\n'));
-            merged += QLatin1Char('\n');
-        }
-
-        return merged;
     }
 
     void loadLineEdit(QLineEdit* widget, const QString& text, const QString& key)
@@ -822,67 +765,41 @@ void Launcher::PlayPage::loadServerSettings()
     serverSettingsPathLabel->setText(tr("Persistent: %1  ->  Runtime: %2")
         .arg(QDir::toNativeSeparators(persistentPath), QDir::toNativeSeparators(runtimePath)));
 
-    // Always treat the newly bundled config.lua as the template.  Older
-    // launcher builds copied userdata/server-config.lua over it wholesale,
-    // which could erase new CoreScript settings/functions after an update.
-    // We now migrate only scalar user-editable config.* values onto the new
-    // template and then synchronize both copies.
-    QString bundledText;
-    QFile runtimeFile(runtimePath);
-    if (runtimeFile.exists() && runtimeFile.open(QIODevice::ReadOnly | QIODevice::Text))
-    {
-        QTextStream stream(&runtimeFile);
-        stream.setCodec("UTF-8");
-        bundledText = stream.readAll();
-        runtimeFile.close();
-    }
-
-    QString persistentText;
-    QFile persistentFile(persistentPath);
-    if (persistentFile.exists() && persistentFile.open(QIODevice::ReadOnly | QIODevice::Text))
-    {
-        QTextStream stream(&persistentFile);
-        stream.setCodec("UTF-8");
-        persistentText = stream.readAll();
-        persistentFile.close();
-    }
-
-    if (bundledText.isEmpty() && persistentText.isEmpty())
+    // The userdata copy is authoritative once it exists. The packaged
+    // server/scripts/config.lua can be replaced by an update or deployment,
+    // so using it as the only settings store caused user changes to appear to
+    // reset to defaults on the next launch.
+    QString sourcePath = QFileInfo::exists(persistentPath) ? persistentPath : runtimePath;
+    QFile file(sourcePath);
+    if (!file.exists())
     {
         serverSettingsEditor->setPlainText(QString());
         setServerSettingsStatus(tr("config.lua not found"), true);
         return;
     }
 
-    const QString text = bundledText.isEmpty()
-        ? persistentText
-        : mergePersistentConfigOntoBundledTemplate(bundledText, persistentText);
-
-    // If a new bundled CoreScript caused a migration, keep the exact previous
-    // persistent file next to userdata/server-config.lua before overwriting it.
-    // This preserves hand-edited tables/functions that are intentionally not
-    // auto-merged into a newer server core. Once migration succeeds the files
-    // are identical, so normal launcher starts do not create backup spam.
-    if (!persistentText.isEmpty() && !bundledText.isEmpty() && text != persistentText)
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
     {
-        const QFileInfo persistentInfo(persistentPath);
-        const QString stamp = QDateTime::currentDateTimeUtc().toString(QStringLiteral("yyyyMMdd-HHmmss"));
-        const QString backupPath = persistentInfo.dir().filePath(
-            QStringLiteral("server-config.before-core-update-%1.lua").arg(stamp));
-        QFile::copy(persistentPath, backupPath);
+        setServerSettingsStatus(tr("Could not open config.lua"), true);
+        return;
     }
+
+    QTextStream stream(&file);
+    stream.setCodec("UTF-8");
+    const QString text = stream.readAll();
+    file.close();
 
     serverSettingsEditor->setPlainText(text);
     populateFormFromConfig(text);
 
     QString syncError;
-    const bool persistentOk = writeServerConfigFile(persistentPath, text, &syncError);
-    const bool runtimeOk = writeServerConfigFile(runtimePath, text, &syncError);
+    const bool persistentOk = sourcePath == persistentPath
+        || writeServerConfigFile(persistentPath, text, &syncError);
+    const bool runtimeOk = sourcePath == runtimePath
+        || writeServerConfigFile(runtimePath, text, &syncError);
 
     if (!persistentOk || !runtimeOk)
         setServerSettingsStatus(tr("Loaded settings, but could not synchronize the persistent/runtime copy: %1").arg(syncError), true);
-    else if (!persistentText.isEmpty() && !bundledText.isEmpty())
-        setServerSettingsStatus(tr("Updated server core and preserved user settings"));
     else
         setServerSettingsStatus(tr("Loaded persistent server settings"));
 }

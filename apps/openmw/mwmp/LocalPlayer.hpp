@@ -2,7 +2,6 @@
 #define OPENMW_LOCALPLAYER_HPP
 
 #include <string>
-#include <chrono>
 
 #include <components/openmw-mp/Base/BasePlayer.hpp>
 #include "../mwmechanics/activespells.hpp"
@@ -145,8 +144,6 @@ namespace mwmp
         void sendWalkAnimationState();
         void updateWalkAnimationSync(float dt);
         void updateInteractionAnimation(float dt);
-        bool validateOutgoingPosition();
-        void resetOutgoingPositionSecurity();
 
         bool mPersistentAnimationActive;
         bool mPersistentAnimationPlaying;

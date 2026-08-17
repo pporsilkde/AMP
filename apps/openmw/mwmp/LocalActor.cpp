@@ -318,7 +318,7 @@ void LocalActor::sendSpellsActiveAddition(const std::string id, bool isStackingS
 
     const MWWorld::Ptr& caster = MWBase::Environment::get().getWorld()->searchPtrViaActorId(params.mCasterActorId);
 
-    mwmp::ActiveSpell spell{};
+    mwmp::ActiveSpell spell;
     spell.id = id;
     spell.isStackingSpell = isStackingSpell;
     spell.caster = MechanicsHelper::getTarget(caster);
@@ -345,7 +345,7 @@ void LocalActor::sendSpellsActiveRemoval(const std::string id, bool isStackingSp
 
     spellsActiveChanges.activeSpells.clear();
 
-    mwmp::ActiveSpell spell{};
+    mwmp::ActiveSpell spell;
     spell.id = id;
     spell.isStackingSpell = isStackingSpell;
     spell.timestampDay = timestamp.getDay();

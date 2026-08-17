@@ -1,7 +1,6 @@
 require("config")
 fileHelper = require("fileHelper")
 tableHelper = require("tableHelper")
-local CoreArenaMP_DataManager = require("CoreArenaMP_DataManager")
 local BaseCell = require("cell.base")
 
 local Cell = class("Cell", BaseCell)
@@ -23,7 +22,7 @@ function Cell:__init(cellDescription)
 end
 
 function Cell:CreateEntry()
-    self.hasEntry = CoreArenaMP_DataManager.Save("cell/" .. self.entryFile, self.data)
+    self.hasEntry = jsonInterface.save("cell/" .. self.entryFile, self.data)
 
     if self.hasEntry then
         tes3mp.LogMessage(enumerations.log.INFO, "Successfully created JSON file for cell " .. self.entryName)
@@ -36,18 +35,18 @@ end
 function Cell:SaveToDrive()
     if self.hasEntry then
         tableHelper.cleanNils(self.data.packets)
-        CoreArenaMP_DataManager.Save("cell/" .. self.entryFile, self.data, config.cellKeyOrder)
+        jsonInterface.save("cell/" .. self.entryFile, self.data, config.cellKeyOrder)
     end
 end
 
 function Cell:QuicksaveToDrive()
     if self.hasEntry then
-        CoreArenaMP_DataManager.Quicksave("cell/" .. self.entryFile, self.data)
+        jsonInterface.quicksave("cell/" .. self.entryFile, self.data)
     end
 end
 
 function Cell:LoadFromDrive()
-    self.data = CoreArenaMP_DataManager.Load("cell/" .. self.entryFile)
+    self.data = jsonInterface.load("cell/" .. self.entryFile)
 
     if self.data == nil then
         tes3mp.LogMessage(enumerations.log.ERROR, "cell/" .. self.entryFile .. " cannot be read!")

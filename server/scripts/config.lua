@@ -30,7 +30,7 @@ config.maxClientsPerIP = 3
 -- 101 to 150 = Grandmaster 
 -- 151 to 200 = Agent
 -- 201+ = Nerevarine (absurdly difficult!)
-config.difficulty = 200
+config.difficulty = 201
 
 -- ArenaMP engine mechanics enforced for every connected client
 --
@@ -224,10 +224,10 @@ config.defaultTimeTable = { year = 427, month = 7, day = 16, hour = 9,
 
 -- The chat window instructions that show up when players join the server.
 -- Keep the original compact ArenaMP/Nirn formatting here so it is easy to edit.
-config.chatWindowInstructions = color.SkyBlue .. "[Написать в чат - " .. color.Turquoise .. "Y" .. color.SkyBlue .. "] [Скрыть чат - " .. color.Turquoise .. "F5" .. color.SkyBlue .. "] [Все доступные команды  - " .. color.Turquoise .. "/help" .. color.SkyBlue .. "]\n" .. color.Green .. "Вопросы? -> morrowind.site\n"
+config.chatWindowInstructions = color.SkyBlue .. "[Написать в чат - " .. color.Turquoise .. "Y" .. color.SkyBlue .. "] [Скрыть чат - " .. color.Turquoise .. "F2" .. color.SkyBlue .. "] [Все доступные команды  - " .. color.Turquoise .. "/help" .. color.SkyBlue .. "]\n"
 
 -- English equivalent used only for EN clients when per-client localization is enabled.
-config.chatWindowInstructionsEN = color.SkyBlue .. "[Chat - " .. color.Turquoise .. "Y" .. color.SkyBlue .. "] [Hide chat - " .. color.Turquoise .. "F5" .. color.SkyBlue .. "] [All available commands  - " .. color.Turquoise .. "/help" .. color.SkyBlue .. "]\n" .. color.Green .. "Questions? -> morrowind.site\n"
+config.chatWindowInstructionsEN = color.SkyBlue .. "[Chat - " .. color.Turquoise .. "Y" .. color.SkyBlue .. "] [Hide chat - " .. color.Turquoise .. "F2" .. color.SkyBlue .. "] [All available commands  - " .. color.Turquoise .. "/help" .. color.SkyBlue .. "]\n"
 
 -- Compact pre-login greeting shown before the password/registration dialog.
 -- Placeholders: {name} = player name, {count} = online count, {seconds} = login timeout.
