@@ -56,6 +56,13 @@
 
 namespace
 {
+    // The location name temporarily replaces the clock below the compass.
+    // Only the time animates: fade it out, show the location steadily, then fade time back in.
+    constexpr float sCompassInfoFadeDuration = 0.35f;
+    constexpr float sCompassLocationHoldDuration = 4.f;
+    constexpr float sCompassInfoSequenceDuration
+        = sCompassInfoFadeDuration * 2.f + sCompassLocationHoldDuration;
+
     std::string getWeaponSpellBoxMode()
     {
         const auto modeKey = std::make_pair(std::string("GUI"), std::string("weapon spell box mode"));
@@ -268,6 +275,8 @@ namespace MWGui
         , mCellNameScrolling(false)
         , mWeaponSpellTimer(0.f)
         , mGameTimeUpdateTimer(0.f)
+        , mGameTimeCaption("00:00")
+        , mGameTimeShowingCellName(false)
         , mMapVisible(true)
         , mMinimapBaseVisible(true)
         , mEffectBaseVisible(true)
@@ -360,6 +369,19 @@ namespace MWGui
         getWidget(mCellNameBox, "CellName");
         getWidget(mWeaponSpellBox, "WeaponSpellName");
         getWidget(mGameTimeBox, "GameTime");
+        if (mGameTimeBox)
+        {
+            // The clock/location line is a single, larger caption below the compass.
+            mGameTimeBox->setFontHeight(18);
+            mGameTimeBox->setTextAlign(MyGUI::Align::Center);
+            mGameTimeBox->setCaption(mGameTimeCaption);
+        }
+        // The old standalone cell-name line is intentionally retired. The location
+        // now uses the same caption as the clock, so the two never overlap.
+        if (mCellNameClip)
+            mCellNameClip->setVisible(false);
+        if (mCellNameBox)
+            mCellNameBox->setVisible(false);
 
         getWidget(mHorizontalCompass, "HorizontalCompass");
         constexpr int horizontalCompassTickCount = 11;
@@ -410,6 +432,7 @@ namespace MWGui
         mMainWidget->eventMouseMove += MyGUI::newDelegate(this, &HUD::onWorldMouseOver);
         mMainWidget->eventMouseLostFocus += MyGUI::newDelegate(this, &HUD::onWorldMouseLostFocus);
 
+        updatePositions();
         mSpellIcons = new SpellIcons();
     }
 
@@ -620,31 +643,16 @@ namespace MWGui
     {
         if (mCellName != cellName)
         {
-            mCellNameTimer = 5.0f;
             mCellName = cellName;
+            mCellNameTimer = Settings::Manager::getBool("show cell name", "HUD")
+                ? sCompassInfoSequenceDuration : 0.f;
 
-            mCellNameBox->setCaptionWithReplacing("#{sCell=" + mCellName + "}");
-
-            const int clipWidth = mCellNameClip ? mCellNameClip->getWidth() : mCellNameBox->getWidth();
-            const int clipHeight = mCellNameClip ? mCellNameClip->getHeight() : mCellNameBox->getHeight();
-            const int textWidth = mCellNameBox->getTextSize().width + 8;
-            mCellNameScrolling = textWidth > clipWidth;
-            mCellNameScrollOffset = 0.f;
-            mCellNameScrollPause = mCellNameScrolling ? 0.75f : 0.f;
-            mCellNameScrollDirection = -1;
-
-            if (mCellNameScrolling)
-            {
-                mCellNameBox->setTextAlign(MyGUI::Align::Left | MyGUI::Align::VCenter);
-                mCellNameBox->setCoord(0, 0, textWidth, clipHeight);
-            }
-            else
-            {
-                mCellNameBox->setTextAlign(MyGUI::Align::Center);
-                mCellNameBox->setCoord(0, 0, clipWidth, clipHeight);
-            }
-
-            mCellNameBox->setVisible(mMapVisible && Settings::Manager::getBool("show cell name", "HUD"));
+            // Cell names are now presented in the clock line under the compass.
+            // Keep the legacy layout widgets hidden so there is only one HUD caption.
+            if (mCellNameClip)
+                mCellNameClip->setVisible(false);
+            if (mCellNameBox)
+                mCellNameBox->setVisible(false);
         }
     }
 
@@ -673,8 +681,7 @@ namespace MWGui
         }
         if (mCompass)
             mCompass->setVisible(showMinimap);
-        if (mGameTimeBox)
-            mGameTimeBox->setVisible(Settings::Manager::getBool("show game time", "HUD"));
+        // Clock/location visibility and timed replacement are handled together below.
         if (mEffectBox)
             mEffectBox->setVisible(mEffectBaseVisible && Settings::Manager::getBool("show status effects", "HUD"));
         if (mFpsBox)
@@ -685,59 +692,9 @@ namespace MWGui
         updateHorizontalCompass();
         updateHorizontalCompassMarkers(dt);
 
-        if (mGameTimeBox && mGameTimeBox->getVisible())
-        {
-            mGameTimeUpdateTimer -= dt;
-            if (mGameTimeUpdateTimer <= 0.f)
-            {
-                const float gameHour = MWBase::Environment::get().getWorld()->getTimeStamp().getHour();
-                int hours = static_cast<int>(std::floor(gameHour)) % 24;
-                int minutes = static_cast<int>(std::floor((gameHour - std::floor(gameHour)) * 60.f + 0.5f));
-                if (minutes >= 60)
-                {
-                    minutes = 0;
-                    hours = (hours + 1) % 24;
-                }
+        updateGameTimeAndCellName(dt);
 
-                std::ostringstream stream;
-                stream << std::setfill('0') << std::setw(2) << hours << ':'
-                       << std::setfill('0') << std::setw(2) << minutes;
-                mGameTimeBox->setCaption(stream.str());
-
-                mGameTimeUpdateTimer = 0.2f;
-            }
-        }
-
-        mCellNameTimer -= dt;
         mWeaponSpellTimer -= dt;
-        if (mCellNameTimer < 0 || !Settings::Manager::getBool("show cell name", "HUD"))
-            mCellNameBox->setVisible(false);
-        else if (mCellNameBox->getVisible() && mCellNameScrolling && mCellNameClip)
-        {
-            if (mCellNameScrollPause > 0.f)
-                mCellNameScrollPause = std::max(0.f, mCellNameScrollPause - dt);
-            else
-            {
-                constexpr float cellNameScrollSpeed = 34.f;
-                mCellNameScrollOffset += mCellNameScrollDirection * cellNameScrollSpeed * std::max(0.f, dt);
-                const float minimumOffset = static_cast<float>(mCellNameClip->getWidth() - mCellNameBox->getWidth());
-
-                if (mCellNameScrollOffset <= minimumOffset)
-                {
-                    mCellNameScrollOffset = minimumOffset;
-                    mCellNameScrollDirection = 1;
-                    mCellNameScrollPause = 0.75f;
-                }
-                else if (mCellNameScrollOffset >= 0.f)
-                {
-                    mCellNameScrollOffset = 0.f;
-                    mCellNameScrollDirection = -1;
-                    mCellNameScrollPause = 0.75f;
-                }
-
-                mCellNameBox->setPosition(static_cast<int>(std::lround(mCellNameScrollOffset)), 0);
-            }
-        }
         if (mWeaponSpellTimer < 0)
             mWeaponSpellBox->setVisible(false);
 
@@ -822,6 +779,104 @@ namespace MWGui
             drawState == MWMechanics::DrawState_Spell, mSpellBox);
         updateAutoHideBar(mFatigueFrame, mStaminaBarState, dt,
             drawState == MWMechanics::DrawState_Weapon, mWeapBox);
+    }
+
+    void HUD::updateGameTimeAndCellName(float dt)
+    {
+        if (!mGameTimeBox)
+            return;
+
+        dt = std::max(0.f, dt);
+        const bool showTime = Settings::Manager::getBool("show game time", "HUD");
+        const bool showLocation = Settings::Manager::getBool("show cell name", "HUD");
+
+        // Keep the underlying time string current even while the location name is shown,
+        // so the clock is correct immediately when it fades back in.
+        mGameTimeUpdateTimer -= dt;
+        if (mGameTimeUpdateTimer <= 0.f)
+        {
+            const float gameHour = MWBase::Environment::get().getWorld()->getTimeStamp().getHour();
+            int hours = static_cast<int>(std::floor(gameHour)) % 24;
+            int minutes = static_cast<int>(std::floor((gameHour - std::floor(gameHour)) * 60.f + 0.5f));
+            if (minutes >= 60)
+            {
+                minutes = 0;
+                hours = (hours + 1) % 24;
+            }
+
+            std::ostringstream stream;
+            stream << std::setfill('0') << std::setw(2) << hours << ':'
+                   << std::setfill('0') << std::setw(2) << minutes;
+            mGameTimeCaption = stream.str();
+            mGameTimeUpdateTimer = 0.2f;
+        }
+
+        if (!showLocation)
+            mCellNameTimer = 0.f;
+        else if (mCellNameTimer > 0.f)
+            mCellNameTimer = std::max(0.f, mCellNameTimer - dt);
+
+        bool displayLocation = false;
+        float alpha = 1.f;
+        const bool locationSequence = showLocation && !mCellName.empty() && mCellNameTimer > 0.f;
+
+        if (locationSequence)
+        {
+            // If the clock itself is disabled, the location can appear immediately; there
+            // is no visible time caption to fade away first.
+            if (!showTime)
+            {
+                displayLocation = true;
+                alpha = 1.f;
+            }
+            else
+            {
+                const float elapsed = sCompassInfoSequenceDuration - mCellNameTimer;
+                const float fade = sCompassInfoFadeDuration;
+                const float locationEnd = fade + sCompassLocationHoldDuration;
+
+                if (elapsed < fade)
+                {
+                    // Phase 1: only the clock fades out.
+                    displayLocation = false;
+                    alpha = 1.f - elapsed / fade;
+                }
+                else if (elapsed < locationEnd)
+                {
+                    // Location itself is steady and fully opaque.
+                    displayLocation = true;
+                    alpha = 1.f;
+                }
+                else
+                {
+                    // Switch back to the clock at zero alpha and fade only the time in.
+                    displayLocation = false;
+                    alpha = (elapsed - locationEnd) / fade;
+                }
+            }
+        }
+
+        alpha = std::max(0.f, std::min(1.f, alpha));
+        const bool visible = displayLocation ? showLocation : showTime;
+        mGameTimeBox->setVisible(visible);
+        mGameTimeBox->setAlpha(visible ? alpha : 0.f);
+
+        if (!visible)
+            return;
+
+        if (displayLocation)
+        {
+            if (!mGameTimeShowingCellName)
+            {
+                mGameTimeBox->setCaptionWithReplacing("#{sCell=" + mCellName + "}");
+                mGameTimeShowingCellName = true;
+            }
+        }
+        else
+        {
+            mGameTimeBox->setCaption(mGameTimeCaption);
+            mGameTimeShowingCellName = false;
+        }
     }
 
     void HUD::setPlayerDir(float x, float y)
@@ -1048,14 +1103,19 @@ namespace MWGui
                         appendCandidate(object, std::string(), kind, position.x(), position.y(), dx * dx + dy * dy);
                     }
 
-                    // In interiors, always expose teleport doors on the horizontal compass.
-                    // These are precisely the doors that lead through to another cell.
-                    if (!player.getCell()->getCell()->isExterior())
+                    // Door markers are now an exterior-navigation aid. While outdoors,
+                    // show nearby teleport doors that lead into interiors (buildings, caves, etc.).
+                    // Interior-to-interior/exterior door clutter is intentionally omitted.
+                    if (player.getCell()->getCell()->isExterior())
                     {
                         std::vector<MWBase::World::DoorMarker> doors;
                         world->getDoorMarkers(player.getCell(), doors);
                         for (const MWBase::World::DoorMarker& door : doors)
                         {
+                            // mPaged == false identifies an interior destination.
+                            if (door.dest.mPaged)
+                                continue;
+
                             const float dx = door.x - playerPosition.x();
                             const float dy = door.y - playerPosition.y();
                             std::ostringstream identity;
@@ -1543,14 +1603,30 @@ namespace MWGui
         mSneakBox->setPosition((viewSize.width - mSneakBox->getWidth()) / 2,
                                (viewSize.height - mSneakBox->getHeight()) / 2);
 
+        if (mHorizontalCompass && mGameTimeBox)
+        {
+            // One centered information line directly under the horizontal compass.
+            // It is deliberately wider than the old clock so long location names fit.
+            const int infoWidth = std::max(360, mHorizontalCompass->getWidth());
+            constexpr int infoHeight = 28;
+            constexpr int infoGap = 1;
+            const int infoLeft = (viewSize.width - infoWidth) / 2;
+            const int infoTop = mHorizontalCompass->getTop() + mHorizontalCompass->getHeight() + infoGap;
+            mGameTimeBox->setCoord(infoLeft, infoTop, infoWidth, infoHeight);
+            mGameTimeBox->setFontHeight(18);
+            mGameTimeBox->setTextAlign(MyGUI::Align::Center);
+        }
+        if (mCellNameClip)
+            mCellNameClip->setVisible(false);
+        if (mCellNameBox)
+            mCellNameBox->setVisible(false);
+
         // effect box can have variable width -> variable left coordinate
         int effectsDx = 0;
         if (!mMinimapBox->getVisible ())
             effectsDx = mEffectBoxBaseRight - mMinimapBoxBaseRight;
 
         mMapVisible = mMinimapBox->getVisible ();
-        if (!mMapVisible)
-            mCellNameBox->setVisible(false);
 
         mEffectBox->setPosition((viewSize.width - mEffectBoxBaseRight) - mEffectBox->getWidth() + effectsDx, mEffectBox->getTop());
     }
@@ -1774,9 +1850,8 @@ namespace MWGui
             const int panelLeft = std::max(horizontalMargin,
                 std::min(stableCentreX - totalWidth / 2, maximumLeft));
 
-            // Keep the target panel below both the compass and the fixed location-name
-            // region. Reserving the location region even while its text is hidden avoids
-            // a vertical jump whenever the city/cell name appears or fades out.
+            // Keep the target panel below the compass and its shared clock/location line.
+            // Reserving the line even during a fade prevents the target panel from jumping.
             int baseY = verticalMargin;
             if (mHorizontalCompass && mHorizontalCompass->getVisible())
             {
@@ -1785,12 +1860,11 @@ namespace MWGui
                 baseY = std::max(baseY,
                     compassCoord.top + compassCoord.height + targetPanelCompassGap);
             }
-            if (mCellNameClip)
+            if (mGameTimeBox)
             {
-                const MyGUI::IntCoord cellNameCoord = mCellNameClip->getAbsoluteCoord();
-                constexpr int targetPanelCellNameGap = 5;
-                baseY = std::max(baseY,
-                    cellNameCoord.top + cellNameCoord.height + targetPanelCellNameGap);
+                const MyGUI::IntCoord infoCoord = mGameTimeBox->getAbsoluteCoord();
+                constexpr int targetPanelInfoGap = 5;
+                baseY = std::max(baseY, infoCoord.top + infoCoord.height + targetPanelInfoGap);
             }
             baseY = std::min(baseY, maximumTop);
 

@@ -128,6 +128,8 @@ namespace MWGui
         std::string mSpellName;
         float mWeaponSpellTimer;
         float mGameTimeUpdateTimer;
+        std::string mGameTimeCaption;
+        bool mGameTimeShowingCellName;
 
         bool mMapVisible;
         bool mMinimapBaseVisible;
@@ -197,6 +199,7 @@ namespace MWGui
         void updateFocusedTargetPanel(float dt);
 
         void updatePositions();
+        void updateGameTimeAndCellName(float dt);
         void updateHorizontalCompass();
         void updateHorizontalCompassMarkers(float dt);
     };
