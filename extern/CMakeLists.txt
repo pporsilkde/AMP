@@ -18,6 +18,10 @@ endmacro()
 # CoreArenaMP native KTX2 support. KTX-Software 4.4.2 is pinned because it is
 # the stable libktx line used by this legacy OpenMW/TES3MP branch. Only the
 # read/transcode library is built; tools, tests and GPU upload helpers are off.
+# KTX1 internals stay enabled because libktx_read's generic ktxTexture_* API
+# (used by the KTX2 loader) references the KTX1 constructor from texture.c
+# even when ArenaMP itself accepts only .ktx2 assets. Disabling KTX1 causes
+# MSVC LNK2001: ktxTexture1_constructFromStreamAndHeader.
 if(OPENMW_USE_KTX2 AND (BUILD_OPENMW OR BUILD_OPENCS))
     if(CMAKE_VERSION VERSION_LESS 3.22)
         message(FATAL_ERROR "OPENMW_USE_KTX2 requires CMake 3.22 or newer (KTX-Software 4.4.2).")
@@ -29,7 +33,7 @@ if(OPENMW_USE_KTX2 AND (BUILD_OPENMW OR BUILD_OPENCS))
     set(KTX_FEATURE_DOC OFF CACHE BOOL "" FORCE)
     set(KTX_FEATURE_GL_UPLOAD OFF CACHE BOOL "" FORCE)
     set(KTX_FEATURE_VK_UPLOAD OFF CACHE BOOL "" FORCE)
-    set(KTX_FEATURE_KTX1 OFF CACHE BOOL "" FORCE)
+    set(KTX_FEATURE_KTX1 ON CACHE BOOL "" FORCE)
     set(KTX_FEATURE_KTX2 ON CACHE BOOL "" FORCE)
     set(KTX_FEATURE_LOADTEST_APPS OFF CACHE STRING "" FORCE)
     set(KTX_FEATURE_ETC_UNPACK OFF CACHE BOOL "" FORCE)
