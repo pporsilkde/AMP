@@ -24,9 +24,7 @@
 #include "sortfilteritemmodel.hpp"
 #include "companionitemmodel.hpp"
 #include "draganddrop.hpp"
-#include "countdialog.hpp"
 #include "widgets.hpp"
-#include "tooltips.hpp"
 
 namespace
 {
@@ -65,6 +63,7 @@ CompanionWindow::CompanionWindow(DragAndDrop *dragAndDrop, MessageBoxManager* ma
     getWidget(mFilterEdit, "FilterEdit");
     getWidget(mItemView, "ItemView");
     mItemView->setExtendedMode(true);
+    mItemView->setSingleClickActionEnabled(true);
     mItemView->eventBackgroundClicked += MyGUI::newDelegate(this, &CompanionWindow::onBackgroundSelected);
     mItemView->eventItemClicked += MyGUI::newDelegate(this, &CompanionWindow::onItemSelected);
     mItemView->eventItemDragStarted += MyGUI::newDelegate(this, &CompanionWindow::onItemDragStarted);
@@ -84,6 +83,9 @@ CompanionWindow::CompanionWindow(DragAndDrop *dragAndDrop, MessageBoxManager* ma
 
 void CompanionWindow::onItemSelected(int index)
 {
+    if (!mSortModel || !mModel || index < 0 || index >= static_cast<int>(mSortModel->getItemCount()))
+        return;
+
     if (mDragAndDrop->mIsOnDragAndDrop)
     {
         dropItem();
@@ -99,24 +101,12 @@ void CompanionWindow::onItemSelected(int index)
         return;
     }
 
-    MWWorld::Ptr object = item.mBase;
-    int count = item.mCount;
-    bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
-    if (MyGUI::InputManager::getInstance().isControlPressed())
-        count = 1;
-
     mSelectedItem = mSortModel->mapToSource(index);
+    const int count = MyGUI::InputManager::getInstance().isControlPressed() ? 1 : item.mCount;
 
-    if (count > 1 && !shift)
-    {
-        CountDialog* dialog = MWBase::Environment::get().getWindowManager()->getCountDialog();
-        std::string name = object.getClass().getName(object) + MWGui::ToolTips::getSoulString(object.getCellRef());
-        dialog->openCountDialog(name, "#{sTake}", count);
-        dialog->eventOkClicked.clear();
-        dialog->eventOkClicked += MyGUI::newDelegate(this, &CompanionWindow::dragItem);
-    }
-    else
-        dragItem (nullptr, count);
+    // A clean click is a quick transfer to the player, matching Container/Trade.
+    // Ctrl+click moves exactly one; drag-and-drop remains available for a custom amount.
+    requestDrag(count, MWBase::Environment::get().getWindowManager()->getInventoryWindow()->getItemView());
 }
 
 void CompanionWindow::onNameFilterChanged(MyGUI::EditBox* _sender)
@@ -172,21 +162,9 @@ void CompanionWindow::onItemDragStarted(int index)
 
 void CompanionWindow::onItemDoubleClicked(int index)
 {
-    if (!mSortModel || !mModel || mDragAndDrop->mIsOnDragAndDrop)
-        return;
-
-    const ItemStack& item = mSortModel->getItem(index);
-    if (item.mFlags & ItemStack::Flag_Bound)
-    {
-        MWBase::Environment::get().getWindowManager()->messageBox("#{sBarterDialog12}");
-        return;
-    }
-
-    mSelectedItem = mSortModel->mapToSource(index);
-    const int count = MyGUI::InputManager::getInstance().isControlPressed() ? 1 : item.mCount;
-
-    // Double click is a server-approved quick transfer to player inventory.
-    requestDrag(count, MWBase::Environment::get().getWindowManager()->getInventoryWindow()->getItemView());
+    // One-click transfer already queued the server-authoritative DRAG.
+    // Ignore MyGUI's follow-up double-click event to avoid a duplicate request.
+    (void)index;
 }
 
 bool CompanionWindow::requestDrag(int count, ItemView* pendingTarget)

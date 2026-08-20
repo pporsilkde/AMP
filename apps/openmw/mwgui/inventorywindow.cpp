@@ -388,7 +388,7 @@ namespace MWGui
     {
         mGuiMode = mode;
         if (mItemView)
-            mItemView->setSingleClickActionEnabled(mode == GM_Barter || mode == GM_Container);
+            mItemView->setSingleClickActionEnabled(mode == GM_Barter || mode == GM_Container || mode == GM_Companion);
         std::string setting = getModeSetting();
         setPinButtonVisible(mode == GM_Inventory);
 
@@ -540,9 +540,9 @@ namespace MWGui
         if (!mSortModel || !mTradeModel)
             return;
 
-        // Barter/container rows transfer on the first click. Do not let the
-        // subsequent MyGUI double-click target whichever item moved into that row.
-        if (mTrading || mGuiMode == GM_Container)
+        // Barter/container/companion rows transfer on the first click. Do not let
+        // the subsequent MyGUI double-click target whichever item moved into that row.
+        if (mTrading || mGuiMode == GM_Container || mGuiMode == GM_Companion)
             return;
 
         if (index < 0 || index >= static_cast<int>(mSortModel->getItemCount()))
@@ -672,10 +672,10 @@ namespace MWGui
             return;
         }
 
-        // Two-pane container mode uses the same click-vs-drag split as barter:
-        // a clean click transfers immediately, while moving the mouse past the
-        // drag threshold keeps the regular drag-and-drop path available.
-        if (mGuiMode == GM_Container && mDragAndDrop->getTransferTargetView())
+        // Two-pane container/companion modes use the same click-vs-drag split as
+        // barter: a clean click transfers immediately, while moving the mouse past
+        // the drag threshold keeps the regular drag-and-drop path available.
+        if ((mGuiMode == GM_Container || mGuiMode == GM_Companion) && mDragAndDrop->getTransferTargetView())
         {
             mSelectedItem = index;
             ensureSelectedItemUnequipped(count);

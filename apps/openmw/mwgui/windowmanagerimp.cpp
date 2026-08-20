@@ -836,6 +836,18 @@ namespace MWGui
         if (!dialog)
             return;
         dialog->setVisible(false);
+
+        // WindowBase::setVisible(false) only calls onClose() (which unregisters
+        // modal windows via removeCurrentModal()) when the widget WAS visible
+        // a moment ago. If this dialog is already hidden for any other reason
+        // when removeDialog() is called on it, that guard skips onClose() and
+        // the object is queued for deletion below while still referenced by
+        // mCurrentModals. The next per-frame update (mCurrentModals.back()->
+        // onFrame()) then calls through a dangling WindowModal* into freed
+        // memory. Unregister it here unconditionally as a safety net.
+        if (WindowModal* modal = dynamic_cast<WindowModal*>(dialog))
+            removeCurrentModal(modal);
+
         mGarbageDialogs.push_back(dialog);
     }
 
@@ -1025,7 +1037,7 @@ namespace MWGui
         for (auto modalIterator = mCurrentModals.begin(); modalIterator != mCurrentModals.end();) {
             if ((*modalIterator)->mMainWidget == 0)
             {
-                mCurrentModals.erase(modalIterator);
+                modalIterator = mCurrentModals.erase(modalIterator);
             }
             else
             {
@@ -1039,7 +1051,8 @@ namespace MWGui
         // Make sure message boxes are always in front
         // This is an awful workaround for a series of awfully interwoven issues that couldn't be worked around
         // in a better way because of an impressive number of even more awfully interwoven issues.
-        if (mMessageBoxManager && mMessageBoxManager->isInteractiveMessageBox() && mCurrentModals.back() != mMessageBoxManager->getInteractiveMessageBox())
+        if (mMessageBoxManager && mMessageBoxManager->isInteractiveMessageBox() && !mCurrentModals.empty()
+            && mCurrentModals.back() != mMessageBoxManager->getInteractiveMessageBox())
         {
             std::vector<WindowModal*>::iterator found = std::find(mCurrentModals.begin(), mCurrentModals.end(), mMessageBoxManager->getInteractiveMessageBox());
             if (found != mCurrentModals.end())
