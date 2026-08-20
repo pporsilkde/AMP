@@ -112,7 +112,7 @@ namespace MWGui
             MyGUI::ImageBox* mGoldIcon;
             MyGUI::TextBox* mGoldLabel;
             bool mPaperDollVisible;
-            bool mPaperDollAutoRevealed;
+            bool mPaperDollAutoRevealed = false;
 
             MyGUI::Button* mFilterAll;
             MyGUI::Button* mFilterWeapon;
@@ -158,7 +158,6 @@ namespace MWGui
 
             void sellItem(MyGUI::Widget* sender, int count);
             void dragItem(MyGUI::Widget* sender, int count);
-            void transferItem(MyGUI::Widget* sender, int count);
 
             void onWindowResize(MyGUI::Window* _sender);
             void onFilterChanged(MyGUI::Widget* _sender);
@@ -167,6 +166,10 @@ namespace MWGui
             void onPaperDollClicked(MyGUI::Widget* _sender);
             void refreshPaperDollToggleVisual();
             void revealPaperDollFor(const MWWorld::Ptr& item);
+            // The doll is on screen either because the player pinned it via the
+            // toggle, or because selecting a wearable/usable item revealed it
+            // for the duration of this inventory session.
+            bool paperDollShown() const { return mPaperDollVisible || mPaperDollAutoRevealed; }
             void refreshWriterButtonVisual();
             void onViewModeClicked(MyGUI::Widget* _sender);
             void onWriterClicked(MyGUI::Widget* _sender);

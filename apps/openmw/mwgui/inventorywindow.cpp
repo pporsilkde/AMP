@@ -128,7 +128,6 @@ namespace MWGui
         , mWriterIcon(nullptr)
         , mViewModeIcon(nullptr)
         , mPaperDollVisible(false)
-        , mPaperDollAutoRevealed(false)
         , mFilterKeys(nullptr)
         , mKeyRingPanel(nullptr)
         , mKeyRingTitle(nullptr)
@@ -281,7 +280,7 @@ namespace MWGui
         int rightLeft = 4;
 
         const bool paperDollAvailable = (mGuiMode == GM_Inventory);
-        const bool showPaperDoll = paperDollAvailable && mPaperDollVisible;
+        const bool showPaperDoll = paperDollAvailable && paperDollShown();
 
         if (showPaperDoll)
         {
@@ -374,6 +373,7 @@ namespace MWGui
         mTradeModel = nullptr;
         mSortModel = nullptr;
         mItemView->setModel(nullptr);
+        mPaperDollAutoRevealed = false;
         if (mKeyRingList)
             refreshKeyRingPopupRows();
         if (mKeyRingPanel)
@@ -409,6 +409,11 @@ namespace MWGui
 
     void InventoryWindow::setGuiMode(GuiMode mode)
     {
+        // The automatic reveal is scoped to one inventory session: leaving the
+        // inventory (or entering barter/container mode) drops back to whatever
+        // the player actually pinned via the toggle.
+        if (mode != mGuiMode)
+            mPaperDollAutoRevealed = false;
         mGuiMode = mode;
         if (mItemView)
             mItemView->setSingleClickActionEnabled(mode == GM_Barter || mode == GM_Container || mode == GM_Companion);
@@ -509,6 +514,10 @@ namespace MWGui
             onFilterChanged(mFilterKeys);
             return;
         }
+
+        // Selecting something wearable/usable while the doll is hidden brings
+        // the doll back, so the result of equipping is immediately visible.
+        revealPaperDollFor(mSortModel->getItem(index).mBase);
 
         onItemSelectedFromSourceModel(mSortModel->mapToSource(index));
     }
@@ -649,6 +658,10 @@ namespace MWGui
         const ItemStack item = mTradeModel->getItem(sourceIndex);
         MWWorld::Ptr object = item.mBase;
 
+        // Same reveal as the single-click path: show the doll so the equip /
+        // unequip result is visible rather than silently applied off-screen.
+        revealPaperDollFor(object);
+
         if (item.mType == ItemStack::Type_Equipped)
         {
             // Match the existing inventory safeguard for removing a weapon in
@@ -680,9 +693,6 @@ namespace MWGui
 
     void InventoryWindow::onItemSelectedFromSourceModel (int index)
     {
-        if (!mTradeModel || index < 0 || index >= static_cast<int>(mTradeModel->getItemCount()))
-            return;
-
         if (mDragAndDrop->mIsOnDragAndDrop)
         {
             mDragAndDrop->drop(mTradeModel, mItemView);
@@ -694,10 +704,9 @@ namespace MWGui
 
         MWWorld::Ptr object = item.mBase;
         int count = item.mCount;
-        const bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
-        const bool control = MyGUI::InputManager::getInstance().isControlPressed();
+        bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
 
-        if (control)
+        if (MyGUI::InputManager::getInstance().isControlPressed())
             count = 1;
 
         if (mTrading)
@@ -720,42 +729,23 @@ namespace MWGui
                 return;
             }
 
-            // Two-pane barter quick transfer: stacked items get a quantity
-            // picker. Ctrl bypasses it with one item; Shift bypasses it with the
-            // complete stack. This keeps mouse-only transfer convenient without
-            // making stacked inventory all-or-nothing.
+            // ArenaMW two-pane barter uses single-click transfer by default.
+            // Ctrl+click still moves exactly one item.
             mSelectedItem = index;
-            if (item.mCount > 1 && !control && !shift)
-            {
-                CountDialog* dialog = MWBase::Environment::get().getWindowManager()->getCountDialog();
-                const std::string name = object.getClass().getName(object)
-                    + MWGui::ToolTips::getSoulString(object.getCellRef());
-                dialog->openCountDialog(name, "#{sQuanityMenuMessage01}", item.mCount);
-                dialog->eventOkClicked.clear();
-                dialog->eventOkClicked += MyGUI::newDelegate(this, &InventoryWindow::sellItem);
-            }
-            else
-                sellItem(nullptr, count);
+            sellItem(nullptr, count);
             return;
         }
 
-        // Container/companion quick transfer follows exactly the same quantity
-        // convention as barter. A real drag stays immediate (whole stack, Ctrl
-        // for one), while a clean click can choose an arbitrary quantity.
+        // Two-pane container/companion modes use the same click-vs-drag split as
+        // barter: a clean click transfers immediately, while moving the mouse past
+        // the drag threshold keeps the regular drag-and-drop path available.
         if ((mGuiMode == GM_Container || mGuiMode == GM_Companion) && mDragAndDrop->getTransferTargetView())
         {
             mSelectedItem = index;
-            if (item.mCount > 1 && !control && !shift)
-            {
-                CountDialog* dialog = MWBase::Environment::get().getWindowManager()->getCountDialog();
-                const std::string name = object.getClass().getName(object)
-                    + MWGui::ToolTips::getSoulString(object.getCellRef());
-                dialog->openCountDialog(name, "#{sQuanityMenuMessage01}", item.mCount);
-                dialog->eventOkClicked.clear();
-                dialog->eventOkClicked += MyGUI::newDelegate(this, &InventoryWindow::transferItem);
-            }
-            else
-                transferItem(nullptr, count);
+            ensureSelectedItemUnequipped(count);
+            mDragAndDrop->startDrag(mSelectedItem, mSortModel, mTradeModel, mItemView, count);
+            mDragAndDrop->getTransferTargetView()->eventBackgroundClicked();
+            notifyContentChanged();
             return;
         }
 
@@ -797,11 +787,7 @@ namespace MWGui
 
     void InventoryWindow::ensureSelectedItemUnequipped(int count)
     {
-        if (!mTradeModel || mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mTradeModel->getItemCount()))
-            return;
-
-        // Copy before unequip: InventoryStore may restack and invalidate model references.
-        const ItemStack item = mTradeModel->getItem(mSelectedItem);
+        const ItemStack& item = mTradeModel->getItem(mSelectedItem);
         if (item.mType == ItemStack::Type_Equipped)
         {
             MWWorld::InventoryStore& invStore = mPtr.getClass().getInventoryStore(mPtr);
@@ -839,37 +825,10 @@ namespace MWGui
         notifyContentChanged();
     }
 
-    void InventoryWindow::transferItem(MyGUI::Widget* sender, int count)
-    {
-        (void)sender;
-        if (!mTradeModel || !mDragAndDrop->getTransferTargetView()
-            || mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mTradeModel->getItemCount()))
-            return;
-
-        count = std::max(1, std::min(count, static_cast<int>(mTradeModel->getItem(mSelectedItem).mCount)));
-        ensureSelectedItemUnequipped(count);
-        if (mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mTradeModel->getItemCount()))
-            return;
-
-        mDragAndDrop->startDrag(mSelectedItem, mSortModel, mTradeModel, mItemView, count);
-        mDragAndDrop->getTransferTargetView()->eventBackgroundClicked();
-        notifyContentChanged();
-    }
-
     void InventoryWindow::sellItem(MyGUI::Widget* sender, int count)
     {
-        (void)sender;
-        if (!mTradeModel || mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mTradeModel->getItemCount()))
-            return;
-
-        count = std::max(1, std::min(count, static_cast<int>(mTradeModel->getItem(mSelectedItem).mCount)));
         ensureSelectedItemUnequipped(count);
-        if (mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mTradeModel->getItemCount()))
-            return;
-
-        // TradeItemModel mutates its vectors below, so never retain a reference
-        // to a row across borrow/return operations.
-        const ItemStack item = mTradeModel->getItem(mSelectedItem);
+        const ItemStack& item = mTradeModel->getItem(mSelectedItem);
         std::string sound = item.mBase.getClass().getUpSoundId(item.mBase);
         MWBase::Environment::get().getWindowManager()->playSound(sound);
 
@@ -892,32 +851,12 @@ namespace MWGui
 
     void InventoryWindow::completeBarterDragToMerchant(int sourceIndex, int count)
     {
-        if (!mTrading || !mTradeModel)
+        if (!mTrading || !mTradeModel || sourceIndex < 0
+            || sourceIndex >= static_cast<int>(mTradeModel->getItemCount()))
             return;
 
-        // A drag can outlive a sort/filter/model refresh. Validate the cached
-        // source row against the Ptr captured by DragAndDrop and re-resolve it
-        // when necessary; never sell whatever happens to occupy the old index.
-        const MWWorld::Ptr draggedItem = mDragAndDrop->mItem.mBase;
-        int resolvedIndex = sourceIndex;
-        if (resolvedIndex < 0 || resolvedIndex >= static_cast<int>(mTradeModel->getItemCount())
-            || mTradeModel->getItem(resolvedIndex).mBase != draggedItem)
-        {
-            resolvedIndex = -1;
-            for (size_t i = 0; i < mTradeModel->getItemCount(); ++i)
-            {
-                if (mTradeModel->getItem(i).mBase == draggedItem)
-                {
-                    resolvedIndex = static_cast<int>(i);
-                    break;
-                }
-            }
-        }
-        if (resolvedIndex < 0)
-            return;
-
-        mSelectedItem = resolvedIndex;
-        const ItemStack item = mTradeModel->getItem(resolvedIndex);
+        mSelectedItem = sourceIndex;
+        const ItemStack& item = mTradeModel->getItem(sourceIndex);
         if (item.mFlags & ItemStack::Flag_Bound)
         {
             MWBase::Environment::get().getWindowManager()->messageBox("#{sBarterDialog9}");
@@ -1030,7 +969,7 @@ namespace MWGui
 
     void InventoryWindow::updatePreviewSize()
     {
-        if (!mPaperDollVisible || !mLeftPane->getVisible())
+        if (!paperDollShown() || !mLeftPane->getVisible())
             return;
 
         MyGUI::IntSize size = mAvatarImage->getSize();
@@ -1080,14 +1019,14 @@ namespace MWGui
         if (!mPaperDollButton || !mPaperDollIcon)
             return;
 
-        mPaperDollIcon->setImageTexture(mPaperDollVisible
+        mPaperDollIcon->setImageTexture(paperDollShown()
             ? "textures/ui/arenamw/paper_doll_visible.png"
             : "textures/ui/arenamw/paper_doll_hidden.png");
         mPaperDollIcon->setColour(MyGUI::Colour::White);
         mPaperDollButton->setUserString("ToolTipType", "Layout");
         mPaperDollButton->setUserString("ToolTipLayout", "TextToolTipOneLine");
         mPaperDollButton->setUserString("Caption_TextOneLine",
-            arenaText(mPaperDollVisible ? "inventory.paper_doll_hide" : "inventory.paper_doll_show"));
+            arenaText(paperDollShown() ? "inventory.paper_doll_hide" : "inventory.paper_doll_show"));
     }
 
     void InventoryWindow::refreshWriterButtonVisual()
@@ -1109,6 +1048,7 @@ namespace MWGui
             return;
 
         mPaperDollAutoRevealed = true;
+        refreshPaperDollToggleVisual();
         adjustPanes();
         updatePreviewSize();
         dirtyPreview();
@@ -1125,7 +1065,11 @@ namespace MWGui
         if (mGuiMode != GM_Inventory)
             return;
 
-        mPaperDollVisible = !mPaperDollVisible;
+        // Toggle relative to what is actually on screen. If the doll was
+        // auto-revealed by an item selection, a click must hide it rather than
+        // flip the (still false) pinned flag to true and appear to do nothing.
+        const bool pinVisible = !paperDollShown();
+        mPaperDollVisible = pinVisible;
         Settings::Manager::setBool("inventory paper doll", "GUI", mPaperDollVisible);
         // An explicit click always wins over the automatic reveal, in either
         // direction: hiding manually should hide it even if it was auto-shown,
@@ -1354,7 +1298,7 @@ namespace MWGui
         // The paper-doll toggle deliberately occupies the old key-ring button
         // position at the lower-left edge of the inventory pane.
         const bool paperDollAvailable = (mGuiMode == GM_Inventory);
-        const bool showPaperDoll = paperDollAvailable && mPaperDollVisible;
+        const bool showPaperDoll = paperDollAvailable && paperDollShown();
         if (mPaperDollButton)
         {
             mPaperDollButton->setVisible(paperDollAvailable);
@@ -1611,7 +1555,7 @@ namespace MWGui
 
     void InventoryWindow::dirtyPreview()
     {
-        if (!mPaperDollVisible)
+        if (!paperDollShown())
             return;
 
         mPreview->update();
