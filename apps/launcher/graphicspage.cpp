@@ -182,6 +182,8 @@ void Launcher::GraphicsPage::syncGraphicsControls()
         lightingMethod = 0;
     else if (Settings::Manager::getString("lighting method", "Shaders") == "shaders")
         lightingMethod = 2;
+    else if (Settings::Manager::getString("lighting method", "Shaders") == "clustered")
+        lightingMethod = 3;
     if (pbrIndex > 0 && lightingMethod == 0)
         lightingMethod = 1;
     lightingMethodComboBox->setCurrentIndex(lightingMethod);
@@ -286,7 +288,7 @@ void Launcher::GraphicsPage::saveSettings()
     applyPbrQuality(pbrIndex);
 
     // Lighting. PBR material maps require the shader-compatible backend.
-    static std::array<std::string, 3> lightingMethodMap = {"legacy", "shaders compatibility", "shaders"};
+    static std::array<std::string, 4> lightingMethodMap = {"legacy", "shaders compatibility", "shaders", "clustered"};
     int lightingMethodIndex = lightingMethodComboBox->currentIndex();
     if (pbrIndex > 0 && lightingMethodIndex == 0)
     {

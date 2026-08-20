@@ -1,5 +1,10 @@
 #version 120
 
+#if @lightingMethodClustered
+    #extension GL_ARB_shader_storage_buffer_object : require
+    #extension GL_ARB_shading_language_420pack : require
+#endif
+
 #if @useUBO
     #extension GL_ARB_uniform_buffer_object : require
 #endif
@@ -88,6 +93,7 @@ uniform mat4 osg_ViewMatrixInverse;
 #include "vertexcolors.glsl"
 #include "shadows_fragment.glsl"
 #define ARENAMP_FRAGMENT_SHADER 1
+#define MAGNUS_FRAGMENT_SHADER 1
 #include "lighting.glsl"
 #include "lighting_enhanced_pbr.glsl"
 #include "parallax.glsl"
@@ -337,7 +343,7 @@ void main()
 #if (!@normalMap && !@parallax && !@forcePPL)
         vec3 viewNormal = gl_NormalMatrix * normalize(passNormal);
 #endif
-        gl_FragData[0].xyz += getSpecular(normalize(viewNormal), normalize(passViewPos.xyz), shininess, matSpec) * shadowing;
+        gl_FragData[0].xyz += getSpecular(passViewPos.xyz, normalize(viewNormal), normalize(passViewPos.xyz), shininess, matSpec) * shadowing;
     }
     }
 #endif

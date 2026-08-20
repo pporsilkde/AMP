@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <iomanip>
 #include <sstream>
 
@@ -133,6 +134,8 @@ ItemView::ItemView()
     , mListDragStartY(0)
     , mListDragStarted(false)
     , mKeyboardFocusedIndex(-1)
+    , mLastQuickActionIndex(-1)
+    , mLastQuickActionTime(0.0)
 {
     sExtendedItemViews.push_back(this);
 }
@@ -152,6 +155,9 @@ void ItemView::setModel(ItemModel *model)
     delete mModel;
     mModel = model;
     mKeyboardFocusedIndex = -1;
+    mLastQuickActionIndex = -1;
+    mLastQuickActionItem = MWWorld::Ptr();
+    mLastQuickActionTime = 0.0;
 
     updateHeaderCaptions();
     update();
@@ -799,7 +805,36 @@ void ItemView::resetScrollBars()
 void ItemView::onSelectedItem(MyGUI::Widget *sender)
 {
     ItemModel::ModelIndex index = (*sender->getUserData<std::pair<ItemModel::ModelIndex, ItemModel*> >()).first;
+    if (shouldSuppressChangedRowQuickAction(index))
+        return;
     eventItemClicked(index);
+}
+
+bool ItemView::shouldSuppressChangedRowQuickAction(ItemModel::ModelIndex index)
+{
+    if (!mSingleClickActionEnabled || !mModel || index < 0
+        || index >= static_cast<ItemModel::ModelIndex>(mModel->getItemCount()))
+        return false;
+
+    using Clock = std::chrono::steady_clock;
+    const double now = std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
+    const MWWorld::Ptr currentItem = mModel->getItem(index).mBase;
+
+    // MyGUI still produces a second release for a physical double-click even
+    // when the first release rebuilt the list. If a different item has moved
+    // into that same visual row, suppress only that stale second activation.
+    // Repeated Ctrl-clicks on the same remaining stack are intentionally kept.
+    constexpr double doubleClickGuardSeconds = 0.45;
+    const bool suppress = mLastQuickActionIndex == index
+        && !mLastQuickActionItem.isEmpty()
+        && currentItem != mLastQuickActionItem
+        && now >= mLastQuickActionTime
+        && now - mLastQuickActionTime <= doubleClickGuardSeconds;
+
+    mLastQuickActionIndex = index;
+    mLastQuickActionItem = currentItem;
+    mLastQuickActionTime = now;
+    return suppress;
 }
 
 void ItemView::onListItemPressed(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id)
@@ -867,7 +902,8 @@ void ItemView::onListItemReleased(MyGUI::Widget* sender, int left, int top, MyGU
         // Barter/container windows explicitly opt into modern one-click
         // transfer. Regular inventory list rows still wait for double-click,
         // preserving equip/use behaviour outside two-pane transfer modes.
-        if (mSingleClickActionEnabled && sameItem)
+        if (mSingleClickActionEnabled && sameItem
+            && !shouldSuppressChangedRowQuickAction(index))
             eventItemClicked(index);
         return;
     }

@@ -104,6 +104,7 @@ namespace MWGui
         void setCoord(const MyGUI::IntCoord& _value) override;
 
         void onSelectedItem (MyGUI::Widget* sender);
+        bool shouldSuppressChangedRowQuickAction(ItemModel::ModelIndex index);
         void onListItemPressed(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
         void onListItemDragged(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
         void onListItemReleased(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
@@ -143,6 +144,13 @@ namespace MWGui
         int mListDragStartY;
         bool mListDragStarted;
         int mKeyboardFocusedIndex;
+
+        // A one-click transfer rebuilds the model immediately. Keep the identity
+        // of that row briefly so the second release of a desktop double-click
+        // cannot transfer whichever different item slid into the same index.
+        ItemModel::ModelIndex mLastQuickActionIndex;
+        MWWorld::Ptr mLastQuickActionItem;
+        double mLastQuickActionTime;
 
     };
 

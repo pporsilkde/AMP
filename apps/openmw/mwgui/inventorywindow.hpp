@@ -112,6 +112,7 @@ namespace MWGui
             MyGUI::ImageBox* mGoldIcon;
             MyGUI::TextBox* mGoldLabel;
             bool mPaperDollVisible;
+            bool mPaperDollAutoRevealed;
 
             MyGUI::Button* mFilterAll;
             MyGUI::Button* mFilterWeapon;
@@ -164,6 +165,7 @@ namespace MWGui
             void onAvatarClicked(MyGUI::Widget* _sender);
             void onPaperDollClicked(MyGUI::Widget* _sender);
             void refreshPaperDollToggleVisual();
+            void revealPaperDollFor(const MWWorld::Ptr& item);
             void refreshWriterButtonVisual();
             void onViewModeClicked(MyGUI::Widget* _sender);
             void onWriterClicked(MyGUI::Widget* _sender);

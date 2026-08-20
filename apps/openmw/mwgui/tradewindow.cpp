@@ -235,12 +235,14 @@ namespace MWGui
         if (!mSortModel || !mTradeModel || index < 0 || index >= static_cast<int>(mSortModel->getItemCount()))
             return;
 
-        const ItemStack& item = mSortModel->getItem(index);
-        int count = MyGUI::InputManager::getInstance().isControlPressed() ? 1 : item.mCount;
+        const ItemStack item = mSortModel->getItem(index);
+        const int count = MyGUI::InputManager::getInstance().isControlPressed() ? 1 : item.mCount;
 
-        // ArenaMW barter uses modern one-click transfer. For stacked items use
-        // Ctrl+click to move one, or drag-and-drop if you want a custom amount.
+        // Clean click = quick transfer; Ctrl+click = one. ItemView guards the
+        // second release of a double-click if another item slid into this row.
         mItemToSell = mSortModel->mapToSource(index);
+        if (mItemToSell < 0 || mItemToSell >= static_cast<int>(mTradeModel->getItemCount()))
+            return;
         sellItem(nullptr, count);
     }
 
@@ -250,7 +252,9 @@ namespace MWGui
             return;
 
         const int sourceIndex = mSortModel->mapToSource(index);
-        const ItemStack& item = mTradeModel->getItem(sourceIndex);
+        if (sourceIndex < 0 || sourceIndex >= static_cast<int>(mTradeModel->getItemCount()))
+            return;
+        const ItemStack item = mTradeModel->getItem(sourceIndex);
         const int count = MyGUI::InputManager::getInstance().isControlPressed() ? 1 : item.mCount;
         mDragAndDrop->startBarterDrag(sourceIndex, mSortModel, mTradeModel, mItemView, count);
     }
@@ -280,17 +284,43 @@ namespace MWGui
 
     void TradeWindow::completeBarterDragToPlayer(int sourceIndex, int count)
     {
-        if (!mTradeModel || sourceIndex < 0 || sourceIndex >= static_cast<int>(mTradeModel->getItemCount()))
+        if (!mTradeModel)
             return;
-        mItemToSell = sourceIndex;
-        const ItemStack& item = mTradeModel->getItem(sourceIndex);
+
+        const MWWorld::Ptr draggedItem = mDragAndDrop->mItem.mBase;
+        int resolvedIndex = sourceIndex;
+        if (resolvedIndex < 0 || resolvedIndex >= static_cast<int>(mTradeModel->getItemCount())
+            || mTradeModel->getItem(resolvedIndex).mBase != draggedItem)
+        {
+            resolvedIndex = -1;
+            for (size_t i = 0; i < mTradeModel->getItemCount(); ++i)
+            {
+                if (mTradeModel->getItem(i).mBase == draggedItem)
+                {
+                    resolvedIndex = static_cast<int>(i);
+                    break;
+                }
+            }
+        }
+        if (resolvedIndex < 0)
+            return;
+
+        mItemToSell = resolvedIndex;
+        const ItemStack item = mTradeModel->getItem(resolvedIndex);
         count = std::max(1, std::min(count, static_cast<int>(item.mCount)));
         sellItem(nullptr, count);
     }
 
     void TradeWindow::sellItem(MyGUI::Widget* sender, int count)
     {
-        const ItemStack& item = mTradeModel->getItem(mItemToSell);
+        (void)sender;
+        if (!mTradeModel || mItemToSell < 0 || mItemToSell >= static_cast<int>(mTradeModel->getItemCount()))
+            return;
+
+        count = std::max(1, std::min(count, static_cast<int>(mTradeModel->getItem(mItemToSell).mCount)));
+        // borrow/return mutates TradeItemModel, so keep a value copy for the
+        // later balance update instead of a potentially invalidated reference.
+        const ItemStack item = mTradeModel->getItem(mItemToSell);
         std::string sound = item.mBase.getClass().getUpSoundId(item.mBase);
         MWBase::Environment::get().getWindowManager()->playSound(sound);
 

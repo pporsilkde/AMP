@@ -86,6 +86,28 @@ namespace
             && item.mBase.getClass().isKey(item.mBase);
     }
 
+    // Items worth revealing the paper doll for: gear you can wear, and the
+    // classic Morrowind "use" categories (drink/read/apply). Deliberately
+    // excludes plain Miscellaneous junk (and gold), which has nothing to
+    // preview on the doll.
+    bool isDollPreviewWorthy(const MWWorld::Ptr& base)
+    {
+        if (base.isEmpty())
+            return false;
+        const std::string type = base.getTypeName();
+        return type == typeid(ESM::Weapon).name()
+            || type == typeid(ESM::Armor).name()
+            || type == typeid(ESM::Clothing).name()
+            || type == typeid(ESM::Book).name()
+            || type == typeid(ESM::Potion).name()
+            || type == typeid(ESM::Ingredient).name()
+            || type == typeid(ESM::Repair).name()
+            || type == typeid(ESM::Lockpick).name()
+            || type == typeid(ESM::Probe).name()
+            || type == typeid(ESM::Apparatus).name()
+            || type == typeid(ESM::Light).name();
+    }
+
 }
 
 namespace MWGui
@@ -106,6 +128,7 @@ namespace MWGui
         , mWriterIcon(nullptr)
         , mViewModeIcon(nullptr)
         , mPaperDollVisible(false)
+        , mPaperDollAutoRevealed(false)
         , mFilterKeys(nullptr)
         , mKeyRingPanel(nullptr)
         , mKeyRingTitle(nullptr)
@@ -530,6 +553,34 @@ namespace MWGui
             return;
         }
 
+        // Two-pane container/companion transfer keeps its existing instant,
+        // dialog-free drag (see the matching branch in
+        // onItemSelectedFromSourceModel, which handles the click path with
+        // the same intent): the whole stack moves immediately, Ctrl for one.
+        if ((mGuiMode == GM_Container || mGuiMode == GM_Companion) && mDragAndDrop->getTransferTargetView())
+        {
+            ensureSelectedItemUnequipped(count);
+            mDragAndDrop->startDrag(mSelectedItem, mSortModel, mTradeModel, mItemView, count);
+            notifyContentChanged();
+            return;
+        }
+
+        // Picking a stack up to carry it (list-mode drag) now asks how many
+        // to take, the same way a grid-mode click already does through
+        // onItemSelectedFromSourceModel. Shift+drag still grabs the whole
+        // stack without asking and Ctrl+drag still grabs exactly one,
+        // mirroring the click path's shortcuts.
+        bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
+        if (count > 1 && !shift)
+        {
+            CountDialog* dialog = MWBase::Environment::get().getWindowManager()->getCountDialog();
+            std::string name = item.mBase.getClass().getName(item.mBase) + MWGui::ToolTips::getSoulString(item.mBase.getCellRef());
+            dialog->openCountDialog(name, "#{sTake}", count);
+            dialog->eventOkClicked.clear();
+            dialog->eventOkClicked += MyGUI::newDelegate(this, &InventoryWindow::dragItem);
+            return;
+        }
+
         ensureSelectedItemUnequipped(count);
         mDragAndDrop->startDrag(mSelectedItem, mSortModel, mTradeModel, mItemView, count);
         notifyContentChanged();
@@ -629,6 +680,9 @@ namespace MWGui
 
     void InventoryWindow::onItemSelectedFromSourceModel (int index)
     {
+        if (!mTradeModel || index < 0 || index >= static_cast<int>(mTradeModel->getItemCount()))
+            return;
+
         if (mDragAndDrop->mIsOnDragAndDrop)
         {
             mDragAndDrop->drop(mTradeModel, mItemView);
@@ -723,7 +777,11 @@ namespace MWGui
 
     void InventoryWindow::ensureSelectedItemUnequipped(int count)
     {
-        const ItemStack& item = mTradeModel->getItem(mSelectedItem);
+        if (!mTradeModel || mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mTradeModel->getItemCount()))
+            return;
+
+        // Copy before unequip: InventoryStore may restack and invalidate model references.
+        const ItemStack item = mTradeModel->getItem(mSelectedItem);
         if (item.mType == ItemStack::Type_Equipped)
         {
             MWWorld::InventoryStore& invStore = mPtr.getClass().getInventoryStore(mPtr);
@@ -763,8 +821,18 @@ namespace MWGui
 
     void InventoryWindow::sellItem(MyGUI::Widget* sender, int count)
     {
+        (void)sender;
+        if (!mTradeModel || mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mTradeModel->getItemCount()))
+            return;
+
+        count = std::max(1, std::min(count, static_cast<int>(mTradeModel->getItem(mSelectedItem).mCount)));
         ensureSelectedItemUnequipped(count);
-        const ItemStack& item = mTradeModel->getItem(mSelectedItem);
+        if (mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mTradeModel->getItemCount()))
+            return;
+
+        // TradeItemModel mutates its vectors below, so never retain a reference
+        // to a row across borrow/return operations.
+        const ItemStack item = mTradeModel->getItem(mSelectedItem);
         std::string sound = item.mBase.getClass().getUpSoundId(item.mBase);
         MWBase::Environment::get().getWindowManager()->playSound(sound);
 
@@ -787,12 +855,32 @@ namespace MWGui
 
     void InventoryWindow::completeBarterDragToMerchant(int sourceIndex, int count)
     {
-        if (!mTrading || !mTradeModel || sourceIndex < 0
-            || sourceIndex >= static_cast<int>(mTradeModel->getItemCount()))
+        if (!mTrading || !mTradeModel)
             return;
 
-        mSelectedItem = sourceIndex;
-        const ItemStack& item = mTradeModel->getItem(sourceIndex);
+        // A drag can outlive a sort/filter/model refresh. Validate the cached
+        // source row against the Ptr captured by DragAndDrop and re-resolve it
+        // when necessary; never sell whatever happens to occupy the old index.
+        const MWWorld::Ptr draggedItem = mDragAndDrop->mItem.mBase;
+        int resolvedIndex = sourceIndex;
+        if (resolvedIndex < 0 || resolvedIndex >= static_cast<int>(mTradeModel->getItemCount())
+            || mTradeModel->getItem(resolvedIndex).mBase != draggedItem)
+        {
+            resolvedIndex = -1;
+            for (size_t i = 0; i < mTradeModel->getItemCount(); ++i)
+            {
+                if (mTradeModel->getItem(i).mBase == draggedItem)
+                {
+                    resolvedIndex = static_cast<int>(i);
+                    break;
+                }
+            }
+        }
+        if (resolvedIndex < 0)
+            return;
+
+        mSelectedItem = resolvedIndex;
+        const ItemStack item = mTradeModel->getItem(resolvedIndex);
         if (item.mFlags & ItemStack::Flag_Bound)
         {
             MWBase::Environment::get().getWindowManager()->messageBox("#{sBarterDialog9}");
@@ -974,6 +1062,27 @@ namespace MWGui
         mWriterButton->setUserString("Caption_TextOneLine", arenaText("writer.tooltip_open"));
     }
 
+    void InventoryWindow::revealPaperDollFor(const MWWorld::Ptr& item)
+    {
+        // Only meaningful in the player's own inventory, and only when the
+        // doll isn't already showing for one reason or another.
+        if (mGuiMode != GM_Inventory || mPaperDollVisible || mPaperDollAutoRevealed)
+            return;
+        if (!isDollPreviewWorthy(item))
+            return;
+
+        mPaperDollAutoRevealed = true;
+        adjustPanes();
+        updatePreviewSize();
+        dirtyPreview();
+
+        if (mItemView)
+        {
+            mItemView->relayout();
+            mItemView->update();
+        }
+    }
+
     void InventoryWindow::onPaperDollClicked(MyGUI::Widget*)
     {
         if (mGuiMode != GM_Inventory)
@@ -981,6 +1090,10 @@ namespace MWGui
 
         mPaperDollVisible = !mPaperDollVisible;
         Settings::Manager::setBool("inventory paper doll", "GUI", mPaperDollVisible);
+        // An explicit click always wins over the automatic reveal, in either
+        // direction: hiding manually should hide it even if it was auto-shown,
+        // and showing manually shouldn't leave a stale auto-reveal behind.
+        mPaperDollAutoRevealed = false;
         refreshPaperDollToggleVisual();
 
         adjustPanes();

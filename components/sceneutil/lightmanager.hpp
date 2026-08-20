@@ -32,6 +32,7 @@ namespace SceneUtil
         FFP,
         PerObjectUniform,
         SingleUBO,
+        Clustered,
     };
 
     /// LightSource managed by a LightManager.
@@ -129,11 +130,11 @@ namespace SceneUtil
         };
 
         using LightList = std::vector<const LightSourceViewBound*>;
-        using SupportedMethods = std::array<bool, 3>;
+        using SupportedMethods = std::array<bool, 4>;
 
         META_Node(SceneUtil, LightManager)
 
-        LightManager(bool ffp = true);
+        LightManager(bool ffp = true, Shader::ShaderManager* shaderManager = nullptr);
 
         LightManager(const LightManager& copy, const osg::CopyOp& copyop);
 
@@ -171,6 +172,11 @@ namespace SceneUtil
 
         int getMaxLightsInScene() const;
 
+        bool usingClustered() const { return mLightingMethod == LightingMethod::Clustered; }
+        Shader::ShaderManager* getShaderManager() const { return mShaderManager; }
+        float getPointLightRadiusMultiplier() const { return mPointLightRadiusMultiplier; }
+        float getPointLightFadeEnd() const { return mPointLightFadeEnd; }
+
         auto& getDummies() { return mDummies; }
 
         auto& getLightIndexMap(size_t frameNum) { return mLightIndexMaps[frameNum%2]; }
@@ -193,6 +199,7 @@ namespace SceneUtil
         void initFFP(int targetLights);
         void initPerObjectUniform(int targetLights);
         void initSingleUBO(int targetLights);
+        void initClustered();
 
         void updateSettings();
 
@@ -217,6 +224,8 @@ namespace SceneUtil
         size_t mLightingMask;
 
         osg::ref_ptr<osg::Light> mSun;
+
+        Shader::ShaderManager* mShaderManager;
 
         osg::ref_ptr<LightBuffer> mLightBuffers[2];
 

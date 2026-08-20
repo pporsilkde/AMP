@@ -117,7 +117,7 @@ namespace MWGui
             return;
         }
 
-        const ItemStack& item = mSortModel->getItem(index);
+        const ItemStack item = mSortModel->getItem(index);
 
         // We can't take a conjured item from a container (some NPC we're pickpocketing, a box, etc)
         if (item.mFlags & ItemStack::Flag_Bound)
@@ -127,6 +127,8 @@ namespace MWGui
         }
 
         mSelectedItem = mSortModel->mapToSource(index);
+        if (mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mModel->getItemCount()))
+            return;
         const int count = MyGUI::InputManager::getInstance().isControlPressed() ? 1 : item.mCount;
 
         // A clean click is a quick transfer to the player. The multiplayer
@@ -140,7 +142,7 @@ namespace MWGui
         if (!mSortModel || !mModel || mDragAndDrop->mIsOnDragAndDrop)
             return;
 
-        const ItemStack& item = mSortModel->getItem(index);
+        const ItemStack item = mSortModel->getItem(index);
         if (item.mFlags & ItemStack::Flag_Bound)
         {
             MWBase::Environment::get().getWindowManager()->messageBox("#{sContentsMessage1}");
@@ -148,6 +150,8 @@ namespace MWGui
         }
 
         mSelectedItem = mSortModel->mapToSource(index);
+        if (mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mModel->getItemCount()))
+            return;
         const int count = MyGUI::InputManager::getInstance().isControlPressed() ? 1 : item.mCount;
 
         // Do not start a local drag here. The container is server-authoritative:

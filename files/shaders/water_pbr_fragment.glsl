@@ -1,5 +1,13 @@
 #version 120
 
+#if @lightingMethodClustered
+#extension GL_EXT_gpu_shader4 : require
+#extension GL_ARB_shader_storage_buffer_object : require
+#extension GL_ARB_shading_language_420pack : require
+#endif
+
+#include "magnus_water.glsl"
+
 // Set to 0 to disable FBM raymarched waves (requires Enhanced PBR Lighting to function)
 #define RAYMARCH_WAVES 1
 
@@ -1097,10 +1105,15 @@ void main(void)
         }
     }
 
+    vec3 magnusPointSpecular = vec3(0.0);
+    if (!isUnderwater)
+        magnusPointSpecular = magnusWaterPointSpecular(position.xyz, normal, 72.0,
+            0.85 * clamp(waterHighlightIntensity, 0.0, 2.0));
+
 #if @sunlightScattering
-    gl_FragData[0].rgb += (specular * sunSpec.rgb + rainSpecular) * (1.0 - foamMask);
+    gl_FragData[0].rgb += (specular * sunSpec.rgb + rainSpecular + magnusPointSpecular) * (1.0 - foamMask);
 #else
-    gl_FragData[0].rgb += rainSpecular * (1.0 - foamMask);
+    gl_FragData[0].rgb += (rainSpecular + magnusPointSpecular) * (1.0 - foamMask);
 #endif // @sunlightScattering
 
 #if @waterRefraction
