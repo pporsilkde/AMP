@@ -236,14 +236,28 @@ namespace MWGui
             return;
 
         const ItemStack item = mSortModel->getItem(index);
-        const int count = MyGUI::InputManager::getInstance().isControlPressed() ? 1 : item.mCount;
+        const bool control = MyGUI::InputManager::getInstance().isControlPressed();
+        const bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
+        const int count = control ? 1 : item.mCount;
 
-        // Clean click = quick transfer; Ctrl+click = one. ItemView guards the
-        // second release of a double-click if another item slid into this row.
+        // Merchant pane mirrors the player pane: click a stack to choose an
+        // amount, Ctrl+click transfers one, Shift+click transfers all. ItemView
+        // still guards a stale second release after the list has been rebuilt.
         mItemToSell = mSortModel->mapToSource(index);
         if (mItemToSell < 0 || mItemToSell >= static_cast<int>(mTradeModel->getItemCount()))
             return;
-        sellItem(nullptr, count);
+
+        if (item.mCount > 1 && !control && !shift)
+        {
+            CountDialog* dialog = MWBase::Environment::get().getWindowManager()->getCountDialog();
+            const std::string name = item.mBase.getClass().getName(item.mBase)
+                + MWGui::ToolTips::getSoulString(item.mBase.getCellRef());
+            dialog->openCountDialog(name, "#{sQuanityMenuMessage01}", item.mCount);
+            dialog->eventOkClicked.clear();
+            dialog->eventOkClicked += MyGUI::newDelegate(this, &TradeWindow::sellItem);
+        }
+        else
+            sellItem(nullptr, count);
     }
 
     void TradeWindow::onItemDragStarted(int index)

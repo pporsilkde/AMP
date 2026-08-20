@@ -694,9 +694,10 @@ namespace MWGui
 
         MWWorld::Ptr object = item.mBase;
         int count = item.mCount;
-        bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
+        const bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
+        const bool control = MyGUI::InputManager::getInstance().isControlPressed();
 
-        if (MyGUI::InputManager::getInstance().isControlPressed())
+        if (control)
             count = 1;
 
         if (mTrading)
@@ -719,23 +720,42 @@ namespace MWGui
                 return;
             }
 
-            // ArenaMW two-pane barter uses single-click transfer by default.
-            // Ctrl+click still moves exactly one item.
+            // Two-pane barter quick transfer: stacked items get a quantity
+            // picker. Ctrl bypasses it with one item; Shift bypasses it with the
+            // complete stack. This keeps mouse-only transfer convenient without
+            // making stacked inventory all-or-nothing.
             mSelectedItem = index;
-            sellItem(nullptr, count);
+            if (item.mCount > 1 && !control && !shift)
+            {
+                CountDialog* dialog = MWBase::Environment::get().getWindowManager()->getCountDialog();
+                const std::string name = object.getClass().getName(object)
+                    + MWGui::ToolTips::getSoulString(object.getCellRef());
+                dialog->openCountDialog(name, "#{sQuanityMenuMessage01}", item.mCount);
+                dialog->eventOkClicked.clear();
+                dialog->eventOkClicked += MyGUI::newDelegate(this, &InventoryWindow::sellItem);
+            }
+            else
+                sellItem(nullptr, count);
             return;
         }
 
-        // Two-pane container/companion modes use the same click-vs-drag split as
-        // barter: a clean click transfers immediately, while moving the mouse past
-        // the drag threshold keeps the regular drag-and-drop path available.
+        // Container/companion quick transfer follows exactly the same quantity
+        // convention as barter. A real drag stays immediate (whole stack, Ctrl
+        // for one), while a clean click can choose an arbitrary quantity.
         if ((mGuiMode == GM_Container || mGuiMode == GM_Companion) && mDragAndDrop->getTransferTargetView())
         {
             mSelectedItem = index;
-            ensureSelectedItemUnequipped(count);
-            mDragAndDrop->startDrag(mSelectedItem, mSortModel, mTradeModel, mItemView, count);
-            mDragAndDrop->getTransferTargetView()->eventBackgroundClicked();
-            notifyContentChanged();
+            if (item.mCount > 1 && !control && !shift)
+            {
+                CountDialog* dialog = MWBase::Environment::get().getWindowManager()->getCountDialog();
+                const std::string name = object.getClass().getName(object)
+                    + MWGui::ToolTips::getSoulString(object.getCellRef());
+                dialog->openCountDialog(name, "#{sQuanityMenuMessage01}", item.mCount);
+                dialog->eventOkClicked.clear();
+                dialog->eventOkClicked += MyGUI::newDelegate(this, &InventoryWindow::transferItem);
+            }
+            else
+                transferItem(nullptr, count);
             return;
         }
 
@@ -816,6 +836,23 @@ namespace MWGui
     {
         ensureSelectedItemUnequipped(count);
         mDragAndDrop->startDrag(mSelectedItem, mSortModel, mTradeModel, mItemView, count);
+        notifyContentChanged();
+    }
+
+    void InventoryWindow::transferItem(MyGUI::Widget* sender, int count)
+    {
+        (void)sender;
+        if (!mTradeModel || !mDragAndDrop->getTransferTargetView()
+            || mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mTradeModel->getItemCount()))
+            return;
+
+        count = std::max(1, std::min(count, static_cast<int>(mTradeModel->getItem(mSelectedItem).mCount)));
+        ensureSelectedItemUnequipped(count);
+        if (mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mTradeModel->getItemCount()))
+            return;
+
+        mDragAndDrop->startDrag(mSelectedItem, mSortModel, mTradeModel, mItemView, count);
+        mDragAndDrop->getTransferTargetView()->eventBackgroundClicked();
         notifyContentChanged();
     }
 

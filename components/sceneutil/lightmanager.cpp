@@ -17,6 +17,8 @@
 
 #include <components/sceneutil/util.hpp>
 
+#include <components/shader/shadermanager.hpp>
+
 #include <components/misc/hash.hpp>
 #include <components/misc/stringops.hpp>
 
@@ -1343,6 +1345,7 @@ namespace SceneUtil
     void LightManager::initClustered()
     {
         setLightingMethod(LightingMethod::Clustered);
+        Log(Debug::Info) << "Project Magnus clustered lighting enabled: 16x8x24 clusters, 512 light indices per cluster";
         // Per-object limits are not used by clustered lighting. Keep the value high only
         // for code paths that query it; the actual per-cluster cap is 512 in the cull pass.
         setMaxLights(512);
