@@ -172,12 +172,26 @@ packetBuilder.AddDoorState = function(uniqueIndex, objectData)
     tes3mp.AddObject()
 end
 
+-- Start of AMP change
+--
+-- Rewritten to tolerate incomplete data instead of erroring out halfway through building a
+-- packet, and to carry the ID of the script the variables belong to.
+--
+-- The old version indexed objectData.variables unconditionally, so a single object entry
+-- that had lost its variables table raised a Lua error inside cell loading and left the
+-- player with a partially loaded cell.
 packetBuilder.AddClientScriptLocal = function(uniqueIndex, objectData)
 
+    if objectData == nil or type(objectData.variables) ~= "table" then return end
+
     local splitIndex = uniqueIndex:split("-")
+
+    if splitIndex[1] == nil or splitIndex[2] == nil then return end
+
     tes3mp.SetObjectRefNum(splitIndex[1])
     tes3mp.SetObjectMpNum(splitIndex[2])
     if objectData.refId ~= nil then tes3mp.SetObjectRefId(objectData.refId) end
+    if objectData.clientScriptId ~= nil then tes3mp.SetObjectClientScriptId(objectData.clientScriptId) end
 
     local variableCount = 0
 
@@ -187,15 +201,21 @@ packetBuilder.AddClientScriptLocal = function(uniqueIndex, objectData)
 
             for internalIndex, value in pairs(variableTable) do
 
-                if variableType == enumerations.variableType.SHORT then
-                    tes3mp.AddClientLocalInteger(tonumber(internalIndex), value, enumerations.variableType.SHORT)
-                elseif variableType == enumerations.variableType.LONG then
-                    tes3mp.AddClientLocalInteger(tonumber(internalIndex), value, enumerations.variableType.LONG)
-                elseif variableType == enumerations.variableType.FLOAT then
-                    tes3mp.AddClientLocalFloat(tonumber(internalIndex), value)
-                end
+                local numericIndex = tonumber(internalIndex)
 
-                variableCount = variableCount + 1
+                if numericIndex ~= nil and type(value) == "number" then
+
+                    if variableType == enumerations.variableType.SHORT then
+                        tes3mp.AddClientLocalInteger(numericIndex, value, enumerations.variableType.SHORT)
+                        variableCount = variableCount + 1
+                    elseif variableType == enumerations.variableType.LONG then
+                        tes3mp.AddClientLocalInteger(numericIndex, value, enumerations.variableType.LONG)
+                        variableCount = variableCount + 1
+                    elseif variableType == enumerations.variableType.FLOAT then
+                        tes3mp.AddClientLocalFloat(numericIndex, value)
+                        variableCount = variableCount + 1
+                    end
+                end
             end
         end
     end
@@ -203,6 +223,51 @@ packetBuilder.AddClientScriptLocal = function(uniqueIndex, objectData)
     if variableCount > 0 then
         tes3mp.AddObject()
     end
+end
+
+-- Build the same kind of entry, but attached to a player instead of to a cell reference,
+-- so that scripts running on a character travel with that character's profile
+packetBuilder.AddPlayerClientScriptLocal = function(pid, scriptId, variables)
+
+    if type(variables) ~= "table" then return false end
+
+    tes3mp.SetPlayerAsObject(pid)
+    tes3mp.SetObjectClientScriptId(scriptId)
+
+    local variableCount = 0
+
+    for variableType, variableTable in pairs(variables) do
+
+        if type(variableTable) == "table" then
+
+            for internalIndex, value in pairs(variableTable) do
+
+                local numericIndex = tonumber(internalIndex)
+
+                if numericIndex ~= nil and type(value) == "number" then
+
+                    if variableType == enumerations.variableType.SHORT then
+                        tes3mp.AddClientLocalInteger(numericIndex, value, enumerations.variableType.SHORT)
+                        variableCount = variableCount + 1
+                    elseif variableType == enumerations.variableType.LONG then
+                        tes3mp.AddClientLocalInteger(numericIndex, value, enumerations.variableType.LONG)
+                        variableCount = variableCount + 1
+                    elseif variableType == enumerations.variableType.FLOAT then
+                        tes3mp.AddClientLocalFloat(numericIndex, value)
+                        variableCount = variableCount + 1
+                    end
+                end
+            end
+        end
+    end
+
+    if variableCount > 0 then
+        tes3mp.AddObject()
+        return true
+    end
+
+    return false
+-- End of AMP change
 end
 
 packetBuilder.AddAIActor = function(actorUniqueIndex, targetPid, aiData)

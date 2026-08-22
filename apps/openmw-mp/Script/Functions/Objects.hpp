@@ -74,6 +74,7 @@
     \
     SCRIPT_API_ENTRY("GetVideoFilename", ObjectFunctions::GetVideoFilename),\
     \
+    SCRIPT_API_ENTRY("GetObjectClientScriptId", ObjectFunctions::GetObjectClientScriptId),\
     SCRIPT_API_ENTRY("GetClientLocalsSize", ObjectFunctions::GetClientLocalsSize),\
     SCRIPT_API_ENTRY("GetClientLocalInternalIndex", ObjectFunctions::GetClientLocalInternalIndex),\
     SCRIPT_API_ENTRY("GetClientLocalVariableType", ObjectFunctions::GetClientLocalVariableType),\
@@ -145,6 +146,7 @@
     SCRIPT_API_ENTRY("SetContainerItemActionCountByIndex", ObjectFunctions::SetContainerItemActionCountByIndex),\
     \
     SCRIPT_API_ENTRY("AddObject", ObjectFunctions::AddObject),\
+    SCRIPT_API_ENTRY("SetObjectClientScriptId", ObjectFunctions::SetObjectClientScriptId),\
     SCRIPT_API_ENTRY("AddClientLocalInteger", ObjectFunctions::AddClientLocalInteger),\
     SCRIPT_API_ENTRY("AddClientLocalFloat", ObjectFunctions::AddClientLocalFloat),\
     SCRIPT_API_ENTRY("AddContainerItem", ObjectFunctions::AddContainerItem),\
@@ -720,6 +722,19 @@ public:
     static const char *GetVideoFilename(unsigned int index) noexcept;
 
     /**
+    * \brief Get the ID of the script whose local variables are carried by the object at a
+    * certain index in the read object list.
+    *
+    * Used to make sure saved variables are only ever reapplied to the script they were
+    * recorded for, which stops stale values from landing on the wrong variables after the
+    * content files change.
+    *
+    * \param objectIndex The index of the object.
+    * \return The script ID, or an empty string if the packet did not name one.
+    */
+    static const char *GetObjectClientScriptId(unsigned int objectIndex) noexcept;
+
+    /**
     * \brief Get the number of client local variables of the object at a certain index in the
     * read object list.
     *
@@ -1285,6 +1300,15 @@ public:
     * \return void
     */
     static void AddObject() noexcept;
+
+    /**
+    * \brief Set the ID of the script whose local variables are carried by the server's
+    * temporary object.
+    *
+    * \param scriptId The script ID.
+    * \return void
+    */
+    static void SetObjectClientScriptId(const char *scriptId) noexcept;
 
     /**
     * \brief Add a client local variable with an integer value to the client locals of the server's

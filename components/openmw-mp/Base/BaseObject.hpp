@@ -26,14 +26,27 @@ namespace mwmp
 
     struct BaseObject
     {
+        /*
+            Start of AMP change
+
+            Default-initialize every field
+
+            Scripts attached to the player never filled refNum/mpNum through
+            getBaseObjectFromPtr(), so ID_CLIENT_SCRIPT_LOCAL packets used to carry
+            whatever happened to be on the stack as their uniqueIndex, corrupting
+            serverside cell data
+        */
         std::string refId = "";
-        unsigned int refNum;
-        unsigned int mpNum;
-        int count;
-        int charge;
-        double enchantmentCharge;
-        std::string soul;
-        int goldValue;
+        unsigned int refNum = 0;
+        unsigned int mpNum = 0;
+        int count = 1;
+        int charge = -1;
+        double enchantmentCharge = -1;
+        std::string soul = "";
+        int goldValue = 1;
+        /*
+            End of AMP change
+        */
 
         ESM::Position position;
 
@@ -82,9 +95,21 @@ namespace mwmp
 
         bool hasContainer;
 
+        /*
+            Start of AMP addition
+
+            The ID of the script whose locals are carried by this object, so a receiver can
+            refuse to apply values that belong to a different script - which is what happens
+            when the content files change and local variable indices shift
+        */
+        std::string clientScriptId = "";
+        /*
+            End of AMP addition
+        */
+
         std::vector<ClientVariable> clientLocals;
         std::vector<ContainerItem> containerItems;
-        unsigned int containerItemCount;
+        unsigned int containerItemCount = 0;
 
         RakNet::RakNetGUID guid; // only for object lists that can also include players
         bool isPlayer;

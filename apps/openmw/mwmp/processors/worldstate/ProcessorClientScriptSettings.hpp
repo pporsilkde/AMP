@@ -4,6 +4,13 @@
 
 #include <apps/openmw/mwbase/world.hpp>
 #include <apps/openmw/mwbase/environment.hpp>
+/*
+    Start of AMP addition
+*/
+#include <apps/openmw/mwmp/Main.hpp>
+/*
+    End of AMP addition
+*/
 #include "../WorldstateProcessor.hpp"
 
 namespace mwmp
@@ -18,6 +25,16 @@ namespace mwmp
 
         virtual void Do(WorldstatePacket &packet, Worldstate &worldstate)
         {
+            /*
+                Start of AMP addition
+
+                Drop the cached lowercase lookup sets so they get rebuilt from this new list
+            */
+            mwmp::Main::invalidatePacketScriptCache();
+            /*
+                End of AMP addition
+            */
+
             LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Received ID_CLIENT_SCRIPT_SETTINGS making us send packets for the following globals:");
             std::string debugMessage = "";
 

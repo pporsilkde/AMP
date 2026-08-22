@@ -48,6 +48,13 @@
 #include "mwmp/Main.hpp"
 #include "mwmp/GUIController.hpp"
 /*
+    Start of AMP addition
+*/
+#include "mwmp/ScriptController.hpp"
+/*
+    End of AMP addition
+*/
+/*
     End of tes3mp addition
 */
 
@@ -460,10 +467,25 @@ void OMW::Engine::executeLocalScripts()
 
             If it is, set a tes3mp-only boolean to true in its interpreterContext
         */
-        if (mwmp::Main::isValidPacketScript(script.first))
+        /*
+            Start of AMP change
+
+            Also require that we are the client entitled to speak for this reference.
+
+            Local scripts run on every client that has the cell loaded, so without this
+            check two players standing in the same room both advance the same quest timer
+            and then both report it, which is why waits ran at double speed and why
+            counters oscillated instead of settling. Scripts on our own character and on
+            items we carry are always ours; world objects belong to the cell authority.
+        */
+        if (mwmp::Main::isValidPacketScript(script.first) &&
+            ScriptController::hasAuthorityOverPtr(script.second))
         {
             interpreterContext.sendPackets = true;
         }
+        /*
+            End of AMP change
+        */
         /*
             End of tes3mp addition
         */

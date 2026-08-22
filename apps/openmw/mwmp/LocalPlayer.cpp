@@ -48,6 +48,7 @@
 #include "Networking.hpp"
 #include "PlayerList.hpp"
 #include "CellController.hpp"
+#include "ScriptController.hpp"
 #include "GUIController.hpp"
 #include "MechanicsHelper.hpp"
 #include "InteractionAnimationSync.hpp"
@@ -587,6 +588,11 @@ void LocalPlayer::updateCell(bool forceUpdate)
 
         LOG_APPEND(TimedLog::LOG_INFO, "- Moved from %s to %s", cell.getShortDescription().c_str(),
                    ptrCell->getShortDescription().c_str());
+
+        // Do not leave the last fraction of a second of script locals queued against the
+        // old cell. The packet still carries the old cell here, which is exactly what the
+        // server needs in order to validate its authority and store it correctly.
+        ScriptController::flushQueuedLocalChanges(0.0f, true);
 
         if (!Misc::StringUtils::ciEqual(cell.mRegion, ptrCell->mRegion))
         {

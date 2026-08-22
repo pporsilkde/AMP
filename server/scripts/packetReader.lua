@@ -346,13 +346,22 @@ packetReader.GetObjectPacketTables = function(packetType)
     for packetIndex = 0, objectListSize - 1 do
         local object, uniqueIndex, player, pid = nil, nil, nil, nil
         
-        if tableHelper.containsValue({"ObjectActivate", "ObjectHit", "ObjectSound", "ConsoleCommand"}, packetType) then
+        -- AMP change: ClientScriptLocal packets can now be attached to a player instead of
+        -- to a cell reference, so they have to go through the player-aware branch below
+        if tableHelper.containsValue({"ObjectActivate", "ObjectHit", "ObjectSound", "ConsoleCommand",
+            "ClientScriptLocal"}, packetType) then
 
             local isObjectPlayer = tes3mp.IsObjectPlayer(packetIndex)
 
             if isObjectPlayer then
                 pid = tes3mp.GetObjectPid(packetIndex)
                 player = Players[pid]
+
+                -- AMP addition: a packet may name a player who is not on the server, and
+                -- every branch below assumes this is a table
+                if player == nil then
+                    goto continueObjectLoop
+                end
             else
                 object = {}
                 uniqueIndex = tes3mp.GetObjectRefNum(packetIndex) .. "-" .. tes3mp.GetObjectMpNum(packetIndex)
@@ -369,6 +378,46 @@ packetReader.GetObjectPacketTables = function(packetType)
                 else
                     object.soundId = soundId
                 end
+
+            -- Start of AMP addition
+            elseif packetType == "ClientScriptLocal" then
+
+                local variables = {}
+                local variableCount = tes3mp.GetClientLocalsSize(packetIndex)
+
+                for variableIndex = 0, variableCount - 1 do
+                    local internalIndex = tes3mp.GetClientLocalInternalIndex(packetIndex, variableIndex)
+                    local variableType = tes3mp.GetClientLocalVariableType(packetIndex, variableIndex)
+                    local value
+
+                    if tableHelper.containsValue({enumerations.variableType.SHORT, enumerations.variableType.LONG},
+                        variableType) then
+                        value = tes3mp.GetClientLocalIntValue(packetIndex, variableIndex)
+                    elseif variableType == enumerations.variableType.FLOAT then
+                        value = tes3mp.GetClientLocalFloatValue(packetIndex, variableIndex)
+                    end
+
+                    -- Ignore variables of a type we do not understand rather than storing a
+                    -- nil that would later be written back out as a malformed packet
+                    if value ~= nil then
+                        if variables[variableType] == nil then
+                            variables[variableType] = {}
+                        end
+
+                        variables[variableType][internalIndex] = value
+                    end
+                end
+
+                local clientScriptId = tes3mp.GetObjectClientScriptId(packetIndex)
+
+                if isObjectPlayer then
+                    player.clientScriptId = clientScriptId
+                    player.variables = variables
+                else
+                    object.clientScriptId = clientScriptId
+                    object.variables = variables
+                end
+            -- End of AMP addition
 
             elseif packetType == "ObjectActivate" then
 
@@ -502,31 +551,6 @@ packetReader.GetObjectPacketTables = function(packetType)
                 object.state = tes3mp.GetObjectState(packetIndex)
             elseif packetType == "DoorState" then
                 object.doorState = tes3mp.GetObjectDoorState(packetIndex)
-            elseif packetType =="ClientScriptLocal" then
-
-                local variables = {}
-                local variableCount = tes3mp.GetClientLocalsSize(packetIndex)
-
-                for variableIndex = 0, variableCount - 1 do
-                    local internalIndex = tes3mp.GetClientLocalInternalIndex(packetIndex, variableIndex)
-                    local variableType = tes3mp.GetClientLocalVariableType(packetIndex, variableIndex)
-                    local value
-
-                    if tableHelper.containsValue({enumerations.variableType.SHORT, enumerations.variableType.LONG},
-                        variableType) then
-                        value = tes3mp.GetClientLocalIntValue(packetIndex, variableIndex)
-                    elseif variableType == enumerations.variableType.FLOAT then
-                        value = tes3mp.GetClientLocalFloatValue(packetIndex, variableIndex)
-                    end
-
-                    if variables[variableType] == nil then
-                        variables[variableType] = {}
-                    end
-
-                    variables[variableType][internalIndex] = value
-                end
-
-                object.variables = variables
             end
         end
 
@@ -535,6 +559,8 @@ packetReader.GetObjectPacketTables = function(packetType)
         elseif player ~= nil then
             packetTables.players[pid] = player
         end
+
+        ::continueObjectLoop::
     end
 
     return packetTables

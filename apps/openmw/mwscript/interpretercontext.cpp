@@ -220,15 +220,22 @@ namespace MWScript
             Send an ID_CLIENT_SCRIPT_LOCAL packet when a local short changes its value if
             it is being set in a script that has been approved for packet sending
         */
+        /*
+            Start of AMP change
+
+            Queue the change instead of sending a packet on the spot. A script that writes a
+            variable every frame used to produce a packet every frame; queued changes are
+            coalesced per variable and flushed on a timer from Main::frame()
+        */
         if (sendPackets)
         {
-            mwmp::ObjectList *objectList = mwmp::Main::get().getNetworking()->getObjectList();
-            objectList->reset();
-            objectList->packetOrigin = ScriptController::getPacketOriginFromContextType(getContextType());
-            objectList->originClientScript = getCurrentScriptName();
-            objectList->addClientScriptLocal(mReference, index, value, mwmp::VARIABLE_TYPE::SHORT);
-            objectList->sendClientScriptLocal();
+            ScriptController::queueLocalChange(mReference,
+                ScriptController::getPacketOriginFromContextType(getContextType()),
+                getCurrentScriptName(), index, mwmp::VARIABLE_TYPE::SHORT, value, 0.0f);
         }
+        /*
+            End of AMP change
+        */
         /*
             End of tes3mp addition
         */
@@ -257,15 +264,20 @@ namespace MWScript
             Send an ID_CLIENT_SCRIPT_LOCAL packet when a local long changes its value if
             it is being set in a script that has been approved for packet sending
         */
+        /*
+            Start of AMP change
+
+            Queue the change instead of sending a packet on the spot; see setLocalShort
+        */
         if (sendPackets)
         {
-            mwmp::ObjectList *objectList = mwmp::Main::get().getNetworking()->getObjectList();
-            objectList->reset();
-            objectList->packetOrigin = ScriptController::getPacketOriginFromContextType(getContextType());
-            objectList->originClientScript = getCurrentScriptName();
-            objectList->addClientScriptLocal(mReference, index, value, mwmp::VARIABLE_TYPE::LONG);
-            objectList->sendClientScriptLocal();
+            ScriptController::queueLocalChange(mReference,
+                ScriptController::getPacketOriginFromContextType(getContextType()),
+                getCurrentScriptName(), index, mwmp::VARIABLE_TYPE::LONG, value, 0.0f);
         }
+        /*
+            End of AMP change
+        */
         /*
             End of tes3mp addition
         */
@@ -300,15 +312,25 @@ namespace MWScript
             its value has changed enough and it is being set in a script that has been approved
             for packet sending
         */
+        /*
+            Start of AMP change
+
+            Queue the change instead of sending a packet on the spot; see setLocalShort.
+
+            Quest timers are almost always floats, and the whole-number filter below is what
+            keeps a per-frame accumulator from being reported sixty times a second. It is
+            kept, and the queue then collapses whatever survives it into one packet per
+            sync interval
+        */
         if (floor(oldValue) != floor(value) && sendPackets)
         {
-            mwmp::ObjectList *objectList = mwmp::Main::get().getNetworking()->getObjectList();
-            objectList->reset();
-            objectList->packetOrigin = ScriptController::getPacketOriginFromContextType(getContextType());
-            objectList->originClientScript = getCurrentScriptName();
-            objectList->addClientScriptLocal(mReference, index, value);
-            objectList->sendClientScriptLocal();
+            ScriptController::queueLocalChange(mReference,
+                ScriptController::getPacketOriginFromContextType(getContextType()),
+                getCurrentScriptName(), index, mwmp::VARIABLE_TYPE::FLOAT, 0, value);
         }
+        /*
+            End of AMP change
+        */
         /*
             End of tes3mp addition
         */

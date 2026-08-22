@@ -28,6 +28,17 @@ namespace mwmp
         bool PacketHeader(RakNet::BitStream *newBitstream, bool send);
         BaseObjectList *objectList;
         static const int maxObjects = 3000;
+        /*
+            Start of AMP addition
+
+            Upper bound on the number of local variables a single object may carry in one
+            packet. Without it, a hostile or corrupt packet could ask us to resize a vector
+            to 4 billion entries
+        */
+        static const unsigned int maxClientLocals = 1024;
+        /*
+            End of AMP addition
+        */
         bool hasCellData;
     };
 }

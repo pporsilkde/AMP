@@ -49,14 +49,24 @@ namespace mwmp
 
     struct ClientVariable
     {
-        std::string id;
-        int internalIndex;
+        /*
+            Start of AMP change
 
-        char variableType;
+            Give every field a default so a partially filled or malformed packet can never
+            leave uninitialized memory behind, which previously produced garbage indices
+            and values when applied to a script's locals
+        */
+        std::string id = "";
+        int internalIndex = 0;
 
-        int intValue;
-        float floatValue;
-        std::string stringValue;
+        char variableType = 0;
+
+        int intValue = 0;
+        float floatValue = 0.0f;
+        std::string stringValue = "";
+        /*
+            End of AMP change
+        */
     };
 
     struct Time

@@ -83,6 +83,141 @@ config.arenaSkillBooksLevelLimit = true
 config.arenaNewConstantEffectDifficulty = true
 config.arenaGlobalXpMultiplier = 1.0
 
+-- Server-authoritative Armor/Weapon Requirements.
+-- These are sent to [Equipment Requirements] on every client. Editing a
+-- local settings.cfg therefore cannot lower requirements on this server.
+-- weapon/armor requirement multiplier is the simple global difficulty knob:
+-- 1.0 = normal, 1.2 = 20% harder, 0.8 = 20% easier.
+config.equipmentRequirements = {
+    ["enabled"] = true,
+    ["armor enabled"] = true,
+    ["weapon enabled"] = true,
+    ["tooltip enabled"] = true,
+    ["use modified stats"] = true,
+    ["heavy armor enabled"] = true,
+    ["medium armor enabled"] = true,
+    ["light armor enabled"] = true,
+    ["bound armor requirements"] = true,
+    ["bound weapon requirements"] = true,
+    ["automatic calculation"] = true,
+    ["weapon requirement multiplier"] = 1.0,
+    ["armor requirement multiplier"] = 1.0,
+    ["automatic minimum skill"] = 10,
+    ["automatic maximum skill"] = 90,
+    ["automatic minimum attribute"] = 10,
+    ["automatic maximum attribute"] = 80,
+    ["automatic requirement step"] = 5,
+    ["automatic skill curve"] = 1.35,
+    ["automatic attribute curve"] = 1.50,
+    ["automatic weapon damage scale"] = 28.0,
+    ["automatic weapon dps scale"] = 35.0,
+    ["automatic weapon reach range"] = 1.25,
+    ["automatic weapon durability reference"] = 6000.0,
+    ["automatic weapon value reference"] = 100000.0,
+    ["automatic weapon weight scale"] = 1.0,
+    ["automatic weapon damage influence"] = 0.42,
+    ["automatic weapon dps influence"] = 0.18,
+    ["automatic weapon reach influence"] = 0.10,
+    ["automatic weapon durability influence"] = 0.12,
+    ["automatic weapon value influence"] = 0.10,
+    ["automatic weapon weight influence"] = 0.08,
+    ["automatic weapon attribute power influence"] = 0.45,
+    ["automatic weapon attribute weight influence"] = 0.45,
+    ["automatic weapon attribute reach influence"] = 0.10,
+    ["automatic armor protection scale"] = 55.0,
+    ["automatic armor durability reference"] = 6000.0,
+    ["automatic armor value reference"] = 100000.0,
+    ["automatic light armor weight reference"] = 8.0,
+    ["automatic medium armor weight reference"] = 18.0,
+    ["automatic heavy armor weight reference"] = 38.0,
+    ["automatic armor protection influence"] = 0.58,
+    ["automatic armor durability influence"] = 0.17,
+    ["automatic armor value influence"] = 0.12,
+    ["automatic armor weight influence"] = 0.13,
+    ["automatic armor attribute power influence"] = 0.28,
+    ["automatic armor attribute weight influence"] = 0.60,
+    ["automatic armor attribute slot influence"] = 0.12,
+    ["heavy tier 2 armor"] = 16,
+    ["heavy tier 3 armor"] = 59,
+    ["heavy tier 4 armor"] = 65,
+    ["medium tier 2 armor"] = 15,
+    ["medium tier 3 armor"] = 39,
+    ["medium tier 4 armor"] = 44,
+    ["light tier 2 armor"] = 8,
+    ["light tier 3 armor"] = 19,
+    ["light tier 4 armor"] = 44,
+    ["heavy tier 2 skill"] = 30,
+    ["heavy tier 3 skill"] = 60,
+    ["heavy tier 4 skill"] = 80,
+    ["heavy tier 2 attribute"] = 30,
+    ["heavy tier 3 attribute"] = 60,
+    ["heavy tier 4 attribute"] = 80,
+    ["medium tier 2 skill"] = 30,
+    ["medium tier 3 skill"] = 60,
+    ["medium tier 4 skill"] = 80,
+    ["medium tier 2 attribute"] = 30,
+    ["medium tier 3 attribute"] = 60,
+    ["medium tier 4 attribute"] = 80,
+    ["light tier 2 skill"] = 30,
+    ["light tier 3 skill"] = 60,
+    ["light tier 4 skill"] = 80,
+    ["light tier 2 attribute"] = 30,
+    ["light tier 3 attribute"] = 60,
+    ["light tier 4 attribute"] = 80,
+    ["weapon tier 1 skill"] = 0,
+    ["weapon tier 2 skill"] = 30,
+    ["weapon tier 3 skill"] = 60,
+    ["weapon tier 4 skill"] = 80,
+    ["weapon tier 1 attribute"] = 0,
+    ["weapon tier 2 attribute"] = 30,
+    ["weapon tier 3 attribute"] = 60,
+    ["weapon tier 4 attribute"] = 80,
+    ["axe 1h tier 2 damage"] = 10,
+    ["axe 1h tier 3 damage"] = 17,
+    ["axe 1h tier 4 damage"] = 19,
+    ["axe 2h tier 2 damage"] = 17,
+    ["axe 2h tier 3 damage"] = 22,
+    ["axe 2h tier 4 damage"] = 38,
+    ["mace tier 2 damage"] = 5,
+    ["mace tier 3 damage"] = 10,
+    ["mace tier 4 damage"] = 999,
+    ["hammer tier 2 damage"] = 15,
+    ["hammer tier 3 damage"] = 22,
+    ["hammer tier 4 damage"] = 999,
+    ["staff tier 2 damage"] = 6,
+    ["staff tier 3 damage"] = 8,
+    ["staff tier 4 damage"] = 999,
+    ["long blade 1h tier 2 damage"] = 10,
+    ["long blade 1h tier 3 damage"] = 16,
+    ["long blade 1h tier 4 damage"] = 999,
+    ["long blade 2h tier 2 damage"] = 13,
+    ["long blade 2h tier 3 damage"] = 20,
+    ["long blade 2h tier 4 damage"] = 30,
+    ["short blade tier 2 damage"] = 6,
+    ["short blade tier 3 damage"] = 12,
+    ["short blade tier 4 damage"] = 999,
+    ["spear tier 2 damage"] = 13,
+    ["spear tier 3 damage"] = 18,
+    ["spear tier 4 damage"] = 999,
+    ["bow tier 2 damage"] = 10,
+    ["bow tier 3 damage"] = 17,
+    ["bow tier 4 damage"] = 24,
+    ["crossbow tier 2 damage"] = 15,
+    ["crossbow tier 3 damage"] = 28,
+    ["crossbow tier 4 damage"] = 37,
+    ["thrown tier 2 damage"] = 3,
+    ["thrown tier 3 damage"] = 5,
+    ["thrown tier 4 damage"] = 999,
+}
+
+-- Arrow Stick changes world item creation, so it is also server-controlled.
+config.arrowStick = {
+    ["enabled"] = true,
+    ["stick chance"] = 1.0, -- -1 uses vanilla fProjectileThrownStoreChance
+    ["stick aoe enchantments"] = false,
+    ["stick underwater"] = false,
+}
+
 -- Player-versus-player damage policy.
 -- "disabled": players cannot harm other players.
 -- "enabled":  all player-versus-player damage is allowed.
@@ -187,6 +322,13 @@ local function setGameSetting(name, value)
     table.insert(config.gameSettings, { name = name, value = value })
 end
 
+-- ID_GAME_SETTINGS carries arbitrary string keys. Protocol 808 clients route
+-- keys in this form to the requested Settings::Manager category, letting the
+-- server authoritatively configure gameplay categories beyond [Game].
+local function setCategorySetting(category, name, value)
+    setGameSetting("@ArenaMP|" .. category .. "|" .. name, value)
+end
+
 setGameSetting("tactical combat", config.arenaTacticalCombat)
 setGameSetting("combat weapon sheathe delay", config.arenaCombatWeaponSheatheDelay)
 setGameSetting("combat pursuit through doors", config.arenaCombatPursuitThroughDoors)
@@ -211,6 +353,14 @@ setGameSetting("skill books have level limit", config.arenaSkillBooksLevelLimit)
 setGameSetting("use new constant effect difficulty logic", config.arenaNewConstantEffectDifficulty)
 setGameSetting("global XP gain multiplier", config.arenaGlobalXpMultiplier)
 setGameSetting("friendly fire mode", config.friendlyFireMode)
+
+for name, value in pairs(config.equipmentRequirements) do
+    setCategorySetting("Equipment Requirements", name, value)
+end
+
+for name, value in pairs(config.arrowStick) do
+    setCategorySetting("Arrow Stick", name, value)
+end
 
 -- The VR settings to enforce for players
 config.vrSettings = {
@@ -328,6 +478,26 @@ config.disabledClientScriptIds = {
 -- Which clientside scripts should have all of their variables synchronized across players
 -- Warning: Make sure whatever scripts you add in here don't cause infinite packet spam
 --          through variable changes that clients cannot agree on
+-- Start of AMP addition
+--
+-- Whether only the cell authority is believed about the local variables of scripts running
+-- on world objects.
+--
+-- Local scripts run on every client that has the cell loaded, so with this off, two players
+-- standing in the same room both advance the same quest timer and both report it, which is
+-- what makes timed quest stages run at multiple times normal speed and makes counters
+-- oscillate instead of settling. Leave it on unless you are debugging.
+config.enforceScriptAuthority = true
+
+-- Whether the local variables of scripts attached to a character are stored in that
+-- character's profile rather than in whatever cell they were standing in.
+--
+-- With this off, every player's copy of the same script shares one entry in the cell data
+-- and they overwrite each other's quest state.
+config.syncPlayerScriptLocals = true
+
+-- End of AMP addition
+
 config.synchronizedClientScriptIds = {
     -- mechanisms
     "GG_OpenGate1", "GG_OpenGate2", "Arkn_doors", "nchuleftingthWrong1", "nchuleftingthWrong2",

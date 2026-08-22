@@ -168,6 +168,118 @@ function StateHelper:LoadClientScriptVariables(pid, stateObject)
     end
 end
 
+-- Start of AMP addition
+--
+-- Storage for the local variables of scripts attached to a player character.
+--
+-- Everything here is keyed on the lowercased script ID and remembers the original casing
+-- alongside it, because Morrowind script IDs are case insensitive but the content files
+-- are inconsistent about how they spell them.
+function StateHelper:LoadClientScriptLocals(pid, stateObject)
+
+    if stateObject.data.clientVariables == nil then
+        stateObject.data.clientVariables = {}
+    end
+
+    if stateObject.data.clientVariables.locals == nil then
+        stateObject.data.clientVariables.locals = {}
+        return
+    end
+
+    local objectCount = 0
+
+    -- At login the client has not reported a cell yet, so fall back to the one stored in
+    -- the profile. The packet is sent straight to the attached player either way, but the
+    -- cell still has to be something the client can parse.
+    local cellDescription = tes3mp.GetCell(pid)
+
+    if cellDescription == nil or cellDescription == "" then
+        if stateObject.data.location ~= nil and stateObject.data.location.cell ~= nil then
+            cellDescription = stateObject.data.location.cell
+        else
+            cellDescription = ""
+        end
+    end
+
+    tes3mp.ClearObjectList()
+    tes3mp.SetObjectListPid(pid)
+    tes3mp.SetObjectListCell(cellDescription)
+
+    for scriptKey, scriptTable in pairs(stateObject.data.clientVariables.locals) do
+
+        if type(scriptTable) == "table" and type(scriptTable.variables) == "table" then
+
+            local scriptId = scriptTable.scriptId or scriptKey
+
+            if packetBuilder.AddPlayerClientScriptLocal(pid, scriptId, scriptTable.variables) then
+                objectCount = objectCount + 1
+            end
+        end
+    end
+
+    if objectCount > 0 then
+        tes3mp.SendClientScriptLocal(false, false)
+    end
+end
+
+function StateHelper:SaveClientScriptLocal(stateObject, scriptId, variables)
+
+    if scriptId == nil or scriptId == "" or type(variables) ~= "table" then return end
+
+    if stateObject.data.clientVariables == nil then
+        stateObject.data.clientVariables = {}
+    end
+
+    if stateObject.data.clientVariables.locals == nil then
+        stateObject.data.clientVariables.locals = {}
+    end
+
+    local scriptKey = string.lower(scriptId)
+    local storedScript = stateObject.data.clientVariables.locals[scriptKey]
+
+    if storedScript == nil then
+        storedScript = { scriptId = scriptId, variables = {} }
+        stateObject.data.clientVariables.locals[scriptKey] = storedScript
+    end
+
+    if type(storedScript.variables) ~= "table" then
+        storedScript.variables = {}
+    end
+
+    storedScript.scriptId = scriptId
+
+    for variableType, variableTable in pairs(variables) do
+
+        if type(variableTable) == "table" then
+
+            if storedScript.variables[variableType] == nil then
+                storedScript.variables[variableType] = {}
+            end
+
+            for internalIndex, value in pairs(variableTable) do
+                storedScript.variables[variableType][internalIndex] = value
+            end
+        end
+    end
+
+    stateObject:QuicksaveToDrive()
+end
+
+function StateHelper:ClearClientScriptLocals(stateObject, scriptId)
+
+    if stateObject.data.clientVariables == nil then return end
+    if stateObject.data.clientVariables.locals == nil then return end
+
+    if scriptId == nil then
+        stateObject.data.clientVariables.locals = {}
+    else
+        stateObject.data.clientVariables.locals[string.lower(scriptId)] = nil
+    end
+
+    stateObject:QuicksaveToDrive()
+end
+-- End of AMP addition
+
 function StateHelper:LoadDestinationOverrides(pid, stateObject)
 
     if stateObject.data.destinationOverrides == nil then

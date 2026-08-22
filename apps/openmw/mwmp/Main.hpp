@@ -30,6 +30,15 @@ namespace mwmp
 
         static bool isValidPacketScript(std::string scriptId);
         static bool isValidPacketGlobal(std::string globalId);
+        /*
+            Start of AMP addition
+
+            Called when the server sends us a new set of synchronized script and global IDs
+        */
+        static void invalidatePacketScriptCache();
+        /*
+            End of AMP addition
+        */
 
         static std::string getResDir();
         static bool useVanillaBuildServer();

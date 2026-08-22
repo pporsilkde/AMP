@@ -1,5 +1,7 @@
 #include "projectilemanager.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <iomanip>
 
 #include <memory>
@@ -13,6 +15,10 @@
 
 #include <components/misc/constants.hpp>
 #include <components/misc/convert.hpp>
+#include <components/misc/rng.hpp>
+#include <components/settings/settings.hpp>
+#include <components/esm/loadench.hpp>
+#include <components/esm/loadgmst.hpp>
 
 #include <components/resource/resourcesystem.hpp>
 #include <components/resource/scenemanager.hpp>
@@ -25,6 +31,7 @@
 #include "../mwworld/class.hpp"
 #include "../mwworld/esmstore.hpp"
 #include "../mwworld/inventorystore.hpp"
+#include "../mwworld/cellstore.hpp"
 
 #include "../mwbase/soundmanager.hpp"
 #include "../mwbase/world.hpp"
@@ -53,6 +60,9 @@
     Include additional headers for multiplayer purposes
 */
 #include "../mwmp/MechanicsHelper.hpp"
+#include "../mwmp/Main.hpp"
+#include "../mwmp/Networking.hpp"
+#include "../mwmp/ObjectList.hpp"
 /*
     End of tes3mp addition
 */
@@ -128,6 +138,142 @@ namespace
             it = projectileIDs.insert(it, ID);
         }
         return projectileEffects;
+    }
+
+    bool arrowStickEnabled()
+    {
+        try { return Settings::Manager::getBool("enabled", "Arrow Stick"); }
+        catch (...) { return true; }
+    }
+
+    float arrowStickChance()
+    {
+        float configured = 1.f;
+        try { configured = Settings::Manager::getFloat("stick chance", "Arrow Stick"); }
+        catch (...) { return 1.f; }
+
+        // Negative means "use the vanilla projectile recovery GMST".
+        if (configured < 0.f)
+        {
+            try
+            {
+                configured = MWBase::Environment::get().getWorld()->getStore()
+                    .get<ESM::GameSetting>().find("fProjectileThrownStoreChance")->mValue.getFloat() / 100.f;
+            }
+            catch (...)
+            {
+                configured = 0.25f;
+            }
+        }
+        return std::clamp(configured, 0.f, 1.f);
+    }
+
+    bool arrowStickUnderwater()
+    {
+        try { return Settings::Manager::getBool("stick underwater", "Arrow Stick"); }
+        catch (...) { return false; }
+    }
+
+    bool arrowStickAoeEnchantments()
+    {
+        try { return Settings::Manager::getBool("stick aoe enchantments", "Arrow Stick"); }
+        catch (...) { return false; }
+    }
+
+    bool projectileHasAoeEnchantment(const MWWorld::Ptr& projectile)
+    {
+        if (projectile.isEmpty())
+            return false;
+        const std::string enchantment = projectile.getClass().getEnchantment(projectile);
+        if (enchantment.empty())
+            return false;
+        const ESM::Enchantment* ench = MWBase::Environment::get().getWorld()->getStore()
+            .get<ESM::Enchantment>().search(enchantment);
+        if (!ench)
+            return false;
+        for (const ESM::ENAMstruct& effect : ench->mEffects.mList)
+            if (effect.mArea > 0)
+                return true;
+        return false;
+    }
+
+    void placeStuckProjectile(const MWWorld::Ptr& projectile, const MWWorld::Ptr& caster,
+        const MWWorld::Ptr& target, const osg::Vec3f& position, const osg::Vec3f& velocity, bool thrown)
+    {
+        if (projectile.isEmpty()
+            || projectile.getCellRef().getRefId().find("$dynamic") != std::string::npos)
+            return;
+
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        MWWorld::CellStore* cell = nullptr;
+        if (!target.isEmpty() && target.isInCell())
+            cell = target.getCell();
+        else if (!caster.isEmpty() && caster.isInCell())
+        {
+            cell = caster.getCell();
+            if (cell->isExterior())
+            {
+                int x = 0, y = 0;
+                world->positionToIndex(position.x(), position.y(), x, y);
+                cell = world->getExterior(x, y);
+            }
+        }
+        if (!cell)
+            return;
+
+        ESM::Position pos;
+        pos.pos[0] = position.x();
+        pos.pos[1] = position.y();
+        pos.pos[2] = position.z();
+        pos.rot[0] = pos.rot[1] = pos.rot[2] = 0.f;
+
+        osg::Vec3f dir = velocity;
+        const float speed = dir.length();
+        if (speed > 0.001f)
+        {
+            dir /= speed;
+            const float horizontal = std::sqrt(dir.x() * dir.x() + dir.y() * dir.y());
+            pos.rot[0] = -std::atan2(dir.z(), horizontal);
+            pos.rot[2] = std::atan2(dir.x(), dir.y());
+
+            // Thrown weapon meshes use the opposite forward convention.
+            if (thrown)
+            {
+                constexpr float Pi = 3.14159265358979323846f;
+                pos.rot[0] += Pi;
+                if (pos.rot[0] > Pi)
+                    pos.rot[0] -= Pi * 2.f;
+            }
+
+            // Put the tip slightly into the surface before creating the MP
+            // reference, avoiding an unsynchronised ObjectMove for a temporary
+            // local reference that has no server mpNum yet.
+            pos.pos[0] += dir.x() * 3.f;
+            pos.pos[1] += dir.y() * 3.f;
+            pos.pos[2] += dir.z() * 3.f;
+        }
+
+        try
+        {
+            MWWorld::Ptr stuck = world->placeObject(projectile, cell, pos);
+            if (stuck.isEmpty())
+                return;
+
+            // Only the client that owns the attack reaches this function. Send
+            // one authoritative ObjectPlace and remove the temporary local copy;
+            // the server returns it with a unique mpNum to every client.
+            mwmp::ObjectList* objectList = mwmp::Main::get().getNetworking()->getObjectList();
+            objectList->reset();
+            objectList->packetOrigin = mwmp::CLIENT_GAMEPLAY;
+            objectList->addObjectPlace(stuck, false);
+            objectList->sendObjectPlace();
+            world->deleteObject(stuck);
+        }
+        catch (const std::exception& e)
+        {
+            Log(Debug::Warning) << "Arrow Stick: failed to place projectile '"
+                << projectile.getCellRef().getRefId() << "': " << e.what();
+        }
     }
 
     osg::Vec4 getMagicBoltLightDiffuseColor(const ESM::EffectList& effects)
@@ -565,10 +711,30 @@ namespace MWWorld
                 if (invIt != inv.end() && Misc::StringUtils::ciEqual(invIt->getCellRef().getRefId(), projectileState.mBowId))
                     bow = *invIt;
             }
-            if (projectile->getHitWater())
+            const bool hitWater = projectile->getHitWater();
+            if (hitWater)
                 mRendering->emitWaterRipple(pos);
 
-            MWMechanics::projectileHit(caster, target, bow, projectileRef.getPtr(), pos, projectileState.mAttackStrength);
+            MWWorld::Ptr projectileObject = projectileRef.getPtr();
+            MWMechanics::projectileHit(caster, target, bow, projectileObject, pos, projectileState.mAttackStrength);
+
+            // Do not let every peer simulate a recoverable copy for the same
+            // remote shot. Only the LocalPlayer or the LocalActor authority may
+            // create the synchronized stuck projectile.
+            const bool ownsAttack = MechanicsHelper::getLocalAttack(caster) != nullptr;
+            bool stick = ownsAttack && arrowStickEnabled()
+                && Misc::Rng::rollProbability() <= arrowStickChance();
+            if (!target.isEmpty() && target.getClass().isActor())
+                stick = false;
+            if (hitWater && !arrowStickUnderwater())
+                stick = false;
+            if (!arrowStickAoeEnchantments()
+                && (projectileHasAoeEnchantment(projectileObject) || projectileHasAoeEnchantment(bow)))
+                stick = false;
+            if (stick)
+                placeStuckProjectile(projectileObject, caster, target, pos,
+                    projectileState.mVelocity, projectileState.mThrown);
+
             cleanupProjectile(projectileState);
         }
         for (auto& magicBoltState : mMagicBolts)

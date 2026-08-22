@@ -375,6 +375,11 @@ const char *ObjectFunctions::GetVideoFilename(unsigned int index) noexcept
     return readObjectList->baseObjects.at(index).videoFilename.c_str();
 }
 
+const char *ObjectFunctions::GetObjectClientScriptId(unsigned int objectIndex) noexcept
+{
+    return readObjectList->baseObjects.at(objectIndex).clientScriptId.c_str();
+}
+
 unsigned int ObjectFunctions::GetClientLocalsSize(unsigned int objectIndex) noexcept
 {
     return readObjectList->baseObjects.at(objectIndex).clientLocals.size();
@@ -704,6 +709,11 @@ void ObjectFunctions::AddObject() noexcept
     writeObjectList.baseObjects.push_back(tempObject);
 
     tempObject = emptyObject;
+}
+
+void ObjectFunctions::SetObjectClientScriptId(const char *scriptId) noexcept
+{
+    tempObject.clientScriptId = scriptId;
 }
 
 void ObjectFunctions::AddClientLocalInteger(int internalIndex, int intValue, unsigned int variableType) noexcept

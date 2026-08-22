@@ -626,32 +626,70 @@ function BaseCell:SaveDoorStates(objects)
     end
 end
 
+-- Start of AMP change
+--
+-- Records which script the stored variables belong to, and drops everything previously
+-- stored for an object whose script has changed.
+--
+-- Local variable indices are positions inside one particular script, so once the content
+-- files change and a script gains or loses a variable, every index saved under the old
+-- version points at the wrong thing. Keeping the script ID lets us notice that and clear
+-- the stale values instead of quietly corrupting quest state.
 function BaseCell:SaveClientScriptLocals(objects)
 
     for uniqueIndex, object in pairs(objects) do
 
         local refId = object.refId
-        local variables = object.variables
 
-        self:InitializeObjectData(uniqueIndex, refId)
+        if refId ~= nil and type(object.variables) == "table" then
 
-        if self.data.objectData[uniqueIndex].variables == nil then
-            self.data.objectData[uniqueIndex].variables = {}
-        end
+            self:InitializeObjectData(uniqueIndex, refId)
 
-        for variableType, variableTable in pairs(object.variables) do
-            if self.data.objectData[uniqueIndex].variables[variableType] == nil then
-                self.data.objectData[uniqueIndex].variables[variableType] = {}
+            local objectData = self.data.objectData[uniqueIndex]
+
+            if objectData ~= nil then
+
+                local clientScriptId = object.clientScriptId
+
+                if clientScriptId ~= nil and clientScriptId ~= "" then
+
+                    if objectData.clientScriptId ~= nil and
+                        string.lower(objectData.clientScriptId) ~= string.lower(clientScriptId) then
+
+                        tes3mp.LogMessage(enumerations.log.WARN, "Clearing saved script locals for " ..
+                            uniqueIndex .. " in " .. self.description .. " because its script changed from " ..
+                            objectData.clientScriptId .. " to " .. clientScriptId)
+
+                        objectData.variables = nil
+                    end
+
+                    objectData.clientScriptId = clientScriptId
+                end
+
+                if objectData.variables == nil then
+                    objectData.variables = {}
+                end
+
+                for variableType, variableTable in pairs(object.variables) do
+
+                    if type(variableTable) == "table" then
+
+                        if objectData.variables[variableType] == nil then
+                            objectData.variables[variableType] = {}
+                        end
+
+                        for internalIndex, value in pairs(variableTable) do
+                            objectData.variables[variableType][internalIndex] = value
+                        end
+                    end
+                end
+
+                tableHelper.insertValueIfMissing(self.data.packets.clientScriptLocal, uniqueIndex)
             end
-
-            for internalIndex, value in pairs(variableTable) do
-                self.data.objectData[uniqueIndex].variables[variableType][internalIndex] = value
-            end
         end
-
-        tableHelper.insertValueIfMissing(self.data.packets.clientScriptLocal, uniqueIndex)
     end
 end
+-- End of AMP change
 
 function BaseCell:SaveContainers(pid)
 
@@ -1480,7 +1518,17 @@ function BaseCell:LoadDoorStates(pid, objectData, uniqueIndexArray, forEveryone)
     end
 end
 
+-- Start of AMP change
+--
+-- This was the only loader in the file without a guard on objectData[uniqueIndex], while
+-- its neighbours all check for one. A uniqueIndex left in packets.clientScriptLocal whose
+-- object data had since been removed therefore raised a Lua error partway through cell
+-- loading, and everything that would have been sent after it - containers, actor data,
+-- door states - never reached the player. That is the likeliest source of the intermittent
+-- desyncs where a cell comes up half populated.
 function BaseCell:LoadClientScriptLocals(pid, objectData, uniqueIndexArray, forEveryone)
+
+    if type(uniqueIndexArray) ~= "table" then return end
 
     local objectCount = 0
 
@@ -1489,14 +1537,20 @@ function BaseCell:LoadClientScriptLocals(pid, objectData, uniqueIndexArray, forE
     tes3mp.SetObjectListCell(self.description)
 
     for arrayIndex, uniqueIndex in pairs(uniqueIndexArray) do
-        packetBuilder.AddClientScriptLocal(uniqueIndex, objectData[uniqueIndex])
-        objectCount = objectCount + 1
+
+        if objectData[uniqueIndex] ~= nil and type(objectData[uniqueIndex].variables) == "table" then
+            packetBuilder.AddClientScriptLocal(uniqueIndex, objectData[uniqueIndex])
+            objectCount = objectCount + 1
+        else
+            tableHelper.removeValue(uniqueIndexArray, uniqueIndex)
+        end
     end
 
     if objectCount > 0 then
         tes3mp.SendClientScriptLocal(forEveryone)
     end
 end
+-- End of AMP change
 
 function BaseCell:LoadContainers(pid, objectData, uniqueIndexArray)
 

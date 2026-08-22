@@ -7,9 +7,23 @@
 #include "PlayerList.hpp"
 #include "CellController.hpp"
 #include "RecordHelper.hpp"
+/*
+    Start of AMP addition
+*/
+#include "ScriptController.hpp"
+/*
+    End of AMP addition
+*/
 
 #include <components/translation/translation.hpp>
 #include <components/openmw-mp/TimedLog.hpp>
+/*
+    Start of AMP addition
+*/
+#include <components/misc/stringops.hpp>
+/*
+    End of AMP addition
+*/
 
 #include "../mwbase/world.hpp"
 #include "../mwbase/environment.hpp"
@@ -32,6 +46,13 @@
 #include "../mwrender/animation.hpp"
 
 #include "../mwscript/interpretercontext.hpp"
+/*
+    Start of AMP addition
+*/
+#include "../mwscript/locals.hpp"
+/*
+    End of AMP addition
+*/
 
 #include "../mwworld/class.hpp"
 #include "../mwworld/containerstore.hpp"
@@ -1086,45 +1107,127 @@ void ObjectList::makeDialogueChoices(MWWorld::CellStore* cellStore)
     }
 }
 
+/*
+    Start of AMP change
+
+    Rewritten to be safe and to actually work for scripts attached to the player.
+
+    The old version reached straight into mShorts/mLongs/mFloats with std::vector::at() on a
+    reference whose locals may never have been configured, so any packet naming an index the
+    receiver did not have threw std::out_of_range from inside packet handling. It also had no
+    way of telling whether the indices it was given still belonged to the script it was
+    running, which is what breaks after a content file changes and every local variable
+    shifts by one.
+*/
 void ObjectList::setClientLocals(MWWorld::CellStore* cellStore)
 {
+    MWBase::World* world = MWBase::Environment::get().getWorld();
+
     for (const auto &baseObject : baseObjects)
     {
-        LOG_APPEND(TimedLog::LOG_VERBOSE, "- cellRef: %s %i-%i", baseObject.refId.c_str(), baseObject.refNum, baseObject.mpNum);
+        MWWorld::Ptr ptrFound;
 
-        MWWorld::Ptr ptrFound = cellStore->searchExact(baseObject.refNum, baseObject.mpNum, baseObject.refId);
-
-        if (ptrFound)
+        if (baseObject.isPlayer)
         {
-            LOG_APPEND(TimedLog::LOG_VERBOSE, "-- Found %s %i-%i", ptrFound.getCellRef().getRefId().c_str(),
-                               ptrFound.getCellRef().getRefNum(), ptrFound.getCellRef().getMpNum());
+            // Only ever apply script locals that belong to our own character; another
+            // player's quest state is theirs and is kept in their own profile
+            if (baseObject.guid != Main::get().getLocalPlayer()->guid)
+                continue;
 
-            for (const auto& clientLocal : baseObject.clientLocals)
+            ptrFound = world->getPlayerPtr();
+            LOG_APPEND(TimedLog::LOG_VERBOSE, "- clientLocals for local player, script: %s",
+                baseObject.clientScriptId.c_str());
+        }
+        else
+        {
+            LOG_APPEND(TimedLog::LOG_VERBOSE, "- cellRef: %s %i-%i, script: %s", baseObject.refId.c_str(),
+                baseObject.refNum, baseObject.mpNum, baseObject.clientScriptId.c_str());
+
+            if (!cellStore)
+                continue;
+
+            ptrFound = cellStore->searchExact(baseObject.refNum, baseObject.mpNum, baseObject.refId);
+        }
+
+        if (!ptrFound)
+            continue;
+
+        std::string scriptId = ptrFound.getClass().getScript(ptrFound);
+
+        if (scriptId.empty())
+        {
+            LOG_APPEND(TimedLog::LOG_WARN, "-- Ignored clientLocals for %s because it has no script",
+                ptrFound.getCellRef().getRefId().c_str());
+            continue;
+        }
+
+        // Refuse values that were recorded for a different script than the one this
+        // reference is actually running, because their indices mean nothing here
+        if (!baseObject.clientScriptId.empty() &&
+            !Misc::StringUtils::ciEqual(baseObject.clientScriptId, scriptId))
+        {
+            LOG_APPEND(TimedLog::LOG_WARN, "-- Ignored clientLocals meant for script %s, but %s runs %s",
+                baseObject.clientScriptId.c_str(), ptrFound.getCellRef().getRefId().c_str(), scriptId.c_str());
+            continue;
+        }
+
+        const ESM::Script* script = world->getStore().get<ESM::Script>().search(scriptId);
+
+        if (script == nullptr)
+        {
+            LOG_APPEND(TimedLog::LOG_WARN, "-- Ignored clientLocals because script %s does not exist here",
+                scriptId.c_str());
+            continue;
+        }
+
+        // Make sure the variable containers exist and are sized for this script before
+        // writing anything into them
+        if (ptrFound.getRefData().getLocals().isEmpty())
+            ptrFound.getRefData().setLocals(*script);
+
+        MWScript::Locals& locals = ptrFound.getRefData().getLocals();
+
+        for (const auto& clientLocal : baseObject.clientLocals)
+        {
+            if (clientLocal.internalIndex < 0)
+                continue;
+
+            const size_t internalIndex = static_cast<size_t>(clientLocal.internalIndex);
+
+            if (clientLocal.variableType == mwmp::VARIABLE_TYPE::SHORT)
             {
-                std::string valueAsString;
-                std::string variableTypeAsString;
-
-                if (clientLocal.variableType == mwmp::VARIABLE_TYPE::SHORT || clientLocal.variableType == mwmp::VARIABLE_TYPE::LONG)
-                {
-                    variableTypeAsString = clientLocal.variableType == mwmp::VARIABLE_TYPE::SHORT ? "short" : "long";
-                    valueAsString = std::to_string(clientLocal.intValue);
-                }
-                else if (clientLocal.variableType == mwmp::VARIABLE_TYPE::FLOAT)
-                {
-                    variableTypeAsString = "float";
-                    valueAsString = std::to_string(clientLocal.floatValue);
-                }
-
-                if (clientLocal.variableType == mwmp::VARIABLE_TYPE::SHORT)
-                    ptrFound.getRefData().getLocals().mShorts.at(clientLocal.internalIndex) = clientLocal.intValue;
-                else if (clientLocal.variableType == mwmp::VARIABLE_TYPE::LONG)
-                    ptrFound.getRefData().getLocals().mLongs.at(clientLocal.internalIndex) = clientLocal.intValue;
-                else if (clientLocal.variableType == mwmp::VARIABLE_TYPE::FLOAT)
-                    ptrFound.getRefData().getLocals().mFloats.at(clientLocal.internalIndex) = clientLocal.floatValue;
+                if (internalIndex < locals.mShorts.size())
+                    locals.mShorts[internalIndex] = clientLocal.intValue;
+                else
+                    LOG_APPEND(TimedLog::LOG_WARN, "-- Out of range short index %i for script %s (has %i)",
+                        clientLocal.internalIndex, scriptId.c_str(), static_cast<int>(locals.mShorts.size()));
+            }
+            else if (clientLocal.variableType == mwmp::VARIABLE_TYPE::LONG)
+            {
+                if (internalIndex < locals.mLongs.size())
+                    locals.mLongs[internalIndex] = clientLocal.intValue;
+                else
+                    LOG_APPEND(TimedLog::LOG_WARN, "-- Out of range long index %i for script %s (has %i)",
+                        clientLocal.internalIndex, scriptId.c_str(), static_cast<int>(locals.mLongs.size()));
+            }
+            else if (clientLocal.variableType == mwmp::VARIABLE_TYPE::FLOAT)
+            {
+                if (internalIndex < locals.mFloats.size())
+                    locals.mFloats[internalIndex] = clientLocal.floatValue;
+                else
+                    LOG_APPEND(TimedLog::LOG_WARN, "-- Out of range float index %i for script %s (has %i)",
+                        clientLocal.internalIndex, scriptId.c_str(), static_cast<int>(locals.mFloats.size()));
             }
         }
+
+        // Anything of ours still waiting to be sent for this reference is now stale, so
+        // drop it instead of letting it overwrite what we were just told
+        ScriptController::dropQueuedLocalChanges(ptrFound);
     }
 }
+/*
+    End of AMP change
+*/
 
 void ObjectList::setMemberShorts()
 {
@@ -1472,11 +1575,20 @@ void ObjectList::addVideoPlay(std::string filename, bool allowSkipping)
     addBaseObject(baseObject);
 }
 
+/*
+    Start of AMP change
+
+    Both overloads now guard against references that have no cell at all, and record which
+    script the variable belongs to so the receiver can validate it
+*/
 void ObjectList::addClientScriptLocal(const MWWorld::Ptr& ptr, int internalIndex, int value, mwmp::VARIABLE_TYPE variableType)
 {
-    cell = *ptr.getCell()->getCell();
+    if (ptr.isEmpty() || ptr.mCell == nullptr) return;
+
+    cell = *ptr.mCell->getCell();
 
     mwmp::BaseObject baseObject = getBaseObjectFromPtr(ptr);
+    baseObject.clientScriptId = ptr.getClass().getScript(ptr);
     ClientVariable clientLocal;
     clientLocal.internalIndex = internalIndex;
     clientLocal.variableType = variableType;
@@ -1487,9 +1599,12 @@ void ObjectList::addClientScriptLocal(const MWWorld::Ptr& ptr, int internalIndex
 
 void ObjectList::addClientScriptLocal(const MWWorld::Ptr& ptr, int internalIndex, float value)
 {
-    cell = *ptr.getCell()->getCell();
+    if (ptr.isEmpty() || ptr.mCell == nullptr) return;
+
+    cell = *ptr.mCell->getCell();
 
     mwmp::BaseObject baseObject = getBaseObjectFromPtr(ptr);
+    baseObject.clientScriptId = ptr.getClass().getScript(ptr);
     ClientVariable clientLocal;
     clientLocal.internalIndex = internalIndex;
     clientLocal.variableType = mwmp::VARIABLE_TYPE::FLOAT;
@@ -1497,6 +1612,9 @@ void ObjectList::addClientScriptLocal(const MWWorld::Ptr& ptr, int internalIndex
     baseObject.clientLocals.push_back(clientLocal);
     addBaseObject(baseObject);
 }
+/*
+    End of AMP change
+*/
 
 void ObjectList::addScriptMemberShort(std::string refId, int index, int shortVal)
 {

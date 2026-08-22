@@ -301,6 +301,7 @@ eventHandler.InitializeDefaultHandlers = function()
         -- the local player
         -- i.e. sendToOtherPlayers is false and skipAttachedPlayer is false
         tes3mp.SendObjectActivate(false, false)
+
     end)
 
     -- Print object hits
@@ -1480,9 +1481,103 @@ eventHandler.OnDoorState = function(pid, cellDescription)
     eventHandler.OnGenericObjectEvent(pid, cellDescription, "DoorState")
 end
 
+-- Start of AMP change
+--
+-- ClientScriptLocal now needs its own handler instead of the generic one, for two reasons.
+--
+-- First, variables belonging to scripts attached to a character have to be filed under that
+-- character's profile. Under the generic handler they were written into the cell the player
+-- happened to be standing in, under a uniqueIndex that every player shared, so two players
+-- with the same script running would overwrite each other's quest state and then have the
+-- result handed back to them as if it were their own.
+--
+-- Second, world objects need an authority check. Local scripts run on every client that has
+-- the cell loaded, so without one, every player present reports the same timer and they
+-- fight over its value. Only the cell authority is believed.
 eventHandler.OnClientScriptLocal = function(pid, cellDescription)
-    eventHandler.OnGenericObjectEvent(pid, cellDescription, "ClientScriptLocal")
+
+    if Players[pid] == nil or not Players[pid]:IsLoggedIn() then
+        tes3mp.Kick(pid)
+        return
+    end
+
+    tes3mp.ReadReceivedObjectList()
+
+    local packetOrigin = tes3mp.GetObjectListOrigin()
+
+    if logicHandler.IsPacketFromConsole(packetOrigin) and not logicHandler.IsPlayerAllowedConsole(pid) then
+        tes3mp.Kick(pid)
+        tes3mp.SendMessage(pid, logicHandler.GetChatName(pid) .. consoleKickMessage, true)
+        return
+    end
+
+    local packetTables = packetReader.GetObjectPacketTables("ClientScriptLocal")
+    local objects = packetTables.objects
+    local targetPlayers = packetTables.players
+
+    local eventStatus = customEventHooks.triggerValidators("OnClientScriptLocal",
+        {pid, cellDescription, objects, targetPlayers})
+
+    if eventStatus.validDefaultHandler then
+
+        -- Variables of scripts running on a character go into that character's profile
+        if config.syncPlayerScriptLocals ~= false then
+
+            for targetPid, targetPlayer in pairs(targetPlayers) do
+
+                -- A player may only ever report their own character's script state
+                if targetPid ~= pid then
+                    tes3mp.LogMessage(enumerations.log.WARN, "Rejected ClientScriptLocal from " ..
+                        logicHandler.GetChatName(pid) .. " about another player's scripts")
+                elseif targetPlayer.clientScriptId ~= nil and targetPlayer.variables ~= nil then
+                    tes3mp.LogMessage(enumerations.log.INFO, "Saving script locals of " ..
+                        targetPlayer.clientScriptId .. " to the profile of " .. logicHandler.GetChatName(pid))
+                    Players[pid]:SaveClientScriptLocal(targetPlayer.clientScriptId, targetPlayer.variables)
+                end
+            end
+        end
+
+        if not tableHelper.isEmpty(objects) then
+
+            local isCellLoaded = LoadedCells[cellDescription] ~= nil
+
+            if not isCellLoaded and logicHandler.DoesPacketOriginRequireLoadedCell(packetOrigin) then
+                tes3mp.LogMessage(enumerations.log.WARN, "Invalid ClientScriptLocal from " ..
+                    logicHandler.GetChatName(pid) .. " for unloaded " .. cellDescription)
+                return
+            end
+
+            if not isCellLoaded then
+                logicHandler.LoadCell(cellDescription)
+            end
+
+            local isAuthority = LoadedCells[cellDescription]:GetAuthority() == pid
+
+            if config.enforceScriptAuthority == true and not isAuthority and
+                not logicHandler.IsPacketFromConsole(packetOrigin) then
+
+                tes3mp.LogMessage(enumerations.log.INFO, "Ignored ClientScriptLocal from " ..
+                    logicHandler.GetChatName(pid) .. " about " .. cellDescription ..
+                    " because they are not the authority there")
+            else
+                tes3mp.LogMessage(enumerations.log.INFO, "Accepted ClientScriptLocal from " ..
+                    logicHandler.GetChatName(pid) .. " about " .. cellDescription)
+
+                LoadedCells[cellDescription]:SaveClientScriptLocals(objects)
+                LoadedCells[cellDescription]:LoadClientScriptLocals(pid, LoadedCells[cellDescription].data.objectData,
+                    tableHelper.getArrayFromIndexes(objects), true)
+            end
+
+            if not isCellLoaded then
+                logicHandler.UnloadCell(cellDescription)
+            end
+        end
+    end
+
+    customEventHooks.triggerHandlers("OnClientScriptLocal", eventStatus,
+        {pid, cellDescription, objects, targetPlayers})
 end
+-- End of AMP change
 
 eventHandler.OnConsoleCommand = function(pid, cellDescription)
     if Players[pid] ~= nil and Players[pid]:IsLoggedIn() then

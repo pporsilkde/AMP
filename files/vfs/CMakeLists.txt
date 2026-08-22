@@ -36,6 +36,7 @@ file(GLOB_RECURSE BUILTIN_VFS_FILES
     textures/ui/arenamw/*.png
     l10n/arenamp/*.ini
     icons/inventoryextender/*.dds
+    Icons/questman/*.dds
 )
 
 # Consuming Animated pipe/smoke models reference these texture names directly.

@@ -31,6 +31,7 @@
 #include "../mwworld/nullaction.hpp"
 
 #include "../mwmechanics/weapontype.hpp"
+#include "../mwmechanics/equipmentrequirements.hpp"
 
 #include "../mwgui/tooltips.hpp"
 
@@ -291,6 +292,10 @@ namespace MWClass
             text += MWGui::ToolTips::getCellRefString(ptr.getCellRef());
             text += MWGui::ToolTips::getMiscString(ref->mBase->mScript, "Script");
         }
+
+        const MWMechanics::EquipmentRequirementResult arenaRequirement
+            = MWMechanics::getEquipmentRequirement(ptr, MWMechanics::getPlayer());
+        text += MWMechanics::formatEquipmentRequirementTooltip(arenaRequirement);
 
         info.text = text;
 

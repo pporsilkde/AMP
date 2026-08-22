@@ -1,4 +1,13 @@
 #include <cstdlib>
+/*
+    Start of AMP addition
+*/
+#include <unordered_set>
+
+#include <components/misc/stringops.hpp>
+/*
+    End of AMP addition
+*/
 
 #include <components/openmw-mp/Utils.hpp>
 #include <components/openmw-mp/TimedLog.hpp>
@@ -46,6 +55,13 @@
 #include "CellController.hpp"
 #include "MechanicsHelper.hpp"
 #include "RecordHelper.hpp"
+/*
+    Start of AMP addition
+*/
+#include "ScriptController.hpp"
+/*
+    End of AMP addition
+*/
 
 using namespace mwmp;
 
@@ -109,6 +125,12 @@ Main::Main()
 
 Main::~Main()
 {
+    // Flush the final coalesced script-local changes while the connection and ObjectList
+    // still exist. A hard connection loss cannot be recovered here, but a normal quit can.
+    if (mNetworking != nullptr && mLocalPlayer != nullptr && mNetworking->isConnected()
+        && mLocalPlayer->isLoggedIn())
+        ScriptController::flushQueuedLocalChanges(0.0f, true);
+
     LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "tes3mp stopped");
     delete mNetworking;
     delete mLocalSystem;
@@ -204,6 +226,16 @@ void Main::frame(float dt)
     get().getCellController()->updateDedicated(dt);
     get().updateWorld(dt);
 
+    /*
+        Start of AMP addition
+
+        Send whatever script local changes have accumulated since the last flush
+    */
+    ScriptController::flushQueuedLocalChanges(dt);
+    /*
+        End of AMP addition
+    */
+
     get().getGUIController()->update(dt);
 }
 
@@ -265,22 +297,65 @@ CellController *Main::getCellController() const
     return mCellController;
 }
 
+/*
+    Start of AMP change
+
+    These two used to walk a std::vector of strings with an exact, case sensitive comparison,
+    once per script per frame.
+
+    Case sensitivity was an outright bug: script IDs come out of the content files with
+    whatever capitalisation the author used, while the server sends the list as written in
+    config.synchronizedClientScriptIds, so a mismatch in a single letter silently dropped a
+    script out of synchronization with no diagnostic anywhere.
+
+    Both lookups are now case insensitive and backed by a hash set that is rebuilt only when
+    the server sends us a new list
+*/
+namespace
+{
+    std::unordered_set<std::string> sPacketScriptIds;
+    std::unordered_set<std::string> sPacketGlobalIds;
+    bool sPacketIdCachesValid = false;
+
+    void rebuildPacketIdCaches(mwmp::BaseWorldstate *worldstate)
+    {
+        sPacketScriptIds.clear();
+        sPacketGlobalIds.clear();
+
+        for (const auto &scriptId : worldstate->synchronizedClientScriptIds)
+            sPacketScriptIds.insert(Misc::StringUtils::lowerCase(scriptId));
+
+        for (const auto &globalId : worldstate->synchronizedClientGlobalIds)
+            sPacketGlobalIds.insert(Misc::StringUtils::lowerCase(globalId));
+
+        sPacketIdCachesValid = true;
+    }
+}
+
+void Main::invalidatePacketScriptCache()
+{
+    sPacketIdCachesValid = false;
+}
+
 bool Main::isValidPacketScript(std::string scriptId)
 {
     mwmp::BaseWorldstate *worldstate = get().getNetworking()->getWorldstate();
 
-    if (Utils::vectorContains(worldstate->synchronizedClientScriptIds, scriptId))
-        return true;
+    if (!sPacketIdCachesValid)
+        rebuildPacketIdCaches(worldstate);
 
-    return false;
+    return sPacketScriptIds.count(Misc::StringUtils::lowerCase(scriptId)) > 0;
 }
 
 bool Main::isValidPacketGlobal(std::string globalId)
 {
     mwmp::BaseWorldstate *worldstate = get().getNetworking()->getWorldstate();
 
-    if (Utils::vectorContains(worldstate->synchronizedClientGlobalIds, globalId))
-        return true;
+    if (!sPacketIdCachesValid)
+        rebuildPacketIdCaches(worldstate);
 
-    return false;
+    return sPacketGlobalIds.count(Misc::StringUtils::lowerCase(globalId)) > 0;
 }
+/*
+    End of AMP change
+*/

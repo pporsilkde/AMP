@@ -67,6 +67,7 @@
 
 #include "spellcasting.hpp"
 #include "animationenhancements.hpp"
+#include "equipmentrequirements.hpp"
 #include "steering.hpp"
 #include "npcstats.hpp"
 #include "creaturestats.hpp"
@@ -2875,12 +2876,15 @@ namespace MWMechanics
             static float timerUpdateHeadTrack = 0;
             static float timerUpdateEquippedLight = 0;
             static float timerUpdateHello = 0;
+            static float timerEquipmentRequirements = 0;
             const float updateEquippedLightInterval = 1.0f;
+            const float equipmentRequirementInterval = 2.0f;
 
             if (timerUpdateHeadTrack >= 0.3f) timerUpdateHeadTrack = 0;
             if (timerUpdateHello >= 0.25f) timerUpdateHello = 0;
             if (mTimerDisposeSummonsCorpses >= 0.2f) mTimerDisposeSummonsCorpses = 0;
             if (timerUpdateEquippedLight >= updateEquippedLightInterval) timerUpdateEquippedLight = 0;
+            if (timerEquipmentRequirements >= equipmentRequirementInterval) timerEquipmentRequirements = 0;
 
             // show torches only when there are darkness and no precipitations
             MWBase::World* world = MWBase::Environment::get().getWorld();
@@ -2894,6 +2898,14 @@ namespace MWMechanics
             std::map<const MWWorld::Ptr, const std::set<MWWorld::Ptr> > cachedAllies; // will be filled as engageCombat iterates
 
             bool aiActive = MWBase::Environment::get().getMechanicsManager()->isAIActive();
+
+            // Revalidate equipped gear periodically because temporary Drain/
+            // Damage/Fortify effects can move the player across a requirement
+            // threshold after the item was equipped. Only the local player is
+            // checked here; remote players are represented by server equipment.
+            if (timerEquipmentRequirements == 0)
+                enforceEquipmentRequirements(player, true);
+
             int attackedByPlayerId = player.getClass().getCreatureStats(player).getHitAttemptActorId();
             if (attackedByPlayerId != -1)
             {
@@ -3173,6 +3185,7 @@ namespace MWMechanics
             timerUpdateHeadTrack += duration;
             timerUpdateEquippedLight += duration;
             timerUpdateHello += duration;
+            timerEquipmentRequirements += duration;
             mTimerDisposeSummonsCorpses += duration;
 
             // Animation/movement update

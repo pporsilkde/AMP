@@ -8,6 +8,7 @@
 
 #include "../mwmechanics/actorutil.hpp"
 #include "../mwmechanics/weapontype.hpp"
+#include "../mwmechanics/equipmentrequirements.hpp"
 
 #include <components/compiler/locals.hpp>
 #include <components/esm/loadweap.hpp>
@@ -87,6 +88,21 @@ namespace MWWorld
                 MWBase::Environment::get().getWindowManager()->messageBox("#{sInventoryMessage1}");
 
             return;
+        }
+
+        // ArenaMP server-controlled Armor/Weapon Requirements. The server
+        // overwrites the whole [Equipment Requirements] category on connect,
+        // so changing a local settings.cfg does not relax these checks.
+        if (actor == MWMechanics::getPlayer())
+        {
+            const MWMechanics::EquipmentRequirementResult requirement
+                = MWMechanics::getEquipmentRequirement(object, actor);
+            if (requirement.mApplicable && !requirement.mAllowed)
+            {
+                MWBase::Environment::get().getWindowManager()->messageBox(
+                    MWMechanics::formatEquipmentRequirementMessage(requirement));
+                return;
+            }
         }
 
         if (!mForce)

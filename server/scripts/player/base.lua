@@ -94,7 +94,24 @@ function BasePlayer:__init(pid, playerName)
         recordLinks = {},
         alliedPlayers = {},
         destinationOverrides = {},
-        customVariables = {}
+        customVariables = {},
+        -- Start of AMP addition
+        --
+        -- Scripts running on the character itself - the ones behind most timed quest
+        -- stages, tavern rents and cooldowns - used to be filed under whichever cell the
+        -- player happened to be standing in, mixed together with every other player's
+        -- copy of the same script. They now live here, in the profile, where they belong
+        -- to exactly one character and travel with them between cells and sessions.
+        --
+        -- Layout: clientVariables.locals[scriptIdInLowercase] = {
+        --     scriptId = "<original casing>",
+        --     variables = { [variableType] = { [internalIndex] = value } }
+        -- }
+        clientVariables = {
+            globals = {},
+            locals = {}
+        }
+        -- End of AMP addition
     }
 
     for index = 0, (tes3mp.GetAttributeCount() - 1) do
@@ -298,6 +315,14 @@ function BasePlayer:FinishLogin()
 
         self:LoadClientScriptVariables()        
         WorldInstance:LoadClientScriptVariables(self.pid)
+
+        -- Start of AMP addition
+        --
+        -- Restore the locals of scripts attached to this character. This has to happen
+        -- before LoadCell() below, so the values are already in place by the time the
+        -- client starts running those scripts again.
+        self:LoadClientScriptLocals()
+        -- End of AMP addition
 
         self:LoadDestinationOverrides()
         WorldInstance:LoadDestinationOverrides(self.pid)
@@ -1499,6 +1524,25 @@ end
 function BasePlayer:SaveClientScriptGlobal(variables)
     stateHelper:SaveClientScriptGlobal(self, variables)
 end
+
+-- Start of AMP addition
+function BasePlayer:LoadClientScriptLocals()
+    stateHelper:LoadClientScriptLocals(self.pid, self)
+end
+
+function BasePlayer:SaveClientScriptLocal(scriptId, variables)
+    stateHelper:SaveClientScriptLocal(self, scriptId, variables)
+end
+
+-- Forget the stored locals of one script, or of every script when scriptId is nil.
+--
+-- This is the "correctly cleared" half of the profile storage: a quest that has been
+-- reset, a character that has been wiped, or a script that no longer exists in the
+-- content files should not keep dragging old counters around forever.
+function BasePlayer:ClearClientScriptLocals(scriptId)
+    stateHelper:ClearClientScriptLocals(self, scriptId)
+end
+-- End of AMP addition
 
 function BasePlayer:LoadDestinationOverrides(pid)
     stateHelper:LoadDestinationOverrides(self.pid, self)

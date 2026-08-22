@@ -53,9 +53,30 @@ namespace mwmp
 
                 MWBase::Environment::get().getWorld()->setPhysicsFramerate(player->physicsFramerate);
 
-                for (auto setting : player->gameSettings)
+                // ArenaMP can enforce settings outside the regular [Game]
+                // category without changing the ID_GAME_SETTINGS wire format.
+                // Server-side config.lua encodes them as:
+                //   @ArenaMP|Category|setting name
+                // Old clients do not understand this routing, so protocol 808
+                // prevents them from connecting and silently ignoring gameplay
+                // rules such as Equipment Requirements.
+                const std::string categoryPrefix = "@ArenaMP|";
+                for (const auto& setting : player->gameSettings)
                 {
-                    Settings::Manager::setString(setting.first, GAME_SETTING_CATEGORY, setting.second);
+                    if (setting.first.compare(0, categoryPrefix.size(), categoryPrefix) == 0)
+                    {
+                        const std::size_t separator = setting.first.find('|', categoryPrefix.size());
+                        if (separator != std::string::npos && separator + 1 < setting.first.size())
+                        {
+                            const std::string category = setting.first.substr(
+                                categoryPrefix.size(), separator - categoryPrefix.size());
+                            const std::string name = setting.first.substr(separator + 1);
+                            if (!category.empty() && !name.empty())
+                                Settings::Manager::setString(name, category, setting.second);
+                        }
+                    }
+                    else
+                        Settings::Manager::setString(setting.first, GAME_SETTING_CATEGORY, setting.second);
                 }
 
                 // A live friendly-fire mode change must immediately rebuild
