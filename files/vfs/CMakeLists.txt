@@ -39,15 +39,16 @@ file(GLOB_RECURSE BUILTIN_VFS_FILES
 )
 
 
-# Quest Manager icons use one canonical lowercase path. Android/Linux assets are
-# case-sensitive, so keeping both Icons/questman and icons/questman would work on
-# Windows but fail or become ambiguous in packaged mobile resources.
+# Quest Manager icons use one canonical lowercase runtime path. Android/Linux
+# assets are case-sensitive, while Windows source lookups are not, so validate
+# the canonical files themselves instead of probing a differently-cased alias.
 set(QUESTMAN_ICON_DIR "icons/questman")
-if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Icons/questman")
-    message(FATAL_ERROR
-        "Legacy Quest Manager path Icons/questman detected. "
-        "Use the canonical lowercase path ${QUESTMAN_ICON_DIR} for Android-safe packaging.")
-endif()
+# Do not probe a differently-cased legacy path here: Windows filesystems are
+# case-insensitive, so EXISTS("Icons/questman") also matches the canonical
+# "icons/questman" directory and would make every Windows configure fail.
+# The per-file checks below are sufficient: on case-sensitive Android/Linux
+# builds they require the canonical lowercase source path, while all copied
+# runtime destinations remain lowercase on every platform.
 
 # Keep the filenames explicit so generated IDE projects see every resource and a
 # missing icon fails at configure time instead of becoming an in-game blank icon.
