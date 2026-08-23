@@ -79,25 +79,20 @@ void Cell::updateLocal(bool forceUpdate)
         }
         else
         {
-            if (actor->getPtr().getRefData().isEnabled())
+            if (!actor->getPtr().getRefData().isEnabled() || actor->getPtr().getRefData().isDeleted())
             {
-                if (actor->getPtr().getRefData().isDeleted())
-                {
-                    std::string mapIndex = it->first;
-                    LOG_APPEND(TimedLog::LOG_VERBOSE, "- Deleting LocalActor %s whose reference has been deleted",
-                        mapIndex.c_str(), getShortDescription().c_str());
-                    cellController->removeLocalActorRecord(mapIndex);
-                    delete actor;
-                    localActors.erase(it++);
-                }
-                else
-                {
-                    // Forcibly update this local actor if its data has never been sent before;
-                    // otherwise, use the current forceUpdate value
-                    actor->update(actor->hasSentData ? forceUpdate : true);
-                }
+                const std::string mapIndex = it->first;
+                LOG_APPEND(TimedLog::LOG_VERBOSE, "- Removing LocalActor %s because its reference is disabled/deleted",
+                    mapIndex.c_str(), getShortDescription().c_str());
+                cellController->removeLocalActorRecord(mapIndex);
+                delete actor;
+                it = localActors.erase(it);
+                continue;
             }
 
+            // Forcibly update this local actor if its data has never been sent before;
+            // otherwise, use the current forceUpdate value.
+            actor->update(actor->hasSentData ? forceUpdate : true);
             ++it;
         }
     }
@@ -117,12 +112,28 @@ void Cell::updateLocal(bool forceUpdate)
 void Cell::updateDedicated(float dt)
 {
     if (dedicatedActors.empty()) return;
-    
-    for (auto &actor : dedicatedActors)
-        actor.second->update(dt);
+
+    CellController *cellController = Main::get().getCellController();
+    for (auto it = dedicatedActors.begin(); it != dedicatedActors.end();)
+    {
+        DedicatedActor *actor = it->second;
+        if (!actor->getPtr().getRefData().isEnabled() || actor->getPtr().getRefData().isDeleted())
+        {
+            const std::string mapIndex = it->first;
+            LOG_APPEND(TimedLog::LOG_VERBOSE, "- Removing DedicatedActor %s because its reference is disabled/deleted",
+                mapIndex.c_str(), getShortDescription().c_str());
+            cellController->removeDedicatedActorRecord(mapIndex);
+            delete actor;
+            it = dedicatedActors.erase(it);
+            continue;
+        }
+
+        actor->update(dt);
+        ++it;
+    }
 
     // Are we the authority over this cell? If so, uninitialize DedicatedActors
-    // after the above update
+    // after the above update.
     if (hasLocalAuthority())
         uninitializeDedicatedActors();
 }
@@ -147,9 +158,9 @@ void Cell::readPositions(ActorList& actorList)
             {
                 actor->hasPositionData = true;
 
-                // Keep EncoreMP's first-packet behavior: snap the initial world
-                // position immediately, then let DedicatedActor::move() handle
-                // interpolation and the visual locomotion fallback on frames.
+                // Snap the first authoritative sample immediately. Subsequent
+                // samples are handled by DedicatedActor::move() with bounded
+                // interpolation and authoritative movement animation.
                 actor->setPosition();
             }
         }
@@ -520,6 +531,9 @@ void Cell::initializeLocalActors()
 
 void Cell::initializeDedicatedActor(const MWWorld::Ptr& ptr)
 {
+    if (ptr.isEmpty() || !ptr.getRefData().isEnabled() || ptr.getRefData().isDeleted())
+        return;
+
     std::string mapIndex = Main::get().getCellController()->generateMapIndex(ptr);
     LOG_APPEND(TimedLog::LOG_VERBOSE, "- Initializing DedicatedActor %s in %s", mapIndex.c_str(), getShortDescription().c_str());
 
@@ -567,10 +581,14 @@ void Cell::uninitializeDedicatedActors(ActorList& actorList)
 {
     for (const auto &baseActor : actorList.baseActors)
     {
-        std::string mapIndex = Main::get().getCellController()->generateMapIndex(baseActor);
+        const std::string mapIndex = Main::get().getCellController()->generateMapIndex(baseActor);
+        auto actorIt = dedicatedActors.find(mapIndex);
+        if (actorIt == dedicatedActors.end())
+            continue;
+
         Main::get().getCellController()->removeDedicatedActorRecord(mapIndex);
-        delete dedicatedActors.at(mapIndex);
-        dedicatedActors.erase(mapIndex);
+        delete actorIt->second;
+        dedicatedActors.erase(actorIt);
     }
 }
 
@@ -583,6 +601,52 @@ void Cell::uninitializeDedicatedActors()
     }
 
     dedicatedActors.clear();
+}
+
+void Cell::uninitializeActor(const MWWorld::Ptr& ptr)
+{
+    if (ptr.isEmpty())
+        return;
+
+    CellController *cellController = Main::get().getCellController();
+    const std::string mapIndex = cellController->generateMapIndex(ptr);
+
+    auto localIt = localActors.find(mapIndex);
+    if (localIt != localActors.end())
+    {
+        cellController->removeLocalActorRecord(mapIndex);
+        delete localIt->second;
+        localActors.erase(localIt);
+    }
+
+    auto dedicatedIt = dedicatedActors.find(mapIndex);
+    if (dedicatedIt != dedicatedActors.end())
+    {
+        cellController->removeDedicatedActorRecord(mapIndex);
+        delete dedicatedIt->second;
+        dedicatedActors.erase(dedicatedIt);
+    }
+}
+
+void Cell::prepareDedicatedActorsForAuthority()
+{
+    // Apply the last complete network snapshot to the real Ptr before replacing
+    // DedicatedActor wrappers with LocalActors. This keeps position, movement
+    // flags and AI state continuous across an authority handoff.
+    for (const auto& entry : dedicatedActors)
+    {
+        DedicatedActor *actor = entry.second;
+        if (!actor || actor->getPtr().isEmpty())
+            continue;
+
+        if (actor->hasPositionData)
+        {
+            actor->setPosition();
+            actor->setMovementSettings();
+        }
+        actor->setAnimFlags();
+        actor->setStatsDynamic();
+    }
 }
 
 LocalActor *Cell::getLocalActor(std::string actorIndex)

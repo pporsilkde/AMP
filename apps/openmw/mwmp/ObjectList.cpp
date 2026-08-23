@@ -757,14 +757,28 @@ void ObjectList::setObjectStates(MWWorld::CellStore* cellStore)
                 MWBase::Environment::get().getWorld()->enable(ptrFound);
 
                 // Is this an actor in a cell where we're the authority? If so, initialize it as
-                // a LocalActor
+                // a LocalActor, but never create a second MP wrapper for the same Ptr.
                 if (ptrFound.getClass().isActor() && mwmp::Main::get().getCellController()->hasLocalAuthority(*cellStore->getCell()))
                 {
-                    mwmp::Main::get().getCellController()->getCell(*cellStore->getCell())->initializeLocalActor(ptrFound);
+                    mwmp::CellController *cellController = mwmp::Main::get().getCellController();
+                    if (!cellController->isLocalActor(ptrFound) && !cellController->isDedicatedActor(ptrFound))
+                        cellController->getCell(*cellStore->getCell())->initializeLocalActor(ptrFound);
                 }
             }
             else
+            {
+                // Remove actor synchronization wrappers before disabling the world
+                // reference. Otherwise DedicatedActor keeps updating a disabled NPC
+                // and remote clients can continue to see/animate a console-disabled actor.
+                if (ptrFound.getClass().isActor())
+                {
+                    mwmp::CellController *cellController = mwmp::Main::get().getCellController();
+                    if (cellController->isInitializedCell(*cellStore->getCell()))
+                        cellController->getCell(*cellStore->getCell())->uninitializeActor(ptrFound);
+                }
+
                 MWBase::Environment::get().getWorld()->disable(ptrFound);
+            }
         }
     }
 }

@@ -4,11 +4,15 @@
 
 #include <iostream>
 #include "Player.hpp"
+#include "Networking.hpp"
 #include "Script/Script.hpp"
 
 Cell::Cell(ESM::Cell cell) : cell(cell)
 {
     cellActorList.count = 0;
+    cellActorList.cell = cell;
+    cellActorAIList.count = 0;
+    cellActorAIList.cell = cell;
 }
 
 Cell::Iterator Cell::begin() const
@@ -42,9 +46,12 @@ void Cell::addPlayer(Player *player)
 
     LOG_APPEND(TimedLog::LOG_INFO, "- Adding %s to Cell %s", player->npc.mName.c_str(), getShortDescription().c_str());
 
-    Script::Call<Script::CallbackIdentity("OnCellLoad")>(player->getId(), getShortDescription().c_str());
-
+    // Make the C++ interest set authoritative before Lua starts loading the cell.
+    // Packets sent from OnCellLoad (authority, actor snapshots, etc.) must already
+    // be able to target the newcomer.
     players.push_back(player);
+
+    Script::Call<Script::CallbackIdentity("OnCellLoad")>(player->getId(), getShortDescription().c_str());
 }
 
 void Cell::removePlayer(Player *player, bool cleanPlayer)
@@ -66,9 +73,12 @@ void Cell::removePlayer(Player *player, bool cleanPlayer)
 
             LOG_APPEND(TimedLog::LOG_INFO, "- Removing %s from Cell %s", player->npc.mName.c_str(), getShortDescription().c_str());
 
-            Script::Call<Script::CallbackIdentity("OnCellUnload")>(player->getId(), getShortDescription().c_str());
-
+            // Remove the player from the C++ interest set before Lua performs an
+            // authority handoff, so the departing peer is not treated as a live
+            // observer of the cell while the handoff packets are sent.
             players.erase(it);
+
+            Script::Call<Script::CallbackIdentity("OnCellUnload")>(player->getId(), getShortDescription().c_str());
             return;
         }
     }
@@ -114,6 +124,54 @@ void Cell::readActorList(unsigned char packetID, const mwmp::BaseActorList *newA
     cellActorList.count = cellActorList.baseActors.size();
 }
 
+
+void Cell::readActorAI(const mwmp::BaseActorList *newActorList)
+{
+    for (const mwmp::BaseActor& newActor : newActorList->baseActors)
+        setActorAI(newActor);
+}
+
+bool Cell::getActorAI(int refNum, int mpNum, mwmp::BaseActor& actor) const
+{
+    for (const mwmp::BaseActor& cachedActor : cellActorAIList.baseActors)
+    {
+        if (static_cast<int>(cachedActor.refNum) == refNum && static_cast<int>(cachedActor.mpNum) == mpNum)
+        {
+            actor = cachedActor;
+            return true;
+        }
+    }
+    return false;
+}
+
+void Cell::setActorAI(const mwmp::BaseActor& actor)
+{
+    for (mwmp::BaseActor& cachedActor : cellActorAIList.baseActors)
+    {
+        if (cachedActor.refNum == actor.refNum && cachedActor.mpNum == actor.mpNum)
+        {
+            cachedActor = actor;
+            cellActorAIList.count = static_cast<unsigned int>(cellActorAIList.baseActors.size());
+            return;
+        }
+    }
+
+    cellActorAIList.baseActors.push_back(actor);
+    cellActorAIList.count = static_cast<unsigned int>(cellActorAIList.baseActors.size());
+}
+
+void Cell::removeActorAI(int refNum, int mpNum)
+{
+    for (auto it = cellActorAIList.baseActors.begin(); it != cellActorAIList.baseActors.end();)
+    {
+        if (static_cast<int>(it->refNum) == refNum && static_cast<int>(it->mpNum) == mpNum)
+            it = cellActorAIList.baseActors.erase(it);
+        else
+            ++it;
+    }
+    cellActorAIList.count = static_cast<unsigned int>(cellActorAIList.baseActors.size());
+}
+
 bool Cell::containsActor(int refNum, int mpNum)
 {
     for (unsigned int i = 0; i < cellActorList.baseActors.size(); i++)
@@ -153,6 +211,7 @@ void Cell::removeActors(const mwmp::BaseActorList *newActorList)
 
             if (newActor.refNum == refNum && newActor.mpNum == mpNum)
             {
+                removeActorAI(refNum, mpNum);
                 it = cellActorList.baseActors.erase(it);
                 foundActor = true;
                 break;
@@ -179,6 +238,11 @@ void Cell::setAuthority(const RakNet::RakNetGUID& guid)
 mwmp::BaseActorList *Cell::getActorList()
 {
     return &cellActorList;
+}
+
+mwmp::BaseActorList *Cell::getActorAIList()
+{
+    return &cellActorAIList;
 }
 
 Cell::TPlayers Cell::getPlayers() const
@@ -211,6 +275,26 @@ void Cell::sendToLoaded(mwmp::ActorPacket *actorPacket, mwmp::BaseActorList *bas
         // Send the packet to this eligible guid
         actorPacket->Send(pl->guid);
     }
+}
+
+void Cell::sendCachedActorAI(const RakNet::RakNetGUID& authority) const
+{
+    if (cellActorAIList.baseActors.empty())
+        return;
+
+    mwmp::BaseActorList aiSnapshot = cellActorAIList;
+    aiSnapshot.guid = authority;
+    aiSnapshot.cell = cell;
+    aiSnapshot.count = static_cast<unsigned int>(aiSnapshot.baseActors.size());
+
+    mwmp::ActorPacket *actorPacket = mwmp::Networking::get().getActorPacketController()->GetPacket(ID_ACTOR_AI);
+    actorPacket->setActorList(&aiSnapshot);
+
+    // Always send directly to the authority first, then to the rest of the
+    // loaded-cell interest set. The duplicate filter in sendToLoaded skips the
+    // authority because aiSnapshot.guid is set to that peer.
+    actorPacket->Send(authority);
+    sendToLoaded(actorPacket, &aiSnapshot);
 }
 
 void Cell::sendToLoaded(mwmp::ObjectPacket *objectPacket, mwmp::BaseObjectList *baseObjectList) const

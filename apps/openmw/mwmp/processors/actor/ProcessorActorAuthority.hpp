@@ -32,6 +32,7 @@ namespace mwmp
                 if (isLocal())
                 {
                     LOG_APPEND(TimedLog::LOG_INFO, "- The new authority is me");
+                    cell->prepareDedicatedActorsForAuthority();
                     cell->uninitializeDedicatedActors();
                     cell->initializeLocalActors();
                     cell->updateLocal(true);

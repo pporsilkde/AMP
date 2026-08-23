@@ -254,6 +254,11 @@ function BaseCell:SetAuthority(pid)
     tes3mp.LogMessage(enumerations.log.INFO, "Authority of cell " .. self.data.entry.description ..
         " is now " .. logicHandler.GetChatName(pid))
 
+    -- Prime the future authority with the most recent server-side snapshot before
+    -- telling clients to switch simulation ownership. Position/stats packets and
+    -- ActorAuthority share the reliable ordered actor channel, so this removes the
+    -- multi-second dead period that could otherwise happen during handoff.
+    self:LoadMomentaryCellData(pid)
     self:LoadActorAuthority(pid)
 end
 
@@ -1146,11 +1151,12 @@ function BaseCell:SaveActorCellChanges(pid)
                         end
                     end
 
-                    -- This actor won't exist at all for players who have not loaded the actor's original
-                    -- cell and were not online when it was first spawned, so send all of its details to them
-                    for _, player in pairs(Players) do
-                        if pid ~= player.pid and not tableHelper.containsValue(self.visitors, player.pid) then
-                            self:LoadActorPackets(player.pid, self.data.objectData, { uniqueIndex })
+                    -- A server-only actor only needs to be introduced to players who
+                    -- currently observe its destination. Do not broadcast its full
+                    -- packet history to unrelated players elsewhere on the server.
+                    for _, visitorPid in pairs(newCell.visitors) do
+                        if pid ~= visitorPid and not tableHelper.containsValue(self.visitors, visitorPid) then
+                            self:LoadActorPackets(visitorPid, self.data.objectData, { uniqueIndex })
                         end
                     end
 

@@ -40,6 +40,8 @@ namespace mwmp
         void uninitializeLocalActors();
         void uninitializeDedicatedActors(ActorList& actorList);
         void uninitializeDedicatedActors();
+        void uninitializeActor(const MWWorld::Ptr& ptr);
+        void prepareDedicatedActorsForAuthority();
 
         virtual LocalActor *getLocalActor(std::string actorIndex);
         virtual DedicatedActor *getDedicatedActor(std::string actorIndex);

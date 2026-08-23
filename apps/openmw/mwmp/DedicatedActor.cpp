@@ -1,4 +1,5 @@
 #include <components/openmw-mp/TimedLog.hpp>
+#include <algorithm>
 #include <cmath>
 
 #include "../mwbase/environment.hpp"
@@ -79,13 +80,13 @@ DedicatedActor::~DedicatedActor()
 
 void DedicatedActor::update(float dt)
 {
-    // Only move and set anim flags if the framerate isn't too low
-    if (dt < 0.1)
-    {
+    // Never skip a whole remote-actor update because of a slow frame. Doing so
+    // makes non-authority NPCs visibly run in slow motion and compounds the lag
+    // after a hitch. move() clamps its interpolation factor and snaps when needed.
+    if (dt > 0.f)
         move(dt);
-        setAnimFlags();
-    }
 
+    setAnimFlags();
     updateInteractionAnimation();
     setStatsDynamic();
 }
@@ -103,23 +104,36 @@ void DedicatedActor::setCell(MWWorld::CellStore *cellStore)
 void DedicatedActor::move(float dt)
 {
     ESM::Position refPos = ptr.getRefData().getPosition();
-    const ESM::Position previousRefPos = refPos;
     MWBase::World *world = MWBase::Environment::get().getWorld();
-    const int maxInterpolationDistance = 40;
 
-    // Apply interpolation only if the position hasn't changed too much from last time
-    bool shouldInterpolate = abs(position.pos[0] - refPos.pos[0]) < maxInterpolationDistance && abs(position.pos[1] - refPos.pos[1]) < maxInterpolationDistance && abs(position.pos[2] - refPos.pos[2]) < maxInterpolationDistance;
+    const float dx = position.pos[0] - refPos.pos[0];
+    const float dy = position.pos[1] - refPos.pos[1];
+    const float dz = position.pos[2] - refPos.pos[2];
+    const float distanceSquared = dx * dx + dy * dy + dz * dz;
+    const float maxInterpolationDistance = 96.f;
+    const bool shouldInterpolate = distanceSquared < maxInterpolationDistance * maxInterpolationDistance;
 
-    // Don't apply linear interpolation if the DedicatedActor has just gone through a cell change, because
-    // the interpolated position will be invalid, causing a slight hopping glitch
-    const bool wasCellChange = hasChangedCell;
+    // Don't interpolate immediately after a cell transition. For normal packets
+    // use a clamped catch-up factor: a 100+ ms frame becomes a snap to the latest
+    // authoritative sample instead of a skipped frame/freeze.
     if (shouldInterpolate && !hasChangedCell)
     {
-        static const int timeMultiplier = 15;
-        osg::Vec3f lerp = MechanicsHelper::getLinearInterpolation(refPos.asVec3(), position.asVec3(), dt * timeMultiplier);
-        refPos.pos[0] = lerp.x();
-        refPos.pos[1] = lerp.y();
-        refPos.pos[2] = lerp.z();
+        const float interpolation = std::min(1.f, std::max(0.f, dt * 22.f));
+
+        if (distanceSquared < 0.25f || interpolation >= 1.f)
+        {
+            refPos.pos[0] = position.pos[0];
+            refPos.pos[1] = position.pos[1];
+            refPos.pos[2] = position.pos[2];
+        }
+        else
+        {
+            const osg::Vec3f lerp = MechanicsHelper::getLinearInterpolation(
+                refPos.asVec3(), position.asVec3(), interpolation);
+            refPos.pos[0] = lerp.x();
+            refPos.pos[1] = lerp.y();
+            refPos.pos[2] = lerp.z();
+        }
 
         world->moveObject(ptr, refPos.pos[0], refPos.pos[1], refPos.pos[2]);
     }
@@ -129,44 +143,11 @@ void DedicatedActor::move(float dt)
         hasChangedCell = false;
     }
 
-    // First apply the exact movement input supplied by the cell authority, just
-    // like EncoreMP. Some scripted/root-motion NPC paths, however, legitimately
-    // arrive with a zero direction while their network target keeps moving. In
-    // that case the remote CharacterController sees an idle actor and the model
-    // slides. Recover locomotion from the SAME interpolation that is visibly
-    // moving the DedicatedActor, without changing the packet or server state.
+    // Movement animation comes only from the authoritative CharacterController
+    // direction. Do not synthesize walking from interpolation residuals: that was
+    // the cause of legs continuing to walk after the authority had already sent
+    // a stop vector.
     setMovementSettings();
-
-    MWMechanics::Movement *move = &ptr.getClass().getMovementSettings(ptr);
-    constexpr float directionEpsilon = 0.001f;
-    const bool hasNetworkTranslation =
-        std::abs(direction.pos[0]) > directionEpsilon ||
-        std::abs(direction.pos[1]) > directionEpsilon ||
-        std::abs(direction.pos[2]) > directionEpsilon;
-
-    if (!hasNetworkTranslation && shouldInterpolate && !wasCellChange)
-    {
-        const float targetDx = position.pos[0] - previousRefPos.pos[0];
-        const float targetDy = position.pos[1] - previousRefPos.pos[1];
-        const float targetHorizontalSquared = targetDx * targetDx + targetDy * targetDy;
-
-        const float visibleDx = refPos.pos[0] - previousRefPos.pos[0];
-        const float visibleDy = refPos.pos[1] - previousRefPos.pos[1];
-        const float visibleHorizontalSquared = visibleDx * visibleDx + visibleDy * visibleDy;
-
-        // Require both a real network target offset and visible interpolation.
-        // This avoids false walk cycles from sub-pixel jitter and never converts
-        // a cell change/teleport into locomotion.
-        if (targetHorizontalSquared > 0.01f && visibleHorizontalSquared > 0.0001f)
-        {
-            const float yaw = position.rot[2];
-            const float localForward = -targetDx * std::sin(yaw) + targetDy * std::cos(yaw);
-            move->mPosition[0] = 0.f;
-            move->mPosition[1] = localForward < -directionEpsilon ? -1.f : 1.f;
-            move->mPosition[2] = 0.f;
-        }
-    }
-
     world->rotateObject(ptr, position.rot[0], position.rot[1], position.rot[2]);
 }
 

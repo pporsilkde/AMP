@@ -872,12 +872,14 @@ logicHandler.LoadCellForPlayer = function(pid, cellDescription)
     LoadedCells[cellDescription]:AddVisitor(pid)
 
     local authPid = LoadedCells[cellDescription]:GetAuthority()
+    local authorityChanged = false
 
     -- If the cell's authority is nil, set this player as the authority, as long as the cell
     -- isn't currently resetting and moving all players out
     if authPid == nil then
         if LoadedCells[cellDescription].isResetting == false then
             LoadedCells[cellDescription]:SetAuthority(pid)
+            authorityChanged = true
         else
             tes3mp.LogAppend(enumerations.log.WARN, "- Ignoring setting of authority to " .. pid ..
                 " because of ongoing cell reset")
@@ -889,6 +891,15 @@ logicHandler.LoadCellForPlayer = function(pid, cellDescription)
             " took over authority from player " .. logicHandler.GetChatName(authPid) ..
             " in " .. cellDescription .. " for latency reasons")
         LoadedCells[cellDescription]:SetAuthority(pid)
+        authorityChanged = true
+    end
+
+    -- A visitor that arrives after authority was selected still needs the current
+    -- ActorAuthority packet. The old global-broadcast workaround hid this race;
+    -- now we resend only to the cell's loaded interest set. The C++ cell visitor
+    -- is registered before OnCellLoad, so the newcomer is included immediately.
+    if authorityChanged == false and authPid ~= nil then
+        LoadedCells[cellDescription]:LoadActorAuthority(authPid)
     end
 end
 

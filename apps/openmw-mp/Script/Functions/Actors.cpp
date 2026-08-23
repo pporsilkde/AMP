@@ -552,12 +552,19 @@ void ActorFunctions::SendActorAuthority() noexcept
     {
         serverCell->setAuthority(writeActorList.guid);
 
+        // Replay the latest AI state before the authority switch. Actor packets
+        // use RELIABLE_ORDERED on CHANNEL_ACTOR, so the future authority receives
+        // this snapshot before it starts simulating the cell.
+        serverCell->sendCachedActorAI(writeActorList.guid);
+
         mwmp::ActorPacket *actorPacket = mwmp::Networking::get().getActorPacketController()->GetPacket(ID_ACTOR_AUTHORITY);
         actorPacket->setActorList(&writeActorList);
 
-        // Always send the packet to everyone on the server, to reduce bugs caused by late-arriving packets
-        actorPacket->Send(false);
-        actorPacket->Send(true);
+        // Interest-managed authority: the authority itself plus peers that have
+        // this cell loaded. This naturally covers overlapping neighbouring
+        // exterior cells without broadcasting to the whole server.
+        actorPacket->Send(writeActorList.guid);
+        serverCell->sendToLoaded(actorPacket, &writeActorList);
     }
 }
 
@@ -677,21 +684,18 @@ void ActorFunctions::SendActorDeath(bool sendToOtherVisitors, bool skipAttachedP
 
 void ActorFunctions::SendActorAI(bool sendToOtherVisitors, bool skipAttachedPlayer) noexcept
 {
+    Cell *serverCell = CellController::get()->getCell(&writeActorList.cell);
+    if (serverCell != nullptr)
+        serverCell->readActorAI(&writeActorList);
+
     mwmp::ActorPacket *actorPacket = mwmp::Networking::get().getActorPacketController()->GetPacket(ID_ACTOR_AI);
     actorPacket->setActorList(&writeActorList);
 
     if (!skipAttachedPlayer)
         actorPacket->Send(writeActorList.guid);
 
-    if (sendToOtherVisitors)
-    {
-        Cell *serverCell = CellController::get()->getCell(&writeActorList.cell);
-
-        if (serverCell != nullptr)
-        {
-            serverCell->sendToLoaded(actorPacket, &writeActorList);
-        }
-    }
+    if (sendToOtherVisitors && serverCell != nullptr)
+        serverCell->sendToLoaded(actorPacket, &writeActorList);
 }
 
 void ActorFunctions::SendActorCellChange(bool sendToOtherVisitors, bool skipAttachedPlayer) noexcept
