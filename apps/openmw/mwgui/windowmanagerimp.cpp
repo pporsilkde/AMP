@@ -733,13 +733,12 @@ namespace MWGui
     {
         bool loading = (getMode() == GM_Loading || getMode() == GM_LoadingWallpaper);
 
-        // updateVisible() is also called while the GUI is being constructed, before
-        // World can be installed in Environment. Never dereference it during that phase.
-        MWBase::World* world = MWBase::Environment::get().getWorld();
+        // updateVisible() can be called while the GUI is being constructed.
+        // ArenaMP has no World::isMainMenuSceneActive(), so preserve the MP main-menu
+        // behaviour while keeping the state-manager access safe during startup.
         MWBase::StateManager* stateManager = MWBase::Environment::get().getStateManager();
-        const bool liveMainMenuScene = world && world->isMainMenuSceneActive();
         const bool noGame = !stateManager || stateManager->getState() == MWBase::StateManager::State_NoGame;
-        const bool mainmenucover = containsMode(GM_MainMenu) && noGame && !liveMainMenuScene;
+        const bool mainmenucover = containsMode(GM_MainMenu) && noGame;
 
         enableScene(!loading && !mainmenucover);
 

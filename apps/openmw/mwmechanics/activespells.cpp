@@ -288,8 +288,6 @@ namespace MWMechanics
                 alchemyDurationMerged = true;
             }
 
-            if (params.mEffects.empty())
-                it = end(); // Nothing new remains to insert.
         }
 
         if (!params.mEffects.empty() && (it == end() || stack))
