@@ -50,6 +50,11 @@ namespace ESM
         BaseProjectileState::save(esm);
 
         esm.writeHNString ("BOW_", mBowId);
+        if (!mPoisonId.empty() && mPoisonCharges > 0)
+        {
+            esm.writeHNString("APOI", mPoisonId);
+            esm.writeHNT("APCH", mPoisonCharges);
+        }
         esm.writeHNT ("VEL_", mVelocity);
         esm.writeHNT ("STR_", mAttackStrength);
     }
@@ -59,6 +64,15 @@ namespace ESM
         BaseProjectileState::load(esm);
 
         mBowId = esm.getHNString ("BOW_");
+        mPoisonId.clear();
+        mPoisonCharges = 0;
+        if (esm.isNextSub("APOI"))
+        {
+            mPoisonId = esm.getHString();
+            esm.getHNOT(mPoisonCharges, "APCH");
+            if (mPoisonCharges <= 0)
+                mPoisonId.clear();
+        }
         esm.getHNT (mVelocity, "VEL_");
 
         mAttackStrength = 1.f;

@@ -2,7 +2,7 @@
 #define OPENMW_VERSION_HPP
 
 #define TES3MP_VERSION "0.8.1"
-#define TES3MP_PROTO_VERSION 808
+#define TES3MP_PROTO_VERSION 809
 
 // Stable ArenaMP/TES3MP network compatibility identity.
 // This is intentionally independent from the Git HEAD used to compile the build,

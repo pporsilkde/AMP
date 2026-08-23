@@ -145,6 +145,16 @@ const char *ObjectFunctions::GetObjectSoul(unsigned int index) noexcept
     return readObjectList->baseObjects.at(index).soul.c_str();
 }
 
+const char *ObjectFunctions::GetObjectPoisonId(unsigned int index) noexcept
+{
+    return readObjectList->baseObjects.at(index).poisonId.c_str();
+}
+
+int ObjectFunctions::GetObjectPoisonCharges(unsigned int index) noexcept
+{
+    return readObjectList->baseObjects.at(index).poisonCharges;
+}
+
 int ObjectFunctions::GetObjectGoldValue(unsigned int index) noexcept
 {
     return readObjectList->baseObjects.at(index).goldValue;
@@ -440,6 +450,16 @@ const char *ObjectFunctions::GetContainerItemSoul(unsigned int objectIndex, unsi
         .containerItems.at(itemIndex).soul.c_str();
 }
 
+const char *ObjectFunctions::GetContainerItemPoisonId(unsigned int objectIndex, unsigned int itemIndex) noexcept
+{
+    return readObjectList->baseObjects.at(objectIndex).containerItems.at(itemIndex).poisonId.c_str();
+}
+
+int ObjectFunctions::GetContainerItemPoisonCharges(unsigned int objectIndex, unsigned int itemIndex) noexcept
+{
+    return readObjectList->baseObjects.at(objectIndex).containerItems.at(itemIndex).poisonCharges;
+}
+
 int ObjectFunctions::GetContainerItemActionCount(unsigned int objectIndex, unsigned int itemIndex) noexcept
 {
     return readObjectList->baseObjects.at(objectIndex)
@@ -509,6 +529,12 @@ void ObjectFunctions::SetObjectEnchantmentCharge(double enchantmentCharge) noexc
 void ObjectFunctions::SetObjectSoul(const char* soul) noexcept
 {
     tempObject.soul = soul;
+}
+
+void ObjectFunctions::SetObjectPoison(const char* poisonId, int charges) noexcept
+{
+    tempObject.poisonId = poisonId ? poisonId : "";
+    tempObject.poisonCharges = charges;
 }
 
 void ObjectFunctions::SetObjectGoldValue(int goldValue) noexcept
@@ -697,6 +723,12 @@ void ObjectFunctions::SetContainerItemEnchantmentCharge(double enchantmentCharge
 void ObjectFunctions::SetContainerItemSoul(const char* soul) noexcept
 {
     tempContainerItem.soul = soul;
+}
+
+void ObjectFunctions::SetContainerItemPoison(const char* poisonId, int charges) noexcept
+{
+    tempContainerItem.poisonId = poisonId ? poisonId : "";
+    tempContainerItem.poisonCharges = charges;
 }
 
 void ObjectFunctions::SetContainerItemActionCountByIndex(unsigned int objectIndex, unsigned int itemIndex, int actionCount) noexcept

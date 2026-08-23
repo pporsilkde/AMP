@@ -17,6 +17,8 @@ void PacketPlayerItemUse::Packet(RakNet::BitStream *newBitstream, bool send)
     RW(player->usedItem.charge, send);
     RW(player->usedItem.enchantmentCharge, send);
     RW(player->usedItem.soul, send, true);
+    RW(player->usedItem.poisonId, send, true);
+    RW(player->usedItem.poisonCharges, send);
 
     RW(player->usingItemMagic, send);
     RW(player->itemUseDrawState, send);

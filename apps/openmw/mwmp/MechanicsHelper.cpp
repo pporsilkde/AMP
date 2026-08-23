@@ -206,6 +206,8 @@ mwmp::Item MechanicsHelper::getItem(const MWWorld::Ptr& itemPtr, int count)
     item.charge = itemPtr.getCellRef().getCharge();
     item.enchantmentCharge = itemPtr.getCellRef().getEnchantmentCharge();
     item.soul = itemPtr.getCellRef().getSoul();
+    item.poisonId = itemPtr.getRefData().getPoisonId();
+    item.poisonCharges = itemPtr.getRefData().getPoisonCharges();
 
     return item;
 }

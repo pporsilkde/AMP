@@ -99,7 +99,9 @@ packetReader.GetPlayerPacketTables = function(pid, packetType)
                 refId = tes3mp.GetEquipmentItemRefId(pid, slot),
                 count = tes3mp.GetEquipmentItemCount(pid, slot),
                 charge = tes3mp.GetEquipmentItemCharge(pid, slot),
-                enchantmentCharge = tes3mp.GetEquipmentItemEnchantmentCharge(pid, slot)
+                enchantmentCharge = tes3mp.GetEquipmentItemEnchantmentCharge(pid, slot),
+                poisonId = tes3mp.GetEquipmentItemPoisonId(pid, slot),
+                poisonCharges = tes3mp.GetEquipmentItemPoisonCharges(pid, slot)
             }
         end
     elseif packetType == "PlayerInventory" then
@@ -112,7 +114,9 @@ packetReader.GetPlayerPacketTables = function(pid, packetType)
                 count = tes3mp.GetInventoryItemCount(pid, changesIndex),
                 charge = tes3mp.GetInventoryItemCharge(pid, changesIndex),
                 enchantmentCharge = tes3mp.GetInventoryItemEnchantmentCharge(pid, changesIndex),
-                soul = tes3mp.GetInventoryItemSoul(pid, changesIndex)
+                soul = tes3mp.GetInventoryItemSoul(pid, changesIndex),
+                poisonId = tes3mp.GetInventoryItemPoisonId(pid, changesIndex),
+                poisonCharges = tes3mp.GetInventoryItemPoisonCharges(pid, changesIndex)
             }
 
             table.insert(packetTable.inventory, item)
@@ -254,7 +258,9 @@ packetReader.GetActorPacketTables = function(packetType)
                         refId = itemRefId,
                         count = tes3mp.GetActorEquipmentItemCount(packetIndex, itemIndex),
                         charge = tes3mp.GetActorEquipmentItemCharge(packetIndex, itemIndex),
-                        enchantmentCharge = tes3mp.GetActorEquipmentItemEnchantmentCharge(packetIndex, itemIndex)
+                        enchantmentCharge = tes3mp.GetActorEquipmentItemEnchantmentCharge(packetIndex, itemIndex),
+                        poisonId = tes3mp.GetActorEquipmentItemPoisonId(packetIndex, itemIndex),
+                        poisonCharges = tes3mp.GetActorEquipmentItemPoisonCharges(packetIndex, itemIndex)
                     }
                 end
             end
@@ -504,6 +510,8 @@ packetReader.GetObjectPacketTables = function(packetType)
                     object.charge = tes3mp.GetObjectCharge(packetIndex)
                     object.enchantmentCharge = tes3mp.GetObjectEnchantmentCharge(packetIndex)
                     object.soul = tes3mp.GetObjectSoul(packetIndex)
+                    object.poisonId = tes3mp.GetObjectPoisonId(packetIndex)
+                    object.poisonCharges = tes3mp.GetObjectPoisonCharges(packetIndex)
                     object.goldValue = tes3mp.GetObjectGoldValue(packetIndex)
                     object.hasContainer = tes3mp.DoesObjectHaveContainer(packetIndex)
                     object.droppedByPlayer = tes3mp.IsObjectDroppedByPlayer(packetIndex)

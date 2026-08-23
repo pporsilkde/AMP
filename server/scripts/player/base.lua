@@ -426,7 +426,7 @@ function BasePlayer:EndCharGen()
         if spawnUsed.items then
             for _, item in pairs(spawnUsed.items) do
                 inventoryHelper.addItem(self.data.inventory, item.refId, item.count, item.charge,
-                    item.enchantmentCharge, item.soul)
+                    item.enchantmentCharge, item.soul, item.poisonId, item.poisonCharges)
             end
             self:LoadItemChanges(spawnUsed.items, enumerations.inventory.ADD)
         end
@@ -1050,6 +1050,8 @@ function BasePlayer:LoadEquipment()
 
             tes3mp.EquipItem(self.pid, index, currentItem.refId, currentItem.count,
                 currentItem.charge, currentItem.enchantmentCharge)
+            tes3mp.SetEquipmentItemPoison(self.pid, index, currentItem.poisonId or "",
+                currentItem.poisonCharges or 0)
         else
             tes3mp.UnequipItem(self.pid, index)
         end
@@ -1076,12 +1078,16 @@ function BasePlayer:SaveEquipment(playerPacket)
             local newCount = equipmentItem.count
             local newCharge = equipmentItem.charge
             local newEnchantmentCharge = equipmentItem.enchantmentCharge
+            local newPoisonId = equipmentItem.poisonId or ""
+            local newPoisonCharges = equipmentItem.poisonCharges or 0
 
             self.data.equipment[slot] = {
                 refId = newRefId,
                 count = newCount,
                 charge = newCharge,
-                enchantmentCharge = newEnchantmentCharge
+                enchantmentCharge = newEnchantmentCharge,
+                poisonId = newPoisonId,
+                poisonCharges = newPoisonCharges
             }
 
             -- Is this the same item that was previously in this slot? In that case,
@@ -1091,12 +1097,15 @@ function BasePlayer:SaveEquipment(playerPacket)
 
             if previousItem ~= nil and previousItem.refId == newRefId then
                 local inventoryIndex = inventoryHelper.getItemIndex(self.data.inventory,
-                    previousItem.refId, previousItem.charge, previousItem.enchantmentCharge)
+                    previousItem.refId, previousItem.charge, previousItem.enchantmentCharge,
+                    previousItem.soul, previousItem.poisonId, previousItem.poisonCharges)
 
                 if inventoryIndex ~= nil then
                     self.data.inventory[inventoryIndex].count = newCount
                     self.data.inventory[inventoryIndex].charge = newCharge
                     self.data.inventory[inventoryIndex].enchantmentCharge = newEnchantmentCharge
+                    self.data.inventory[inventoryIndex].poisonId = newPoisonId
+                    self.data.inventory[inventoryIndex].poisonCharges = newPoisonCharges
                 end
             end
 
@@ -1190,7 +1199,7 @@ function BasePlayer:SaveInventory(playerPacket)
             if action == enumerations.inventory.SET or action == enumerations.inventory.ADD then
 
                 inventoryHelper.addItem(self.data.inventory, item.refId, item.count, item.charge,
-                    item.enchantmentCharge, item.soul)
+                    item.enchantmentCharge, item.soul, item.poisonId, item.poisonCharges)
 
                 if logicHandler.IsGeneratedRecord(item.refId) then
 
@@ -1204,7 +1213,7 @@ function BasePlayer:SaveInventory(playerPacket)
             elseif action == enumerations.inventory.REMOVE then
 
                 inventoryHelper.removeClosestItem(self.data.inventory, item.refId, item.count,
-                    item.charge, item.enchantmentCharge, item.soul)
+                    item.charge, item.enchantmentCharge, item.soul, item.poisonId, item.poisonCharges)
 
                 if not inventoryHelper.containsItem(self.data.inventory, item.refId) and
                     logicHandler.IsGeneratedRecord(item.refId) then

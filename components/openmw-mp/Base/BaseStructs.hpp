@@ -83,15 +83,18 @@ namespace mwmp
     struct Item
     {
         std::string refId;
-        int count;
-        int charge;
-        float enchantmentCharge;
+        int count = 0;
+        int charge = -1;
+        float enchantmentCharge = -1;
         std::string soul;
+        std::string poisonId;
+        int poisonCharges = 0;
 
         inline bool operator==(const Item& rhs)
         {
             return refId == rhs.refId && count == rhs.count && charge == rhs.charge &&
-                enchantmentCharge == rhs.enchantmentCharge && soul == rhs.soul;
+                enchantmentCharge == rhs.enchantmentCharge && soul == rhs.soul &&
+                poisonId == rhs.poisonId && poisonCharges == rhs.poisonCharges;
         }
     };
 

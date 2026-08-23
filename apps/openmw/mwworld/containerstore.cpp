@@ -284,6 +284,11 @@ bool MWWorld::ContainerStore::stacks(const ConstPtr& ptr1, const ConstPtr& ptr2)
     if (!Misc::StringUtils::ciEqual(ptr1.getCellRef().getRefId(), ptr2.getCellRef().getRefId()))
         return false;
 
+    // Poison coating belongs to one physical weapon instance. Never merge it
+    // into another stack or its poison identity/remaining charges are lost.
+    if (ptr1.getRefData().hasPoison() || ptr2.getRefData().hasPoison())
+        return false;
+
     // If it has an enchantment, don't stack when some of the charge is already used
     if (!ptr1.getClass().getEnchantment(ptr1).empty())
     {

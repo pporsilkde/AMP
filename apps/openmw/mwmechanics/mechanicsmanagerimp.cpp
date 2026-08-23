@@ -45,6 +45,7 @@
 #include "npcstats.hpp"
 #include "actorutil.hpp"
 #include "combat.hpp"
+#include "alchemyknowledge.hpp"
 
 namespace
 {
@@ -500,7 +501,7 @@ namespace MWMechanics
         mUpdatePlayer = true;
     }
 
-    int MechanicsManager::getDerivedDisposition(const MWWorld::Ptr& ptr, bool addTemporaryDispositionChange)
+    int MechanicsManager::getDerivedDisposition(const MWWorld::Ptr& ptr, bool addTemporaryDispositionChange, bool useBaseStats)
     {
         const MWMechanics::NpcStats& npcSkill = ptr.getClass().getNpcStats(ptr);
         float x = static_cast<float>(npcSkill.getBaseDisposition());
@@ -517,7 +518,10 @@ namespace MWMechanics
 
         static const float fDispPersonalityMult = gmst.find("fDispPersonalityMult")->mValue.getFloat();
         static const float fDispPersonalityBase = gmst.find("fDispPersonalityBase")->mValue.getFloat();
-        x += fDispPersonalityMult * (playerStats.getAttribute(ESM::Attribute::Personality).getModified() - fDispPersonalityBase);
+        const float playerPersonality = useBaseStats
+            ? playerStats.getAttribute(ESM::Attribute::Personality).getBase()
+            : playerStats.getAttribute(ESM::Attribute::Personality).getModified();
+        x += fDispPersonalityMult * (playerPersonality - fDispPersonalityBase);
 
         float reaction = 0;
         int rank = 0;
@@ -577,7 +581,10 @@ namespace MWMechanics
         if (playerStats.getDrawState() == MWMechanics::DrawState_Weapon)
             x += fDispWeaponDrawn;
 
-        x += ptr.getClass().getCreatureStats(ptr).getMagicEffects().get(ESM::MagicEffect::Charm).getMagnitude();
+        // Training prices must not be alterable through temporary magic. Normal
+        // dialogue/barter keeps Charm, while base-stat quotes ignore it.
+        if (!useBaseStats)
+            x += ptr.getClass().getCreatureStats(ptr).getMagicEffects().get(ESM::MagicEffect::Charm).getMagnitude();
 
         if(addTemporaryDispositionChange)
           x += MWBase::Environment::get().getDialogueManager()->getTemporaryDispositionChange();
@@ -586,7 +593,7 @@ namespace MWMechanics
         return effective_disposition;
     }
 
-    int MechanicsManager::getBarterOffer(const MWWorld::Ptr& ptr, int basePrice, bool buying)
+    int MechanicsManager::getBarterOffer(const MWWorld::Ptr& ptr, int basePrice, bool buying, bool useBaseStats)
     {
         // Make sure zero base price items/services can't be bought/sold for 1 gold
         // and return the intended base price for creature merchants
@@ -598,18 +605,42 @@ namespace MWMechanics
         MWWorld::Ptr playerPtr = getPlayer();
         const MWMechanics::NpcStats &playerStats = playerPtr.getClass().getNpcStats(playerPtr);
 
-        // I suppose the temporary disposition change (second param to getDerivedDisposition()) _has_ to be considered here,
-        // otherwise one would get different prices when exiting and re-entering the dialogue window...
-        int clampedDisposition = getDerivedDisposition(ptr);
-        float a = std::min(playerPtr.getClass().getSkill(playerPtr, ESM::Skill::Mercantile), 100.f);
-        float b = std::min(0.1f * playerStats.getAttribute(ESM::Attribute::Luck).getModified(), 10.f);
-        float c = std::min(0.2f * playerStats.getAttribute(ESM::Attribute::Personality).getModified(), 10.f);
-        float d = std::min(ptr.getClass().getSkill(ptr, ESM::Skill::Mercantile), 100.f);
-        float e = std::min(0.1f * sellerStats.getAttribute(ESM::Attribute::Luck).getModified(), 10.f);
-        float f = std::min(0.2f * sellerStats.getAttribute(ESM::Attribute::Personality).getModified(), 10.f);
+        // Normal commerce keeps the MP branch's modified-stat/fatigue formula.
+        // Training asks for base stats so Drain/Fortify and current fatigue cannot
+        // manipulate the quote.
+        int clampedDisposition = getDerivedDisposition(ptr, true, useBaseStats);
+        const float playerMercantile = useBaseStats
+            ? playerStats.getSkill(ESM::Skill::Mercantile).getBase()
+            : playerPtr.getClass().getSkill(playerPtr, ESM::Skill::Mercantile);
+        const float playerLuck = useBaseStats
+            ? playerStats.getAttribute(ESM::Attribute::Luck).getBase()
+            : playerStats.getAttribute(ESM::Attribute::Luck).getModified();
+        const float playerPersonality = useBaseStats
+            ? playerStats.getAttribute(ESM::Attribute::Personality).getBase()
+            : playerStats.getAttribute(ESM::Attribute::Personality).getModified();
+        const float sellerMercantile = useBaseStats
+            ? sellerStats.getSkill(ESM::Skill::Mercantile).getBase()
+            : ptr.getClass().getSkill(ptr, ESM::Skill::Mercantile);
+        const float sellerLuck = useBaseStats
+            ? sellerStats.getAttribute(ESM::Attribute::Luck).getBase()
+            : sellerStats.getAttribute(ESM::Attribute::Luck).getModified();
+        const float sellerPersonality = useBaseStats
+            ? sellerStats.getAttribute(ESM::Attribute::Personality).getBase()
+            : sellerStats.getAttribute(ESM::Attribute::Personality).getModified();
+
+        float a = std::min(playerMercantile, 100.f);
+        float b = std::min(0.1f * playerLuck, 10.f);
+        float c = std::min(0.2f * playerPersonality, 10.f);
+        float d = std::min(sellerMercantile, 100.f);
+        float e = std::min(0.1f * sellerLuck, 10.f);
+        float f = std::min(0.2f * sellerPersonality, 10.f);
         float dispositionmodified = ((clampedDisposition - 50) * 0.25f);
-        float pcTerm = (dispositionmodified + a + b + c) * playerStats.getFatigueTerm();
-        float npcTerm = (d + e + f) * sellerStats.getFatigueTerm();
+        const float fullFatigueTerm = MWBase::Environment::get().getWorld()->getStore()
+            .get<ESM::GameSetting>().find("fFatigueBase")->mValue.getFloat();
+        const float pcFatigueTerm = useBaseStats ? fullFatigueTerm : playerStats.getFatigueTerm();
+        const float npcFatigueTerm = useBaseStats ? fullFatigueTerm : sellerStats.getFatigueTerm();
+        float pcTerm = (dispositionmodified + a + b + c) * pcFatigueTerm;
+        float npcTerm = (d + e + f) * npcFatigueTerm;
         float buyTerm = 0.01f * (100 - 0.5f * (pcTerm - npcTerm));
         float sellTerm = 0.01f * (50 - 0.5f * (npcTerm - pcTerm));
         int offerPrice = int(basePrice * (buying ? buyTerm : sellTerm));
@@ -1843,7 +1874,8 @@ namespace MWMechanics
     int MechanicsManager::countSavedGameRecords() const
     {
         return 1 // Death counter
-                +1; // Stolen items
+                +1 // Stolen items
+                +1; // Refined Alchemy knowledge
     }
 
     void MechanicsManager::write(ESM::ESMWriter &writer, Loading::Listener &listener) const
@@ -1855,6 +1887,10 @@ namespace MWMechanics
         writer.startRecord(ESM::REC_STLN);
         items.write(writer);
         writer.endRecord(ESM::REC_STLN);
+
+        writer.startRecord(ESM::REC_AMAL);
+        AlchemyKnowledge::write(writer);
+        writer.endRecord(ESM::REC_AMAL);
     }
 
     void MechanicsManager::readRecord(ESM::ESMReader &reader, uint32_t type)
@@ -1865,6 +1901,8 @@ namespace MWMechanics
             items.load(reader);
             mStolenItems = items.mStolenItems;
         }
+        else if (type == ESM::REC_AMAL)
+            AlchemyKnowledge::read(reader);
         else
             mActors.readRecord(reader, type);
     }
@@ -1874,6 +1912,7 @@ namespace MWMechanics
         MWWorld::ActionTeleport::clearDelayedTeleports();
         mActors.clear();
         mStolenItems.clear();
+        AlchemyKnowledge::clear();
         mClassSelected = false;
         mRaceSelected = false;
     }

@@ -8,6 +8,9 @@ packetBuilder.AddPlayerInventoryItemChange = function(pid, item)
     if item.soul == nil then item.soul = "" end
 
     tes3mp.AddItemChange(pid, item.refId, item.count, item.charge, item.enchantmentCharge, item.soul)
+    local poisonId = item.poisonId or ""
+    local poisonCharges = item.poisonCharges or 0
+    tes3mp.SetInventoryItemPoison(pid, tes3mp.GetInventoryChangesSize(pid) - 1, poisonId, poisonCharges)
 end
 
 packetBuilder.AddPlayerSpellsActive = function(pid, spellsActive, action)
@@ -52,6 +55,8 @@ packetBuilder.AddObjectPlace = function(uniqueIndex, objectData)
     local charge = objectData.charge
     local enchantmentCharge = objectData.enchantmentCharge
     local soul = objectData.soul
+    local poisonId = objectData.poisonId
+    local poisonCharges = objectData.poisonCharges
     local goldValue = objectData.goldValue
     local droppedByPlayer = objectData.droppedByPlayer
 
@@ -60,6 +65,8 @@ packetBuilder.AddObjectPlace = function(uniqueIndex, objectData)
     if charge == nil then charge = -1 end
     if enchantmentCharge == nil then enchantmentCharge = -1 end
     if soul == nil then soul = "" end
+    if poisonId == nil then poisonId = "" end
+    if poisonCharges == nil then poisonCharges = 0 end
     if goldValue == nil then goldValue = 1 end
     if droppedByPlayer == nil then droppedByPlayer = false end
 
@@ -67,6 +74,7 @@ packetBuilder.AddObjectPlace = function(uniqueIndex, objectData)
     tes3mp.SetObjectCharge(charge)
     tes3mp.SetObjectEnchantmentCharge(enchantmentCharge)
     tes3mp.SetObjectSoul(soul)
+    tes3mp.SetObjectPoison(poisonId, poisonCharges)
     tes3mp.SetObjectGoldValue(goldValue)
     tes3mp.SetObjectDroppedByPlayerState(droppedByPlayer)
 

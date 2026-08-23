@@ -256,7 +256,7 @@ namespace MWClass
             typeText = "";
         else
         {
-            int armorType = getEquipmentSkill(ptr);       
+            int armorType = getEquipmentSkill(ptr);
             if (armorType == ESM::Skill::LightArmor)
                 typeText = "#{sLight}";
             else if (armorType == ESM::Skill::MediumArmor)

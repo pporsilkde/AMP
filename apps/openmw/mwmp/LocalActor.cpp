@@ -261,6 +261,8 @@ void LocalActor::updateEquipment(bool forceUpdate, bool sendImmediately)
                 item.charge = cellRef.getCharge();
                 item.enchantmentCharge = it->getCellRef().getEnchantmentCharge();
                 item.count = it->getRefData().getCount();
+                item.poisonId = it->getRefData().getPoisonId();
+                item.poisonCharges = it->getRefData().getPoisonCharges();
             }
         }
         else if (!item.refId.empty())
@@ -270,6 +272,8 @@ void LocalActor::updateEquipment(bool forceUpdate, bool sendImmediately)
             item.count = 0;
             item.charge = -1;
             item.enchantmentCharge = -1;
+            item.poisonId.clear();
+            item.poisonCharges = 0;
         }
     }
 
@@ -306,6 +310,30 @@ void LocalActor::sendEquipment()
     actorList.addActor(*this);
     Main::get().getNetworking()->getActorPacket(ID_ACTOR_EQUIPMENT)->setActorList(&actorList);
     Main::get().getNetworking()->getActorPacket(ID_ACTOR_EQUIPMENT)->Send();
+}
+
+void LocalActor::sendSpellsActive()
+{
+    MWMechanics::ActiveSpells& activeSpells = ptr.getClass().getCreatureStats(ptr).getActiveSpells();
+    spellsActiveChanges.activeSpells.clear();
+
+    for (const auto& ptrSpell : activeSpells)
+    {
+        mwmp::ActiveSpell packetSpell;
+        packetSpell.id = ptrSpell.first;
+        packetSpell.params.mDisplayName = ptrSpell.second.mDisplayName;
+        packetSpell.params.mEffects = ptrSpell.second.mEffects;
+        packetSpell.timestampDay = ptrSpell.second.mTimeStamp.getDay();
+        packetSpell.timestampHour = ptrSpell.second.mTimeStamp.getHour();
+        spellsActiveChanges.activeSpells.push_back(packetSpell);
+    }
+
+    spellsActiveChanges.action = mwmp::SpellsActiveChanges::SET;
+    ActorList actorList;
+    actorList.cell = cell;
+    actorList.addActor(*this);
+    Main::get().getNetworking()->getActorPacket(ID_ACTOR_SPELLS_ACTIVE)->setActorList(&actorList);
+    Main::get().getNetworking()->getActorPacket(ID_ACTOR_SPELLS_ACTIVE)->Send();
 }
 
 void LocalActor::sendSpellsActiveAddition(const std::string id, bool isStackingSpell, const MWMechanics::ActiveSpells::ActiveSpellParams& params)

@@ -1,4 +1,5 @@
 #include "combat.hpp"
+#include "poison.hpp"
 
 #include <components/misc/rng.hpp>
 #include <components/settings/settings.hpp>
@@ -383,6 +384,13 @@ namespace MWMechanics
         /*
             End of tes3mp change (minor)
         */
+
+        // Poison on ranged attacks belongs to the bow/crossbow or thrown weapon.
+        // This function already rejects DedicatedPlayer/DedicatedActor attackers,
+        // so the charge is consumed only by the authoritative firing client.
+        if (validVictim
+            && !(victim == getPlayer() && MWBase::Environment::get().getWorld()->getGodModeState()))
+            applyWeaponPoison(attacker, victim, weapon, hitPosition, true);
 
         if (validVictim)
         {

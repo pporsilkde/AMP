@@ -145,6 +145,30 @@ double ItemFunctions::GetEquipmentItemEnchantmentCharge(unsigned short pid, unsi
     return player->equipmentItems[slot].enchantmentCharge;
 }
 
+const char* ItemFunctions::GetEquipmentItemPoisonId(unsigned short pid, unsigned short slot) noexcept
+{
+    Player* player;
+    GET_PLAYER(pid, player, "");
+    return player->equipmentItems[slot].poisonId.c_str();
+}
+
+int ItemFunctions::GetEquipmentItemPoisonCharges(unsigned short pid, unsigned short slot) noexcept
+{
+    Player* player;
+    GET_PLAYER(pid, player, 0);
+    return player->equipmentItems[slot].poisonCharges;
+}
+
+void ItemFunctions::SetEquipmentItemPoison(unsigned short pid, unsigned short slot, const char* poisonId, int charges) noexcept
+{
+    Player* player;
+    GET_PLAYER(pid, player, );
+    player->equipmentItems[slot].poisonId = poisonId ? poisonId : "";
+    player->equipmentItems[slot].poisonCharges = charges;
+    if (!Utils::vectorContains(player->equipmentIndexChanges, slot))
+        player->equipmentIndexChanges.push_back(slot);
+}
+
 const char *ItemFunctions::GetInventoryItemRefId(unsigned short pid, unsigned int index) noexcept
 {
     Player *player;
@@ -191,6 +215,31 @@ const char *ItemFunctions::GetInventoryItemSoul(unsigned short pid, unsigned int
     return player->inventoryChanges.items.at(index).soul.c_str();
 }
 
+const char* ItemFunctions::GetInventoryItemPoisonId(unsigned short pid, unsigned int index) noexcept
+{
+    Player* player;
+    GET_PLAYER(pid, player, "");
+    if (index >= player->inventoryChanges.items.size()) return "invalid";
+    return player->inventoryChanges.items.at(index).poisonId.c_str();
+}
+
+int ItemFunctions::GetInventoryItemPoisonCharges(unsigned short pid, unsigned int index) noexcept
+{
+    Player* player;
+    GET_PLAYER(pid, player, 0);
+    if (index >= player->inventoryChanges.items.size()) return 0;
+    return player->inventoryChanges.items.at(index).poisonCharges;
+}
+
+void ItemFunctions::SetInventoryItemPoison(unsigned short pid, unsigned int index, const char* poisonId, int charges) noexcept
+{
+    Player* player;
+    GET_PLAYER(pid, player, );
+    if (index >= player->inventoryChanges.items.size()) return;
+    player->inventoryChanges.items[index].poisonId = poisonId ? poisonId : "";
+    player->inventoryChanges.items[index].poisonCharges = charges;
+}
+
 const char *ItemFunctions::GetUsedItemRefId(unsigned short pid) noexcept
 {
     Player *player;
@@ -229,6 +278,20 @@ const char *ItemFunctions::GetUsedItemSoul(unsigned short pid) noexcept
     GET_PLAYER(pid, player, "");
 
     return player->usedItem.soul.c_str();
+}
+
+const char* ItemFunctions::GetUsedItemPoisonId(unsigned short pid) noexcept
+{
+    Player* player;
+    GET_PLAYER(pid, player, "");
+    return player->usedItem.poisonId.c_str();
+}
+
+int ItemFunctions::GetUsedItemPoisonCharges(unsigned short pid) noexcept
+{
+    Player* player;
+    GET_PLAYER(pid, player, 0);
+    return player->usedItem.poisonCharges;
 }
 
 void ItemFunctions::SendEquipment(unsigned short pid) noexcept

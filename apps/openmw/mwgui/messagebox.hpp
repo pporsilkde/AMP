@@ -81,7 +81,7 @@ namespace MWGui
             MyGUI::EditBox* mMessageWidget;
             int mBottomPadding;
             int mNextBoxPadding;
-            bool mFramedForBarter;
+            bool mFramedForInventoryMode;
     };
 
     class InteractiveMessageBox : public WindowModal

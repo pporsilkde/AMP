@@ -50,8 +50,8 @@ namespace MWGui
         ViewMode getViewMode() const { return mViewMode; }
 
         /// In extended list mode, emit eventItemClicked on a normal mouse
-        /// release. Disabled by default so the regular inventory keeps its
-        /// focus/double-click behaviour; two-pane transfer windows opt in.
+        /// release. Host windows opt in when list rows should behave like the
+        /// classic icon grid (pick up/transfer on the first click).
         void setSingleClickActionEnabled(bool enabled) { mSingleClickActionEnabled = enabled; }
 
         /// Hide the built-in table/grid toggle when a host window provides its
@@ -104,7 +104,6 @@ namespace MWGui
         void setCoord(const MyGUI::IntCoord& _value) override;
 
         void onSelectedItem (MyGUI::Widget* sender);
-        bool shouldSuppressChangedRowQuickAction(ItemModel::ModelIndex index);
         void onListItemPressed(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
         void onListItemDragged(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
         void onListItemReleased(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
@@ -144,13 +143,6 @@ namespace MWGui
         int mListDragStartY;
         bool mListDragStarted;
         int mKeyboardFocusedIndex;
-
-        // A one-click transfer rebuilds the model immediately. Keep the identity
-        // of that row briefly so the second release of a desktop double-click
-        // cannot transfer whichever different item slid into the same index.
-        ItemModel::ModelIndex mLastQuickActionIndex;
-        MWWorld::Ptr mLastQuickActionItem;
-        double mLastQuickActionTime;
 
     };
 

@@ -602,8 +602,9 @@ namespace MWMechanics
                 int casterActorId = -1;
                 if (!caster.isEmpty() && caster.getClass().isActor())
                     casterActorId = caster.getClass().getCreatureStats(caster).getActorId();
+                const bool alchemyDurationStack = mSourceType == SourceType::Potion || mSourceType == SourceType::Ingredient;
                 target.getClass().getCreatureStats(target).getActiveSpells().addSpell(mId, mStack, appliedLastingEffects,
-                        mSourceName, casterActorId);
+                        mSourceName, casterActorId, alchemyDurationStack);
             }
         }
     }

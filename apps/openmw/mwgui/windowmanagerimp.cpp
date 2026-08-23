@@ -733,7 +733,13 @@ namespace MWGui
     {
         bool loading = (getMode() == GM_Loading || getMode() == GM_LoadingWallpaper);
 
-        bool mainmenucover = containsMode(GM_MainMenu) && MWBase::Environment::get().getStateManager()->getState() == MWBase::StateManager::State_NoGame;
+        // updateVisible() is also called while the GUI is being constructed, before
+        // World can be installed in Environment. Never dereference it during that phase.
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        MWBase::StateManager* stateManager = MWBase::Environment::get().getStateManager();
+        const bool liveMainMenuScene = world && world->isMainMenuSceneActive();
+        const bool noGame = !stateManager || stateManager->getState() == MWBase::StateManager::State_NoGame;
+        const bool mainmenucover = containsMode(GM_MainMenu) && noGame && !liveMainMenuScene;
 
         enableScene(!loading && !mainmenucover);
 
@@ -922,11 +928,13 @@ namespace MWGui
 
     void WindowManager::messageBox (const std::string& message, enum MWGui::ShowInDialogueMode showInDialogueMode)
     {
-        // Barter is opened from dialogue, so the dialogue actor remains set while
-        // the dialogue window is hidden behind the two barter panes. Ordinary
-        // barter notifications must therefore bypass hidden dialogue history and
-        // use the dedicated framed transient message box.
-        if (containsMode(GM_Barter) && showInDialogueMode != MWGui::ShowInDialogueMode_Only)
+        // Inventory-style windows can cover dialogue and normal transient text.
+        // Keep ordinary inventory/barter/container/companion feedback in its own
+        // framed notification box. Explicit dialogue-only script messages keep
+        // their existing dialogue routing.
+        const bool inventoryStyleMode = containsMode(GM_Barter) || containsMode(GM_Inventory)
+            || containsMode(GM_Container) || containsMode(GM_Companion);
+        if (inventoryStyleMode && showInDialogueMode != MWGui::ShowInDialogueMode_Only)
         {
             mMessageBoxManager->createMessageBox(message);
             return;
@@ -1028,40 +1036,41 @@ namespace MWGui
                     window->onFrame(frameDuration);
         }
 
-        /*
-            Start of tes3mp addition
-
-            Fix crashes caused by messageboxes that never have their modals erased elsewhere, working around
-            one of the main GUI-related problems that arise in an unpaused environment
-        */
-        for (auto modalIterator = mCurrentModals.begin(); modalIterator != mCurrentModals.end();) {
-            if ((*modalIterator)->mMainWidget == 0)
+        // In the unpaused MP UI a modal may destroy its MyGUI widget during the
+        // same frame. Remove dead entries before using back() or restoring focus.
+        bool removedInvalidModal = false;
+        for (auto it = mCurrentModals.begin(); it != mCurrentModals.end();)
+        {
+            WindowModal* modal = *it;
+            if (!modal || !modal->mMainWidget)
             {
-                modalIterator = mCurrentModals.erase(modalIterator);
+                it = mCurrentModals.erase(it);
+                removedInvalidModal = true;
             }
             else
-            {
-                ++modalIterator;
-            }
+                ++it;
         }
-        /*
-            End of tes3mp addition
-        */
+        if (removedInvalidModal)
+            mKeyboardNavigation->setModalWindow(
+                mCurrentModals.empty() ? nullptr : mCurrentModals.back()->mMainWidget);
 
-        // Make sure message boxes are always in front
-        // This is an awful workaround for a series of awfully interwoven issues that couldn't be worked around
-        // in a better way because of an impressive number of even more awfully interwoven issues.
-        if (mMessageBoxManager && mMessageBoxManager->isInteractiveMessageBox() && !mCurrentModals.empty()
-            && mCurrentModals.back() != mMessageBoxManager->getInteractiveMessageBox())
+        // Make sure interactive message boxes are always in front. Preserve the
+        // TES3MP server-origin callback behavior in MessageBoxManager.
+        if (mMessageBoxManager && mMessageBoxManager->isInteractiveMessageBox())
         {
-            std::vector<WindowModal*>::iterator found = std::find(mCurrentModals.begin(), mCurrentModals.end(), mMessageBoxManager->getInteractiveMessageBox());
-            if (found != mCurrentModals.end())
+            const WindowModal* interactive = mMessageBoxManager->getInteractiveMessageBox();
+            if (interactive && !mCurrentModals.empty() && mCurrentModals.back() != interactive)
             {
-                WindowModal* msgbox = *found;
-                std::swap(*found, mCurrentModals.back());
-                MyGUI::InputManager::getInstance().addWidgetModal(msgbox->mMainWidget);
-                mKeyboardNavigation->setModalWindow(msgbox->mMainWidget);
-                mKeyboardNavigation->setDefaultFocus(msgbox->mMainWidget, msgbox->getDefaultKeyFocus());
+                std::vector<WindowModal*>::iterator found
+                    = std::find(mCurrentModals.begin(), mCurrentModals.end(), interactive);
+                if (found != mCurrentModals.end())
+                {
+                    WindowModal* msgbox = *found;
+                    std::swap(*found, mCurrentModals.back());
+                    MyGUI::InputManager::getInstance().addWidgetModal(msgbox->mMainWidget);
+                    mKeyboardNavigation->setModalWindow(msgbox->mMainWidget);
+                    mKeyboardNavigation->setDefaultFocus(msgbox->mMainWidget, msgbox->getDefaultKeyFocus());
+                }
             }
         }
 

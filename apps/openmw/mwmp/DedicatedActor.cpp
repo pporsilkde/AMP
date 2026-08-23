@@ -253,7 +253,13 @@ void DedicatedActor::setEquipment()
             if (!Misc::StringUtils::ciEqual(storeRefId, packetRefId)) // if other item equiped
                 invStore.unequipSlot(slot, ptr);
             else
+            {
                 equal = true;
+                if (!equipmentItems[slot].poisonId.empty() && equipmentItems[slot].poisonCharges > 0)
+                    it->getRefData().setPoison(equipmentItems[slot].poisonId, equipmentItems[slot].poisonCharges);
+                else
+                    it->getRefData().clearPoison();
+            }
         }
 
         if (packetRefId.empty() || equal)
@@ -266,6 +272,14 @@ void DedicatedActor::setEquipment()
 
         // Equip items silently if this is the first time equipment is being set for this character
         equipItem(packetRefId, packetCharge, !hasReceivedInitialEquipment);
+        MWWorld::ContainerStoreIterator equipped = invStore.getSlot(slot);
+        if (equipped != invStore.end())
+        {
+            if (!equipmentItems[slot].poisonId.empty() && equipmentItems[slot].poisonCharges > 0)
+                equipped->getRefData().setPoison(equipmentItems[slot].poisonId, equipmentItems[slot].poisonCharges);
+            else
+                equipped->getRefData().clearPoison();
+        }
     }
 
     hasReceivedInitialEquipment = true;

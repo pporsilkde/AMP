@@ -23,18 +23,26 @@
     SCRIPT_API_ENTRY("GetEquipmentItemCount", ItemFunctions::GetEquipmentItemCount),\
     SCRIPT_API_ENTRY("GetEquipmentItemCharge", ItemFunctions::GetEquipmentItemCharge),\
     SCRIPT_API_ENTRY("GetEquipmentItemEnchantmentCharge", ItemFunctions::GetEquipmentItemEnchantmentCharge),\
+    SCRIPT_API_ENTRY("GetEquipmentItemPoisonId", ItemFunctions::GetEquipmentItemPoisonId),\
+    SCRIPT_API_ENTRY("GetEquipmentItemPoisonCharges", ItemFunctions::GetEquipmentItemPoisonCharges),\
+    SCRIPT_API_ENTRY("SetEquipmentItemPoison", ItemFunctions::SetEquipmentItemPoison),\
     \
     SCRIPT_API_ENTRY("GetInventoryItemRefId", ItemFunctions::GetInventoryItemRefId),\
     SCRIPT_API_ENTRY("GetInventoryItemCount", ItemFunctions::GetInventoryItemCount),\
     SCRIPT_API_ENTRY("GetInventoryItemCharge", ItemFunctions::GetInventoryItemCharge),\
     SCRIPT_API_ENTRY("GetInventoryItemEnchantmentCharge", ItemFunctions::GetInventoryItemEnchantmentCharge),\
     SCRIPT_API_ENTRY("GetInventoryItemSoul", ItemFunctions::GetInventoryItemSoul),\
+    SCRIPT_API_ENTRY("GetInventoryItemPoisonId", ItemFunctions::GetInventoryItemPoisonId),\
+    SCRIPT_API_ENTRY("GetInventoryItemPoisonCharges", ItemFunctions::GetInventoryItemPoisonCharges),\
+    SCRIPT_API_ENTRY("SetInventoryItemPoison", ItemFunctions::SetInventoryItemPoison),\
     \
     SCRIPT_API_ENTRY("GetUsedItemRefId", ItemFunctions::GetUsedItemRefId),\
     SCRIPT_API_ENTRY("GetUsedItemCount", ItemFunctions::GetUsedItemCount),\
     SCRIPT_API_ENTRY("GetUsedItemCharge", ItemFunctions::GetUsedItemCharge),\
     SCRIPT_API_ENTRY("GetUsedItemEnchantmentCharge", ItemFunctions::GetUsedItemEnchantmentCharge),\
     SCRIPT_API_ENTRY("GetUsedItemSoul", ItemFunctions::GetUsedItemSoul),\
+    SCRIPT_API_ENTRY("GetUsedItemPoisonId", ItemFunctions::GetUsedItemPoisonId),\
+    SCRIPT_API_ENTRY("GetUsedItemPoisonCharges", ItemFunctions::GetUsedItemPoisonCharges),\
     \
     SCRIPT_API_ENTRY("SendEquipment", ItemFunctions::SendEquipment),\
     SCRIPT_API_ENTRY("SendInventoryChanges", ItemFunctions::SendInventoryChanges),\
@@ -191,6 +199,9 @@ public:
     * \return The enchantment charge.
     */
     static double GetEquipmentItemEnchantmentCharge(unsigned short pid, unsigned short slot) noexcept;
+    static const char* GetEquipmentItemPoisonId(unsigned short pid, unsigned short slot) noexcept;
+    static int GetEquipmentItemPoisonCharges(unsigned short pid, unsigned short slot) noexcept;
+    static void SetEquipmentItemPoison(unsigned short pid, unsigned short slot, const char* poisonId, int charges) noexcept;
 
     /**
     * \brief Get the refId of the item at a certain index in a player's latest inventory
@@ -241,6 +252,9 @@ public:
     * \return The soul.
     */
     static const char *GetInventoryItemSoul(unsigned short pid, unsigned int index) noexcept;
+    static const char* GetInventoryItemPoisonId(unsigned short pid, unsigned int index) noexcept;
+    static int GetInventoryItemPoisonCharges(unsigned short pid, unsigned int index) noexcept;
+    static void SetInventoryItemPoison(unsigned short pid, unsigned int index, const char* poisonId, int charges) noexcept;
 
     /**
     * \brief Get the refId of the item last used by a player.
@@ -281,6 +295,8 @@ public:
     * \return The soul.
     */
     static const char *GetUsedItemSoul(unsigned short pid) noexcept;
+    static const char* GetUsedItemPoisonId(unsigned short pid) noexcept;
+    static int GetUsedItemPoisonCharges(unsigned short pid) noexcept;
 
     /**
     * \brief Send a PlayerEquipment packet with a player's equipment.

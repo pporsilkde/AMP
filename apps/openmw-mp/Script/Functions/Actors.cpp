@@ -185,6 +185,16 @@ double ActorFunctions::GetActorEquipmentItemEnchantmentCharge(unsigned int index
     return readActorList->baseActors.at(index).equipmentItems[slot].enchantmentCharge;
 }
 
+const char* ActorFunctions::GetActorEquipmentItemPoisonId(unsigned int index, unsigned short slot) noexcept
+{
+    return readActorList->baseActors.at(index).equipmentItems[slot].poisonId.c_str();
+}
+
+int ActorFunctions::GetActorEquipmentItemPoisonCharges(unsigned int index, unsigned short slot) noexcept
+{
+    return readActorList->baseActors.at(index).equipmentItems[slot].poisonCharges;
+}
+
 bool ActorFunctions::DoesActorHavePlayerKiller(unsigned int index) noexcept
 {
     return readActorList->baseActors.at(index).killer.isPlayer;
@@ -482,6 +492,12 @@ void ActorFunctions::EquipActorItem(unsigned short slot, const char *refId, unsi
     tempActor.equipmentItems[slot].count = count;
     tempActor.equipmentItems[slot].charge = charge;
     tempActor.equipmentItems[slot].enchantmentCharge = enchantmentCharge;
+}
+
+void ActorFunctions::SetActorEquipmentItemPoison(unsigned short slot, const char* poisonId, int charges) noexcept
+{
+    tempActor.equipmentItems[slot].poisonId = poisonId ? poisonId : "";
+    tempActor.equipmentItems[slot].poisonCharges = charges;
 }
 
 void ActorFunctions::UnequipActorItem(unsigned short slot) noexcept

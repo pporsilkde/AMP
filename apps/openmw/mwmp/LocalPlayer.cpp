@@ -645,6 +645,8 @@ void LocalPlayer::updateEquipment(bool forceUpdate)
                 cellRef.getCharge() != item.charge ||
                 Utils::compareFloats(cellRef.getEnchantmentCharge(), item.enchantmentCharge, 1.0f) == false ||
                 it->getRefData().getCount() != item.count ||
+                it->getRefData().getPoisonId() != item.poisonId ||
+                it->getRefData().getPoisonCharges() != item.poisonCharges ||
                 forceUpdate)
             {
                 equipmentIndexChanges.push_back(slot);
@@ -653,6 +655,8 @@ void LocalPlayer::updateEquipment(bool forceUpdate)
                 item.count = it->getRefData().getCount();
                 item.charge = it->getCellRef().getCharge();
                 item.enchantmentCharge = it->getCellRef().getEnchantmentCharge();
+                item.poisonId = it->getRefData().getPoisonId();
+                item.poisonCharges = it->getRefData().getPoisonCharges();
             }
         }
         else if (!item.refId.empty())
@@ -662,6 +666,8 @@ void LocalPlayer::updateEquipment(bool forceUpdate)
             item.count = 0;
             item.charge = -1;
             item.enchantmentCharge = -1;
+            item.poisonId.clear();
+            item.poisonCharges = 0;
         }
     }
 
@@ -692,6 +698,8 @@ void LocalPlayer::updateInventory(bool forceUpdate)
         item.charge = iter.getCellRef().getCharge();
         item.enchantmentCharge = iter.getCellRef().getEnchantmentCharge();
         item.soul = iter.getCellRef().getSoul();
+        item.poisonId = iter.getRefData().getPoisonId();
+        item.poisonCharges = iter.getRefData().getPoisonCharges();
 
         return false;
     };
@@ -854,6 +862,7 @@ void LocalPlayer::addItems()
 
             if (!item.soul.empty())
                 itemPtr.getCellRef().setSoul(item.soul);
+            itemPtr.getRefData().setPoison(item.poisonId, item.poisonCharges);
 
             LOG_APPEND(TimedLog::LOG_INFO, "- Adding inventory item %s with count %i", item.refId.c_str(), item.count);
 
@@ -1357,7 +1366,9 @@ void LocalPlayer::setEquipment()
         if (!currentItem.refId.empty())
         {
             auto it = find_if(ptrInventory.begin(), ptrInventory.end(), [&currentItem](const MWWorld::Ptr &itemPtr) {
-                return Misc::StringUtils::ciEqual(itemPtr.getCellRef().getRefId(), currentItem.refId);
+                return Misc::StringUtils::ciEqual(itemPtr.getCellRef().getRefId(), currentItem.refId)
+                    && itemPtr.getRefData().getPoisonId() == currentItem.poisonId
+                    && itemPtr.getRefData().getPoisonCharges() == currentItem.poisonCharges;
             });
 
             // If the item is not in our inventory, add it as long as it's not a bound item
@@ -1368,6 +1379,7 @@ void LocalPlayer::setEquipment()
                     try
                     {
                         auto addIter = ptrInventory.ContainerStore::add(currentItem.refId.c_str(), currentItem.count, ptrPlayer);
+                        addIter->getRefData().setPoison(currentItem.poisonId, currentItem.poisonCharges);
 
                         ptrInventory.equip(slot, addIter, ptrPlayer);
                     }
@@ -1666,6 +1678,8 @@ void LocalPlayer::sendInventory()
         item.charge = iter.getCellRef().getCharge();
         item.enchantmentCharge = iter.getCellRef().getEnchantmentCharge();
         item.soul = iter.getCellRef().getSoul();
+        item.poisonId = iter.getRefData().getPoisonId();
+        item.poisonCharges = iter.getRefData().getPoisonCharges();
 
         inventoryChanges.items.push_back(item);
     }
@@ -2036,6 +2050,8 @@ void LocalPlayer::sendItemUse(const MWWorld::Ptr& itemPtr, bool itemMagicState, 
     usedItem.charge = itemPtr.getCellRef().getCharge();
     usedItem.enchantmentCharge = itemPtr.getCellRef().getEnchantmentCharge();
     usedItem.soul = itemPtr.getCellRef().getSoul();
+    usedItem.poisonId = itemPtr.getRefData().getPoisonId();
+    usedItem.poisonCharges = itemPtr.getRefData().getPoisonCharges();
 
     usingItemMagic = itemMagicState;
     itemUseDrawState = currentDrawState;

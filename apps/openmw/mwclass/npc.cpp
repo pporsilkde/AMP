@@ -41,6 +41,7 @@
 #include "../mwmechanics/spellcasting.hpp"
 #include "../mwmechanics/disease.hpp"
 #include "../mwmechanics/combat.hpp"
+#include "../mwmechanics/poison.hpp"
 #include "../mwmechanics/autocalcspell.hpp"
 #include "../mwmechanics/difficultyscaling.hpp"
 #include "../mwmechanics/weapontype.hpp"
@@ -804,11 +805,19 @@ namespace MWClass
 
         MWMechanics::applyElementalShields(ptr, victim);
 
-        if (MWMechanics::blockMeleeAttack(ptr, victim, weapon, damage, attackStrength))
+        const bool blocked = MWMechanics::blockMeleeAttack(ptr, victim, weapon, damage, attackStrength);
+        if (blocked)
             damage = 0;
 
+        bool poisonHit = !blocked;
         if (victim == MWMechanics::getPlayer() && MWBase::Environment::get().getWorld()->getGodModeState())
+        {
             damage = 0;
+            poisonHit = false;
+        }
+
+        if (!weapon.isEmpty() && poisonHit)
+            MWMechanics::applyWeaponPoison(ptr, victim, weapon, hitPosition, false);
 
         MWMechanics::diseaseContact(victim, ptr);
 

@@ -57,7 +57,7 @@ namespace mwmp
                 // category without changing the ID_GAME_SETTINGS wire format.
                 // Server-side config.lua encodes them as:
                 //   @ArenaMP|Category|setting name
-                // Old clients do not understand this routing, so protocol 808
+                // Old clients do not understand this routing, so protocol 809
                 // prevents them from connecting and silently ignoring gameplay
                 // rules such as Equipment Requirements.
                 const std::string categoryPrefix = "@ArenaMP|";

@@ -416,7 +416,8 @@ namespace MWGui
             mPaperDollAutoRevealed = false;
         mGuiMode = mode;
         if (mItemView)
-            mItemView->setSingleClickActionEnabled(mode == GM_Barter || mode == GM_Container || mode == GM_Companion);
+            mItemView->setSingleClickActionEnabled(mode == GM_Inventory || mode == GM_Barter
+                || mode == GM_Container || mode == GM_Companion);
         std::string setting = getModeSetting();
         setPinButtonVisible(mode == GM_Inventory);
 

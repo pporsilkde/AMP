@@ -1,6 +1,6 @@
 local inventoryHelper = {}
 
-function inventoryHelper.containsItem(inventory, refId, charge, enchantmentCharge, soul)
+function inventoryHelper.containsItem(inventory, refId, charge, enchantmentCharge, soul, poisonId, poisonCharges)
 
     if charge ~= nil then charge = math.floor(charge) end
     if enchantmentCharge ~= nil then enchantmentCharge = math.floor(enchantmentCharge) end
@@ -17,6 +17,10 @@ function inventoryHelper.containsItem(inventory, refId, charge, enchantmentCharg
             elseif enchantmentCharge ~= nil and item.enchantmentCharge ~= nil and 
                 math.floor(item.enchantmentCharge) ~= enchantmentCharge then
                 isValid = false
+            elseif poisonId ~= nil and (item.poisonId or "") ~= poisonId then
+                isValid = false
+            elseif poisonCharges ~= nil and (item.poisonCharges or 0) ~= poisonCharges then
+                isValid = false
             end
 
             if isValid then
@@ -28,7 +32,7 @@ function inventoryHelper.containsItem(inventory, refId, charge, enchantmentCharg
     return false
 end
 
-function inventoryHelper.getItemIndex(inventory, refId, charge, enchantmentCharge, soul)
+function inventoryHelper.getItemIndex(inventory, refId, charge, enchantmentCharge, soul, poisonId, poisonCharges)
 
     if charge ~= nil then charge = math.floor(charge) end
     if enchantmentCharge ~= nil then enchantmentCharge = math.floor(enchantmentCharge) end
@@ -44,6 +48,10 @@ function inventoryHelper.getItemIndex(inventory, refId, charge, enchantmentCharg
                 isValid = false
             elseif enchantmentCharge ~= nil and item.enchantmentCharge ~= nil and
                 math.floor(item.enchantmentCharge) ~= enchantmentCharge then
+                isValid = false
+            elseif poisonId ~= nil and (item.poisonId or "") ~= poisonId then
+                isValid = false
+            elseif poisonCharges ~= nil and (item.poisonCharges or 0) ~= poisonCharges then
                 isValid = false
             end
 
@@ -69,10 +77,10 @@ function inventoryHelper.getItemIndexes(inventory, refId)
     return indexes
 end
 
-function inventoryHelper.addItem(inventory, refId, count, charge, enchantmentCharge, soul)
+function inventoryHelper.addItem(inventory, refId, count, charge, enchantmentCharge, soul, poisonId, poisonCharges)
 
-    if inventoryHelper.containsItem(inventory, refId, charge, enchantmentCharge, soul) then
-        local index = inventoryHelper.getItemIndex(inventory, refId, charge, enchantmentCharge, soul)
+    if inventoryHelper.containsItem(inventory, refId, charge, enchantmentCharge, soul, poisonId, poisonCharges) then
+        local index = inventoryHelper.getItemIndex(inventory, refId, charge, enchantmentCharge, soul, poisonId, poisonCharges)
 
         inventory[index].count = inventory[index].count + count
     else
@@ -82,6 +90,8 @@ function inventoryHelper.addItem(inventory, refId, count, charge, enchantmentCha
         item.charge = charge
         item.enchantmentCharge = enchantmentCharge
         item.soul = soul
+        item.poisonId = poisonId or ""
+        item.poisonCharges = poisonCharges or 0
 
         table.insert(inventory, item)
     end
@@ -120,6 +130,23 @@ function inventoryHelper.compareClosenessToItem(idealItem, comparedItem, otherIt
             elseif idealItem.soul:ciEqual(otherItem.soul) then
                 return false
             end
+        end
+    end
+
+    if idealItem.poisonId ~= nil then
+        local comparedPoisonId = comparedItem.poisonId or ""
+        local otherPoisonId = otherItem.poisonId or ""
+        if comparedPoisonId ~= otherPoisonId then
+            if comparedPoisonId == idealItem.poisonId then return true end
+            if otherPoisonId == idealItem.poisonId then return false end
+        end
+    end
+    if idealItem.poisonCharges ~= nil then
+        local comparedCharges = comparedItem.poisonCharges or 0
+        local otherCharges = otherItem.poisonCharges or 0
+        if comparedCharges ~= otherCharges then
+            if comparedCharges == idealItem.poisonCharges then return true end
+            if otherCharges == idealItem.poisonCharges then return false end
         end
     end
 
@@ -191,13 +218,13 @@ function inventoryHelper.compareClosenessToItem(idealItem, comparedItem, otherIt
     return false
 end
 
-function inventoryHelper.removeClosestItem(inventory, refId, count, charge, enchantmentCharge, soul)
+function inventoryHelper.removeClosestItem(inventory, refId, count, charge, enchantmentCharge, soul, poisonId, poisonCharges)
 
     if inventoryHelper.containsItem(inventory, refId) then
         local itemIndexesToCompare = inventoryHelper.getItemIndexes(inventory, refId)
         local itemIndexesByCloseness = {}
         local idealItem = { refId = refId, charge = charge, enchantmentCharge = enchantmentCharge,
-            soul = soul }
+            soul = soul, poisonId = poisonId, poisonCharges = poisonCharges }
 
         for _, comparedItemIndex in ipairs(itemIndexesToCompare) do
 
@@ -243,10 +270,10 @@ function inventoryHelper.removeClosestItem(inventory, refId, count, charge, ench
     end
 end
 
-function inventoryHelper.removeExactItem(inventory, refId, count, charge, enchantmentCharge, soul)
+function inventoryHelper.removeExactItem(inventory, refId, count, charge, enchantmentCharge, soul, poisonId, poisonCharges)
 
-    if inventoryHelper.containsItem(inventory, refId, charge, enchantmentCharge, soul) then
-        local index = inventoryHelper.getItemIndex(inventory, refId, charge, enchantmentCharge, soul)
+    if inventoryHelper.containsItem(inventory, refId, charge, enchantmentCharge, soul, poisonId, poisonCharges) then
+        local index = inventoryHelper.getItemIndex(inventory, refId, charge, enchantmentCharge, soul, poisonId, poisonCharges)
 
         inventory[index].count = inventory[index].count - count
 
@@ -257,8 +284,8 @@ function inventoryHelper.removeExactItem(inventory, refId, count, charge, enchan
 end
 
 -- Deprecated
-function inventoryHelper.removeItem(inventory, refId, count, charge, enchantmentCharge, soul)
-    return inventoryHelper.removeClosestItem(inventory, refId, count, charge, enchantmentCharge, soul)
+function inventoryHelper.removeItem(inventory, refId, count, charge, enchantmentCharge, soul, poisonId, poisonCharges)
+    return inventoryHelper.removeClosestItem(inventory, refId, count, charge, enchantmentCharge, soul, poisonId, poisonCharges)
 end
 
 return inventoryHelper

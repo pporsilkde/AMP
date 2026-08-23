@@ -218,6 +218,29 @@ config.arrowStick = {
     ["stick underwater"] = false,
 }
 
+
+-- Refined Alchemy gameplay is server-authoritative. Local settings.cfg values
+-- are fallbacks only and are overwritten on connection.
+config.refinedAlchemy = {
+    ["learn from eating"] = true,
+    ["learn from brewing"] = true,
+    ["learn from skill"] = true,
+    ["learning confirmations"] = 3,
+    ["synergy"] = true,
+    ["ingredient bonus"] = true,
+    ["failure mode"] = 1,
+    ["max poison charges"] = 5,
+    ["skill reveal effect 1"] = 15,
+    ["skill reveal effect 2"] = 30,
+    ["skill reveal effect 3"] = 45,
+    ["skill reveal effect 4"] = 60,
+    ["fatigue affects success"] = true,
+}
+
+config.alchemyGameplay = {
+    ["ingredient value power cap"] = 500,
+}
+
 -- Player-versus-player damage policy.
 -- "disabled": players cannot harm other players.
 -- "enabled":  all player-versus-player damage is allowed.
@@ -322,7 +345,7 @@ local function setGameSetting(name, value)
     table.insert(config.gameSettings, { name = name, value = value })
 end
 
--- ID_GAME_SETTINGS carries arbitrary string keys. Protocol 808 clients route
+-- ID_GAME_SETTINGS carries arbitrary string keys. Protocol 809 clients route
 -- keys in this form to the requested Settings::Manager category, letting the
 -- server authoritatively configure gameplay categories beyond [Game].
 local function setCategorySetting(category, name, value)
@@ -360,6 +383,15 @@ end
 
 for name, value in pairs(config.arrowStick) do
     setCategorySetting("Arrow Stick", name, value)
+end
+
+
+for name, value in pairs(config.refinedAlchemy) do
+    setCategorySetting("ArenaMW Alchemy", name, value)
+end
+
+for name, value in pairs(config.alchemyGameplay) do
+    setCategorySetting("Alchemy", name, value)
 end
 
 -- The VR settings to enforce for players

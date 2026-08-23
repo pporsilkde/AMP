@@ -39,6 +39,8 @@
     SCRIPT_API_ENTRY("GetActorEquipmentItemCount", ActorFunctions::GetActorEquipmentItemCount),\
     SCRIPT_API_ENTRY("GetActorEquipmentItemCharge", ActorFunctions::GetActorEquipmentItemCharge),\
     SCRIPT_API_ENTRY("GetActorEquipmentItemEnchantmentCharge", ActorFunctions::GetActorEquipmentItemEnchantmentCharge),\
+    SCRIPT_API_ENTRY("GetActorEquipmentItemPoisonId", ActorFunctions::GetActorEquipmentItemPoisonId),\
+    SCRIPT_API_ENTRY("GetActorEquipmentItemPoisonCharges", ActorFunctions::GetActorEquipmentItemPoisonCharges),\
     \
     SCRIPT_API_ENTRY("DoesActorHavePlayerKiller", ActorFunctions::DoesActorHavePlayerKiller),\
     SCRIPT_API_ENTRY("GetActorKillerPid", ActorFunctions::GetActorKillerPid),\
@@ -104,6 +106,7 @@
     SCRIPT_API_ENTRY("SetActorAIRepetition", ActorFunctions::SetActorAIRepetition),\
     \
     SCRIPT_API_ENTRY("EquipActorItem", ActorFunctions::EquipActorItem),\
+    SCRIPT_API_ENTRY("SetActorEquipmentItemPoison", ActorFunctions::SetActorEquipmentItemPoison),\
     SCRIPT_API_ENTRY("UnequipActorItem", ActorFunctions::UnequipActorItem),\
     \
     SCRIPT_API_ENTRY("AddActorSpellActive", ActorFunctions::AddActorSpellActive),\
@@ -380,6 +383,8 @@ public:
     * \return The enchantment charge.
     */
     static double GetActorEquipmentItemEnchantmentCharge(unsigned int index, unsigned short slot) noexcept;
+    static const char* GetActorEquipmentItemPoisonId(unsigned int index, unsigned short slot) noexcept;
+    static int GetActorEquipmentItemPoisonCharges(unsigned int index, unsigned short slot) noexcept;
 
     /**
     * \brief Check whether the killer of the actor at a certain index in the read actor list is a player.
@@ -863,6 +868,7 @@ public:
     * \return void
     */
     static void EquipActorItem(unsigned short slot, const char* refId, unsigned int count, int charge, double enchantmentCharge = -1) noexcept;
+    static void SetActorEquipmentItemPoison(unsigned short slot, const char* poisonId, int charges) noexcept;
 
     /**
     * \brief Unequip the item in a certain slot of the equipment of the temporary actor stored

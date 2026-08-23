@@ -417,6 +417,8 @@ function BaseCell:SaveObjectsPlaced(objects)
             local charge = object.charge
             local enchantmentCharge = object.enchantmentCharge
             local soul = object.soul
+            local poisonId = object.poisonId or ""
+            local poisonCharges = object.poisonCharges or 0
             local goldValue = object.goldValue
 
             -- Only save count if it isn't the default value of 1
@@ -438,6 +440,14 @@ function BaseCell:SaveObjectsPlaced(objects)
                self.data.objectData[uniqueIndex].soul = soul
             end
 
+            if poisonId ~= "" and poisonCharges > 0 then
+                self.data.objectData[uniqueIndex].poisonId = poisonId
+                self.data.objectData[uniqueIndex].poisonCharges = poisonCharges
+            else
+                self.data.objectData[uniqueIndex].poisonId = nil
+                self.data.objectData[uniqueIndex].poisonCharges = nil
+            end
+
             -- Only save goldValue if it isn't the default value of 1
             if goldValue ~= 1 then
                 self.data.objectData[uniqueIndex].goldValue = goldValue
@@ -447,7 +457,8 @@ function BaseCell:SaveObjectsPlaced(objects)
 
             tes3mp.LogAppend(enumerations.log.INFO, "- " .. uniqueIndex .. ", refId: " .. refId ..
                 ", count: " .. count .. ", charge: " .. charge .. ", enchantmentCharge: " .. enchantmentCharge ..
-                ", soul: " .. soul .. ", goldValue: " .. goldValue)
+                ", soul: " .. soul .. ", poisonId: " .. poisonId .. ", poisonCharges: " .. poisonCharges ..
+                ", goldValue: " .. goldValue)
 
             table.insert(self.data.packets.place, uniqueIndex)
 
@@ -729,12 +740,14 @@ function BaseCell:SaveContainers(pid)
             local itemCharge = tes3mp.GetContainerItemCharge(objectIndex, itemIndex)
             local itemEnchantmentCharge = tes3mp.GetContainerItemEnchantmentCharge(objectIndex, itemIndex)
             local itemSoul = tes3mp.GetContainerItemSoul(objectIndex, itemIndex)
+            local itemPoisonId = tes3mp.GetContainerItemPoisonId(objectIndex, itemIndex)
+            local itemPoisonCharges = tes3mp.GetContainerItemPoisonCharges(objectIndex, itemIndex)
             local actionCount = tes3mp.GetContainerItemActionCount(objectIndex, itemIndex)
 
             -- Check if the object's stored inventory contains this item already
-            if inventoryHelper.containsItem(inventory, itemRefId, itemCharge, itemEnchantmentCharge, itemSoul) then
+            if inventoryHelper.containsItem(inventory, itemRefId, itemCharge, itemEnchantmentCharge, itemSoul, itemPoisonId, itemPoisonCharges) then
                 local foundIndex = inventoryHelper.getItemIndex(inventory, itemRefId, itemCharge,
-                    itemEnchantmentCharge, itemSoul)
+                    itemEnchantmentCharge, itemSoul, itemPoisonId, itemPoisonCharges)
                 local item = inventory[foundIndex]
 
                 if action == enumerations.container.ADD then
@@ -780,7 +793,7 @@ function BaseCell:SaveContainers(pid)
                     tes3mp.LogAppend(enumerations.log.VERBOSE, "- Added new item " .. itemRefId .. " with count of " ..
                         itemCount)
                     inventoryHelper.addItem(inventory, itemRefId, itemCount,
-                        itemCharge, itemEnchantmentCharge, itemSoul)
+                        itemCharge, itemEnchantmentCharge, itemSoul, itemPoisonId, itemPoisonCharges)
 
                     -- Is this a generated record? If so, add a link to it
                     if logicHandler.IsGeneratedRecord(itemRefId) then
@@ -1584,6 +1597,7 @@ function BaseCell:LoadContainers(pid, objectData, uniqueIndexArray)
                 tes3mp.SetContainerItemCharge(item.charge)
                 tes3mp.SetContainerItemEnchantmentCharge(item.enchantmentCharge)
                 tes3mp.SetContainerItemSoul(item.soul)
+                tes3mp.SetContainerItemPoison(item.poisonId or "", item.poisonCharges or 0)
 
                 tes3mp.AddContainerItem()
             end
@@ -1785,6 +1799,8 @@ function BaseCell:LoadActorEquipment(pid, objectData, uniqueIndexArray)
 
                     tes3mp.EquipActorItem(itemIndex, currentItem.refId, currentItem.count,
                         currentItem.charge, currentItem.enchantmentCharge)
+                    tes3mp.SetActorEquipmentItemPoison(itemIndex, currentItem.poisonId or "",
+                        currentItem.poisonCharges or 0)
                 else
                     tes3mp.UnequipActorItem(itemIndex)
                 end

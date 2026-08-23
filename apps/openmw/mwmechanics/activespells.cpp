@@ -1,9 +1,13 @@
 #include "activespells.hpp"
 
+#include <algorithm>
+
 #include <components/misc/rng.hpp>
 #include <components/misc/stringops.hpp>
 
 #include <components/esm/loadmgef.hpp>
+#include <components/esm/loadalch.hpp>
+#include <components/esm/loadingr.hpp>
 
 /*
     Start of tes3mp addition
@@ -211,7 +215,8 @@ namespace MWMechanics
         received them from it
     */
     void ActiveSpells::addSpell(const std::string &id, bool stack, std::vector<ActiveEffect> effects,
-                                const std::string &displayName, int casterActorId, MWWorld::TimeStamp timestamp, bool sendPacket)
+                                const std::string &displayName, int casterActorId, MWWorld::TimeStamp timestamp,
+                                bool sendPacket, bool stackAlchemyDuration)
     /*
         End of tes3mp change (major)
     */
@@ -233,11 +238,65 @@ namespace MWMechanics
             End of tes3mp addition
         */
 
-        if (it == end() || stack)
+        bool alchemyDurationMerged = false;
+        if (stackAlchemyDuration)
+        {
+            // Refined Alchemy: a second potion/ingredient with the same EffectKey
+            // extends duration rather than stacking another simultaneous magnitude.
+            // Keep this merge on the authoritative client, then send a full SET below.
+            const MWWorld::ESMStore& store = MWBase::Environment::get().getWorld()->getStore();
+            const auto isAlchemySource = [&store](const std::string& sourceId)
+            {
+                return store.get<ESM::Potion>().search(sourceId) != nullptr
+                    || store.get<ESM::Ingredient>().search(sourceId) != nullptr;
+            };
+
+            for (std::vector<ActiveEffect>::iterator incoming = params.mEffects.begin();
+                 incoming != params.mEffects.end();)
+            {
+                ActiveEffect* destination = nullptr;
+                for (TContainer::iterator spell = mSpells.begin(); spell != mSpells.end() && !destination; ++spell)
+                {
+                    if (!isAlchemySource(spell->first))
+                        continue;
+                    for (ActiveEffect& active : spell->second.mEffects)
+                    {
+                        if (active.mTimeLeft > 0.f && active.mEffectId == incoming->mEffectId
+                            && active.mArg == incoming->mArg)
+                        {
+                            destination = &active;
+                            break;
+                        }
+                    }
+                }
+
+                if (!destination)
+                {
+                    ++incoming;
+                    continue;
+                }
+
+                const float oldTime = std::max(0.f, destination->mTimeLeft);
+                const float newTime = std::max(0.f, incoming->mTimeLeft);
+                const float totalTime = oldTime + newTime;
+                if (totalTime > 0.f)
+                    destination->mMagnitude = (destination->mMagnitude * oldTime
+                        + incoming->mMagnitude * newTime) / totalTime;
+                destination->mTimeLeft = totalTime;
+                destination->mDuration = std::max(destination->mDuration, totalTime);
+                incoming = params.mEffects.erase(incoming);
+                alchemyDurationMerged = true;
+            }
+
+            if (params.mEffects.empty())
+                it = end(); // Nothing new remains to insert.
+        }
+
+        if (!params.mEffects.empty() && (it == end() || stack))
         {
             mSpells.insert(std::make_pair(id, params));
         }
-        else
+        else if (!params.mEffects.empty())
         {
             // addSpell() is called with effects for a range.
             // but a spell may have effects with different ranges (e.g. Touch & Target)
@@ -257,14 +316,23 @@ namespace MWMechanics
         {
             if (this == &MWMechanics::getPlayer().getClass().getCreatureStats(MWMechanics::getPlayer()).getActiveSpells())
             {
-                mwmp::Main::get().getLocalPlayer()->sendSpellsActiveAddition(id, stack, params);
+                if (stackAlchemyDuration && alchemyDurationMerged)
+                    mwmp::Main::get().getLocalPlayer()->sendSpellsActive();
+                else
+                    mwmp::Main::get().getLocalPlayer()->sendSpellsActiveAddition(id, stack, params);
             }
             else
             {
                 MWWorld::Ptr actorPtr = MWBase::Environment::get().getWorld()->searchPtrViaActorId(getActorId());
 
                 if (mwmp::Main::get().getCellController()->isLocalActor(actorPtr))
-                    mwmp::Main::get().getCellController()->getLocalActor(actorPtr)->sendSpellsActiveAddition(id, stack, params);
+                {
+                    mwmp::LocalActor* localActor = mwmp::Main::get().getCellController()->getLocalActor(actorPtr);
+                    if (stackAlchemyDuration && alchemyDurationMerged)
+                        localActor->sendSpellsActive();
+                    else
+                        localActor->sendSpellsActiveAddition(id, stack, params);
+                }
             }
         }
         /*
@@ -281,11 +349,11 @@ namespace MWMechanics
         using the current time for the timestamp
     */
     void ActiveSpells::addSpell(const std::string& id, bool stack, std::vector<ActiveEffect> effects,
-                                const std::string& displayName, int casterActorId)
+                                const std::string& displayName, int casterActorId, bool stackAlchemyDuration)
     {
         MWWorld::TimeStamp timestamp = MWBase::Environment::get().getWorld()->getTimeStamp();
 
-        addSpell(id, stack, effects, displayName, casterActorId, timestamp);
+        addSpell(id, stack, effects, displayName, casterActorId, timestamp, true, stackAlchemyDuration);
     }
     /*
         End of tes3mp addition

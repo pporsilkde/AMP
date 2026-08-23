@@ -28,6 +28,7 @@ namespace mwmp
         void updateAttackOrCast();
 
         void sendEquipment();
+        void sendSpellsActive();
         void sendSpellsActiveAddition(const std::string id, bool isStackingSpell, const MWMechanics::ActiveSpells::ActiveSpellParams& params);
         void sendSpellsActiveRemoval(const std::string id, bool isStackingSpell, MWWorld::TimeStamp timestamp);
         void sendDeath(char newDeathState);

@@ -34,5 +34,7 @@ void PacketPlayerInventory::Packet(RakNet::BitStream *newBitstream, bool send)
         RW(item.charge, send);
         RW(item.enchantmentCharge, send);
         RW(item.soul, send, true);
+        RW(item.poisonId, send, true);
+        RW(item.poisonCharges, send);
     }
 }

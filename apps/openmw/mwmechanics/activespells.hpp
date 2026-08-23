@@ -85,7 +85,7 @@ namespace MWMechanics
             /// \param displayName Name for display in magic menu.
             ///
             void addSpell (const std::string& id, bool stack, std::vector<ActiveEffect> effects,
-                           const std::string& displayName, int casterActorId);
+                           const std::string& displayName, int casterActorId, bool stackAlchemyDuration = false);
 
             /*
                 Start of tes3mp addition
@@ -93,7 +93,8 @@ namespace MWMechanics
                 Add a separate addSpell() with a timestamp argument
             */
             void addSpell (const std::string& id, bool stack, std::vector<ActiveEffect> effects,
-                           const std::string& displayName, int casterActorId, MWWorld::TimeStamp timestamp, bool sendPacket = true);
+                           const std::string& displayName, int casterActorId, MWWorld::TimeStamp timestamp,
+                           bool sendPacket = true, bool stackAlchemyDuration = false);
             /*
                 End of tes3mp addition
             */

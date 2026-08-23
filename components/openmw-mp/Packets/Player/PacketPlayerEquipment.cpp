@@ -50,5 +50,7 @@ void PacketPlayerEquipment::ExchangeItemInformation(Item &item, bool send)
     RW(item.count, send);
     RW(item.charge, send);
     RW(item.enchantmentCharge, send);
+    RW(item.poisonId, send, true);
+    RW(item.poisonCharges, send);
 }
 

@@ -10,17 +10,20 @@ namespace mwmp
     struct ContainerItem
     {
         std::string refId;
-        int count;
-        int charge;
-        double enchantmentCharge;
+        int count = 0;
+        int charge = -1;
+        double enchantmentCharge = -1;
         std::string soul;
+        std::string poisonId;
+        int poisonCharges = 0;
 
-        int actionCount;
+        int actionCount = 0;
 
         inline bool operator==(const ContainerItem& rhs)
         {
             return refId == rhs.refId && count == rhs.count && charge == rhs.charge &&
-                enchantmentCharge == rhs.enchantmentCharge && soul == rhs.soul;
+                enchantmentCharge == rhs.enchantmentCharge && soul == rhs.soul &&
+                poisonId == rhs.poisonId && poisonCharges == rhs.poisonCharges;
         }
     };
 
@@ -43,6 +46,8 @@ namespace mwmp
         int charge = -1;
         double enchantmentCharge = -1;
         std::string soul = "";
+        std::string poisonId = "";
+        int poisonCharges = 0;
         int goldValue = 1;
         /*
             End of AMP change

@@ -25,6 +25,8 @@
     SCRIPT_API_ENTRY("GetObjectCharge", ObjectFunctions::GetObjectCharge),\
     SCRIPT_API_ENTRY("GetObjectEnchantmentCharge", ObjectFunctions::GetObjectEnchantmentCharge),\
     SCRIPT_API_ENTRY("GetObjectSoul", ObjectFunctions::GetObjectSoul),\
+    SCRIPT_API_ENTRY("GetObjectPoisonId", ObjectFunctions::GetObjectPoisonId),\
+    SCRIPT_API_ENTRY("GetObjectPoisonCharges", ObjectFunctions::GetObjectPoisonCharges),\
     SCRIPT_API_ENTRY("GetObjectGoldValue", ObjectFunctions::GetObjectGoldValue),\
     SCRIPT_API_ENTRY("GetObjectScale", ObjectFunctions::GetObjectScale),\
     SCRIPT_API_ENTRY("GetObjectSoundId", ObjectFunctions::GetObjectSoundId),\
@@ -87,6 +89,8 @@
     SCRIPT_API_ENTRY("GetContainerItemCharge", ObjectFunctions::GetContainerItemCharge),\
     SCRIPT_API_ENTRY("GetContainerItemEnchantmentCharge", ObjectFunctions::GetContainerItemEnchantmentCharge),\
     SCRIPT_API_ENTRY("GetContainerItemSoul", ObjectFunctions::GetContainerItemSoul),\
+    SCRIPT_API_ENTRY("GetContainerItemPoisonId", ObjectFunctions::GetContainerItemPoisonId),\
+    SCRIPT_API_ENTRY("GetContainerItemPoisonCharges", ObjectFunctions::GetContainerItemPoisonCharges),\
     SCRIPT_API_ENTRY("GetContainerItemActionCount", ObjectFunctions::GetContainerItemActionCount),\
     \
     SCRIPT_API_ENTRY("DoesObjectHaveContainer", ObjectFunctions::DoesObjectHaveContainer),\
@@ -104,6 +108,7 @@
     SCRIPT_API_ENTRY("SetObjectCharge", ObjectFunctions::SetObjectCharge),\
     SCRIPT_API_ENTRY("SetObjectEnchantmentCharge", ObjectFunctions::SetObjectEnchantmentCharge),\
     SCRIPT_API_ENTRY("SetObjectSoul", ObjectFunctions::SetObjectSoul),\
+    SCRIPT_API_ENTRY("SetObjectPoison", ObjectFunctions::SetObjectPoison),\
     SCRIPT_API_ENTRY("SetObjectGoldValue", ObjectFunctions::SetObjectGoldValue),\
     SCRIPT_API_ENTRY("SetObjectScale", ObjectFunctions::SetObjectScale),\
     SCRIPT_API_ENTRY("SetObjectState", ObjectFunctions::SetObjectState),\
@@ -142,6 +147,7 @@
     SCRIPT_API_ENTRY("SetContainerItemCharge", ObjectFunctions::SetContainerItemCharge),\
     SCRIPT_API_ENTRY("SetContainerItemEnchantmentCharge", ObjectFunctions::SetContainerItemEnchantmentCharge),\
     SCRIPT_API_ENTRY("SetContainerItemSoul", ObjectFunctions::SetContainerItemSoul),\
+    SCRIPT_API_ENTRY("SetContainerItemPoison", ObjectFunctions::SetContainerItemPoison),\
     \
     SCRIPT_API_ENTRY("SetContainerItemActionCountByIndex", ObjectFunctions::SetContainerItemActionCountByIndex),\
     \
@@ -347,6 +353,8 @@ public:
     * \return The soul.
     */
     static const char *GetObjectSoul(unsigned int index) noexcept;
+    static const char *GetObjectPoisonId(unsigned int index) noexcept;
+    static int GetObjectPoisonCharges(unsigned int index) noexcept;
 
     /**
     * \brief Get the gold value of the object at a certain index in the read object list.
@@ -841,6 +849,8 @@ public:
     * \return The soul.
     */
     static const char *GetContainerItemSoul(unsigned int objectIndex, unsigned int itemIndex) noexcept;
+    static const char *GetContainerItemPoisonId(unsigned int objectIndex, unsigned int itemIndex) noexcept;
+    static int GetContainerItemPoisonCharges(unsigned int objectIndex, unsigned int itemIndex) noexcept;
 
     /**
     * \brief Get the action count of the container item at a certain itemIndex in the container
@@ -987,6 +997,7 @@ public:
     * \return void
     */
     static void SetObjectSoul(const char* soul) noexcept;
+    static void SetObjectPoison(const char* poisonId, int charges) noexcept;
 
     /**
     * \brief Set the gold value of the temporary object stored on the server.
@@ -1274,6 +1285,7 @@ public:
     * \return void
     */
     static void SetContainerItemSoul(const char* soul) noexcept;
+    static void SetContainerItemPoison(const char* poisonId, int charges) noexcept;
 
     /**
     * \brief Set the action count of the container item at a certain itemIndex in the container

@@ -51,6 +51,8 @@ void PacketContainer::Packet(RakNet::BitStream *newBitstream, bool send)
             RW(containerItem.charge, send);
             RW(containerItem.enchantmentCharge, send);
             RW(containerItem.soul, send, true);
+            RW(containerItem.poisonId, send, true);
+            RW(containerItem.poisonCharges, send);
             RW(containerItem.actionCount, send);
 
             if (!send)

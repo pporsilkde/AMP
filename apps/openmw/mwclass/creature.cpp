@@ -54,6 +54,7 @@
 
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/combat.hpp"
+#include "../mwmechanics/poison.hpp"
 #include "../mwmechanics/actorutil.hpp"
 
 //EncoreMp addition
@@ -424,8 +425,14 @@ namespace MWClass
 
         MWMechanics::applyElementalShields(ptr, victim);
 
-        if (MWMechanics::blockMeleeAttack(ptr, victim, weapon, damage, attackStrength))
+        const bool blocked = MWMechanics::blockMeleeAttack(ptr, victim, weapon, damage, attackStrength);
+        if (blocked)
             damage = 0;
+
+        const bool poisonHit = !blocked
+            && !(victim == MWMechanics::getPlayer() && MWBase::Environment::get().getWorld()->getGodModeState());
+        if (!weapon.isEmpty() && poisonHit)
+            MWMechanics::applyWeaponPoison(ptr, victim, weapon, hitPosition, false);
 
         MWMechanics::diseaseContact(victim, ptr);
 

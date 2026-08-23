@@ -115,6 +115,8 @@ mwmp::BaseObject ObjectList::getBaseObjectFromPtr(const MWWorld::Ptr& ptr)
         baseObject.mpNum = ptr.getCellRef().getMpNum();
     }
 
+    baseObject.poisonId = ptr.getRefData().getPoisonId();
+    baseObject.poisonCharges = ptr.getRefData().getPoisonCharges();
     return baseObject;
 }
 
@@ -126,6 +128,8 @@ void ObjectList::addContainerItem(mwmp::BaseObject& baseObject, const MWWorld::P
     containerItem.charge = itemPtr.getCellRef().getCharge();
     containerItem.enchantmentCharge = itemPtr.getCellRef().getEnchantmentCharge();
     containerItem.soul = itemPtr.getCellRef().getSoul();
+    containerItem.poisonId = itemPtr.getRefData().getPoisonId();
+    containerItem.poisonCharges = itemPtr.getRefData().getPoisonCharges();
     containerItem.actionCount = actionCount;
 
     LOG_APPEND(TimedLog::LOG_VERBOSE, "--- Adding container item %s to packet with count %i and actionCount %i",
@@ -142,6 +146,8 @@ void ObjectList::addContainerItem(mwmp::BaseObject& baseObject, const MWGui::Ite
     containerItem.charge = itemStack.mBase.getCellRef().getCharge();
     containerItem.enchantmentCharge = itemStack.mBase.getCellRef().getEnchantmentCharge();
     containerItem.soul = itemStack.mBase.getCellRef().getSoul();
+    containerItem.poisonId = itemStack.mBase.getRefData().getPoisonId();
+    containerItem.poisonCharges = itemStack.mBase.getRefData().getPoisonCharges();
     containerItem.actionCount = actionCount;
 
     LOG_APPEND(TimedLog::LOG_VERBOSE, "--- Adding container item %s to packet with count %i and actionCount %i",
@@ -267,6 +273,7 @@ void ObjectList::editContainers(MWWorld::CellStore* cellStore)
 
                     if (!containerItem.soul.empty())
                         newPtr.getCellRef().setSoul(containerItem.soul);
+                    newPtr.getRefData().setPoison(containerItem.poisonId, containerItem.poisonCharges);
 
                     containerStore.add(newPtr, containerItem.count, ownerPtr);
                 }
@@ -281,7 +288,9 @@ void ObjectList::editContainers(MWWorld::CellStore* cellStore)
                         {
                             if (itemPtr.getCellRef().getCharge() == containerItem.charge &&
                                 itemPtr.getCellRef().getEnchantmentCharge() == containerItem.enchantmentCharge &&
-                                Misc::StringUtils::ciEqual(itemPtr.getCellRef().getSoul(), containerItem.soul))
+                                Misc::StringUtils::ciEqual(itemPtr.getCellRef().getSoul(), containerItem.soul) &&
+                                itemPtr.getRefData().getPoisonId() == containerItem.poisonId &&
+                                itemPtr.getRefData().getPoisonCharges() == containerItem.poisonCharges)
                             {
                                 // Store the sound of the first item in a TAKE_ALL
                                 if (isLocalTakeAll && takeAllSound.empty())
@@ -474,6 +483,7 @@ void ObjectList::placeObjects(MWWorld::CellStore* cellStore)
 
                 if (!baseObject.soul.empty())
                     newPtr.getCellRef().setSoul(baseObject.soul);
+                newPtr.getRefData().setPoison(baseObject.poisonId, baseObject.poisonCharges);
 
                 newPtr.getCellRef().setGoldValue(baseObject.goldValue);
                 newPtr = world->placeObject(newPtr, cellStore, baseObject.position);

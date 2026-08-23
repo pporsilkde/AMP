@@ -84,10 +84,10 @@ namespace MWMechanics
             int getHoursToRest() const override;
             ///< Calculate how many hours the player needs to rest in order to be fully healed
 
-            int getBarterOffer(const MWWorld::Ptr& ptr,int basePrice, bool buying) override;
+            int getBarterOffer(const MWWorld::Ptr& ptr, int basePrice, bool buying, bool useBaseStats = false) override;
             ///< This is used by every service to determine the price of objects given the trading skills of the player and NPC.
 
-            int getDerivedDisposition(const MWWorld::Ptr& ptr, bool addTemporaryDispositionChange = true) override;
+            int getDerivedDisposition(const MWWorld::Ptr& ptr, bool addTemporaryDispositionChange = true, bool useBaseStats = false) override;
             ///< Calculate the diposition of an NPC toward the player.
 
             int countDeaths (const std::string& id) const override;
