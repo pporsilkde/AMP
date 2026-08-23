@@ -533,6 +533,7 @@ void LocalPlayer::updatePosition(bool forceUpdate)
     static bool isJumping = false;
     static bool sentJumpEnd = true;
     static float oldRot[2] = {0};
+    static float idleHeartbeatTimer = 0.f;
 
     position = ptrPlayer.getRefData().getPosition();
 
@@ -549,12 +550,24 @@ void LocalPlayer::updatePosition(bool forceUpdate)
             isPlayingAnimation = false;
     }
 
-    if (forceUpdate || posIsChanging || posWasChanged)
+    if (!posIsChanging)
+        idleHeartbeatTimer += MWBase::Environment::get().getFrameDuration();
+    else
+        idleHeartbeatTimer = 0.f;
+
+    // Position uses an unreliable sequenced transport in ArenaMP. Keep a small
+    // idle heartbeat so a lost movement->stop sample cannot leave another client
+    // walking forever. Two packets per second while idle is enough and remains
+    // far cheaper than reliable per-frame movement.
+    const bool sendIdleHeartbeat = !posIsChanging && idleHeartbeatTimer >= 0.5f;
+
+    if (forceUpdate || posIsChanging || posWasChanged || sendIdleHeartbeat)
     {
         oldRot[0] = position.rot[0];
         oldRot[1] = position.rot[2];
 
         posWasChanged = posIsChanging;
+        idleHeartbeatTimer = 0.f;
 
         if (!isJumping && !world->isOnGround(ptrPlayer) && !world->isFlying(ptrPlayer))
             isJumping = true;

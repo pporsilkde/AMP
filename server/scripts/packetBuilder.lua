@@ -1,5 +1,100 @@
 packetBuilder = {}
 
+-- ArenaMP AOI routing for container state.  The stock TES3MP scripts use
+-- SendContainer(true, ...), which broadcasts through the server.  Instead, use
+-- the client's authoritative loaded-cell list: exterior neighbours naturally
+-- participate because OpenMW reports those cells as loaded.  This is stricter
+-- than guessing distance and also excludes nearby coordinates in another
+-- interior/instance.
+packetBuilder.GetRelevantPlayersForCell = function(cell)
+    local relevantPids = {}
+
+    if cell == nil then return relevantPids end
+
+    for pid, player in pairs(Players) do
+        if player ~= nil and player:IsLoggedIn() then
+            local isVisitor = tableHelper.containsValue(cell.visitors, pid)
+            local hasCellLoaded = player.cellsLoaded ~= nil and
+                tableHelper.containsValue(player.cellsLoaded, cell.description)
+
+            if isVisitor or hasCellLoaded then
+                table.insert(relevantPids, pid)
+            end
+        end
+    end
+
+    return relevantPids
+end
+
+-- Re-route the received Container packet to the AOI only.
+packetBuilder.SendReceivedContainerToRelevantPlayers = function(cell, skipPid)
+    local sentCount = 0
+
+    for _, targetPid in ipairs(packetBuilder.GetRelevantPlayersForCell(cell)) do
+        if skipPid == nil or targetPid ~= skipPid then
+            tes3mp.CopyReceivedObjectListToStore()
+            tes3mp.SetObjectListPid(targetPid)
+            tes3mp.SendContainer(false, false)
+            sentCount = sentCount + 1
+        end
+    end
+
+    return sentCount
+end
+
+-- Send one authoritative full SET of a stored container to the AOI.  REMOVE
+-- packets are not forwarded to observers because TES3MP may treat the attached
+-- player as the item recipient; observers only need the resulting container
+-- state.  Poison state is preserved as part of the item identity.
+packetBuilder.UpdateContainerForRelevantPlayers = function(cell, uniqueIndex, skipPid)
+    if cell == nil or cell.data == nil or cell.data.objectData == nil then return 0 end
+
+    local containerData = cell.data.objectData[uniqueIndex]
+    if containerData == nil or containerData.inventory == nil then return 0 end
+
+    local splitIndex = uniqueIndex:split("-")
+    if splitIndex[1] == nil or splitIndex[2] == nil then return 0 end
+
+    local sentCount = 0
+
+    for _, targetPid in ipairs(packetBuilder.GetRelevantPlayersForCell(cell)) do
+        if skipPid == nil or targetPid ~= skipPid then
+            tes3mp.ClearObjectList()
+            tes3mp.SetObjectListPid(targetPid)
+            tes3mp.SetObjectListCell(cell.description)
+            tes3mp.SetObjectListAction(enumerations.container.SET)
+            tes3mp.SetObjectListContainerSubAction(enumerations.containerSub.NONE)
+
+            tes3mp.SetObjectRefNum(splitIndex[1])
+            tes3mp.SetObjectMpNum(splitIndex[2])
+            if containerData.refId ~= nil then tes3mp.SetObjectRefId(containerData.refId) end
+
+            for _, item in pairs(containerData.inventory) do
+                local charge = item.charge or -1
+                local enchantmentCharge = item.enchantmentCharge or -1
+                local soul = item.soul or ""
+
+                if charge < -1 then charge = -1 end
+                if enchantmentCharge < -1 then enchantmentCharge = -1 end
+
+                tes3mp.SetContainerItemRefId(item.refId)
+                tes3mp.SetContainerItemCount(item.count)
+                tes3mp.SetContainerItemCharge(charge)
+                tes3mp.SetContainerItemEnchantmentCharge(enchantmentCharge)
+                tes3mp.SetContainerItemSoul(soul)
+                tes3mp.SetContainerItemPoison(item.poisonId or "", item.poisonCharges or 0)
+                tes3mp.AddContainerItem()
+            end
+
+            tes3mp.AddObject()
+            tes3mp.SendContainer(false, false)
+            sentCount = sentCount + 1
+        end
+    end
+
+    return sentCount
+end
+
 packetBuilder.AddPlayerInventoryItemChange = function(pid, item)
 
     -- Use default values when necessary

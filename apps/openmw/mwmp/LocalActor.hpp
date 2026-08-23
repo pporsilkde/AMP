@@ -42,6 +42,7 @@ namespace mwmp
         MWWorld::Ptr ptr;
 
         bool posWasChanged;
+        int stopPositionResends;
         bool equipmentChanged;
 
         bool wasRunning;

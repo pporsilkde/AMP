@@ -123,7 +123,13 @@ enum OrderingChannel
     CHANNEL_PLAYER,
     CHANNEL_OBJECT,
     CHANNEL_MASTER,
-    CHANNEL_WORLDSTATE
+    CHANNEL_WORLDSTATE,
+
+    // High-frequency movement is deliberately isolated from reliable gameplay
+    // traffic. RakNet sequences packets independently per ordering channel, so
+    // combat/AI/equipment bursts cannot hold back the newest position sample.
+    CHANNEL_ACTOR_MOVEMENT,
+    CHANNEL_PLAYER_MOVEMENT
 };
 
 

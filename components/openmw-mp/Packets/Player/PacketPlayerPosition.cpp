@@ -6,8 +6,9 @@ using namespace mwmp;
 PacketPlayerPosition::PacketPlayerPosition(RakNet::RakPeerInterface *peer) : PlayerPacket(peer)
 {
     packetID = ID_PLAYER_POSITION;
-    priority = MEDIUM_PRIORITY;
-    //reliability = UNRELIABLE_SEQUENCED;
+    priority = HIGH_PRIORITY;
+    reliability = UNRELIABLE_SEQUENCED;
+    orderChannel = CHANNEL_PLAYER_MOVEMENT;
 }
 
 void PacketPlayerPosition::Packet(RakNet::BitStream *newBitstream, bool send)

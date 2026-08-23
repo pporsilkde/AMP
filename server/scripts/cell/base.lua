@@ -254,11 +254,11 @@ function BaseCell:SetAuthority(pid)
     tes3mp.LogMessage(enumerations.log.INFO, "Authority of cell " .. self.data.entry.description ..
         " is now " .. logicHandler.GetChatName(pid))
 
-    -- Prime the future authority with the most recent server-side snapshot before
-    -- telling clients to switch simulation ownership. Position/stats packets and
-    -- ActorAuthority share the reliable ordered actor channel, so this removes the
-    -- multi-second dead period that could otherwise happen during handoff.
-    self:LoadMomentaryCellData(pid)
+    -- The new authority is already a live observer of this loaded cell and has
+    -- been receiving position/stats continuously. Avoid replaying a second full
+    -- momentary snapshot here: on busy cells that burst competed with combat and
+    -- movement traffic. SendActorAuthority still replays the cached AI state
+    -- directly before switching ownership.
     self:LoadActorAuthority(pid)
 end
 
@@ -816,24 +816,30 @@ function BaseCell:SaveContainers(pid)
         self.data.objectData[uniqueIndex].inventory = inventory
     end
 
-    -- Is this a player replying to our request for container contents?
-    -- If so, only send the reply to other players
-    -- i.e. sendToOtherPlayers is true and skipAttachedPlayer is true
-    if subAction == enumerations.containerSub.REPLY_TO_REQUEST then
-        tes3mp.SendContainer(true, true)
-    -- Is this a container packet originating from a client script or
-    -- dialogue? If so, its effects have already taken place on the
-    -- sending client, so only send it to other players
-    elseif packetOrigin == enumerations.packetOrigin.CLIENT_SCRIPT_LOCAL or
+    -- ArenaMP interest management: never broadcast container changes to the
+    -- whole server. Recipients are players who actually have this cell loaded
+    -- (including the neighbouring exterior cells in their OpenMW scene).
+    local isSpecialSubAction = subAction == enumerations.containerSub.REPLY_TO_REQUEST or
+        packetOrigin == enumerations.packetOrigin.CLIENT_SCRIPT_LOCAL or
         packetOrigin == enumerations.packetOrigin.CLIENT_SCRIPT_GLOBAL or
-        packetOrigin == enumerations.packetOrigin.CLIENT_DIALOGUE then
-        tes3mp.SendContainer(true, true)
-    -- Otherwise, send the received packet to everyone, including the
-    -- player who sent it (because no clientside changes will be made
-    -- to the related container otherwise)
-    -- i.e. sendToOtherPlayers is true and skipAttachedPlayer is false
+        packetOrigin == enumerations.packetOrigin.CLIENT_DIALOGUE
+
+    if action == enumerations.container.REMOVE then
+        -- The player taking the item needs the original REMOVE packet. Other
+        -- observers receive an authoritative SET of the resulting container,
+        -- so none of them can accidentally become the item recipient.
+        tes3mp.CopyReceivedObjectListToStore()
+        tes3mp.SetObjectListPid(pid)
+        tes3mp.SendContainer(false, false)
+
+        for objectIndex = 0, tes3mp.GetObjectListSize() - 1 do
+            local uniqueIndex = tes3mp.GetObjectRefNum(objectIndex) .. "-" .. tes3mp.GetObjectMpNum(objectIndex)
+            packetBuilder.UpdateContainerForRelevantPlayers(self, uniqueIndex, pid)
+        end
     else
-        tes3mp.SendContainer(true, false)
+        local skipPid = nil
+        if isSpecialSubAction then skipPid = pid end
+        packetBuilder.SendReceivedContainerToRelevantPlayers(self, skipPid)
     end
 
     self:QuicksaveToDrive()

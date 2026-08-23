@@ -24,6 +24,7 @@ LocalActor::LocalActor()
 {
     hasSentData = false;
     posWasChanged = false;
+    stopPositionResends = 0;
     equipmentChanged = false;
 
     wasRunning = false;
@@ -122,11 +123,20 @@ void LocalActor::updatePosition(bool forceUpdate)
         // to send ActorPosition packets even when CharacterController has no input.
     }
 
-    if (forceUpdate || posIsChanging || posWasChanged)
+    const bool wasChanging = posWasChanged;
+    if (posIsChanging)
+        stopPositionResends = 0;
+    else if (wasChanging)
+        stopPositionResends = 3;
+
+    if (forceUpdate || posIsChanging || wasChanging || stopPositionResends > 0)
     {
         posWasChanged = posIsChanging;
         position = ptrPosition;
         mwmp::Main::get().getNetworking()->getActorList()->addPositionActor(*this);
+
+        if (!posIsChanging && stopPositionResends > 0)
+            --stopPositionResends;
     }
 }
 

@@ -211,12 +211,13 @@ DedicatedPlayer::~DedicatedPlayer()
 
 void DedicatedPlayer::update(float dt)
 {
-    // Only move and set anim flags if the framerate isn't too low
-    if (dt < 0.1)
-    {
+    // Remote players must keep advancing even when one rendered frame takes
+    // longer than 100 ms. The old TES3MP guard skipped the complete movement
+    // update on a hitch, producing visible freezes and also giving authority-side
+    // NPC AI a stale target position during combat. move() is frame-time-safe.
+    if (dt > 0.f)
         move(dt);
-        setAnimFlags();
-    }
+    setAnimFlags();
 
     updateInteractionAnimation(dt);
     updatePersistentAnimation(dt);
@@ -258,20 +259,27 @@ void DedicatedPlayer::move(float dt)
 
     ESM::Position refPos = ptr.getRefData().getPosition();
     MWBase::World *world = MWBase::Environment::get().getWorld();
-    const int maxInterpolationDistance = 80;
 
-    // Apply interpolation only if the position hasn't changed too much from last time
-    bool shouldInterpolate =
-            abs(position.pos[0] - refPos.pos[0]) < maxInterpolationDistance &&
-            abs(position.pos[1] - refPos.pos[1]) < maxInterpolationDistance &&
-            abs(position.pos[2] - refPos.pos[2]) < maxInterpolationDistance;
+    const float dx = position.pos[0] - refPos.pos[0];
+    const float dy = position.pos[1] - refPos.pos[1];
+    const float dz = position.pos[2] - refPos.pos[2];
+    const float distanceSquared = dx * dx + dy * dy + dz * dz;
+    const float maxInterpolationDistance = 192.f;
 
-    if (shouldInterpolate)
+    if (distanceSquared < maxInterpolationDistance * maxInterpolationDistance)
     {
-        static const int timeMultiplier = 15;
-        osg::Vec3f lerp = MechanicsHelper::getLinearInterpolation(refPos.asVec3(), position.asVec3(), dt * timeMultiplier);
+        // Exponential catch-up is stable across 30/60/120 FPS and, unlike the
+        // old dt < 0.1 gate, keeps moving after a long combat/render frame.
+        const float interpolation = 1.f - std::exp(-std::max(0.f, dt) * 18.f);
 
-        world->moveObject(ptr, lerp.x(), lerp.y(), lerp.z());
+        if (distanceSquared < 0.0625f)
+            world->moveObject(ptr, position.pos[0], position.pos[1], position.pos[2]);
+        else
+        {
+            const osg::Vec3f lerp = MechanicsHelper::getLinearInterpolation(
+                refPos.asVec3(), position.asVec3(), interpolation);
+            world->moveObject(ptr, lerp.x(), lerp.y(), lerp.z());
+        }
     }
     else
         world->moveObject(ptr, position.pos[0], position.pos[1], position.pos[2]);
