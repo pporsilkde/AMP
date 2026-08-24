@@ -266,8 +266,16 @@ namespace MWMechanics
 
             storage.updateCombatMove(duration);
             updateTacticalMovement(actor, target, duration, storage, characterController);
+
+            // The storage vector is authoritative only while a tactical state or a
+            // timed combat move is running. Outside of those windows the actor must
+            // keep the full-speed pursuit vector that pathTo() just produced, while
+            // still turning to face its target.
+            const bool hasStorageTranslation = storage.hasTacticalMovement() || storage.isCombatMoving()
+                || storage.mMovement.mPosition[0] != 0.f || storage.mMovement.mPosition[1] != 0.f;
+
             if (storage.mReadyToAttack || storage.hasTacticalMovement() || meleePressureMovement)
-                updateActorsMovement(actor, duration, storage);
+                updateActorsMovement(actor, duration, storage, hasStorageTranslation);
             storage.updateAttack(characterController);
 
             /*
@@ -511,7 +519,7 @@ namespace MWMechanics
                     {
                         mPathFinder.clearPath();
                         storage.mMovement.mPosition[0] = 0.f;
-                        storage.mMovement.mPosition[1] = 0.9f;
+                        storage.mMovement.mPosition[1] = 1.f;
                     }
                     else
                     {
@@ -795,7 +803,7 @@ namespace MWMechanics
             if (distToTarget > closeStop)
                 storage.mMovement.mPosition[1] = storage.mMeleeCommitTimer > 0.f ? 0.85f : 1.f;
             else
-                storage.mMovement.mPosition[1] = storage.mMeleeCommitTimer > 0.f ? 0.18f : 0.f;
+                storage.mMovement.mPosition[1] = 0.f; // ArenaMP C16: no foot shuffle while already inside close melee range.
         }
     }
 
@@ -1210,17 +1218,29 @@ namespace MWMechanics
         };
     }
 
-    void AiCombat::updateActorsMovement(const MWWorld::Ptr& actor, float duration, AiCombatStorage& storage)
+    void AiCombat::updateActorsMovement(const MWWorld::Ptr& actor, float duration, AiCombatStorage& storage,
+        bool applyTranslation)
     {
-        // apply combat movement
-        float deltaAngle = storage.mMovement.mRotation[2] - actor.getRefData().getPosition().rot[2];
-        osg::Vec2f movement = Misc::rotateVec2f(
-            osg::Vec2f(storage.mMovement.mPosition[0], storage.mMovement.mPosition[1]), -deltaAngle);
-
         MWMechanics::Movement& actorMovementSettings = actor.getClass().getMovementSettings(actor);
-        actorMovementSettings.mPosition[0] = movement.x();
-        actorMovementSettings.mPosition[1] = movement.y();
-        actorMovementSettings.mPosition[2] = storage.mMovement.mPosition[2];
+
+        // apply combat movement
+        //
+        // ArenaMP: only overwrite the translation when the storage actually holds a
+        // tactical/combat move. Writing a stale (usually zero or fractional) vector
+        // over the full-speed input produced by pathTo() in the same frame is what
+        // made pursuing NPCs crawl: mSpeedFactor feeds both physics speed and the
+        // movement animation speed multiplier, so a shrunken vector looks like a
+        // run cycle played in slow motion.
+        if (applyTranslation)
+        {
+            float deltaAngle = storage.mMovement.mRotation[2] - actor.getRefData().getPosition().rot[2];
+            osg::Vec2f movement = Misc::rotateVec2f(
+                osg::Vec2f(storage.mMovement.mPosition[0], storage.mMovement.mPosition[1]), -deltaAngle);
+
+            actorMovementSettings.mPosition[0] = movement.x();
+            actorMovementSettings.mPosition[1] = movement.y();
+            actorMovementSettings.mPosition[2] = storage.mMovement.mPosition[2];
+        }
 
         rotateActorOnAxis(actor, 2, actorMovementSettings, storage);
         rotateActorOnAxis(actor, 0, actorMovementSettings, storage);
@@ -1276,7 +1296,7 @@ namespace MWMechanics
             // Commit the body to the swing: face the target and keep a modest
             // amount of forward pressure instead of random side-stepping.
             mMovement.mPosition[0] = 0.f;
-            mMovement.mPosition[1] = distToTarget > rangeAttack * 0.68f ? 0.72f : 0.f;
+            mMovement.mPosition[1] = distToTarget > rangeAttack * 0.68f ? 1.f : 0.f;
             mTimerCombatMove = 0.22f;
             mCombatMove = true;
             return;
@@ -1498,6 +1518,11 @@ namespace MWMechanics
     bool AiCombatStorage::hasTacticalMovement() const
     {
         return mTacticalState != Tactical_None && mTacticalState != Tactical_SneakApproach;
+    }
+
+    bool AiCombatStorage::isCombatMoving() const
+    {
+        return mCombatMove && mTimerCombatMove > 0.f;
     }
 
     bool AiCombatStorage::suppressesAttack() const

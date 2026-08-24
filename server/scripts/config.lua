@@ -83,6 +83,12 @@ config.arenaSkillBooksLevelLimit = true
 config.arenaNewConstantEffectDifficulty = true
 config.arenaGlobalXpMultiplier = 1.0
 
+-- ArenaMP FIX26 combat AI. Keep these [Game] values identical on every client
+-- so an authority handoff cannot change how the same NPC chooses attacks/spells.
+config.arenaNpcsUseBestAttack = true
+config.arenaCombatMagicBias = 1.40
+config.arenaCombatHealThreshold = 0.65
+
 -- Server-authoritative Armor/Weapon Requirements.
 -- These are sent to [Equipment Requirements] on every client. Editing a
 -- local settings.cfg therefore cannot lower requirements on this server.
@@ -375,6 +381,9 @@ setGameSetting("staves receive accuracy bonus instead of two handed penalty", co
 setGameSetting("skill books have level limit", config.arenaSkillBooksLevelLimit)
 setGameSetting("use new constant effect difficulty logic", config.arenaNewConstantEffectDifficulty)
 setGameSetting("global XP gain multiplier", config.arenaGlobalXpMultiplier)
+setGameSetting("npcs use best attack", config.arenaNpcsUseBestAttack)
+setGameSetting("combat magic bias", config.arenaCombatMagicBias)
+setGameSetting("combat heal threshold", config.arenaCombatHealThreshold)
 setGameSetting("friendly fire mode", config.friendlyFireMode)
 
 for name, value in pairs(config.equipmentRequirements) do

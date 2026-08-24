@@ -1808,9 +1808,15 @@ bool CharacterController::updateWeaponState(CharacterState& idle)
                 }
                 else
                 {
-                    if(mPtr == getPlayer())
+                    // ArenaMP FIX26: NPCs can use their highest-damage attack type instead of
+                    // deriving it from the movement direction. Keep the player setting separate.
+                    const bool useBestAttack = mPtr == getPlayer()
+                        ? Settings::Manager::getBool("best attack", "Game")
+                        : Settings::Manager::getBool("npcs use best attack", "Game");
+
+                    if (mPtr == getPlayer() || useBestAttack)
                     {
-                        if (Settings::Manager::getBool("best attack", "Game"))
+                        if (useBestAttack)
                         {
                             if (isWeapon)
                             {

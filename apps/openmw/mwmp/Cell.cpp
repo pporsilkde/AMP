@@ -369,33 +369,64 @@ void Cell::readAi(ActorList& actorList)
 
 void Cell::readAttack(ActorList& actorList)
 {
+    // Unlike every other read* handler, this one used to skip actor initialization.
+    // An ActorAttack packet is addressed to the cell the *sender* believed the actor
+    // was in; right after a door transition the receiver may already have moved the
+    // DedicatedActor elsewhere, so the packet found nothing and the hit was silently
+    // dropped - the NPC kept pursuing (position packets self-initialize) but stopped
+    // dealing damage, and Npc::hit() returns early for DedicatedActors so no client
+    // applied it locally either.
+    initializeDedicatedActors(actorList);
+
+    CellController *cellController = Main::get().getCellController();
+
     for (const auto &baseActor : actorList.baseActors)
     {
-        std::string mapIndex = Main::get().getCellController()->generateMapIndex(baseActor);
+        std::string mapIndex = cellController->generateMapIndex(baseActor);
+
+        DedicatedActor *actor = nullptr;
 
         if (dedicatedActors.count(mapIndex) > 0)
+            actor = dedicatedActors[mapIndex];
+        else if (cellController->isDedicatedActor(baseActor.refNum, baseActor.mpNum))
         {
-            LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Reading ActorAttack about %s", mapIndex.c_str());
-
-            DedicatedActor *actor = dedicatedActors[mapIndex];
-            actor->attack = baseActor.attack;
-
-            MechanicsHelper::processAttack(actor->attack, actor->getPtr());
+            // The actor is tracked under another cell after a transition - route the
+            // packet there instead of discarding it.
+            actor = cellController->getDedicatedActor(baseActor.refNum, baseActor.mpNum);
         }
+
+        if (!actor || actor->getPtr().isEmpty())
+            continue;
+
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Reading ActorAttack about %s", mapIndex.c_str());
+
+        actor->attack = baseActor.attack;
+
+        MechanicsHelper::processAttack(actor->attack, actor->getPtr());
     }
 }
 
 void Cell::readCast(ActorList& actorList)
 {
+    initializeDedicatedActors(actorList);
+
+    CellController *cellController = Main::get().getCellController();
+
     for (const auto &baseActor : actorList.baseActors)
     {
-        std::string mapIndex = Main::get().getCellController()->generateMapIndex(baseActor);
+        std::string mapIndex = cellController->generateMapIndex(baseActor);
+
+        DedicatedActor *actor = nullptr;
 
         if (dedicatedActors.count(mapIndex) > 0)
+            actor = dedicatedActors[mapIndex];
+        else if (cellController->isDedicatedActor(baseActor.refNum, baseActor.mpNum))
+            actor = cellController->getDedicatedActor(baseActor.refNum, baseActor.mpNum);
+
+        if (actor && !actor->getPtr().isEmpty())
         {
             LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Reading ActorCast about %s", mapIndex.c_str());
 
-            DedicatedActor *actor = dedicatedActors[mapIndex];
             actor->cast = baseActor.cast;
 
             // Set the correct drawState here if we've somehow we've missed a previous

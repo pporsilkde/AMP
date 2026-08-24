@@ -2648,6 +2648,21 @@ namespace MWMechanics
             if (ptr == player)
                 continue; // Don't interfere with player controls.
 
+            /*
+                Start of tes3mp addition
+
+                Never touch the movement vector of network-driven actors. It was
+                assigned from the latest packet by DedicatedActor::setMovementSettings()
+                and locally shrinking it desynchronizes the movement animation speed
+                from the actual (interpolated) translation on non-authority clients.
+            */
+            if (mwmp::PlayerList::isDedicatedPlayer(ptr)
+                || mwmp::Main::get().getCellController()->isDedicatedActor(ptr))
+                continue;
+            /*
+                End of tes3mp addition
+            */
+
             auto& avoidance = iter->second->mCollisionAvoidance;
             if (isActiveDialogueTarget(ptr))
             {
@@ -2829,18 +2844,32 @@ namespace MWMechanics
                 if (!shouldYieldCollision(ptr, nearestCollisionActor))
                     continue;
 
-                if (timeToCollision > 0.65f)
+                // ArenaMP: an actor that is fighting must never be slowed down by
+                // bystanders. Braking cuts mSpeedFactor, and mSpeedFactor drives both
+                // the physical speed and the movement animation speed, which is what
+                // produced the "running in slow motion" look during multiplayer fights.
+                // Combat actors still steer around obstacles, they just keep their pace.
+                if (!isCombatOrPursue)
                 {
-                    // Timely soft slowdown while there is still room to resolve
-                    // the encounter without changing animation direction.
-                    movement.mPosition[1] *= 0.45f;
-                    movement.mPosition[0] *= 0.65f;
-                    continue;
-                }
+                    if (timeToCollision > 0.65f)
+                    {
+                        // Timely soft slowdown while there is still room to resolve
+                        // the encounter without changing animation direction.
+                        movement.mPosition[1] *= 0.45f;
+                        movement.mPosition[0] *= 0.65f;
+                        continue;
+                    }
 
-                if (avoidance.mCooldown > 0.f && timeToCollision > 0.20f)
+                    if (avoidance.mCooldown > 0.f && timeToCollision > 0.20f)
+                    {
+                        movement.mPosition[1] *= 0.35f;
+                        continue;
+                    }
+                }
+                else if (timeToCollision > 0.35f)
                 {
-                    movement.mPosition[1] *= 0.35f;
+                    // Enough room left: sidestep without braking.
+                    movement.mPosition[0] = nearestActorRelativeX > 0.f ? -0.6f : 0.6f;
                     continue;
                 }
 
@@ -2848,6 +2877,13 @@ namespace MWMechanics
                 {
                     // The other actor already has a clear side: wait briefly
                     // rather than performing an unnecessary detour.
+                    if (isCombatOrPursue)
+                    {
+                        // Go around the obstacle instead of standing still.
+                        movement.mPosition[0] = nearestActorRelativeX > 0.f ? -1.f : 1.f;
+                        continue;
+                    }
+
                     avoidance.mPhase = Actor::CollisionAvoidancePhase::Yielding;
                     avoidance.mTimer = 0.18f + std::min(0.18f, timeToCollision * 0.25f);
                     movement.mPosition[0] = 0.f;
@@ -2860,6 +2896,14 @@ namespace MWMechanics
                 const float direction = ownId > otherId ? 1.f : -1.f;
                 const float angle = 62.f;
                 avoidance.mTargetAngle = baseRotZ + direction * osg::DegreesToRadians(angle);
+                if (isCombatOrPursue)
+                {
+                    // Strafe past the blocker while keeping forward pressure.
+                    movement.mPosition[0] = direction;
+                    movement.mPosition[1] = std::max(movement.mPosition[1], 0.75f);
+                    continue;
+                }
+
                 avoidance.mPhase = Actor::CollisionAvoidancePhase::Turning;
                 avoidance.mTimer = 0.48f;
                 movement.mPosition[0] = 0.f;

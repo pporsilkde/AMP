@@ -176,6 +176,7 @@ namespace MWMechanics
         void stopFleeing();
         bool isFleeing();
         bool hasTacticalMovement() const;
+        bool isCombatMoving() const;
         bool suppressesAttack() const;
     };
 
@@ -227,7 +228,10 @@ namespace MWMechanics
             bool updatePursuitLeash(const MWWorld::Ptr& actor, float duration, AiCombatStorage& storage);
 
             /// Transfer desired movement (from AiCombatStorage) to Actor
-            void updateActorsMovement(const MWWorld::Ptr& actor, float duration, AiCombatStorage& storage);
+            /// If applyTranslation is false, only the facing is applied and the
+            /// translation produced by pathTo() in this same frame is preserved.
+            void updateActorsMovement(const MWWorld::Ptr& actor, float duration, AiCombatStorage& storage,
+                bool applyTranslation = true);
             void rotateActorOnAxis(const MWWorld::Ptr& actor, int axis, 
                 MWMechanics::Movement& actorMovementSettings, AiCombatStorage& storage);
     };
