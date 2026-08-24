@@ -211,6 +211,14 @@ DedicatedPlayer::~DedicatedPlayer()
 
 void DedicatedPlayer::update(float dt)
 {
+    // Network packets can create/remove a DedicatedPlayer in the same frame as
+    // PlayerList::update().  Never dereference a transient/disabled world Ptr.
+    if (!reference || ptr.isEmpty() || !ptr.isInCell())
+        return;
+
+    // Only move and set anim flags if the framerate isn't too low
+    // Android Mobile compatibility note: the legacy dt < 0.1 movement skip is
+    // intentionally not used below; C13+ keeps remote movement advancing on hitches.
     // Remote players must keep advancing even when one rendered frame takes
     // longer than 100 ms. The old TES3MP guard skipped the complete movement
     // update on a hitch, producing visible freezes and also giving authority-side
