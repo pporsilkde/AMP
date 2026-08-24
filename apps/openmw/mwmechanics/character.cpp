@@ -971,6 +971,9 @@ CharacterController::CharacterController(const MWWorld::Ptr &ptr, MWRender::Anim
     , mCastingManualSpell(false)
     , mTimeUntilWake(0.f)
     , mIsMovingBackward(false)
+    , mMpLastObservedPosition()
+    , mMpHasLastObservedPosition(false)
+    , mMpBlockedMeleeTime(0.f)
 {
     if(!mAnimation)
         return;
@@ -1218,6 +1221,8 @@ void CharacterController::handleTextKey(const std::string &groupname, SceneUtil:
 void CharacterController::updatePtr(const MWWorld::Ptr &ptr)
 {
     mPtr = ptr;
+    mMpHasLastObservedPosition = false;
+    mMpBlockedMeleeTime = 0.f;
 }
 
 void CharacterController::updateIdleStormState(bool inwater)
@@ -2157,6 +2162,58 @@ void CharacterController::update(float duration)
         CreatureStats &stats = cls.getCreatureStats(mPtr);
         Movement& movementSettings = cls.getMovementSettings(mPtr);
 
+        // ArenaMP: a close melee actor can keep receiving forward AI input even
+        // after collision/attack range has made its real movement effectively
+        // zero. In single-player this is mostly hidden by local timing, while in
+        // MP the same locomotion intent is also replicated and becomes a very
+        // visible slow-motion foot shuffle during attacks. Track REAL horizontal
+        // displacement here and later suppress only the walk/run animation layer.
+        // Do not alter movementSettings: AI/pathing and physics keep their normal
+        // intent, so the actor can immediately resume pursuit if the target moves.
+        bool suppressMpBlockedMeleeLocomotion = false;
+        if (!isPlayer && mwmp::Main::isInitialized())
+        {
+            mwmp::CellController* cellController = mwmp::Main::get().getCellController();
+            const bool isMpActor = cellController
+                && (cellController->isLocalActor(mPtr) || cellController->isDedicatedActor(mPtr));
+
+            const osg::Vec3f currentPosition = mPtr.getRefData().getPosition().asVec3();
+            if (mMpHasLastObservedPosition && duration > 0.001f && isMpActor)
+            {
+                const float dx = currentPosition.x() - mMpLastObservedPosition.x();
+                const float dy = currentPosition.y() - mMpLastObservedPosition.y();
+                const float actualHorizontalSpeed = std::sqrt(dx * dx + dy * dy) / duration;
+                const bool hasHorizontalIntent = std::abs(movementSettings.mPosition[0]) > 0.05f
+                    || std::abs(movementSettings.mPosition[1]) > 0.05f;
+                const bool meleeWeapon = mWeaponType != ESM::Weapon::Spell
+                    && mWeaponType < ESM::Weapon::MarksmanBow;
+
+                const bool meleeAttackAnimation =
+                    mUpperBodyState >= UpperCharState_StartToMinAttack
+                    && mUpperBodyState <= UpperCharState_FollowStartToFollowStop;
+
+                if (meleeAttackAnimation && meleeWeapon && hasHorizontalIntent
+                    && actualHorizontalSpeed < 30.f)
+                    mMpBlockedMeleeTime += duration;
+                else
+                    mMpBlockedMeleeTime = 0.f;
+
+                // A short debounce avoids toggling the lower-body state on tiny
+                // collision corrections while still stopping the shuffle quickly.
+                suppressMpBlockedMeleeLocomotion = mMpBlockedMeleeTime >= 0.08f;
+            }
+            else
+                mMpBlockedMeleeTime = 0.f;
+
+            mMpLastObservedPosition = currentPosition;
+            mMpHasLastObservedPosition = true;
+        }
+        else
+        {
+            mMpBlockedMeleeTime = 0.f;
+            mMpHasLastObservedPosition = false;
+        }
+
         //Force Jump Logic
 
         bool isMoving = (std::abs(movementSettings.mPosition[0]) > .5 || std::abs(movementSettings.mPosition[1]) > .5);
@@ -2573,6 +2630,13 @@ void CharacterController::update(float duration)
                 }
             }
         }
+
+        // ArenaMP: if a melee actor is already attacking but is physically
+        // stationary (typically pressed against a player), do not blend a stale
+        // walk/run cycle under the attack. Keep vec untouched so pathing/physics
+        // can still move the actor on the very next frame.
+        if (suppressMpBlockedMeleeLocomotion && jumpstate == JumpState_None)
+            movestate = CharState_None;
 
         if(movestate != CharState_None && !isTurning())
             clearAnimQueue();

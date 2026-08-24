@@ -196,6 +196,13 @@ class CharacterController : public MWRender::Animation::TextKeyListener
     bool mIsMovingBackward;
     osg::Vec2f mSmoothedSpeed;
 
+    // ArenaMP: detect melee actors that keep requesting locomotion while
+    // collision/combat range leaves them physically stationary. This is used
+    // only to suppress the visual walk/run layer, never the AI movement itself.
+    osg::Vec3f mMpLastObservedPosition;
+    bool mMpHasLastObservedPosition;
+    float mMpBlockedMeleeTime;
+
     void setAttackTypeBasedOnMovement();
 
     void refreshCurrentAnims(CharacterState idle, CharacterState movement, JumpingState jump, bool force=false);
