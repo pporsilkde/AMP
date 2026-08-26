@@ -346,11 +346,10 @@ namespace MWGui
 
         if (MWMechanics::XPLeveling::isEnabled())
         {
-            // XP mode uses SkillNoProgressToolTip. Do not feed the classic
-            // bottom progress-bar row with SP text: it makes the XP information
-            // appear detached at the very bottom of the tooltip.
-            w->setUserString("Caption_SkillProgressText", "");
-            w->setUserString("RangePosition_SkillProgress", "0");
+            // XP mode uses SkillNoProgressToolTip, which has neither
+            // SkillProgress nor SkillProgressText. Writing those user strings
+            // here would only mutate the hidden classic SkillToolTip, so skip
+            // them entirely.
             return;
         }
 
@@ -390,6 +389,17 @@ namespace MWGui
 
             valueWidget->setCaption(text);
             valueWidget->_setWidgetState(state);
+
+            // SkillMaxed / SkillProgressVBox only exist in the classic
+            // SkillToolTip. In XP mode the skill rows point at
+            // SkillNoProgressToolTip instead, so these toggles would silently
+            // reconfigure a layout that is never shown.
+            if (MWMechanics::XPLeveling::isEnabled())
+            {
+                if (purchaseUiChanged)
+                    mChanged = true;
+                return;
+            }
 
             if (value.getBase() < 100)
             {
@@ -550,7 +560,7 @@ namespace MWGui
         if (!sender || !MWMechanics::XPLeveling::isEnabled())
             return;
 
-        const std::string value = sender->getUserString("ArenaXP_SkillId");
+        const std::string value = sender->getUserString("ArenaXPSkillId");
         if (value.empty())
             return;
 
@@ -711,7 +721,7 @@ namespace MWGui
                     skillWidget->setUserString("Caption_SkillNoProgressAttribute", "#{sGoverningAttribute}: #{" + attr->mName + "}");
                     skillWidget->setUserString("ImageTexture_SkillNoProgressImage", icon);
 
-                    skillWidget->setUserString("ArenaXP_SkillId", MyGUI::utility::toString(skillId));
+                    skillWidget->setUserString("ArenaXPSkillId", MyGUI::utility::toString(skillId));
                     skillWidget->setNeedMouseFocus(true);
                     skillWidget->eventMouseButtonDoubleClick
                         += MyGUI::newDelegate(this, &StatsWindow::onSkillDoubleClicked);
@@ -748,7 +758,7 @@ namespace MWGui
                 else
                     button->setCaption("+1 | " + MyGUI::utility::toString(cost) + " " + arenaText("xp.sp"));
 
-                button->setUserString("ArenaXP_SkillId", MyGUI::utility::toString(skillId));
+                button->setUserString("ArenaXPSkillId", MyGUI::utility::toString(skillId));
                 button->setUserString("ToolTipType", "Layout");
                 button->setUserString("ToolTipLayout", "TextToolTip");
                 if (maxed)
