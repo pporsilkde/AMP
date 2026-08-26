@@ -375,7 +375,7 @@ local function setGameSetting(name, value)
     table.insert(config.gameSettings, { name = name, value = value })
 end
 
--- ID_GAME_SETTINGS carries arbitrary string keys. Protocol 807 clients route
+-- ID_GAME_SETTINGS carries arbitrary string keys. ArenaMP keeps protocol number 806; clients route
 -- keys in this form to the requested Settings::Manager category, letting the
 -- server authoritatively configure gameplay categories beyond [Game].
 local function setCategorySetting(category, name, value)
@@ -576,6 +576,165 @@ config.synchronizedClientScriptIds = {
     -- quest stages and timers
     "helsethScript", "KarrodMovement"
 }
+
+
+-- ArenaMP C21: mechanism/local-state scripts discovered from the supplied
+-- Tamriel_Data.esm and TR_Mainland.esm. Only scripts attached to physical
+-- world records and using local state + world-changing commands were selected.
+-- This avoids synchronizing generic NPC/UI/timer scripts.
+do
+    local c21SynchronizedClientScriptIds = {
+        -- Tamriel_Data.esm
+        "T_ScObj_DaeWardA",
+        "T_ScObj_DaeWardB",
+        "T_ScObj_DaeWardC",
+        "T_ScObj_DaeWardD",
+        "T_ScObj_DaeWardE",
+        "T_ScObj_DaeWardF",
+        "T_ScObj_DaeWardG",
+        "T_ScObj_DaeWardH",
+        "T_ScObj_DaeWardI",
+        "T_ScObj_DaeWardJ",
+        "T_ScObj_DaeWardK",
+        "T_ScObj_DaeWardL",
+        "T_ScObj_DaeWardM",
+        "T_ScObj_DaeWardN",
+        "T_ScObj_DaeWardO",
+        "T_ScObj_DaeWardP",
+        "T_ScObj_DaeWardQ",
+        "T_ScObj_DaeWardR",
+        "T_ScObj_DaeWardS",
+        "T_ScObj_DaeWardT",
+        "T_ScObj_DaeWardU",
+        "T_ScObj_DaeWardV",
+        "T_ScObj_DaeWardW",
+        "T_ScObj_DaeWardZ",
+        -- TR_Mainland.esm
+        "TR_FM_Act_RecallFixer_FMGH_sc",
+        "TR_FM_Act_RecallFixer_FMK_sc",
+        "TR_FM_Act_RecallFixer_FMKT_sc",
+        "TR_FM_Act_RecallFixer_SWI_sc",
+        "TR_FM_Act_RecallFixer_SWLH_sc",
+        "TR_FM_Act_SkullTrap_sc",
+        "TR_m1_bthalastatue_sc",
+        "TR_m1_bthalight_sc",
+        "TR_m1_FW_TG6_BoneFragScr",
+        "TR_M1_FW_TG6_Display",
+        "TR_m1_IL_teleportscript",
+        "TR_m1_q_FG_BoatStuffDisable",
+        "TR_m2_445_sc_switch",
+        "TR_m2_445_sc_templegrate",
+        "TR_M2_MzankhDoorCrank_sc",
+        "TR_m3_Btharch_Mousetrap1",
+        "TR_m3_BtharchPipe_sc",
+        "TR_m3_Hal_FelmsShrineAct_sc",
+        "TR_m3_HH_GM_ritualshrine_scr",
+        "TR_m3_MG_OE_Q7_CeilingDoor4_sc",
+        "TR_m3_MG_OE_Q7_CeilingDoor5_sc",
+        "TR_m3_MoraAshpitEmpty_sc",
+        "TR_m3_MoraTSancGGFence_sc",
+        "TR_m3_OE_CuriaVaultHole01SCP",
+        "TR_m3_OE_CuriaVaultHole02SCP",
+        "TR_m3_OE_CuriaVaultResetSCP",
+        "TR_m3_OE_fiendchest_scr1",
+        "TR_m3_OE_fiendchest_scr2",
+        "TR_m3_OE_fiendchest_scr3",
+        "TR_m3_OE_GhoulBusines_Coffin",
+        "TR_m3_OE_RumaDisableSCP",
+        "TR_m3_OE_TG_RaathimTrapSc",
+        "TR_m3_Oth_TT_Punavit_1_sc",
+        "TR_m3_Oth_TT_Punavit_2_sc",
+        "TR_m3_speakercandle_scr",
+        "TR_m3_TT_Dar_2_Sand_sc",
+        "TR_m3_Vr_BoundHelp_Cart",
+        "TR_m4_AA_DamiloCrate_scp",
+        "TR_m4_AA_DeadBelBetu_scp",
+        "TR_m4_AA_MasterSehutu_Script",
+        "TR_m4_AA_SehutuBarrier_scp",
+        "TR_m4_AA_SehutuLid1Script",
+        "TR_m4_AA_SehutuRod2_Scp",
+        "TR_m4_AA_SehutuRod_Scp",
+        "TR_m4_AA_SehutuTalk02_scp",
+        "TR_m4_AA_SehutuTalk06_scp",
+        "TR_m4_AlynuChestScript",
+        "TR_m4_AlynuPileScript",
+        "TR_m4_And_IncThreat_Dw_sc",
+        "TR_m4_AndasHiddenSwitch_scp",
+        "TR_m4_AndasPrayerStool_scp",
+        "TR_m4_AndasSewerCrank2_script",
+        "TR_m4_AndasSewerCrank_script",
+        "TR_m4_AndasSewerLock_Script",
+        "TR_m4_Ando_FaulerChestScript",
+        "TR_m4_Ando_NevusaBarrelScript",
+        "TR_m4_AndoHH_CrateDisable",
+        "TR_m4_AndoHH_ShipDoorScript",
+        "TR_m4_AndoHH_SujammaCrate",
+        "TR_m4_Andoth_AndasLift_scp",
+        "TR_m4_Andoth_Rivenwake_Scp",
+        "TR_m4_AndothDweBarDart1_scp",
+        "TR_m4_AndothDweCoinPurse01_scp",
+        "TR_m4_AndothDweCrank_scp",
+        "TR_m4_AndothDweDummy01_scp",
+        "TR_m4_AndothDweLift_scp",
+        "TR_m4_AndothDweLock01_scp",
+        "TR_m4_BahrundActivator_scp",
+        "TR_m4_Bal_AmuletCaster_Sc",
+        "TR_m4_FelmsCargoLift_scp",
+        "TR_m4_HH_DelayedCaravanSc",
+        "TR_m4_HH_GreefCrate",
+        "TR_m4_HH_GreefDisable",
+        "TR_m4_HH_SavrethiDeskScript",
+        "TR_m4_NirnboundBoulder_Scp",
+        "TR_m4_NirnboundDisabled_Scp",
+        "TR_m4_OmaynisInnBanner_script",
+        "TR_m4_orlukhgate01_scr",
+        "TR_m4_orlukhgate02_scr",
+        "TR_m4_q_AAB_containerscript",
+        "TR_m4_ShalmuratCrank_script",
+        "TR_m4_ShalmuratLock_Script",
+        "TR_m4_T_Nuccius_mover_1_sc",
+        "TR_m4_TG_BaseNPCMover_scp",
+        "TR_m4_TG_GeldrasUrn_scp",
+        "TR_m4_TG_GeldrasUrnTracker_scp",
+        "TR_m4_TG_VendicciCoach01_scp",
+        "TR_m4_TG_VendicciCoach02_scp",
+        "TR_m4_TJ_GhostFence_sc",
+        "TR_m4_TT_DonationBoxScript",
+        "TR_m4_TT_LastWillEnable_sc",
+        "TR_m4_TT_OlmsDoor_sc",
+        "TR_m4_TT_TempleCoffers_sc",
+        "TR_m4_TT_VathriDoorLocked",
+        "TR_m4_TT_VathriDoorOrig",
+        "TR_m4_UshkuKurPlat_Scp",
+        "TR_m4_UshuKurPlat2_Scp",
+        "TR_m4_UshuKurRockFall_scp",
+        "TR_m4_UshuKurRockSink_scp",
+        "TR_m4_VA_andasbattle_scr",
+        "TR_m7_HH_Alvynu2_Desk_sc",
+        "TR_m7_HH_Alvynu_4_Urn_sc",
+        "TR_m7_HH_Alvynu_7_Ship_sc",
+        "TR_m7_HH_Alvynu_7_ShipExpls_sc",
+        "TR_m7_HH_GM_perfume_scr",
+        "TR_m7_HOGuide_Ruin_scr",
+        "TR_m7_Ns_ArenaDuelManager_sc",
+        "TR_m7_Ns_MG_Arch02_Cont_sc",
+        "TR_m7_Oth_MG_ScVandirRubble",
+        "TR_RothRoryn_Monastery_AlmSc",
+    }
+
+    local known = {}
+    for _, scriptId in ipairs(config.synchronizedClientScriptIds) do
+        known[string.lower(scriptId)] = true
+    end
+
+    for _, scriptId in ipairs(c21SynchronizedClientScriptIds) do
+        local key = string.lower(scriptId)
+        if not known[key] then
+            table.insert(config.synchronizedClientScriptIds, scriptId)
+            known[key] = true
+        end
+    end
+end
 
 -- Location shown behind the login/register interface before authentication.
 -- "default" keeps the client hardcoded exterior cell 0, -7.

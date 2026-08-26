@@ -57,9 +57,10 @@ namespace mwmp
                 // category without changing the ID_GAME_SETTINGS wire format.
                 // Server-side config.lua encodes them as:
                 //   @ArenaMP|Category|setting name
-                // Old clients do not understand this routing, so protocol 807
-                // prevents them from connecting and silently ignoring gameplay
-                // rules such as Equipment Requirements.
+                // Stock/older clients do not understand this routing. ArenaMP keeps
+                // TES3MP_PROTO_VERSION at 806 by branch policy, so client and server
+                // must still use matching ArenaMP builds even though the protocol ID
+                // itself is intentionally not bumped.
                 const std::string categoryPrefix = "@ArenaMP|";
                 for (const auto& setting : player->gameSettings)
                 {

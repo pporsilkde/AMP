@@ -1,11 +1,85 @@
-local kanaHousing = require("custom.kanaHousing")
 local fileHelper = require("fileHelper")
 local jsonInterface = require("jsonInterface")
+
+-- ArenaMP C21: houseHelper is an OPTIONAL dependency.
+-- Never crash the server when a housing package is not installed.
+local houseHelper = nil
+do
+    local ok, helper = pcall(require, "houseHelper")
+    if ok and type(helper) == "table" then
+        houseHelper = helper
+    end
+end
+
 periodicCellResets = {}
 
 periodicCellResets.hData = {
     cells = {}
 }
+
+local function callHouseHelper(methodNames, ...)
+    if not houseHelper then
+        return nil, false
+    end
+
+    for _, methodName in ipairs(methodNames) do
+        local fn = houseHelper[methodName]
+        if type(fn) == "function" then
+            local ok, result = pcall(fn, ...)
+            if ok then
+                return result, true
+            end
+
+            -- Some helper modules expose methods with ':' instead of '.'
+            ok, result = pcall(fn, houseHelper, ...)
+            if ok then
+                return result, true
+            end
+        end
+    end
+
+    return nil, false
+end
+
+local function getHouseCellData(cellDescription)
+    local data, called = callHouseHelper({"GetCellData", "getCellData"}, cellDescription)
+    if called then
+        return data
+    end
+
+    if periodicCellResets.hData.cells then
+        return periodicCellResets.hData.cells[cellDescription]
+    end
+
+    return nil
+end
+
+local function isHouseCell(cellDescription)
+    local cellData = getHouseCellData(cellDescription)
+    if type(cellData) == "table" and cellData.house then
+        return true
+    end
+
+    local result, called = callHouseHelper({"IsHouseCell", "isHouseCell"}, cellDescription)
+    return called and result == true
+end
+
+local function canLookupHouseOwner()
+    if not houseHelper then
+        return false
+    end
+
+    return type(houseHelper.GetHouseOwnerName) == "function"
+        or type(houseHelper.getHouseOwnerName) == "function"
+end
+
+local function getHouseOwnerName(houseName)
+    local ownerName, called = callHouseHelper({"GetHouseOwnerName", "getHouseOwnerName"}, houseName)
+    if called then
+        return ownerName
+    end
+    return nil
+end
 
 local cellResetTimeCheck = 300       -- fallback polling (секунды), используется только если нет ячеек в очереди
 local exteriorCellResetTime = 3600
@@ -441,7 +515,7 @@ local resetCellsOnStartup = function()
             local cellName = splitFileExtension[1]
             local preventDeletion = false
 
-            local cellData = kanaHousing.GetCellData(cellName)
+            local cellData = getHouseCellData(cellName)
             if cellData and cellData.house then
                 preventDeletion = true
             end
@@ -537,15 +611,8 @@ local function isCellEligibleForReset(cellDescription)
     if las.rc_blacklist and las.rc_blacklist[cellDescription] then
         return false
     end
-    -- Ячейка принадлежит дому — актуальные данные через kanaHousing API
-    local cellData = kanaHousing.GetCellData(cellDescription)
-    if cellData and cellData.house then
-        return false
-    end
-    -- Резервная проверка через кэш hData (на случай если kanaHousing ещё не прогрузился)
-    if periodicCellResets.hData.cells
-       and periodicCellResets.hData.cells[cellDescription]
-       and periodicCellResets.hData.cells[cellDescription].house then
+    -- Домовые ячейки защищаем через опциональный houseHelper или локальный кэш.
+    if isHouseCell(cellDescription) then
         return false
     end
     return true
@@ -594,8 +661,9 @@ end
 -- Вызывается при старте сервера и по команде /cleanuphomes.
 -- ============================================================================
 local function cleanUnownedHouses()
-    if not kanaHousing then
-        tes3mp.LogAppend(enumerations.log.WARN, "[UnownedHouse] kanaHousing недоступен, очистка пропущена.")
+    if not canLookupHouseOwner() then
+        tes3mp.LogAppend(enumerations.log.WARN,
+            "[UnownedHouse] houseHelper отсутствует или не имеет API владельцев; очистка домов пропущена.")
         return 0, 0
     end
     local cleaned = 0
@@ -605,7 +673,7 @@ local function cleanUnownedHouses()
         if cellData and cellData.house then
             local houseName = cellData.house
             -- Проверяем наличие владельца через актуальный API
-            local ownerName = kanaHousing.GetHouseOwnerName(houseName)
+            local ownerName = getHouseOwnerName(houseName)
             if not ownerName then
                 if LoadedCells[cellDescription] then
                     -- В ячейке кто-то есть — пропустим до следующей проверки
@@ -693,7 +761,7 @@ local doCellReset = function(pid, cellDescription)
         return
     end
 
-    local cellData = kanaHousing.GetCellData(cellDescription)
+    local cellData = getHouseCellData(cellDescription)
     if cellData and cellData.house then
         tes3mp.SendMessage(pid, color.Yellow .. "[Сброс Ячеек]: " .. color.Error .. "Эта ячейка принадлежит дому и не может быть сброшена.\n")
         return
@@ -775,7 +843,7 @@ periodicCellResets.ResetCell = function(cellDescription)
         return
     end
 
-    local cellData = kanaHousing.GetCellData(cellDescription)
+    local cellData = getHouseCellData(cellDescription)
     if cellData and cellData.house then
         return
     end
@@ -1258,7 +1326,7 @@ end
 
 local showSaveCellMenu = function(pid)
     local cellDescription = tes3mp.GetCell(pid)
-    local cellData = kanaHousing.GetCellData(cellDescription)
+    local cellData = getHouseCellData(cellDescription)
     local isHouse = cellData and cellData.house or false
     local hasBackup = hasCellBackup(cellDescription)
     local resetTime = cellResetTimers[cellDescription]
@@ -1376,7 +1444,7 @@ periodicCellResets.softResetCell = function(cellDescription)
         return false, "Личный инстанс дома Кая Косадеса не сбрасывается."
     end
 
-    local cellData = kanaHousing.GetCellData(cellDescription)
+    local cellData = getHouseCellData(cellDescription)
     if cellData and cellData.house then
         return false, "Эта ячейка принадлежит дому и не может быть сброшена."
     end
@@ -1459,7 +1527,7 @@ periodicCellResets.fullResetCell = function(cellDescription)
         return false, "Личный инстанс дома Кая Косадеса не сбрасывается."
     end
 
-    local cellData = kanaHousing.GetCellData(cellDescription)
+    local cellData = getHouseCellData(cellDescription)
     if cellData and cellData.house then
         return false, "Эта ячейка принадлежит дому и не может быть сброшена."
     end
@@ -1618,6 +1686,11 @@ customCommandHooks.registerCommand("cleanunowned", cmdCleanUnowned)
 
 -- Регистрируем OnServerPostInit в конце файла, после объявления всех local функций
 customEventHooks.registerHandler("OnServerPostInit", function(eventStatus)
+    if not houseHelper then
+        tes3mp.LogAppend(enumerations.log.WARN,
+            "[resetHelrer] houseHelper.lua не найден. Сервер продолжает работу; дополнительные housing-проверки отключены.")
+    end
+
     las.LoadRCbl()
     las.LoadRC()
     LoadCellResetTimers()

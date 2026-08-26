@@ -116,4 +116,4 @@ localization.RegisterDictionary("example", {
 localization.Message(pid, "example", "greeting", { name = Players[pid].name })
 ```
 
-The multiplayer protocol is `807`; client and server must be updated together.
+The ArenaMP branch keeps the multiplayer protocol number fixed at `806`; client and server should still use the same ArenaMP build because packet layouts may differ inside this branch.

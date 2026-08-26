@@ -49,6 +49,7 @@ namespace MWGui
             void onWindowResize(MyGUI::Window* window);
             void onMouseWheel(MyGUI::Widget* _sender, int _rel);
             void onSkillDoubleClicked(MyGUI::Widget* sender);
+            void onSkillIncreaseClicked(MyGUI::Widget* sender);
 
             MyGUI::Widget* mLeftPane;
             MyGUI::Widget* mRightPane;
@@ -65,6 +66,7 @@ namespace MWGui
             std::vector<MyGUI::Widget*> mSkillWidgets; //< Skills and other information
             std::set<std::string> mExpelled;
 
+            int mLastSkillPoints;
             bool mChanged;
             const int mMinFullWidth;
 
