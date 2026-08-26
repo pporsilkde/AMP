@@ -1,4 +1,4 @@
-﻿#include "npc.hpp"
+#include "npc.hpp"
 
 #include <memory>
 
@@ -769,6 +769,7 @@ namespace MWClass
         {
             MWMechanics::getHandToHandDamage(ptr, victim, damage, healthdmg, attackStrength);
         }
+        bool xpCriticalHit = false;
         if(ptr == MWMechanics::getPlayer())
         {
             skillUsageSucceeded(ptr, weapskill, 0);
@@ -779,6 +780,7 @@ namespace MWClass
                     && !MWBase::Environment::get().getMechanicsManager()->awarenessCheck(ptr, victim);
             if(unaware)
             {
+                xpCriticalHit = true;
                 damage *= store.find("fCombatCriticalStrikeMult")->mValue.getFloat();
                 MWBase::Environment::get().getWindowManager()->messageBox("#{sTargetCriticalStrike}");
                 MWBase::Environment::get().getSoundManager()->playSound3D(victim, "critical damage", 1.0f, 1.0f);
@@ -809,6 +811,9 @@ namespace MWClass
         const bool blocked = MWMechanics::blockMeleeAttack(ptr, victim, weapon, damage, attackStrength);
         if (blocked)
             damage = 0;
+
+        if (xpCriticalHit && !blocked && damage > 0.f)
+            MWMechanics::XPLeveling::awardCriticalHit(ptr, victim);
 
         bool poisonHit = !blocked;
         if (victim == MWMechanics::getPlayer() && MWBase::Environment::get().getWorld()->getGodModeState())

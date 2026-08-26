@@ -60,23 +60,12 @@ namespace
 {
     using MWWorld::RotationOrder;
 
-    void awardCellDiscovery(MWWorld::CellStore* cell)
+    void awardTravelTransition()
     {
-        if (!cell || !MWMechanics::XPLeveling::isEnabled())
+        if (!MWMechanics::XPLeveling::isEnabled())
             return;
-
-        const ESM::Cell* record = cell->getCell();
-        if (!record || record->mName.empty())
-            return; // unnamed wilderness is not a discoverable location
-
-        // Named exterior settlements often span several grid cells. Keying by
-        // the data-defined name prevents multiple rewards for walking across the
-        // same settlement, without maintaining a location-ID whitelist.
-        const std::string key = std::string(record->isExterior() ? "e:" : "i:")
-            + Misc::StringUtils::lowerCase(record->mName);
-
-        MWMechanics::XPLeveling::awardLocationDiscovery(
-            MWBase::Environment::get().getWorld()->getPlayerPtr(), key, record->mName);
+        MWMechanics::XPLeveling::awardTravel(
+            MWBase::Environment::get().getWorld()->getPlayerPtr());
     }
 
     osg::Quat makeActorOsgQuat(const ESM::Position& position)
@@ -816,10 +805,11 @@ namespace MWWorld
         mLastPlayerPos = player.getRefData().getPosition().asVec3();
 
         // The pointer changes on real exterior crossings as well as teleports.
-        // Doing discovery here therefore covers every cell transition once,
-        // while the null previous cell suppresses free XP on initial load.
+        // Travel XP rolls here on real cell transitions. The XP system applies a
+        // persistent cooldown/roll slot, while the null previous cell suppresses
+        // a free roll on initial load.
         if (previousCell && previousCell != cell)
-            awardCellDiscovery(cell);
+            awardTravelTransition();
     }
 
     Scene::Scene (MWRender::RenderingManager& rendering, MWPhysics::PhysicsSystem *physics,

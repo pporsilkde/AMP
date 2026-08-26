@@ -598,7 +598,11 @@ function BasePlayer:ProcessDeath()
         self.data.stats.experience = self.data.stats.experience - lostXp
         tes3mp.SetExperience(self.pid, self.data.stats.experience)
         tes3mp.SendLevel(self.pid)
-        tes3mp.SendMessage(self.pid, string.format("Death: -%.1f XP\n", lostXp), false)
+        local deathLabel = "Death"
+        if localization ~= nil and localization.GetLanguage ~= nil and localization.GetLanguage(self.pid) == "RU" then
+            deathLabel = "Смерть"
+        end
+        tes3mp.SendMessage(self.pid, string.format("%s: -%.1f XP\n", deathLabel, lostXp), false)
     end
 
     local deathReason = "committed suicide"

@@ -31,8 +31,10 @@ namespace MWMechanics
         // Discrete, data-driven reward sources.
         void awardKill(const MWWorld::Ptr& victim, const MWWorld::Ptr& attacker);
         void awardQuestProgress(const std::string& questId, int journalIndex, bool completed);
-        void awardLocationDiscovery(const MWWorld::Ptr& player,
-            const std::string& rewardKey, const std::string& displayName);
+        void awardTravel(const MWWorld::Ptr& player);
+        void awardSuccessfulTrade(const MWWorld::Ptr& player);
+        void awardCriticalHit(const MWWorld::Ptr& player, const MWWorld::Ptr& victim);
+        void awardSuccessfulTheft(const MWWorld::Ptr& player, const MWWorld::Ptr& item, int count);
         void awardBookRead(const MWWorld::Ptr& player, const ESM::Book& book);
 
         // Replaces ArenaMW's old random skill-loss death penalty.

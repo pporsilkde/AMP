@@ -346,11 +346,10 @@ namespace MWGui
 
         if (MWMechanics::XPLeveling::isEnabled())
         {
-            const float base = player.getClass().getNpcStats(player).getSkill(skillId).getBase();
-            const int cost = MWMechanics::XPLeveling::getSkillPointCost(base);
-            w->setUserString("Caption_SkillProgressText",
-                base >= 100.f ? arenaText("xp.max")
-                               : arenaText("xp.cost") + ": " + MyGUI::utility::toString(cost) + " " + arenaText("xp.sp"));
+            // XP mode uses SkillNoProgressToolTip. Do not feed the classic
+            // bottom progress-bar row with SP text: it makes the XP information
+            // appear detached at the very bottom of the tooltip.
+            w->setUserString("Caption_SkillProgressText", "");
             w->setUserString("RangePosition_SkillProgress", "0");
             return;
         }
@@ -680,20 +679,51 @@ namespace MWGui
 
             for (int i=0; i<2; ++i)
             {
-                mSkillWidgets[mSkillWidgets.size()-1-i]->setUserString("ToolTipType", "Layout");
-                mSkillWidgets[mSkillWidgets.size()-1-i]->setUserString("ToolTipLayout", "SkillToolTip");
-                mSkillWidgets[mSkillWidgets.size()-1-i]->setUserString("Caption_SkillName", "#{"+skillNameId+"}");
-                mSkillWidgets[mSkillWidgets.size()-1-i]->setUserString("Caption_SkillDescription", skill->mDescription);
-                mSkillWidgets[mSkillWidgets.size()-1-i]->setUserString("Caption_SkillAttribute", "#{sGoverningAttribute}: #{" + attr->mName + "}");
-                mSkillWidgets[mSkillWidgets.size()-1-i]->setUserString("ImageTexture_SkillImage", icon);
-                mSkillWidgets[mSkillWidgets.size()-1-i]->setUserString("Range_SkillProgress", "100");
+                MyGUI::Widget* skillWidget = mSkillWidgets[mSkillWidgets.size()-1-i];
+                skillWidget->setUserString("ToolTipType", "Layout");
 
                 if (MWMechanics::XPLeveling::isEnabled())
                 {
-                    mSkillWidgets[mSkillWidgets.size()-1-i]->setUserString("ArenaXP_SkillId", MyGUI::utility::toString(skillId));
-                    mSkillWidgets[mSkillWidgets.size()-1-i]->setNeedMouseFocus(true);
-                    mSkillWidgets[mSkillWidgets.size()-1-i]->eventMouseButtonDoubleClick
+                    const MWWorld::Ptr playerPtr = MWMechanics::getPlayer();
+                    const MWMechanics::NpcStats& stats = playerPtr.getClass().getNpcStats(playerPtr);
+                    const float base = stats.getSkill(skillId).getBase();
+                    const int cost = MWMechanics::XPLeveling::getSkillPointCost(base);
+
+                    std::string description = skill->mDescription;
+                    if (!description.empty())
+                        description += "\n\n";
+                    if (base >= 100.f)
+                        description += arenaText("xp.skill_maxed_hint");
+                    else
+                    {
+                        description += arenaText("xp.tooltip_next_cost") + ": "
+                            + MyGUI::utility::toString(cost) + " " + arenaText("xp.sp");
+                        description += "\n" + arenaText("xp.free_skill_points") + ": "
+                            + MyGUI::utility::toString(stats.getSkillPoints());
+                    }
+
+                    // The classic SkillToolTip places SkillProgress at the bottom.
+                    // XP uses the auto-sized no-progress layout so cost/SP text
+                    // stays with the skill description instead of floating below it.
+                    skillWidget->setUserString("ToolTipLayout", "SkillNoProgressToolTip");
+                    skillWidget->setUserString("Caption_SkillNoProgressName", "#{"+skillNameId+"}");
+                    skillWidget->setUserString("Caption_SkillNoProgressDescription", description);
+                    skillWidget->setUserString("Caption_SkillNoProgressAttribute", "#{sGoverningAttribute}: #{" + attr->mName + "}");
+                    skillWidget->setUserString("ImageTexture_SkillNoProgressImage", icon);
+
+                    skillWidget->setUserString("ArenaXP_SkillId", MyGUI::utility::toString(skillId));
+                    skillWidget->setNeedMouseFocus(true);
+                    skillWidget->eventMouseButtonDoubleClick
                         += MyGUI::newDelegate(this, &StatsWindow::onSkillDoubleClicked);
+                }
+                else
+                {
+                    skillWidget->setUserString("ToolTipLayout", "SkillToolTip");
+                    skillWidget->setUserString("Caption_SkillName", "#{"+skillNameId+"}");
+                    skillWidget->setUserString("Caption_SkillDescription", skill->mDescription);
+                    skillWidget->setUserString("Caption_SkillAttribute", "#{sGoverningAttribute}: #{" + attr->mName + "}");
+                    skillWidget->setUserString("ImageTexture_SkillImage", icon);
+                    skillWidget->setUserString("Range_SkillProgress", "100");
                 }
             }
 

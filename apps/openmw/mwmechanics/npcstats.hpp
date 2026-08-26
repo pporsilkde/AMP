@@ -125,6 +125,7 @@ namespace MWMechanics
 
             bool hasXpRewardKey(const std::string& key) const;
             void addXpRewardKey(const std::string& key);
+            void removeXpRewardKeysWithPrefix(const std::string& prefix);
             const std::set<std::string>& getXpRewardKeys() const { return mXpRewardKeys; }
             void setXpRewardKeys(const std::vector<std::string>& keys);
 

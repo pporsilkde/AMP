@@ -396,6 +396,19 @@ void MWMechanics::NpcStats::addXpRewardKey(const std::string& key)
         mXpRewardKeys.insert(key);
 }
 
+void MWMechanics::NpcStats::removeXpRewardKeysWithPrefix(const std::string& prefix)
+{
+    if (prefix.empty())
+        return;
+    for (auto it = mXpRewardKeys.begin(); it != mXpRewardKeys.end();)
+    {
+        if (it->compare(0, prefix.size(), prefix) == 0)
+            it = mXpRewardKeys.erase(it);
+        else
+            ++it;
+    }
+}
+
 void MWMechanics::NpcStats::setXpRewardKeys(const std::vector<std::string>& keys)
 {
     mXpRewardKeys.clear();

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
+#include <MyGUI_LanguageManager.h>
 #include <set>
 #include <sstream>
 
@@ -15,9 +16,11 @@
 #include <components/esm/loadnpc.hpp>
 #include <components/esm/loadskil.hpp>
 #include <components/misc/stringops.hpp>
+#include <components/misc/rng.hpp>
 #include <components/settings/settings.hpp>
 
 #include "actorutil.hpp"
+#include "difficultyscaling.hpp"
 #include "npcstats.hpp"
 
 #include "../mwbase/environment.hpp"
@@ -28,6 +31,7 @@
 #include "../mwworld/class.hpp"
 #include "../mwworld/esmstore.hpp"
 #include "../mwworld/ptr.hpp"
+#include "../mwworld/timestamp.hpp"
 
 namespace
 {
@@ -50,6 +54,51 @@ namespace
     bool showNotifications()
     {
         return Settings::Manager::getBool("show xp notifications", "XP Leveling");
+    }
+
+    std::string arenaText(const std::string& key)
+    {
+        return MyGUI::LanguageManager::getInstance().replaceTags("#{arenamp=" + key + "}");
+    }
+
+    float difficultyXpMultiplier()
+    {
+        if (!Settings::Manager::getBool("difficulty xp scaling", "XP Leveling"))
+            return 1.f;
+
+        const int tier = std::max(1, std::min(6, difficultyTier()));
+        static const char* settingNames[] =
+        {
+            "difficulty xp tier 1 multiplier",
+            "difficulty xp tier 2 multiplier",
+            "difficulty xp tier 3 multiplier",
+            "difficulty xp tier 4 multiplier",
+            "difficulty xp tier 5 multiplier",
+            "difficulty xp tier 6 multiplier"
+        };
+        static const float fallbacks[] = { 1.f, 1.15f, 1.30f, 1.45f, 1.60f, 1.75f };
+        return positiveSetting(settingNames[tier - 1], fallbacks[tier - 1]);
+    }
+
+    float totalXpMultiplier()
+    {
+        return positiveSetting("xp gain multiplier", 1.f) * difficultyXpMultiplier();
+    }
+
+    float chanceSetting(const char* name, float fallback)
+    {
+        const float value = Settings::Manager::getFloat(name, "XP Leveling");
+        return std::isfinite(value) ? clampFloat(value, 0.f, 1.f) : fallback;
+    }
+
+    bool randomRewardRoll(const char* chanceName, float fallback)
+    {
+        return Misc::Rng::rollProbability() < chanceSetting(chanceName, fallback);
+    }
+
+    float finalXpAmount(float rawAmount)
+    {
+        return rawAmount * totalXpMultiplier();
     }
 
     std::string formatXp(float amount)
@@ -101,9 +150,9 @@ namespace
         stats.addSkillPoints(points);
 
         std::ostringstream message;
-        message << "Level " << stats.getLevel() << " reached";
+        message << arenaText("xp.msg.level_reached") << ": " << stats.getLevel();
         if (points > 0)
-            message << ". +" << points << " Skill Points";
+            message << ". +" << points << " " << arenaText("xp.msg.skill_points");
         notifyXp(message.str());
     }
 
@@ -112,7 +161,7 @@ namespace
         if (!MWMechanics::XPLeveling::isEnabled() || player.isEmpty() || !player.getClass().isNpc())
             return;
 
-        amount *= positiveSetting("xp gain multiplier", 1.f);
+        amount *= totalXpMultiplier();
         if (!(amount > 0.f) || !std::isfinite(amount))
             return;
 
@@ -205,7 +254,8 @@ namespace
             const std::string name = MWBase::Environment::get().getWindowManager()
                 ->getGameSettingString(gmstId, gmstId);
             std::ostringstream message;
-            message << name << " increased to " << static_cast<int>(stats.getAttribute(attribute).getBase());
+            message << name << " " << arenaText("xp.msg.increased_to") << " "
+                    << static_cast<int>(stats.getAttribute(attribute).getBase());
             notifyXp(message.str());
         }
     }
@@ -305,7 +355,7 @@ namespace MWMechanics
             const float xp = (base + perLevel * victimLevel) * relativeDanger;
 
             std::ostringstream message;
-            message << "+" << formatXp(xp * positiveSetting("xp gain multiplier", 1.f)) << " XP - defeated "
+            message << "+" << formatXp(finalXpAmount(xp)) << " XP - " << arenaText("xp.msg.defeated") << " "
                     << victim.getClass().getName(victim);
             addExperience(player, xp, message.str());
         }
@@ -358,23 +408,83 @@ namespace MWMechanics
                 return;
 
             std::ostringstream message;
-            message << "+" << formatXp(xp * positiveSetting("xp gain multiplier", 1.f))
-                    << " XP - " << (completed ? "quest completed: " : "quest progress: ")
-                    << questName;
+            message << "+" << formatXp(finalXpAmount(xp))
+                    << " XP - " << arenaText(completed ? "xp.msg.quest_completed" : "xp.msg.quest_progress")
+                    << ": " << questName;
             addExperience(player, xp, message.str());
         }
 
-        void awardLocationDiscovery(const MWWorld::Ptr& player,
-            const std::string& rewardKey, const std::string& displayName)
+        void awardTravel(const MWWorld::Ptr& player)
         {
-            if (!isEnabled() || player.isEmpty() || player != MWMechanics::getPlayer()
-                || rewardKey.empty() || displayName.empty())
+            if (!isEnabled() || player.isEmpty() || player != MWMechanics::getPlayer())
                 return;
 
-            const float xp = nonNegativeSetting("location discovery xp");
+            // Persist the roll window in XP reward keys. This prevents door/cell
+            // bouncing and, in ArenaMP, prevents a server restart/relog from
+            // resetting the travel reward opportunity. Only the current slot is kept.
+            const float cooldownHours = std::max(0.25f, positiveSetting("travel xp cooldown hours", 2.f));
+            const MWWorld::TimeStamp now = MWBase::Environment::get().getWorld()->getTimeStamp();
+            const double absoluteHours = static_cast<double>(now.getDay()) * 24.0 + now.getHour();
+            const long long slot = static_cast<long long>(std::floor(absoluteHours / cooldownHours));
+            const std::string prefix = "travel-roll-slot:";
+            const std::string slotKey = prefix + std::to_string(slot);
+
+            NpcStats& stats = player.getClass().getNpcStats(player);
+            if (stats.hasXpRewardKey(slotKey))
+                return;
+            stats.removeXpRewardKeysWithPrefix(prefix);
+            stats.addXpRewardKey(slotKey); // consume this roll even when RNG fails
+
+            if (!randomRewardRoll("travel xp chance", 0.20f))
+                return;
+            const float xp = nonNegativeSetting("travel xp");
+            if (!(xp > 0.f))
+                return;
             std::ostringstream message;
-            message << "+" << formatXp(xp * positiveSetting("xp gain multiplier", 1.f)) << " XP - discovered " << displayName;
-            awardOnce(player, "location:" + rewardKey, xp, message.str());
+            message << "+" << formatXp(finalXpAmount(xp)) << " XP - " << arenaText("xp.msg.travel");
+            addExperience(player, xp, message.str());
+        }
+
+        void awardSuccessfulTrade(const MWWorld::Ptr& player)
+        {
+            if (!isEnabled() || player.isEmpty() || player != MWMechanics::getPlayer()
+                || !randomRewardRoll("trade bonus xp chance", 0.20f))
+                return;
+            const float xp = nonNegativeSetting("trade bonus xp");
+            if (!(xp > 0.f))
+                return;
+            std::ostringstream message;
+            message << "+" << formatXp(finalXpAmount(xp)) << " XP - " << arenaText("xp.msg.trade_success");
+            addExperience(player, xp, message.str());
+        }
+
+        void awardCriticalHit(const MWWorld::Ptr& player, const MWWorld::Ptr& victim)
+        {
+            if (!isEnabled() || player.isEmpty() || victim.isEmpty() || player != MWMechanics::getPlayer()
+                || !victim.getClass().isActor() || !randomRewardRoll("critical bonus xp chance", 0.35f))
+                return;
+            const int victimLevel = std::max(1, victim.getClass().getCreatureStats(victim).getLevel());
+            const int playerLevel = std::max(1, player.getClass().getCreatureStats(player).getLevel());
+            const float danger = clampFloat(std::sqrt(static_cast<float>(victimLevel) / playerLevel), 0.5f, 2.f);
+            const float xp = nonNegativeSetting("critical bonus xp") * danger;
+            if (!(xp > 0.f))
+                return;
+            std::ostringstream message;
+            message << "+" << formatXp(finalXpAmount(xp)) << " XP - " << arenaText("xp.msg.critical");
+            addExperience(player, xp, message.str());
+        }
+
+        void awardSuccessfulTheft(const MWWorld::Ptr& player, const MWWorld::Ptr& item, int count)
+        {
+            if (!isEnabled() || player.isEmpty() || item.isEmpty() || count <= 0 || player != MWMechanics::getPlayer()
+                || !randomRewardRoll("theft bonus xp chance", 0.30f))
+                return;
+            const float xp = nonNegativeSetting("theft bonus xp");
+            if (!(xp > 0.f))
+                return;
+            std::ostringstream message;
+            message << "+" << formatXp(finalXpAmount(xp)) << " XP - " << arenaText("xp.msg.theft");
+            addExperience(player, xp, message.str());
         }
 
         void awardBookRead(const MWWorld::Ptr& player, const ESM::Book& book)
@@ -389,7 +499,7 @@ namespace MWMechanics
                 return;
 
             std::ostringstream message;
-            message << "+" << formatXp(xp * positiveSetting("xp gain multiplier", 1.f)) << " XP - read "
+            message << "+" << formatXp(finalXpAmount(xp)) << " XP - " << arenaText("xp.msg.read") << " "
                     << (book.mName.empty() ? book.mId : book.mName);
             awardOnce(player, "book:" + Misc::StringUtils::lowerCase(book.mId), xp, message.str());
         }
@@ -408,7 +518,7 @@ namespace MWMechanics
 
             stats.setExperience(std::max(0.f, stats.getExperience() - loss));
             std::ostringstream message;
-            message << "Death: -" << formatXp(loss) << " XP";
+            message << arenaText("xp.msg.death") << ": -" << formatXp(loss) << " XP";
             notifyXp(message.str());
         }
 
@@ -423,7 +533,7 @@ namespace MWMechanics
             const float before = stats.getSkill(skillId).getBase();
             if (before >= 100.f)
             {
-                notifyXp("Skill is already at 100");
+                notifyXp(arenaText("xp.msg.skill_at_100"));
                 return false;
             }
 
@@ -431,7 +541,8 @@ namespace MWMechanics
             if (stats.getSkillPoints() < cost)
             {
                 std::ostringstream message;
-                message << "Not enough Skill Points (need " << cost << ")";
+                message << arenaText("xp.msg.not_enough_sp") << " (" << arenaText("xp.msg.need")
+                        << " " << cost << ")";
                 notifyXp(message.str());
                 return false;
             }
@@ -456,7 +567,8 @@ namespace MWMechanics
                 classAttributeProgress(class_, *skill, skillId));
 
             std::ostringstream message;
-            message << "Skill Points: " << stats.getSkillPoints() << " remaining";
+            message << arenaText("xp.msg.skill_points") << ": " << stats.getSkillPoints()
+                    << " " << arenaText("xp.msg.remaining");
             notifyXp(message.str());
             return true;
         }

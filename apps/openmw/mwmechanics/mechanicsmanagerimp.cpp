@@ -1225,8 +1225,14 @@ namespace MWMechanics
             if (victim.isEmpty() || (victim.getClass().isActor() && victim.getRefData().getCount() > 0 && !victim.getClass().getCreatureStats(victim).isDead()))
                 mStolenItems[Misc::StringUtils::lowerCase(item.getCellRef().getRefId())][owner] += count;
         }
+        bool reported = false;
         if (alarm)
-            commitCrime(ptr, victim, OT_Theft, ownerCellRef->getFaction(), item.getClass().getValue(item) * count);
+            reported = commitCrime(ptr, victim, OT_Theft, ownerCellRef->getFaction(), item.getClass().getValue(item) * count);
+
+        // Reward only a theft that actually succeeded without being reported.
+        // Successful pickpocket transfers arrive here with alarm=false.
+        if (!reported)
+            XPLeveling::awardSuccessfulTheft(ptr, item, count);
     }
 
 
