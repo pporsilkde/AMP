@@ -3,6 +3,7 @@
 #include <exception>
 #include <sstream>
 #include <components/esm/esmwriter.hpp>
+#include <components/esm/loadbook.hpp>
 #include <components/openmw-mp/TimedLog.hpp>
 #include <components/openmw-mp/Utils.hpp>
 
@@ -14,6 +15,7 @@
 #include "../mwclass/npc.hpp"
 
 #include "../mwdialogue/dialoguemanagerimp.hpp"
+#include "../mwdialogue/journalimp.hpp"
 
 #include "../mwgui/inventorywindow.hpp"
 #include "../mwgui/windowmanagerimp.hpp"
@@ -36,6 +38,7 @@
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/customdata.hpp"
 #include "../mwworld/inventorystore.hpp"
+#include "../mwworld/esmstore.hpp"
 #include "../mwworld/manualref.hpp"
 #include "../mwworld/player.hpp"
 #include "../mwworld/worldimp.hpp"
@@ -997,6 +1000,13 @@ void LocalPlayer::addTopics()
 
         env.getDialogueManager()->addTopic(topicId);
 
+        // C24: topicChanges is the persistent server-side list of known topics.
+        // DialogueManager restoration alone is not enough for the journal: its
+        // hyperlink index is built from Journal::topicBegin()/topicEnd(). Recreate
+        // an empty history node so links remain clickable after reconnect.
+        if (MWDialogue::Journal* journal = dynamic_cast<MWDialogue::Journal*>(env.getJournal()))
+            journal->ensureKnownTopic(topicId);
+
         if (env.getWindowManager()->containsMode(MWGui::GM_Dialogue))
             env.getDialogueManager()->updateActorKnownTopics();
     }
@@ -1623,9 +1633,17 @@ void LocalPlayer::setBooks()
 {
     MWWorld::Ptr ptrPlayer = getPlayerPtr();
     MWMechanics::NpcStats &ptrNpcStats = ptrPlayer.getClass().getNpcStats(ptrPlayer);
+    const MWWorld::Store<ESM::Book>& books =
+        MWBase::Environment::get().getWorld()->getStore().get<ESM::Book>();
 
     for (const auto &book : bookChanges)
-        ptrNpcStats.flagAsUsed(book.bookId);
+    {
+        // Bookworm migration: older XP reward keys stored a lowercase book id.
+        // Resolve it through the ESM store and keep the canonical record id in
+        // NpcStats so hasBeenUsed() also works for mixed-case TR/Tamriel_Data ids.
+        const ESM::Book* record = books.search(book.bookId);
+        ptrNpcStats.flagAsUsed(record ? record->mId : book.bookId);
+    }
 }
 
 void LocalPlayer::setShapeshift()

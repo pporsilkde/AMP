@@ -120,8 +120,36 @@ namespace
     float xpRequirementForLevel(int level)
     {
         const float base = positiveSetting("base xp to level", 1000.f);
-        const float perLevel = nonNegativeSetting("xp per level");
-        return std::max(1.f, base + std::max(0, level - 1) * perLevel);
+        const int targetLevel = std::max(1, level);
+
+        // C24: progressive level curve. The amount added to the next-level
+        // requirement grows as 10, 15, 20, ... 50, then 60, 70, ... by
+        // default. This makes high character levels progressively more
+        // expensive without the abrupt linear +250 jump used by the old
+        // prototype. The legacy linear rule remains available as a fallback.
+        if (!Settings::Manager::getBool("progressive xp curve", "XP Leveling"))
+        {
+            const float perLevel = nonNegativeSetting("xp per level");
+            return std::max(1.f, base + std::max(0, targetLevel - 1) * perLevel);
+        }
+
+        float requirement = base;
+        float increment = nonNegativeSetting("xp level increment start");
+        const float lowStep = nonNegativeSetting("xp level increment step");
+        const float threshold = nonNegativeSetting("xp level increment threshold");
+        const float highStep = nonNegativeSetting("xp level increment high step");
+
+        for (int currentLevel = 1; currentLevel < targetLevel; ++currentLevel)
+        {
+            requirement += increment;
+
+            if (increment < threshold)
+                increment = std::min(threshold, increment + lowStep);
+            else
+                increment += highStep;
+        }
+
+        return std::max(1.f, requirement);
     }
 
     void notifyXp(const std::string& text)
@@ -284,11 +312,16 @@ namespace MWMechanics
             return Settings::Manager::getBool("enabled", "XP Leveling");
         }
 
+        float getXpRequirementForLevel(int level)
+        {
+            return xpRequirementForLevel(level);
+        }
+
         float getXpForNextLevel(const MWWorld::Ptr& player)
         {
             if (player.isEmpty() || !player.getClass().isActor())
-                return xpRequirementForLevel(1);
-            return xpRequirementForLevel(std::max(1, player.getClass().getCreatureStats(player).getLevel()));
+                return getXpRequirementForLevel(1);
+            return getXpRequirementForLevel(std::max(1, player.getClass().getCreatureStats(player).getLevel()));
         }
 
         int getSkillPointCost(float skillBase)

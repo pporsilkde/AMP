@@ -1,4 +1,5 @@
 #include "npcstats.hpp"
+#include "xpleveling.hpp"
 
 #include <iomanip>
 
@@ -780,9 +781,7 @@ void MWMechanics::NpcStats::readState (const ESM::NpcStats& state)
             const int oldRequirement = std::max(1, gmst.find("iLevelUpTotal")->mValue.getInteger());
             const float fraction = std::max(0.f,
                 static_cast<float>(mLevelProgress) / static_cast<float>(oldRequirement));
-            const float baseXp = Settings::Manager::getFloat("base xp to level", "XP Leveling");
-            const float xpPerLevel = Settings::Manager::getFloat("xp per level", "XP Leveling");
-            const float nextLevelXp = std::max(1.f, baseXp + std::max(0, getLevel() - 1) * xpPerLevel);
+            const float nextLevelXp = XPLeveling::getXpRequirementForLevel(getLevel());
             mExperience = std::max(mExperience, nextLevelXp * fraction);
         }
         mLevelProgress = 0;

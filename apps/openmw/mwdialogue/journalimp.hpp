@@ -60,6 +60,12 @@ namespace MWDialogue
             void addTopic (const std::string& topicId, const std::string& infoId, const MWWorld::Ptr& actor) override;
             /// \note topicId must be lowercase
 
+            // ArenaMP C24: recreate an empty topic-history object for a topic
+            // restored by the server. This keeps @topic# links in journal text
+            // clickable after relog without inventing an NPC response that the
+            // player never actually heard.
+            void ensureKnownTopic(const std::string& topicId);
+
             void removeLastAddedTopicResponse (const std::string& topicId, const std::string& actorName) override;
             ///< Removes the last topic response added for the given topicId and actor name.
             /// \note topicId must be lowercase

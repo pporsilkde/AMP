@@ -21,6 +21,7 @@ namespace MWMechanics
         bool isEnabled();
 
         float getXpForNextLevel(const MWWorld::Ptr& player);
+        float getXpRequirementForLevel(int level);
         int getSkillPointCost(float skillBase);
 
         // Converts a normal OpenMW skill-use event into character XP. The

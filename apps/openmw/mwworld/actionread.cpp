@@ -53,42 +53,34 @@ namespace MWWorld
         else
             MWBase::Environment::get().getWindowManager()->pushGuiMode(MWGui::GM_Book, getTarget());
 
-        MWMechanics::NpcStats& npcStats = actor.getClass().getNpcStats (actor);
+        MWMechanics::NpcStats& npcStats = actor.getClass().getNpcStats(actor);
         const bool firstRead = !npcStats.hasBeenUsed(ref->mBase->mId);
+        const bool skillBook = ref->mBase->mData.mSkillId >= 0
+            && ref->mBase->mData.mSkillId < ESM::Skill::Length;
 
         if (firstRead && MWMechanics::XPLeveling::isEnabled())
             MWMechanics::XPLeveling::awardBookRead(actor, *ref->mBase);
 
-        // Skill gain from books
-        if (ref->mBase->mData.mSkillId >= 0 && ref->mBase->mData.mSkillId < ESM::Skill::Length
-                && firstRead)
+        // Skill gain from books remains a one-time effect.
+        if (skillBook && firstRead)
         {
-            MWWorld::LiveCellRef<ESM::NPC> *playerRef = actor.get<ESM::NPC>();
+            MWWorld::LiveCellRef<ESM::NPC>* playerRef = actor.get<ESM::NPC>();
+            const ESM::Class* class_ =
+                MWBase::Environment::get().getWorld()->getStore().get<ESM::Class>().find(
+                    playerRef->mBase->mClass);
 
-            const ESM::Class *class_ =
-                MWBase::Environment::get().getWorld()->getStore().get<ESM::Class>().find (
-                    playerRef->mBase->mClass
-                );
-
-            npcStats.increaseSkill (ref->mBase->mData.mSkillId, *class_, true, true);
-
-            npcStats.flagAsUsed (ref->mBase->mId);
-
-            /*
-                Start of tes3mp addition
-
-                Send an ID_PLAYER_BOOK packet every time a player reads a skill book
-            */
-            mwmp::Main::get().getLocalPlayer()->sendBook(ref->mBase->mId);
-            /*
-                End of tes3mp addition
-            */
+            npcStats.increaseSkill(ref->mBase->mData.mSkillId, *class_, true, true);
         }
 
-        // XP leveling also rewards ordinary lore books once. Reuse the same
-        // persistent USED set as skill books, without requiring a hardcoded list.
-        if (firstRead && MWMechanics::XPLeveling::isEnabled())
+        // Bookworm: ID_PLAYER_BOOK already has server-profile persistence in
+        // BasePlayer.data.books. Extend it from skill books to every ordinary
+        // first-read book; no new packet or protocol revision is required.
+        const bool trackRead = firstRead && (!ref->mBase->mData.mIsScroll || skillBook);
+        if (trackRead)
+        {
             npcStats.flagAsUsed(ref->mBase->mId);
+            mwmp::Main::get().getLocalPlayer()->sendBook(ref->mBase->mId);
+        }
 
     }
 }

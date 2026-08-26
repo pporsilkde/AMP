@@ -6,6 +6,7 @@
 #include <components/esm/esmreader.hpp>
 #include <components/esm/queststate.hpp>
 #include <components/esm/journalentry.hpp>
+#include <components/misc/stringops.hpp>
 
 #include "../mwworld/esmstore.hpp"
 #include "../mwworld/class.hpp"
@@ -165,6 +166,18 @@ namespace MWDialogue
         JournalEntry entry(topicId, infoId, actor);
         entry.mActorName = actor.getClass().getName(actor);
         topic.addEntry (entry);
+    }
+
+    void Journal::ensureKnownTopic(const std::string& topicId)
+    {
+        const std::string normalized = Misc::StringUtils::lowerCase(topicId);
+        if (!isThere(normalized))
+            return;
+
+        // getTopic() is intentionally enough here: an empty Topic participates
+        // in the journal keyword index and can therefore be used as a hyperlink
+        // target, but it contains no fabricated dialogue responses.
+        getTopic(normalized);
     }
 
     void Journal::removeLastAddedTopicResponse(const std::string &topicId, const std::string &actorName)

@@ -1,3 +1,10 @@
+
+## ArenaMP C24 - persistent journal topic links + progressive XP curve (Protocol 806)
+
+- Restored server-known dialogue topics now also recreate an empty journal topic-history node on the client, so `@topic#` links remain clickable after relog/reconnect without fabricating dialogue responses.
+- Replaced the default linear next-level XP rule with a progressive cumulative curve: +10, +15, +20, ... +50, then +60, +70, ... per character level.
+- Added server-authoritative `[XP Leveling]` curve settings while retaining `xp per level` as an optional legacy fallback.
+- Protocol remains 806.
 # Server Changelog — ArenaMP
 
 ## C21 — TR/Tamriel synchronization + safe reset helper / Protocol 806 (26 августа 2026)

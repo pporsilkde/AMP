@@ -1639,10 +1639,30 @@ function BasePlayer:LoadBooks()
 
     if self.data.books == nil then self.data.books = {} end
 
+    -- Bookworm migration: C17-C24 could persist lore-book XP as
+    -- "book:<id>" reward keys even though BasePlayer.data.books only contained
+    -- skill books. Import those ids once so old profiles immediately gain the
+    -- new read markers too.
+    local migrated = false
+    if self.data.stats ~= nil and self.data.stats.xpRewardKeys ~= nil then
+        for _, rewardKey in ipairs(self.data.stats.xpRewardKeys) do
+            if type(rewardKey) == "string" and string.sub(rewardKey, 1, 5) == "book:" then
+                local bookId = string.sub(rewardKey, 6)
+                if bookId ~= "" and not tableHelper.containsValue(self.data.books, bookId, false) then
+                    table.insert(self.data.books, bookId)
+                    migrated = true
+                end
+            end
+        end
+    end
+
+    if migrated then
+        self:QuicksaveToDrive()
+    end
+
     tes3mp.ClearBookChanges(self.pid)
 
-    for index, bookId in pairs(self.data.books) do
-
+    for _, bookId in pairs(self.data.books) do
         tes3mp.AddBook(self.pid, bookId)
     end
 
@@ -1651,15 +1671,28 @@ end
 
 function BasePlayer:AddBooks()
 
+    if self.data.books == nil then self.data.books = {} end
+
+    local hasNewBook = false
+
     for index = 0, tes3mp.GetBookChangesSize(self.pid) - 1 do
         local bookId = tes3mp.GetBookId(self.pid, index)
 
-        -- Only add new book if we don't already have it
-        if not tableHelper.containsValue(self.data.books, bookId, false) then
-            tes3mp.LogMessage(enumerations.log.INFO, "Adding book " .. bookId .. " to " ..
+        -- Bookworm: the profile owns the authoritative read-book history.
+        if bookId ~= nil and bookId ~= "" and
+            not tableHelper.containsValue(self.data.books, bookId, false) then
+
+            tes3mp.LogMessage(enumerations.log.INFO, "Adding read book " .. bookId .. " to " ..
                 logicHandler.GetChatName(self.pid))
             table.insert(self.data.books, bookId)
+            hasNewBook = true
         end
+    end
+
+    -- Persist immediately instead of waiting for a later autosave. This makes
+    -- read markers survive an abrupt disconnect/server restart as well.
+    if hasNewBook then
+        self:QuicksaveToDrive()
     end
 end
 
