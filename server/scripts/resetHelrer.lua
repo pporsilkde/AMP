@@ -81,6 +81,52 @@ local function getHouseOwnerName(houseName)
     return nil
 end
 
+local function getLas()
+    local value = rawget(_G, "las")
+    if type(value) == "table" then
+        return value
+    end
+    return nil
+end
+
+local function callLas(methodName, ...)
+    local helper = getLas()
+    local fn = helper and helper[methodName]
+    if type(fn) ~= "function" then
+        return nil, false
+    end
+
+    local ok, result = pcall(fn, ...)
+    if ok then
+        return result, true
+    end
+
+    ok, result = pcall(fn, helper, ...)
+    if ok then
+        return result, true
+    end
+
+    tes3mp.LogAppend(enumerations.log.WARN,
+        "[resetHelrer] las." .. methodName .. " вызвал ошибку; вызов пропущен.")
+    return nil, false
+end
+
+local function getLasTable(name)
+    local helper = getLas()
+    if helper and type(helper[name]) == "table" then
+        return helper[name]
+    end
+    return nil
+end
+
+local function refreshCellThroughLas(cellDescription)
+    callLas("loadCell", cellDescription)
+end
+
+local function refreshLasMenu(pid, cmd)
+    callLas("LASResetControllerMenuG", pid, cmd)
+end
+
 local cellResetTimeCheck = 300       -- fallback polling (секунды), используется только если нет ячеек в очереди
 local exteriorCellResetTime = 3600
 local interiorCellResetTime = 3600
@@ -110,7 +156,22 @@ periodicCellResets.exemptCellNamesLike = {
 local ViewResetsGuiId = 44332202
 local SaveCellGuiId = 44332203
 
-local cellResetTimers = jsonInterface.load("custom/cellResetTimers.json")
+local function loadCellResetTimersFile()
+    local path = tes3mp.GetDataPath() .. "/custom/cellResetTimers.json"
+    local file = io.open(path, "r")
+    if not file then
+        return {}
+    end
+    file:close()
+
+    local loaded = jsonInterface.load("custom/cellResetTimers.json")
+    if type(loaded) == "table" then
+        return loaded
+    end
+    return {}
+end
+
+local cellResetTimers = loadCellResetTimersFile()
 local merchantCells = {}
 local startupCommandsHaveRun = false
 
@@ -608,7 +669,8 @@ local function isCellEligibleForReset(cellDescription)
         return false
     end
     -- Чёрный список las
-    if las.rc_blacklist and las.rc_blacklist[cellDescription] then
+    local rcBlacklist = getLasTable("rc_blacklist")
+    if rcBlacklist and rcBlacklist[cellDescription] then
         return false
     end
     -- Домовые ячейки защищаем через опциональный houseHelper или локальный кэш.
@@ -719,7 +781,7 @@ local function safeResetUnloadedCell(cellDescription)
     if hasCellBackup(cellDescription) then
         if restoreCellFromBackup(cellDescription) then
             cellResetTimers[cellDescription] = nil
-            las.loadCell(cellDescription)
+            refreshCellThroughLas(cellDescription)
             return true
         end
     end
@@ -747,7 +809,7 @@ local function safeResetUnloadedCell(cellDescription)
 
     cellResetTimers[cellDescription] = nil
     removeCustomRecordsFromResetCell(cellDescription)
-    las.loadCell(cellDescription)
+    refreshCellThroughLas(cellDescription)
     return true
 end
 
@@ -772,7 +834,7 @@ local doCellReset = function(pid, cellDescription)
             tes3mp.SendMessage(pid, color.Yellow .. "[Сброс Ячеек]: " .. color.Turquoise .. cellDescription .. color.White .. " была восстановлена из бэкапа.\n")
             cellResetTimers[cellDescription] = nil
             SaveCellResetTimers(true)
-            las.loadCell(cellDescription)
+            refreshCellThroughLas(cellDescription)
             return
         else
             tes3mp.SendMessage(pid, color.Yellow .. "[Сброс Ячеек]: " .. color.Error .. "Не удалось восстановить бэкап для " .. cellDescription .. ". Выполняется стандартный сброс.\n")
@@ -818,7 +880,7 @@ local pushForCellReset = function(pid, cmd)
         local inputConcatenation = tableHelper.concatFromIndex(cmd, 2)
         local cellDescription = string.gsub(inputConcatenation, '"', '')
         doCellReset(pid, cellDescription)
-        las.loadCell(cellDescription)
+        refreshCellThroughLas(cellDescription)
     end
 end
 customCommandHooks.registerCommand("reset", pushForCellReset)
@@ -828,8 +890,8 @@ periodicCellResets.ResetThisCell = function(pid, cmd)
     if Players[pid].data.settings.staffRank >= requiredStaffRank then
         local cellDescription = tes3mp.GetCell(pid)
         doCellReset(pid, cellDescription)
-        las.loadCell(cellDescription)
-        las.LASResetControllerMenuG(pid, cmd)
+        refreshCellThroughLas(cellDescription)
+        refreshLasMenu(pid, cmd)
     end
 end
 customCommandHooks.registerCommand("resetthis", periodicCellResets.ResetThisCell)
@@ -851,7 +913,7 @@ periodicCellResets.ResetCell = function(cellDescription)
         if restoreCellFromBackup(cellDescription) then
             cellResetTimers[cellDescription] = nil
             SaveCellResetTimers(true)
-            las.loadCell(cellDescription)
+            refreshCellThroughLas(cellDescription)
             return
         end
     end
@@ -984,7 +1046,7 @@ customCommandHooks.registerCommand("PUSHRESETS", pushCellResetsEarly)
 
 periodicCellResets.pushCellResetsEarly = function(pid, cmd)
     pushCellResetsEarly(pid, cmd)
-    las.LASResetControllerMenuG(pid, cmd)
+    refreshLasMenu(pid, cmd)
 end
 
 -- ============================================================================
@@ -1073,7 +1135,7 @@ customCommandHooks.registerCommand("RESETALL", pushResetAllCells)
 
 periodicCellResets.pushResetAllCells = function(pid, cmd)
     pushResetAllCells(pid, cmd)
-    las.LASResetControllerMenuG(pid, cmd)
+    refreshLasMenu(pid, cmd)
 end
 
 customEventHooks.registerHandler("OnObjectDialogueChoice", function(eventStatus, pid, cellDescription, objects)
@@ -1119,8 +1181,9 @@ customEventHooks.registerHandler("OnPlayerCellChange", function(eventStatus, pid
             if not cellResetTimers[cellDescription] and isCellEligibleForReset(cellDescription) then
                 local exteriorCell = cell.isExterior
                 local getResetTime = exteriorCell and exteriorCellResetTime or interiorCellResetTime
-                if las.rc_list and las.rc_list[cellDescription] then
-                    getResetTime = tonumber(las.rc_list[cellDescription])
+                local rcList = getLasTable("rc_list")
+                if rcList and rcList[cellDescription] then
+                    getResetTime = tonumber(rcList[cellDescription]) or getResetTime
                 end
                 local resetAt = os.time() + getResetTime
                 cellResetTimers[cellDescription] = resetAt
@@ -1691,9 +1754,18 @@ customEventHooks.registerHandler("OnServerPostInit", function(eventStatus)
             "[resetHelrer] houseHelper.lua не найден. Сервер продолжает работу; дополнительные housing-проверки отключены.")
     end
 
-    las.LoadRCbl()
-    las.LoadRC()
+    if not getLas() then
+        tes3mp.LogAppend(enumerations.log.WARN,
+            "[resetHelrer] las не найден. Reset Controller интеграция отключена; базовые hourly reset работают.")
+    else
+        callLas("LoadRCbl")
+        callLas("LoadRC")
+    end
+
     LoadCellResetTimers()
+    if tableHelper.isEmpty(cellResetTimers) then
+        SaveCellResetTimers(true)
+    end
     resetCellsOnStartup()
     removeDeletedCellsFromResetTimers()
     -- Очистка домов без хозяина при старте отключена.

@@ -91,6 +91,7 @@ namespace MWGui
         void onItemDragStarted(int index);
         void onItemDoubleClicked(int index);
         void onBackgroundSelected();
+        void takeItem(MyGUI::Widget* sender, int count);
         void dragItem(MyGUI::Widget* sender, int count);
         bool requestDrag(int count, ItemView* pendingTarget);
         void dropItem();

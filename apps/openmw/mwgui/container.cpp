@@ -38,6 +38,7 @@
 
 #include "../mwscript/interpretercontext.hpp"
 
+#include "countdialog.hpp"
 #include "inventorywindow.hpp"
 
 #include "itemview.hpp"
@@ -46,6 +47,7 @@
 #include "sortfilteritemmodel.hpp"
 #include "pickpocketitemmodel.hpp"
 #include "draganddrop.hpp"
+#include "tooltips.hpp"
 #include "widgets.hpp"
 
 namespace MWGui
@@ -129,12 +131,25 @@ namespace MWGui
         mSelectedItem = mSortModel->mapToSource(index);
         if (mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mModel->getItemCount()))
             return;
-        const int count = MyGUI::InputManager::getInstance().isControlPressed() ? 1 : item.mCount;
 
-        // A clean click is a quick transfer to the player. The multiplayer
-        // container remains server-authoritative: request the same DRAG packet
-        // as normal drag-and-drop and auto-release only after the server echo.
-        requestDrag(count, MWBase::Environment::get().getWindowManager()->getInventoryWindow()->getItemView());
+        const bool control = MyGUI::InputManager::getInstance().isControlPressed();
+        const bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
+        const int count = control ? 1 : item.mCount;
+
+        // Stacks now mirror world/inventory transfers: choose an amount before
+        // taking them. Ctrl transfers one, Shift transfers the full stack.
+        if (item.mCount > 1 && !control && !shift)
+        {
+            CountDialog* dialog = MWBase::Environment::get().getWindowManager()->getCountDialog();
+            const std::string name = item.mBase.getClass().getName(item.mBase)
+                + MWGui::ToolTips::getSoulString(item.mBase.getCellRef());
+            dialog->openCountDialog(name, "#{sQuanityMenuMessage01}", item.mCount);
+            dialog->eventOkClicked.clear();
+            dialog->eventOkClicked += MyGUI::newDelegate(this, &ContainerWindow::takeItem);
+            return;
+        }
+
+        takeItem(nullptr, count);
     }
 
     void ContainerWindow::onItemDragStarted(int index)
@@ -152,7 +167,21 @@ namespace MWGui
         mSelectedItem = mSortModel->mapToSource(index);
         if (mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mModel->getItemCount()))
             return;
-        const int count = MyGUI::InputManager::getInstance().isControlPressed() ? 1 : item.mCount;
+
+        const bool control = MyGUI::InputManager::getInstance().isControlPressed();
+        const bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
+        const int count = control ? 1 : item.mCount;
+
+        if (item.mCount > 1 && !control && !shift)
+        {
+            CountDialog* dialog = MWBase::Environment::get().getWindowManager()->getCountDialog();
+            const std::string name = item.mBase.getClass().getName(item.mBase)
+                + MWGui::ToolTips::getSoulString(item.mBase.getCellRef());
+            dialog->openCountDialog(name, "#{sQuanityMenuMessage01}", item.mCount);
+            dialog->eventOkClicked.clear();
+            dialog->eventOkClicked += MyGUI::newDelegate(this, &ContainerWindow::dragItem);
+            return;
+        }
 
         // Do not start a local drag here. The container is server-authoritative:
         // the echoed ID_CONTAINER/DRAG will call dragItemByPtr().
@@ -166,12 +195,20 @@ namespace MWGui
         (void)index;
     }
 
+    void ContainerWindow::takeItem(MyGUI::Widget* sender, int count)
+    {
+        (void)sender;
+        requestDrag(count, MWBase::Environment::get().getWindowManager()->getInventoryWindow()->getItemView());
+    }
+
     bool ContainerWindow::requestDrag(int count, ItemView* pendingTarget)
     {
         if (!mModel || mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mModel->getItemCount()))
             return false;
         if (mDragAndDrop->isServerDragPending())
             return false;
+
+        count = std::max(1, std::min(count, static_cast<int>(mModel->getItem(mSelectedItem).mCount)));
 
         if (!onTakeItem(mModel->getItem(mSelectedItem), count))
             return false;

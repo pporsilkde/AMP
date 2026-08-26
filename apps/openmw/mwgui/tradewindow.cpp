@@ -269,9 +269,37 @@ namespace MWGui
         const int sourceIndex = mSortModel->mapToSource(index);
         if (sourceIndex < 0 || sourceIndex >= static_cast<int>(mTradeModel->getItemCount()))
             return;
+
+        mItemToSell = sourceIndex;
         const ItemStack item = mTradeModel->getItem(sourceIndex);
-        const int count = MyGUI::InputManager::getInstance().isControlPressed() ? 1 : item.mCount;
-        mDragAndDrop->startBarterDrag(sourceIndex, mSortModel, mTradeModel, mItemView, count);
+        const bool control = MyGUI::InputManager::getInstance().isControlPressed();
+        const bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
+        const int count = control ? 1 : item.mCount;
+
+        if (item.mCount > 1 && !control && !shift)
+        {
+            CountDialog* dialog = MWBase::Environment::get().getWindowManager()->getCountDialog();
+            const std::string name = item.mBase.getClass().getName(item.mBase)
+                + MWGui::ToolTips::getSoulString(item.mBase.getCellRef());
+            dialog->openCountDialog(name, "#{sQuanityMenuMessage01}", item.mCount);
+            dialog->eventOkClicked.clear();
+            dialog->eventOkClicked += MyGUI::newDelegate(this, &TradeWindow::startBarterDrag);
+            return;
+        }
+
+        startBarterDrag(nullptr, count);
+    }
+
+    void TradeWindow::startBarterDrag(MyGUI::Widget* sender, int count)
+    {
+        (void)sender;
+        if (!mTradeModel || !mSortModel || mItemToSell < 0
+            || mItemToSell >= static_cast<int>(mTradeModel->getItemCount()))
+            return;
+
+        const ItemStack item = mTradeModel->getItem(mItemToSell);
+        count = std::max(1, std::min(count, static_cast<int>(item.mCount)));
+        mDragAndDrop->startBarterDrag(mItemToSell, mSortModel, mTradeModel, mItemView, count);
     }
 
     void TradeWindow::onItemDoubleClicked(int index)

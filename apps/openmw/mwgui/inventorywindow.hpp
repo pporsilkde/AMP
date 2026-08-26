@@ -158,6 +158,8 @@ namespace MWGui
 
             void sellItem(MyGUI::Widget* sender, int count);
             void dragItem(MyGUI::Widget* sender, int count);
+            void startBarterDrag(MyGUI::Widget* sender, int count);
+            void transferItemToOtherPane(MyGUI::Widget* sender, int count);
 
             void onWindowResize(MyGUI::Window* _sender);
             void onFilterChanged(MyGUI::Widget* _sender);

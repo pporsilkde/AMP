@@ -95,6 +95,7 @@ namespace MWGui
 
             void onItemSelected (int index);
             void onItemDragStarted(int index);
+            void startBarterDrag(MyGUI::Widget* sender, int count);
             void onItemDoubleClicked(int index);
             void onBackgroundSelected();
             void sellItem (MyGUI::Widget* sender, int count);
