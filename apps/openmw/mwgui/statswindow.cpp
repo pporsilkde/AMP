@@ -472,20 +472,12 @@ namespace MWGui
             : MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>()
                 .find("iLevelUpTotal")->mValue.getInteger();
 
-        for (int i=0; i<2; ++i)
-        {
-            getWidget(levelWidget, i==0 ? "Level_str" : "LevelText");
-            levelWidget->setUserString("RangePosition_LevelProgress", MyGUI::utility::toString(std::min(levelProgress, levelMaximum)));
-            levelWidget->setUserString("Range_LevelProgress", MyGUI::utility::toString(levelMaximum));
-            levelWidget->setUserString("Caption_LevelProgressText", MyGUI::utility::toString(levelProgress) + "/"
-                                       + MyGUI::utility::toString(levelMaximum));
-        }
-
         std::stringstream detail;
         if (xpLeveling)
         {
-            detail << "XP " << levelProgress << "/" << levelMaximum
-                   << "\n" << arenaText("xp.free_skill_points") << ": " << PCstats.getSkillPoints()
+            // The progress bar right above already renders "<xp>/<next level>",
+            // so the detail block carries only what the bar cannot show.
+            detail << arenaText("xp.free_skill_points") << ": " << PCstats.getSkillPoints()
                    << "\n" << arenaText("xp.double_click_hint");
 
             if (mLastSkillPoints != PCstats.getSkillPoints())
@@ -506,8 +498,22 @@ namespace MWGui
                     << "} x" << MyGUI::utility::toString(mult);
             }
         }
-        if (levelWidget)
-            levelWidget->setUserString("Caption_LevelDetailText", MyGUI::LanguageManager::getInstance().replaceTags(detail.str()));
+
+        const std::string detailText = MyGUI::LanguageManager::getInstance().replaceTags(detail.str());
+
+        // Every user string has to land on both widgets. Pushing the detail
+        // caption to LevelText alone left Level_str holding whatever text the
+        // previous hover had written, so the block under the bar lagged behind
+        // the bar itself.
+        for (int i=0; i<2; ++i)
+        {
+            getWidget(levelWidget, i==0 ? "Level_str" : "LevelText");
+            levelWidget->setUserString("RangePosition_LevelProgress", MyGUI::utility::toString(std::min(levelProgress, levelMaximum)));
+            levelWidget->setUserString("Range_LevelProgress", MyGUI::utility::toString(levelMaximum));
+            levelWidget->setUserString("Caption_LevelProgressText", MyGUI::utility::toString(levelProgress) + "/"
+                                       + MyGUI::utility::toString(levelMaximum));
+            levelWidget->setUserString("Caption_LevelDetailText", detailText);
+        }
 
         setFactions(PCstats.getFactionRanks());
         setExpelled(PCstats.getExpelled ());
