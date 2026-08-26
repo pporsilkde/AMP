@@ -20,6 +20,11 @@
     \
     SCRIPT_API_ENTRY("GetLevel", StatsFunctions::GetLevel),\
     SCRIPT_API_ENTRY("GetLevelProgress", StatsFunctions::GetLevelProgress),\
+    SCRIPT_API_ENTRY("GetExperience", StatsFunctions::GetExperience),\
+    SCRIPT_API_ENTRY("GetSkillPoints", StatsFunctions::GetSkillPoints),\
+    SCRIPT_API_ENTRY("GetXpAttributeProgress", StatsFunctions::GetXpAttributeProgress),\
+    SCRIPT_API_ENTRY("GetXpRewardKeyCount", StatsFunctions::GetXpRewardKeyCount),\
+    SCRIPT_API_ENTRY("GetXpRewardKey", StatsFunctions::GetXpRewardKey),\
     \
     SCRIPT_API_ENTRY("GetHealthBase", StatsFunctions::GetHealthBase),\
     SCRIPT_API_ENTRY("GetHealthCurrent", StatsFunctions::GetHealthCurrent),\
@@ -53,6 +58,11 @@
     \
     SCRIPT_API_ENTRY("SetLevel", StatsFunctions::SetLevel),\
     SCRIPT_API_ENTRY("SetLevelProgress", StatsFunctions::SetLevelProgress),\
+    SCRIPT_API_ENTRY("SetExperience", StatsFunctions::SetExperience),\
+    SCRIPT_API_ENTRY("SetSkillPoints", StatsFunctions::SetSkillPoints),\
+    SCRIPT_API_ENTRY("SetXpAttributeProgress", StatsFunctions::SetXpAttributeProgress),\
+    SCRIPT_API_ENTRY("ClearXpRewardKeys", StatsFunctions::ClearXpRewardKeys),\
+    SCRIPT_API_ENTRY("AddXpRewardKey", StatsFunctions::AddXpRewardKey),\
     \
     SCRIPT_API_ENTRY("SetHealthBase", StatsFunctions::SetHealthBase),\
     SCRIPT_API_ENTRY("SetHealthCurrent", StatsFunctions::SetHealthCurrent),\
@@ -224,6 +234,11 @@ public:
     * \return The level progress.
     */
     static int GetLevelProgress(unsigned short pid) noexcept;
+    static double GetExperience(unsigned short pid) noexcept;
+    static int GetSkillPoints(unsigned short pid) noexcept;
+    static double GetXpAttributeProgress(unsigned short pid, unsigned short attributeId) noexcept;
+    static int GetXpRewardKeyCount(unsigned short pid) noexcept;
+    static const char* GetXpRewardKey(unsigned short pid, unsigned int index) noexcept;
 
     /**
     * \brief Get the base health of the player.
@@ -451,6 +466,11 @@ public:
     * \return void
     */
     static void SetLevelProgress(unsigned short pid, int value) noexcept;
+    static void SetExperience(unsigned short pid, double value) noexcept;
+    static void SetSkillPoints(unsigned short pid, int value) noexcept;
+    static void SetXpAttributeProgress(unsigned short pid, unsigned short attributeId, double value) noexcept;
+    static void ClearXpRewardKeys(unsigned short pid) noexcept;
+    static void AddXpRewardKey(unsigned short pid, const char* key) noexcept;
 
     /**
     * \brief Set the base health of a player.

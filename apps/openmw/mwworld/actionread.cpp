@@ -17,6 +17,7 @@
 
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/xpleveling.hpp"
 
 #include "player.hpp"
 #include "class.hpp"
@@ -53,10 +54,14 @@ namespace MWWorld
             MWBase::Environment::get().getWindowManager()->pushGuiMode(MWGui::GM_Book, getTarget());
 
         MWMechanics::NpcStats& npcStats = actor.getClass().getNpcStats (actor);
+        const bool firstRead = !npcStats.hasBeenUsed(ref->mBase->mId);
+
+        if (firstRead && MWMechanics::XPLeveling::isEnabled())
+            MWMechanics::XPLeveling::awardBookRead(actor, *ref->mBase);
 
         // Skill gain from books
         if (ref->mBase->mData.mSkillId >= 0 && ref->mBase->mData.mSkillId < ESM::Skill::Length
-                && !npcStats.hasBeenUsed (ref->mBase->mId))
+                && firstRead)
         {
             MWWorld::LiveCellRef<ESM::NPC> *playerRef = actor.get<ESM::NPC>();
 
@@ -79,6 +84,11 @@ namespace MWWorld
                 End of tes3mp addition
             */
         }
+
+        // XP leveling also rewards ordinary lore books once. Reuse the same
+        // persistent USED set as skill books, without requiring a hardcoded list.
+        if (firstRead && MWMechanics::XPLeveling::isEnabled())
+            npcStats.flagAsUsed(ref->mBase->mId);
 
     }
 }

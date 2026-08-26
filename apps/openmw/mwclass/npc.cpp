@@ -46,6 +46,7 @@
 #include "../mwmechanics/difficultyscaling.hpp"
 #include "../mwmechanics/weapontype.hpp"
 #include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/xpleveling.hpp"
 
 #include "../mwworld/ptr.hpp"
 #include "../mwworld/actiontalk.hpp"
@@ -1498,6 +1499,12 @@ namespace MWClass
             MWBase::Environment::get().getWorld()->getStore().get<ESM::Class>().find (
                 ref->mBase->mClass
             );
+
+        if (ptr == MWMechanics::getPlayer() && MWMechanics::XPLeveling::isEnabled())
+        {
+            MWMechanics::XPLeveling::awardSkillUse(ptr, skill, usageType, extraFactor, *class_);
+            return;
+        }
 
         stats.useSkill (skill, *class_, usageType, extraFactor);
     }

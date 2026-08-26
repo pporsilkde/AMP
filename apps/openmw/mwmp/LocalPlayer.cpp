@@ -487,14 +487,34 @@ void LocalPlayer::updateLevel(bool forceUpdate)
     MWWorld::Ptr ptrPlayer = getPlayerPtr();
     const MWMechanics::NpcStats &ptrNpcStats = ptrPlayer.getClass().getNpcStats(ptrPlayer);
 
+    bool xpChanged = std::fabs(ptrNpcStats.getExperience() - npcStats.mExperience) > 0.001f
+        || ptrNpcStats.getSkillPoints() != npcStats.mSkillPoints;
+
+    for (int i = 0; i < 8 && !xpChanged; ++i)
+        xpChanged = std::fabs(ptrNpcStats.getXpAttributeProgress(i) - npcStats.mXpAttributeProgress[i]) > 0.001f;
+
+    std::vector<std::string> rewardKeys(ptrNpcStats.getXpRewardKeys().begin(), ptrNpcStats.getXpRewardKeys().end());
+    const bool rewardKeysChanged = rewardKeys != npcStats.mXpRewardKeys;
+    if (rewardKeysChanged)
+        xpChanged = true;
+
     if (ptrNpcStats.getLevel() != creatureStats.mLevel ||
-        ptrNpcStats.getLevelProgress() != npcStats.mLevelProgress ||
+        ptrNpcStats.getLevelProgress() != npcStats.mLevelProgress || xpChanged ||
         forceUpdate)
     {
         creatureStats.mLevel = ptrNpcStats.getLevel();
         npcStats.mLevelProgress = ptrNpcStats.getLevelProgress();
+        npcStats.mXpVersion = 1;
+        npcStats.mExperience = ptrNpcStats.getExperience();
+        npcStats.mSkillPoints = ptrNpcStats.getSkillPoints();
+        for (int i = 0; i < 8; ++i)
+            npcStats.mXpAttributeProgress[i] = ptrNpcStats.getXpAttributeProgress(i);
+        npcStats.mXpRewardKeys = rewardKeys;
+        xpRewardKeysChanged = rewardKeysChanged;
+
         getNetworking()->getPlayerPacket(ID_PLAYER_LEVEL)->setPlayer(this);
         getNetworking()->getPlayerPacket(ID_PLAYER_LEVEL)->Send();
+        xpRewardKeysChanged = false;
     }
 }
 
@@ -1245,6 +1265,13 @@ void LocalPlayer::setLevel()
     MWMechanics::NpcStats *ptrNpcStats = &ptrPlayer.getClass().getNpcStats(ptrPlayer);
     ptrNpcStats->setLevel(creatureStats.mLevel);
     ptrNpcStats->setLevelProgress(npcStats.mLevelProgress);
+    ptrNpcStats->setExperience(npcStats.mExperience);
+    ptrNpcStats->setSkillPoints(npcStats.mSkillPoints);
+    for (int i = 0; i < 8; ++i)
+        ptrNpcStats->setXpAttributeProgress(i, npcStats.mXpAttributeProgress[i]);
+    if (xpRewardKeysChanged)
+        ptrNpcStats->setXpRewardKeys(npcStats.mXpRewardKeys);
+    xpRewardKeysChanged = false;
 }
 
 void LocalPlayer::setBounty()

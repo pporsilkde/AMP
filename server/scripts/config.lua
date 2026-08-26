@@ -83,6 +83,30 @@ config.arenaSkillBooksLevelLimit = true
 config.arenaNewConstantEffectDifficulty = true
 config.arenaGlobalXpMultiplier = 1.0
 
+-- Server-authoritative ArenaMP XP progression. These values overwrite the
+-- client [XP Leveling] category when a player connects.
+config.xpLeveling = {
+    ["enabled"] = true,
+    ["base xp to level"] = 1000,
+    ["xp per level"] = 250,
+    ["skill points per level"] = 10,
+    ["xp per skill level equivalent"] = 50,
+    ["xp gain multiplier"] = 1.0,
+    ["kill base xp"] = 20,
+    ["kill xp per victim level"] = 20,
+    ["quest base xp"] = 125,
+    ["quest xp per stage"] = 30,
+    ["location discovery xp"] = 25,
+    ["skill book xp"] = 25,
+    ["lore book xp"] = 5,
+    ["death xp loss fraction"] = 0.20,
+    ["attribute progress major"] = 0.30,
+    ["attribute progress minor"] = 0.15,
+    ["attribute progress misc"] = 0.05,
+    ["attribute specialization multiplier"] = 1.25,
+    ["attribute progress multiplier"] = 1.0
+}
+
 -- ArenaMP FIX26 combat AI. Keep these [Game] values identical on every client
 -- so an authority handoff cannot change how the same NPC chooses attacks/spells.
 config.arenaNpcsUseBestAttack = true
@@ -351,7 +375,7 @@ local function setGameSetting(name, value)
     table.insert(config.gameSettings, { name = name, value = value })
 end
 
--- ID_GAME_SETTINGS carries arbitrary string keys. Protocol 809 clients route
+-- ID_GAME_SETTINGS carries arbitrary string keys. Protocol 807 clients route
 -- keys in this form to the requested Settings::Manager category, letting the
 -- server authoritatively configure gameplay categories beyond [Game].
 local function setCategorySetting(category, name, value)
@@ -385,6 +409,10 @@ setGameSetting("npcs use best attack", config.arenaNpcsUseBestAttack)
 setGameSetting("combat magic bias", config.arenaCombatMagicBias)
 setGameSetting("combat heal threshold", config.arenaCombatHealThreshold)
 setGameSetting("friendly fire mode", config.friendlyFireMode)
+
+for name, value in pairs(config.xpLeveling) do
+    setCategorySetting("XP Leveling", name, value)
+end
 
 for name, value in pairs(config.equipmentRequirements) do
     setCategorySetting("Equipment Requirements", name, value)
@@ -553,6 +581,21 @@ config.synchronizedClientScriptIds = {
 -- "default" keeps the client hardcoded exterior cell 0, -7.
 -- Other examples: "0, 0", "Balmora", "Balmora, Guild of Mages".
 config.startLocation = "Seyda Neen"
+
+-- Per-player persistent interior instances. The first entry makes Caius Cosades'
+-- house private for every account while keeping the original interior as the
+-- template. Destination overrides route normal doors directly to the player's
+-- own copy; eventHandler also catches coc/script/admin teleports as a fallback.
+config.privateCellInstances = {
+    caiusHouse = {
+        enabled = true,
+        baseCellDescription = "Balmora, Caius Cosades' House",
+        instanceSuffix = " - Instance for ",
+        neverReset = true,
+        noticeKey = "private_caius_instance_notice",
+        noticeEveryEntry = false
+    }
+}
 
 -- Whether the instanced spawn should be used instead of the noninstanced one
 config.useInstancedSpawn = true

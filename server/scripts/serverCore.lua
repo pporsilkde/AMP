@@ -40,6 +40,10 @@ menuHelper = require("menuHelper")
 require("defaultCommands")
 coreChat = require("coreChat")
 require("customScripts")
+-- ArenaMP C19: core cell reset helper now lives in the main scripts folder.
+-- Lua require caching keeps this safe when an older customScripts.lua still
+-- loads custom.periodicCellResets through the compatibility shim.
+require("resetHelrer")
 
 Database = nil
 Player = nil

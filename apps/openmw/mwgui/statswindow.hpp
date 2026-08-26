@@ -48,6 +48,7 @@ namespace MWGui
 
             void onWindowResize(MyGUI::Window* window);
             void onMouseWheel(MyGUI::Widget* _sender, int _rel);
+            void onSkillDoubleClicked(MyGUI::Widget* sender);
 
             MyGUI::Widget* mLeftPane;
             MyGUI::Widget* mRightPane;

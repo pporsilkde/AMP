@@ -71,9 +71,23 @@ packetReader.GetPlayerPacketTables = function(pid, packetType)
             }
         end
     elseif packetType == "PlayerLevel" then
+        local xpAttributeProgress = {}
+        for attributeIndex = 0, tes3mp.GetAttributeCount() - 1 do
+            xpAttributeProgress[attributeIndex + 1] = tes3mp.GetXpAttributeProgress(pid, attributeIndex)
+        end
+
+        local xpRewardKeys = {}
+        for index = 0, tes3mp.GetXpRewardKeyCount(pid) - 1 do
+            table.insert(xpRewardKeys, tes3mp.GetXpRewardKey(pid, index))
+        end
+
         packetTable.stats = {
             level = tes3mp.GetLevel(pid),
-            levelProgress = tes3mp.GetLevelProgress(pid)
+            levelProgress = tes3mp.GetLevelProgress(pid),
+            experience = tes3mp.GetExperience(pid),
+            skillPoints = tes3mp.GetSkillPoints(pid),
+            xpAttributeProgress = xpAttributeProgress,
+            xpRewardKeys = xpRewardKeys
         }
     elseif packetType == "PlayerShapeshift" then
         packetTable.shapeshift = {

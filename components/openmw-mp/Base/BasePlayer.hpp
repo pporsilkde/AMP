@@ -243,6 +243,8 @@ namespace mwmp
         ESM::Cell cell;
         ESM::NPC npc;
         ESM::NpcStats npcStats;
+        // PLAYER_LEVEL only carries the full one-time XP reward-key set when it changed.
+        bool xpRewardKeysChanged = false;
         ESM::Creature creature;
         ESM::CreatureStats creatureStats;
         ESM::Class charClass;

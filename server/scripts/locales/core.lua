@@ -473,6 +473,8 @@ return {
         friendly_fire_disabled = "Friendly fire is disabled.",
         friendly_fire_enabled = "Friendly fire is enabled.",
         friendly_fire_group = "Friendly fire is blocked between group allies.",
+        private_caius_instance_notice = "This is your private instance of Caius Cosades' house.\n" ..
+            "Other players have their own separate copy. This cell is excluded from the hourly reset.",
         player_joined = color.PaleGreen .. "{name} joined the server.\n" .. color.Default,
         player_left = color.DarkSalmon .. "{name} left the server.\n" .. color.Default
     },
@@ -498,6 +500,8 @@ return {
         friendly_fire_disabled = "Дружественный огонь отключён.",
         friendly_fire_enabled = "Дружественный огонь включён.",
         friendly_fire_group = "Дружественный огонь между союзниками группы заблокирован.",
+        private_caius_instance_notice = "Это ваш личный инстанс дома Кая Косадеса.\n" ..
+            "У каждого игрока своя отдельная копия. Эта ячейка исключена из ежечасного сброса.",
         player_joined = color.PaleGreen .. "{name} зашёл(ла) на сервер.\n" .. color.Default,
         player_left = color.DarkSalmon .. "{name} покинул(а) сервер.\n" .. color.Default
     },

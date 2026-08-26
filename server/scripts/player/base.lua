@@ -2,6 +2,7 @@ require("config")
 require("patterns")
 stateHelper = require("stateHelper")
 tableHelper = require("tableHelper")
+local privateCellInstances = require("privateCellInstances")
 local BasePlayer = class("BasePlayer")
 
 function BasePlayer:__init(pid, playerName)
@@ -51,6 +52,10 @@ function BasePlayer:__init(pid, playerName)
         stats = {
             level = 1,
             levelProgress = 0,
+            experience = 0,
+            skillPoints = 0,
+            xpAttributeProgress = {0, 0, 0, 0, 0, 0, 0, 0},
+            xpRewardKeys = {},
             healthBase = 1,
             healthCurrent = 1,
             magickaBase = 1,
@@ -324,13 +329,24 @@ function BasePlayer:FinishLogin()
         self:LoadClientScriptLocals()
         -- End of AMP addition
 
+        local privateOverridesChanged = privateCellInstances.EnsurePlayerDestinationOverrides(self)
+        local privateLocationChanged = privateCellInstances.NormalizeSavedLocation(self)
+
         self:LoadDestinationOverrides()
         WorldInstance:LoadDestinationOverrides(self.pid)
+        -- WorldInstance reloads the native override store, so personal mappings
+        -- are appended last and therefore remain authoritative for this client.
+        privateCellInstances.ApplyDestinationOverrides(self.pid, self)
 
         self:LoadAllies()
         self:LoadCell()
 
+        if privateOverridesChanged or privateLocationChanged then
+            self:QuicksaveToDrive()
+        end
+
         self.loggedIn = true
+        privateCellInstances.NotifyIfInside(self)
 
         -- Publish the restored race/head/hair only after authentication and the
         -- account character snapshot have been fully loaded.
@@ -363,6 +379,11 @@ function BasePlayer:EndCharGen()
 
     WorldInstance:LoadTime(self.pid, false)
     WorldInstance:LoadWeather(self.pid, false, true)
+
+    if privateCellInstances.EnsurePlayerDestinationOverrides(self) then
+        self:QuicksaveToDrive()
+    end
+    privateCellInstances.ApplyDestinationOverrides(self.pid, self)
 
     local spawnUsed
 
@@ -563,6 +584,22 @@ function BasePlayer:ProcessDeath()
 
     -- Clear this player's active spell effects
     self.data.spellsActive = {}
+
+    -- ArenaMP XP leveling death penalty is authoritative on the server.
+    -- It only removes progress inside the current level; earned levels and SP stay intact.
+    local xpLossFraction = 0.20
+    if config.xpLeveling ~= nil and config.xpLeveling["death xp loss fraction"] ~= nil then
+        xpLossFraction = config.xpLeveling["death xp loss fraction"]
+    end
+    xpLossFraction = math.max(0, math.min(1, xpLossFraction))
+    self.data.stats.experience = math.max(0, self.data.stats.experience or 0)
+    local lostXp = self.data.stats.experience * xpLossFraction
+    if lostXp > 0 then
+        self.data.stats.experience = self.data.stats.experience - lostXp
+        tes3mp.SetExperience(self.pid, self.data.stats.experience)
+        tes3mp.SendLevel(self.pid)
+        tes3mp.SendMessage(self.pid, string.format("Death: -%.1f XP\n", lostXp), false)
+    end
 
     local deathReason = "committed suicide"
 
@@ -947,15 +984,32 @@ function BasePlayer:LoadLevel()
 
     if self.data.stats.level == nil then self.data.stats.level = 1 end
     if self.data.stats.levelProgress == nil then self.data.stats.levelProgress = 0 end
+    if self.data.stats.experience == nil then self.data.stats.experience = 0 end
+    if self.data.stats.skillPoints == nil then self.data.stats.skillPoints = 0 end
+    if self.data.stats.xpAttributeProgress == nil then self.data.stats.xpAttributeProgress = {0, 0, 0, 0, 0, 0, 0, 0} end
+    if self.data.stats.xpRewardKeys == nil then self.data.stats.xpRewardKeys = {} end
 
     tes3mp.SetLevel(self.pid, self.data.stats.level)
     tes3mp.SetLevelProgress(self.pid, self.data.stats.levelProgress)
+    tes3mp.SetExperience(self.pid, self.data.stats.experience)
+    tes3mp.SetSkillPoints(self.pid, self.data.stats.skillPoints)
+    for attributeIndex = 0, tes3mp.GetAttributeCount() - 1 do
+        tes3mp.SetXpAttributeProgress(self.pid, attributeIndex, self.data.stats.xpAttributeProgress[attributeIndex + 1] or 0)
+    end
+    tes3mp.ClearXpRewardKeys(self.pid)
+    for _, key in ipairs(self.data.stats.xpRewardKeys) do
+        tes3mp.AddXpRewardKey(self.pid, key)
+    end
     tes3mp.SendLevel(self.pid)
 end
 
 function BasePlayer:SaveLevel(playerPacket)
     self.data.stats.level = playerPacket.stats.level
     self.data.stats.levelProgress = playerPacket.stats.levelProgress
+    self.data.stats.experience = math.max(0, playerPacket.stats.experience or 0)
+    self.data.stats.skillPoints = math.max(0, playerPacket.stats.skillPoints or 0)
+    self.data.stats.xpAttributeProgress = playerPacket.stats.xpAttributeProgress or {0, 0, 0, 0, 0, 0, 0, 0}
+    self.data.stats.xpRewardKeys = playerPacket.stats.xpRewardKeys or {}
 end
 
 function BasePlayer:LoadShapeshift()

@@ -1,5 +1,6 @@
 #include "statswindow.hpp"
 
+#include <cmath>
 #include <MyGUI_Window.h>
 #include <MyGUI_ScrollView.h>
 #include <MyGUI_ProgressBar.h>
@@ -20,6 +21,7 @@
 
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/xpleveling.hpp"
 
 #include "tooltips.hpp"
 
@@ -334,6 +336,17 @@ namespace MWGui
     void setSkillProgress(MyGUI::Widget* w, float progress, int skillId)
     {
         MWWorld::Ptr player = MWMechanics::getPlayer();
+
+        if (MWMechanics::XPLeveling::isEnabled())
+        {
+            const float base = player.getClass().getNpcStats(player).getSkill(skillId).getBase();
+            const int cost = MWMechanics::XPLeveling::getSkillPointCost(base);
+            w->setUserString("Caption_SkillProgressText",
+                base >= 100.f ? "MAX" : "Cost: " + MyGUI::utility::toString(cost) + " SP");
+            w->setUserString("RangePosition_SkillProgress", "0");
+            return;
+        }
+
         const MWWorld::ESMStore &esmStore =
             MWBase::Environment::get().getWorld()->getStore();
 
@@ -425,29 +438,48 @@ namespace MWGui
         MWWorld::Ptr player = MWMechanics::getPlayer();
         const MWMechanics::NpcStats &PCstats = player.getClass().getNpcStats(player);
 
-        // level progress
-        MyGUI::Widget* levelWidget;
+        // Level progress. XP Leveling completely replaces the vanilla sleep-based
+        // LPRO counter while keeping the same tooltip/progress-bar layout.
+        MyGUI::Widget* levelWidget = nullptr;
+        const bool xpLeveling = MWMechanics::XPLeveling::isEnabled();
+        const int levelProgress = xpLeveling
+            ? static_cast<int>(std::floor(std::max(0.f, PCstats.getExperience())))
+            : PCstats.getLevelProgress();
+        const int levelMaximum = xpLeveling
+            ? std::max(1, static_cast<int>(std::ceil(MWMechanics::XPLeveling::getXpForNextLevel(player))))
+            : MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>()
+                .find("iLevelUpTotal")->mValue.getInteger();
+
         for (int i=0; i<2; ++i)
         {
-            int max = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("iLevelUpTotal")->mValue.getInteger();
             getWidget(levelWidget, i==0 ? "Level_str" : "LevelText");
+            levelWidget->setUserString("RangePosition_LevelProgress", MyGUI::utility::toString(std::min(levelProgress, levelMaximum)));
+            levelWidget->setUserString("Range_LevelProgress", MyGUI::utility::toString(levelMaximum));
+            levelWidget->setUserString("Caption_LevelProgressText", MyGUI::utility::toString(levelProgress) + "/"
+                                       + MyGUI::utility::toString(levelMaximum));
+        }
 
-            levelWidget->setUserString("RangePosition_LevelProgress", MyGUI::utility::toString(PCstats.getLevelProgress()));
-            levelWidget->setUserString("Range_LevelProgress", MyGUI::utility::toString(max));
-            levelWidget->setUserString("Caption_LevelProgressText", MyGUI::utility::toString(PCstats.getLevelProgress()) + "/"
-                                       + MyGUI::utility::toString(max));
-        }
         std::stringstream detail;
-        for (int attribute = 0; attribute < ESM::Attribute::Length; ++attribute)
+        if (xpLeveling)
         {
-            float mult = PCstats.getLevelupAttributeMultiplier(attribute);
-            mult = std::min(mult, 100 - PCstats.getAttribute(attribute).getBase());
-            if (mult > 1)
-                detail << (detail.str().empty() ? "" : "\n") << "#{"
-                << MyGUI::TextIterator::toTagsString(ESM::Attribute::sGmstAttributeIds[attribute])
-                << "} x" << MyGUI::utility::toString(mult);
+            detail << "XP " << levelProgress << "/" << levelMaximum
+                   << "\nSkill Points: " << PCstats.getSkillPoints()
+                   << "\nDouble-click a skill to improve it";
         }
-        levelWidget->setUserString("Caption_LevelDetailText", MyGUI::LanguageManager::getInstance().replaceTags(detail.str()));
+        else
+        {
+            for (int attribute = 0; attribute < ESM::Attribute::Length; ++attribute)
+            {
+                float mult = PCstats.getLevelupAttributeMultiplier(attribute);
+                mult = std::min(mult, 100 - PCstats.getAttribute(attribute).getBase());
+                if (mult > 1)
+                    detail << (detail.str().empty() ? "" : "\n") << "#{"
+                    << MyGUI::TextIterator::toTagsString(ESM::Attribute::sGmstAttributeIds[attribute])
+                    << "} x" << MyGUI::utility::toString(mult);
+            }
+        }
+        if (levelWidget)
+            levelWidget->setUserString("Caption_LevelDetailText", MyGUI::LanguageManager::getInstance().replaceTags(detail.str()));
 
         setFactions(PCstats.getFactionRanks());
         setExpelled(PCstats.getExpelled ());
@@ -488,6 +520,22 @@ namespace MWGui
             mBirthSignId = signId;
             mChanged = true;
         }
+    }
+
+    void StatsWindow::onSkillDoubleClicked(MyGUI::Widget* sender)
+    {
+        if (!sender || !MWMechanics::XPLeveling::isEnabled())
+            return;
+
+        const std::string value = sender->getUserString("ArenaXP_SkillId");
+        if (value.empty())
+            return;
+
+        std::istringstream stream(value);
+        int skillId = -1;
+        stream >> skillId;
+        if (!stream.fail() && MWMechanics::XPLeveling::spendSkillPoints(MWMechanics::getPlayer(), skillId))
+            mChanged = true;
     }
 
     void StatsWindow::addSeparator(MyGUI::IntCoord &coord1, MyGUI::IntCoord &coord2)
@@ -611,6 +659,14 @@ namespace MWGui
                 mSkillWidgets[mSkillWidgets.size()-1-i]->setUserString("Caption_SkillAttribute", "#{sGoverningAttribute}: #{" + attr->mName + "}");
                 mSkillWidgets[mSkillWidgets.size()-1-i]->setUserString("ImageTexture_SkillImage", icon);
                 mSkillWidgets[mSkillWidgets.size()-1-i]->setUserString("Range_SkillProgress", "100");
+
+                if (MWMechanics::XPLeveling::isEnabled())
+                {
+                    mSkillWidgets[mSkillWidgets.size()-1-i]->setUserString("ArenaXP_SkillId", MyGUI::utility::toString(skillId));
+                    mSkillWidgets[mSkillWidgets.size()-1-i]->setNeedMouseFocus(true);
+                    mSkillWidgets[mSkillWidgets.size()-1-i]->eventMouseButtonDoubleClick
+                        += MyGUI::newDelegate(this, &StatsWindow::onSkillDoubleClicked);
+                }
             }
 
             setValue(static_cast<ESM::Skill::SkillEnum>(skillId), mSkillValues.find(skillId)->second);

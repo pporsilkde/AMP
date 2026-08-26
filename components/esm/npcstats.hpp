@@ -36,6 +36,13 @@ namespace ESM
         int mReputation;
         int mWerewolfKills;
         int mLevelProgress;
+        // ArenaMP native XP leveling state. Version 0 means a pre-XP save and
+        // allows the runtime to perform a one-time migration from LPRO.
+        int mXpVersion = 0;
+        float mExperience = 0.f;
+        int mSkillPoints = 0;
+        float mXpAttributeProgress[8]{};
+        std::vector<std::string> mXpRewardKeys;
         int mSkillIncrease[8];
         int mSpecIncreases[3];
         std::vector<std::string> mUsedIds; // lower case IDs

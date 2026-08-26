@@ -116,4 +116,4 @@ localization.RegisterDictionary("example", {
 localization.Message(pid, "example", "greeting", { name = Players[pid].name })
 ```
 
-The multiplayer protocol is `806`; client and server must be updated together.
+The multiplayer protocol is `807`; client and server must be updated together.

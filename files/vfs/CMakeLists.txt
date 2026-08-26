@@ -36,7 +36,6 @@ file(GLOB_RECURSE BUILTIN_VFS_FILES
     textures/ui/arenamw/*.png
     l10n/arenamp/*.ini
     icons/inventoryextender/*.dds
-    icons/questman/*.dds
 )
 
 

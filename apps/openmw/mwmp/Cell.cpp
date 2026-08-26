@@ -7,6 +7,8 @@
 #include "../mwworld/livecellref.hpp"
 #include "../mwworld/worldimp.hpp"
 
+#include "../mwmechanics/xpleveling.hpp"
+
 #include "Cell.hpp"
 #include "Main.hpp"
 #include "Networking.hpp"
@@ -244,8 +246,20 @@ void Cell::readDeath(ActorList& actorList)
         if (dedicatedActors.count(mapIndex) > 0)
         {
             DedicatedActor *actor = dedicatedActors[mapIndex];
+            const bool wasAlreadyDead = actor->creatureStats.mDead;
             actor->creatureStats.mDead = true;
             actor->creatureStats.mDynamic[0].mCurrent = 0;
+
+            // Actor authority is not necessarily the player who landed the kill.
+            // The authority already awards its own local kill through actorKilled();
+            // all other clients receive ActorDeath, so the killer's client can award
+            // the same data-driven XP when its GUID matches the packet killer.
+            LocalPlayer* localPlayer = Main::get().getLocalPlayer();
+            if (!wasAlreadyDead && localPlayer != nullptr && baseActor.killer.isPlayer
+                && baseActor.killer.guid == localPlayer->guid)
+            {
+                MWMechanics::XPLeveling::awardKill(actor->getPtr(), localPlayer->getPlayerPtr());
+            }
 
             Main::get().getCellController()->setQueuedDeathState(actor->getPtr(), baseActor.deathState);
 

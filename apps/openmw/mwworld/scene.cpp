@@ -19,6 +19,7 @@
 #include <components/detournavigator/navigator.hpp>
 #include <components/detournavigator/debug.hpp>
 #include <components/misc/convert.hpp>
+#include <components/misc/stringops.hpp>
 
 /*
     Start of tes3mp addition
@@ -36,6 +37,8 @@
 #include "../mwbase/soundmanager.hpp"
 #include "../mwbase/mechanicsmanager.hpp"
 #include "../mwbase/windowmanager.hpp"
+
+#include "../mwmechanics/xpleveling.hpp"
 
 #include "../mwrender/renderingmanager.hpp"
 #include "../mwrender/landmanager.hpp"
@@ -56,6 +59,25 @@
 namespace
 {
     using MWWorld::RotationOrder;
+
+    void awardCellDiscovery(MWWorld::CellStore* cell)
+    {
+        if (!cell || !MWMechanics::XPLeveling::isEnabled())
+            return;
+
+        const ESM::Cell* record = cell->getCell();
+        if (!record || record->mName.empty())
+            return; // unnamed wilderness is not a discoverable location
+
+        // Named exterior settlements often span several grid cells. Keying by
+        // the data-defined name prevents multiple rewards for walking across the
+        // same settlement, without maintaining a location-ID whitelist.
+        const std::string key = std::string(record->isExterior() ? "e:" : "i:")
+            + Misc::StringUtils::lowerCase(record->mName);
+
+        MWMechanics::XPLeveling::awardLocationDiscovery(
+            MWBase::Environment::get().getWorld()->getPlayerPtr(), key, record->mName);
+    }
 
     osg::Quat makeActorOsgQuat(const ESM::Position& position)
     {
@@ -761,6 +783,7 @@ namespace MWWorld
 
     void Scene::changePlayerCell(CellStore *cell, const ESM::Position &pos, bool adjustPlayerPos)
     {
+        CellStore* previousCell = mCurrentCell;
         mCurrentCell = cell;
 
         mRendering.enableTerrain(cell->isExterior());
@@ -791,6 +814,12 @@ namespace MWWorld
         world->adjustSky();
 
         mLastPlayerPos = player.getRefData().getPosition().asVec3();
+
+        // The pointer changes on real exterior crossings as well as teleports.
+        // Doing discovery here therefore covers every cell transition once,
+        // while the null previous cell suppresses free XP on initial load.
+        if (previousCell && previousCell != cell)
+            awardCellDiscovery(cell);
     }
 
     Scene::Scene (MWRender::RenderingManager& rendering, MWPhysics::PhysicsSystem *physics,

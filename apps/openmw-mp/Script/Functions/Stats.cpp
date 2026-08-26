@@ -1,6 +1,7 @@
 #include "Stats.hpp"
 
 #include <iostream>
+#include <algorithm>
 
 #include <components/esm/attr.hpp>
 #include <components/esm/loadskil.hpp>
@@ -142,6 +143,45 @@ int StatsFunctions::GetLevelProgress(unsigned short pid) noexcept
     GET_PLAYER(pid, player, 0);
 
     return player->npcStats.mLevelProgress;
+}
+
+double StatsFunctions::GetExperience(unsigned short pid) noexcept
+{
+    Player *player;
+    GET_PLAYER(pid, player, 0.0);
+    return player->npcStats.mExperience;
+}
+
+int StatsFunctions::GetSkillPoints(unsigned short pid) noexcept
+{
+    Player *player;
+    GET_PLAYER(pid, player, 0);
+    return player->npcStats.mSkillPoints;
+}
+
+double StatsFunctions::GetXpAttributeProgress(unsigned short pid, unsigned short attributeId) noexcept
+{
+    Player *player;
+    GET_PLAYER(pid, player, 0.0);
+    if (attributeId >= 8)
+        return 0.0;
+    return player->npcStats.mXpAttributeProgress[attributeId];
+}
+
+int StatsFunctions::GetXpRewardKeyCount(unsigned short pid) noexcept
+{
+    Player *player;
+    GET_PLAYER(pid, player, 0);
+    return static_cast<int>(player->npcStats.mXpRewardKeys.size());
+}
+
+const char* StatsFunctions::GetXpRewardKey(unsigned short pid, unsigned int index) noexcept
+{
+    Player *player;
+    GET_PLAYER(pid, player, "");
+    if (index >= player->npcStats.mXpRewardKeys.size())
+        return "";
+    return player->npcStats.mXpRewardKeys[index].c_str();
 }
 
 double StatsFunctions::GetHealthBase(unsigned short pid) noexcept
@@ -387,6 +427,52 @@ void StatsFunctions::SetLevelProgress(unsigned short pid, int value) noexcept
     GET_PLAYER(pid, player, );
 
     player->npcStats.mLevelProgress = value;
+}
+
+void StatsFunctions::SetExperience(unsigned short pid, double value) noexcept
+{
+    Player *player;
+    GET_PLAYER(pid, player, );
+    player->npcStats.mXpVersion = 1;
+    player->npcStats.mExperience = static_cast<float>(std::max(0.0, value));
+}
+
+void StatsFunctions::SetSkillPoints(unsigned short pid, int value) noexcept
+{
+    Player *player;
+    GET_PLAYER(pid, player, );
+    player->npcStats.mSkillPoints = std::max(0, value);
+}
+
+void StatsFunctions::SetXpAttributeProgress(unsigned short pid, unsigned short attributeId, double value) noexcept
+{
+    Player *player;
+    GET_PLAYER(pid, player, );
+    if (attributeId < 8)
+        player->npcStats.mXpAttributeProgress[attributeId] = static_cast<float>(std::max(0.0, value));
+}
+
+void StatsFunctions::ClearXpRewardKeys(unsigned short pid) noexcept
+{
+    Player *player;
+    GET_PLAYER(pid, player, );
+    player->npcStats.mXpRewardKeys.clear();
+    player->xpRewardKeysChanged = true;
+}
+
+void StatsFunctions::AddXpRewardKey(unsigned short pid, const char* key) noexcept
+{
+    Player *player;
+    GET_PLAYER(pid, player, );
+    if (!key || !*key || player->npcStats.mXpRewardKeys.size() >= 16384)
+        return;
+    const std::string value(key);
+    if (std::find(player->npcStats.mXpRewardKeys.begin(), player->npcStats.mXpRewardKeys.end(), value)
+        == player->npcStats.mXpRewardKeys.end())
+    {
+        player->npcStats.mXpRewardKeys.push_back(value);
+        player->xpRewardKeysChanged = true;
+    }
 }
 
 void StatsFunctions::SetHealthBase(unsigned short pid, double value) noexcept
@@ -672,6 +758,7 @@ void StatsFunctions::SendLevel(unsigned short pid) noexcept
     
     packet->Send(false);
     packet->Send(true);
+    player->xpRewardKeysChanged = false;
 }
 
 void StatsFunctions::SendBounty(unsigned short pid) noexcept

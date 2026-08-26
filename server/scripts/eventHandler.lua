@@ -1,6 +1,7 @@
 local eventHandler = {}
 
 commandHandler = require("commandHandler")
+local privateCellInstances = require("privateCellInstances")
 
 local consoleKickMessage = " has been kicked for using the console despite not having the permission to do so.\n"
 
@@ -467,6 +468,11 @@ eventHandler.OnPlayerConnect = function(pid, playerName)
             tes3mp.SendRecordDynamic(pid, false, false)
         end
 
+        -- Personal interiors are also dynamic CELL records based on their vanilla
+        -- originals. Send them before login/load so old saves can safely be
+        -- normalized into a personal cell during FinishLogin.
+        privateCellInstances.SendCellRecords(pid, playerName)
+
         -- Load high priority permanent records
         for _, storeType in ipairs(config.recordStoreLoadOrder[1]) do
             local recordStore = RecordStores[storeType]
@@ -873,7 +879,27 @@ eventHandler.OnPlayerSkill = function(pid)
 end
 
 eventHandler.OnPlayerLevel = function(pid)
-    eventHandler.OnGenericPlayerEvent(pid, "PlayerLevel")
+    if Players[pid] ~= nil and Players[pid]:IsLoggedIn() then
+        local playerPacket = packetReader.GetPlayerPacketTables(pid, "PlayerLevel")
+        local eventStatus = customEventHooks.triggerValidators("OnPlayerLevel", {pid, playerPacket})
+
+        if eventStatus.validDefaultHandler then
+            Players[pid]:SaveLevel(playerPacket)
+        end
+
+        customEventHooks.triggerHandlers("OnPlayerLevel", eventStatus, {pid, playerPacket})
+
+        -- Player progression is always confirmed by the server. Accepted state
+        -- is echoed without rebuilding the reward-key list; rejected state is
+        -- restored from the server-owned profile and sent in full.
+        if Players[pid] ~= nil and Players[pid]:IsLoggedIn() then
+            if eventStatus.validDefaultHandler then
+                tes3mp.SendLevel(pid)
+            else
+                Players[pid]:LoadLevel()
+            end
+        end
+    end
 end
 
 eventHandler.OnPlayerShapeshift = function(pid)
@@ -921,6 +947,14 @@ eventHandler.OnPlayerCellChange = function(pid)
 
         local playerPacket = packetReader.GetPlayerPacketTables(pid, "PlayerCellChange")
         local currentCellDescription = playerPacket.location.cell
+
+        -- Normal doors are already redirected client-side through a per-player
+        -- DestinationOverride. This fallback catches coc, scripts, admin moves,
+        -- old saves and attempts to enter another player's personal instance.
+        local wasPrivateRedirect = privateCellInstances.RedirectCellChange(pid, Players[pid], playerPacket)
+        if wasPrivateRedirect then
+            return
+        end
 
         if not tableHelper.containsValue(config.forbiddenCells, currentCellDescription) then
             local previousCellDescription = Players[pid].data.location.cell
@@ -986,6 +1020,10 @@ eventHandler.OnPlayerCellChange = function(pid)
             
             customEventHooks.triggerHandlers("OnPlayerCellChange", eventStatus,
                 {pid, playerPacket, previousCellDescription})
+
+            if eventStatus.validDefaultHandler then
+                privateCellInstances.NotifyIfInside(Players[pid], currentCellDescription)
+            end
         else
             Players[pid].data.location.posX = tes3mp.GetPreviousCellPosX(pid)
             Players[pid].data.location.posY = tes3mp.GetPreviousCellPosY(pid)
