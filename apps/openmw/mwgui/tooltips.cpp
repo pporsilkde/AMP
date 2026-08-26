@@ -356,24 +356,17 @@ namespace MWGui
 
     void ToolTips::position(MyGUI::IntPoint& position, MyGUI::IntSize size, MyGUI::IntSize viewportSize)
     {
-        // C31/C25: GUI tooltips belong to the hovered mouse position. The old
-        // screen-percentage offset could move a small/collapsed layout far away
-        // from the skill being hovered. Keep a predictable cursor offset and
-        // flip to the opposite side only when the tooltip would leave the screen.
-        const MyGUI::IntPoint mouse = MyGUI::InputManager::getInstance().getMousePosition();
-        constexpr int horizontalGap = 16;
-        constexpr int verticalGap = 24;
+        position += MyGUI::IntPoint(0, 32)
+        - MyGUI::IntPoint(static_cast<int>(MyGUI::InputManager::getInstance().getMousePosition().left / float(viewportSize.width) * size.width), 0);
 
-        position.left = mouse.left + horizontalGap;
-        position.top = mouse.top + verticalGap;
-
-        if (position.left + size.width > viewportSize.width)
-            position.left = mouse.left - size.width - horizontalGap;
-        if (position.top + size.height > viewportSize.height)
-            position.top = mouse.top - size.height - 8;
-
-        position.left = std::max(0, std::min(position.left, std::max(0, viewportSize.width - size.width)));
-        position.top = std::max(0, std::min(position.top, std::max(0, viewportSize.height - size.height)));
+        if ((position.left + size.width) > viewportSize.width)
+        {
+            position.left = viewportSize.width - size.width;
+        }
+        if ((position.top + size.height) > viewportSize.height)
+        {
+            position.top = MyGUI::InputManager::getInstance().getMousePosition().top - size.height - 8;
+        }
     }
 
     void ToolTips::clear()

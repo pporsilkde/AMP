@@ -159,6 +159,12 @@ function BasePlayer:__init(pid, playerName)
     self.consoleCommandsQueued = {}
 
     self.hasFinishedInitialTeleportation = false
+
+    -- ArenaMP C26: protect persisted XP/SP from stale zero PLAYER_LEVEL packets
+    -- that can arrive during the first moments of a reconnect, and debounce
+    -- profile writes caused by frequent XP awards.
+    self.xpLoginGuardUntil = 0
+    self.xpLastQuicksaveTime = 0
 end
 
 function BasePlayer:Destroy()
@@ -1004,16 +1010,99 @@ function BasePlayer:LoadLevel()
     for _, key in ipairs(self.data.stats.xpRewardKeys) do
         tes3mp.AddXpRewardKey(self.pid, key)
     end
+
+    -- During login the client may still have the temporary zeroed local stats
+    -- from before the server profile was applied. Keep a short guard so such a
+    -- stale packet cannot overwrite the persistent progression we are sending.
+    self.xpLoginGuardUntil = os.time() + 8
     tes3mp.SendLevel(self.pid)
 end
 
+function BasePlayer:HasPersistentXpProgress()
+    if self.data == nil or self.data.stats == nil then
+        return false
+    end
+
+    local stats = self.data.stats
+    if (stats.experience or 0) > 0.001 or (stats.skillPoints or 0) > 0 then
+        return true
+    end
+
+    if stats.xpAttributeProgress ~= nil then
+        for _, value in ipairs(stats.xpAttributeProgress) do
+            if (value or 0) > 0.001 then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+function BasePlayer:IsStaleEmptyXpPacket(playerPacket)
+    if playerPacket == nil or playerPacket.stats == nil then
+        return false
+    end
+
+    if os.time() > (self.xpLoginGuardUntil or 0) or not self:HasPersistentXpProgress() then
+        return false
+    end
+
+    local stats = playerPacket.stats
+    if (stats.experience or 0) > 0.001 or (stats.skillPoints or 0) > 0 then
+        return false
+    end
+
+    if stats.xpAttributeProgress ~= nil then
+        for _, value in ipairs(stats.xpAttributeProgress) do
+            if (value or 0) > 0.001 then
+                return false
+            end
+        end
+    end
+
+    return true
+end
+
+function BasePlayer:PersistXpProgress(force)
+    if not self.hasAccount then
+        return
+    end
+
+    local now = os.time()
+    if not force and now - (self.xpLastQuicksaveTime or 0) < 5 then
+        return
+    end
+
+    -- JSON players have a fast minimized quicksave. Fall back to the generic
+    -- SaveToDrive implementation for alternate backends.
+    if self.QuicksaveToDrive ~= nil then
+        self:QuicksaveToDrive()
+    else
+        self:SaveToDrive()
+    end
+    self.xpLastQuicksaveTime = now
+end
+
 function BasePlayer:SaveLevel(playerPacket)
+    local oldLevel = self.data.stats.level or 1
+    local oldSkillPoints = self.data.stats.skillPoints or 0
+
+    -- A non-empty accepted packet proves the client has applied the server state.
+    self.xpLoginGuardUntil = 0
+
     self.data.stats.level = playerPacket.stats.level
     self.data.stats.levelProgress = playerPacket.stats.levelProgress
     self.data.stats.experience = math.max(0, playerPacket.stats.experience or 0)
     self.data.stats.skillPoints = math.max(0, playerPacket.stats.skillPoints or 0)
     self.data.stats.xpAttributeProgress = playerPacket.stats.xpAttributeProgress or {0, 0, 0, 0, 0, 0, 0, 0}
     self.data.stats.xpRewardKeys = playerPacket.stats.xpRewardKeys or {}
+
+    -- Do not wait until disconnect to persist progression. XP packets can be
+    -- frequent, so ordinary gains are debounced to one write per 5 seconds;
+    -- level-ups and SP changes are persisted immediately.
+    local importantChange = oldLevel ~= self.data.stats.level or oldSkillPoints ~= self.data.stats.skillPoints
+    self:PersistXpProgress(importantChange)
 end
 
 function BasePlayer:LoadShapeshift()

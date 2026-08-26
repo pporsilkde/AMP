@@ -881,6 +881,18 @@ end
 eventHandler.OnPlayerLevel = function(pid)
     if Players[pid] ~= nil and Players[pid]:IsLoggedIn() then
         local playerPacket = packetReader.GetPlayerPacketTables(pid, "PlayerLevel")
+
+        -- ArenaMP C26: a reconnecting client can briefly emit the zeroed local
+        -- PLAYER_LEVEL state before the server-owned profile has settled. Never
+        -- allow that stale packet to erase persisted XP/SP/attribute progress.
+        if Players[pid]:IsStaleEmptyXpPacket(playerPacket) then
+            tes3mp.LogAppend(enumerations.log.WARN,
+                "[XP] Ignored stale empty PlayerLevel during login sync for " ..
+                logicHandler.GetChatName(pid))
+            Players[pid]:LoadLevel()
+            return
+        end
+
         local eventStatus = customEventHooks.triggerValidators("OnPlayerLevel", {pid, playerPacket})
 
         if eventStatus.validDefaultHandler then

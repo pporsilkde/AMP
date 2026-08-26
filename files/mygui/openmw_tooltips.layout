@@ -217,44 +217,36 @@
             </Widget>
         </Widget>
 
-        <!-- Skill tooltip (without progress bar).
-             C31/C25: give the layout a real width and stretch the description.
-             The old zero-width VBox could collapse to a tiny square and then be
-             positioned far from the hovered skill by the generic tooltip code. -->
-        <Widget type="VBox" skin="HUD_Box_NoTransp" position="0 0 446 52" align="Left Top" name="SkillNoProgressToolTip">
+        <!-- Skill tooltip (without progress bar) -->
+        <Widget type="VBox" skin="HUD_Box_NoTransp" position="0 0 0 52" align="Stretch" name="SkillNoProgressToolTip">
             <Property key="AutoResize" value="true"/>
             <Property key="Padding" value="8"/>
 
-            <Widget type="HBox" position="0 0 430 40" align="Left Top">
+            <Widget type="HBox">
                 <UserString key="HStretch" value="true"/>
                 <Property key="Spacing" value="8"/>
 
-                <Widget type="ImageBox" skin="ImageBox" position="0 0 32 32" align="Left Top" name="SkillNoProgressImage"/>
+                <Widget type="ImageBox" skin="ImageBox" position="8 8 32 32" align="Left Top" name="SkillNoProgressImage"/>
 
-                <Widget type="VBox" position="0 0 390 40" align="Left Top">
-                    <UserString key="HStretch" value="true"/>
-                    <Widget type="AutoSizedTextBox" skin="NormalText" position="0 0 390 16" align="Left Top" name="SkillNoProgressName">
+                <Widget type="VBox">
+                    <Widget type="AutoSizedEditBox" skin="NormalText" position="44 8 0 16" align="Left Top" name="SkillNoProgressName">
                         <Property key="TextAlign" value="Left"/>
                         <UserString key="HStretch" value="true"/>
                     </Widget>
 
-                    <Widget type="AutoSizedTextBox" skin="SandText" position="0 0 390 16" align="Left Top" name="SkillNoProgressAttribute">
+                    <Widget type="AutoSizedTextBox" skin="SandText" position="44 24 0 16" align="Left Top" name="SkillNoProgressAttribute">
                         <Property key="TextAlign" value="Left"/>
                         <UserString key="HStretch" value="true"/>
                     </Widget>
                 </Widget>
             </Widget>
 
-            <Widget type="Widget" skin="" position="0 0 430 2" align="Left Top">
-                <UserString key="HStretch" value="true"/>
-            </Widget>
+            <Widget type="Widget" skin="" position="0 0 0 2" align="Left Top" />
 
-            <Widget type="AutoSizedEditBox" skin="SandText" position="0 0 430 0" align="Left Top" name="SkillNoProgressDescription">
+            <Widget type="AutoSizedEditBox" skin="SandText" position="8 44 430 0" align="Left Top" name="SkillNoProgressDescription">
                 <Property key="MultiLine" value="true"/>
-                <Property key="Shrink" value="true"/>
                 <Property key="WordWrap" value="true"/>
                 <Property key="TextAlign" value="Left Top"/>
-                <UserString key="HStretch" value="true"/>
             </Widget>
         </Widget>
 
