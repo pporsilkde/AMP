@@ -1534,6 +1534,40 @@ namespace MWWorld
         return mDistanceToFacedObject;
    }
 
+    void World::suppressPhysicsGrabCollision(PhysicsObjectState& state)
+    {
+        state.mHadWorldCollision = false;
+        if (state.mPtr.isEmpty())
+            return;
+
+        const MWPhysics::Object* physicsObject = mPhysics->getObject(state.mPtr);
+        if (!physicsObject)
+            return;
+
+        state.mHadWorldCollision = true;
+        mShouldUpdateNavigator = mNavigator->removeObject(DetourNavigator::ObjectId(physicsObject))
+            || mShouldUpdateNavigator;
+        mPhysics->remove(state.mPtr);
+    }
+
+    void World::restorePhysicsGrabCollision(PhysicsObjectState& state)
+    {
+        if (!state.mHadWorldCollision || state.mPtr.isEmpty() || !state.mPtr.isInCell())
+            return;
+
+        if (!mPhysics->getObject(state.mPtr))
+        {
+            const std::string model = state.mPtr.getClass().getModel(state.mPtr);
+            if (!model.empty())
+                state.mPtr.getClass().insertObject(state.mPtr, model, *mPhysics);
+        }
+
+        if (const MWPhysics::Object* physicsObject = mPhysics->getObject(state.mPtr))
+            updateNavigatorObject(*physicsObject);
+
+        state.mHadWorldCollision = false;
+    }
+
     bool World::canPhysicsGrab(const MWWorld::ConstPtr& object) const
     {
         if (object.isEmpty() || !object.isInCell() || !object.getRefData().getBaseNode())
@@ -1714,9 +1748,10 @@ namespace MWWorld
         state->mSleepTimer = 0.f;
         state->mHadSurfaceContact = false;
         state->mGrabbed = true;
-        // Static/container/activator decor is exact placement geometry, not a
-        // gameplay rigid body. Normal inventory items keep the existing physics default.
-        state->mPhysicsOnRelease = !creativePlacementProp;
+        // X006 placement is deliberately kinematic for every supported object.
+        // Physics release was unreliable for furniture and made exact placement
+        // unpredictable, so placement now always commits the arranged transform.
+        state->mPhysicsOnRelease = false;
         state->mMoveMode = 0;
         state->mManualHoldOffset.set(0.f, 0.f, 0.f);
 
@@ -1724,6 +1759,10 @@ namespace MWWorld
             ? object.getRefData().getBaseNode()->getAttitude() : osg::Quat();
         state->mGrabStartOrigin = object.getRefData().getPosition().asVec3();
         state->mGrabStartRotation = rotation;
+
+        // Placement is render-visible but actor-ghosted. Bounds were captured
+        // before this call, so the held object no longer needs its own Bullet body.
+        suppressPhysicsGrabCollision(*state);
 
         // Resolve any pre-existing overlap before starting the hand spring. Every
         // held step can fall back to this most-recent safe transform if Bullet cannot
@@ -1959,6 +1998,9 @@ namespace MWWorld
             state.mLastSafeRotation = state.mPtr.getRefData().getBaseNode()
                 ? state.mPtr.getRefData().getBaseNode()->getAttitude() : osg::Quat();
 
+            // Re-enable world collision only after the accepted safe transform.
+            restorePhysicsGrabCollision(state);
+
             // ArenaMP: final static placement is immediately published to the
             // server/other peers; held movement remains throttled to 20 Hz.
             syncPhysicsObjectTransform(state.mPtr);
@@ -1971,19 +2013,10 @@ namespace MWWorld
 
     bool World::finishPhysicsGrab()
     {
-        for (const PhysicsObjectState& state : mPhysicsObjects)
-        {
-            if (!state.mGrabbed)
-                continue;
-
-            if (state.mPhysicsOnRelease)
-            {
-                releasePhysicsGrab();
-                return true;
-            }
-            return placePhysicsGrab();
-        }
-        return false;
+        // X006 has one deterministic completion path: exact kinematic placement.
+        // The older free-body release remains available internally for legacy
+        // physics objects, but placement never selects it.
+        return placePhysicsGrab();
     }
 
     void World::releasePhysicsGrab()
@@ -2062,67 +2095,74 @@ namespace MWWorld
             [](const PhysicsObjectState& state) { return state.mGrabbed; });
     }
 
-    void World::rotatePhysicsGrab(float rollInput, float pitchInput, float duration)
+    void World::rotatePhysicsGrab(float horizontalInput, float verticalInput, float duration)
     {
-        if (duration <= 0.f || (std::abs(rollInput) < 0.001f && std::abs(pitchInput) < 0.001f))
+        horizontalInput = std::max(-1.f, std::min(1.f, horizontalInput));
+        verticalInput = std::max(-1.f, std::min(1.f, verticalInput));
+        if (duration <= 0.f || (std::abs(horizontalInput) < 0.001f && std::abs(verticalInput) < 0.001f))
             return;
-
-        const MWWorld::Ptr player = getPlayerPtr();
-        const ESM::Position& playerPosition = player.getRefData().getPosition();
-        const osg::Quat viewRotation = osg::Quat(playerPosition.rot[0], osg::Vec3f(-1.f, 0.f, 0.f))
-            * osg::Quat(playerPosition.rot[2], osg::Vec3f(0.f, 0.f, -1.f));
-        const osg::Vec3f viewForward = viewRotation * osg::Vec3f(0.f, 1.f, 0.f);
-        const osg::Vec3f viewRight = viewRotation * osg::Vec3f(1.f, 0.f, 0.f);
 
         for (PhysicsObjectState& state : mPhysicsObjects)
         {
-            if (!state.mGrabbed)
+            if (!state.mGrabbed || state.mPtr.isEmpty())
                 continue;
 
-            const osg::Vec3f requestedAxis = viewForward * rollInput + viewRight * pitchInput;
+            const osg::Quat currentRotation = state.mPtr.getRefData().getBaseNode()
+                ? state.mPtr.getRefData().getBaseNode()->getAttitude() : osg::Quat();
+            const osg::Vec3f currentOrigin = state.mPtr.getRefData().getPosition().asVec3();
+            const osg::Vec3f pivot = currentOrigin + currentRotation * state.mLocalCenter;
+
+            // Horizontal rotation is an intuitive yaw in the world horizontal plane.
+            // Vertical rotation tilts around the object's own horizontal/right axis.
+            // Both rotations use the visual/physics centre as the pivot, so off-centre
+            // NIF origins no longer make furniture orbit while it is being rotated.
+            const osg::Vec3f horizontalAxis(0.f, 0.f, 1.f);
+            osg::Vec3f verticalAxis = currentRotation * osg::Vec3f(1.f, 0.f, 0.f);
+            if (verticalAxis.length2() < 0.0001f)
+                verticalAxis.set(1.f, 0.f, 0.f);
+            else
+                verticalAxis.normalize();
+
+            osg::Vec3f requestedAxis = horizontalAxis * horizontalInput + verticalAxis * verticalInput;
             const float requestedLength = requestedAxis.length();
             if (requestedLength < 0.0001f)
                 continue;
+            requestedAxis /= requestedLength;
 
-            if (!state.mPhysicsOnRelease)
-            {
-                // Physics OFF is a precise placement mode: R/F changes only the
-                // requested orientation. There is no residual angular velocity, so
-                // translating the prop cannot make it swing or continue spinning.
-                osg::Quat currentRotation = state.mPtr.getRefData().getBaseNode()
-                    ? state.mPtr.getRefData().getBaseNode()->getAttitude() : osg::Quat();
-                osg::Quat deltaRotation;
-                constexpr float manualAngularSpeed = 1.65f;
-                deltaRotation.makeRotate(
-                    manualAngularSpeed * std::min(duration, 0.05f) * requestedLength,
-                    requestedAxis / requestedLength);
-                const osg::Quat proposedRotation = deltaRotation * currentRotation;
-                const osg::Vec3f euler = objectQuatToEuler(proposedRotation);
-                rotateObject(state.mPtr, euler.x(), euler.y(), euler.z(), MWBase::RotationFlag_none);
+            constexpr float manualAngularSpeed = 1.65f;
+            osg::Quat deltaRotation;
+            deltaRotation.makeRotate(manualAngularSpeed * std::min(duration, 0.05f) * requestedLength,
+                requestedAxis);
+            const osg::Quat proposedRotation = deltaRotation * currentRotation;
 
-                state.mVelocity.set(0.f, 0.f, 0.f);
-                state.mAngularVelocity.set(0.f, 0.f, 0.f);
-                state.mSleepTimer = 0.f;
-                if (state.mNetworkSyncTimer <= 0.f)
-                {
-                    syncPhysicsObjectTransform(state.mPtr);
-                    state.mNetworkSyncTimer = 0.05f;
-                }
+            // Preserve the centre while changing orientation. X007 never resolves
+            // a blocked rotation by translating the object: doing that could push
+            // large furniture through walls or out of the level. A blocked sample
+            // is simply rejected, leaving the last safe transform untouched.
+            const osg::Vec3f proposedOrigin = pivot - proposedRotation * state.mLocalCenter;
+            const osg::Vec3f remaining = mPhysics->getBoxPenetrationCorrection(
+                proposedOrigin + proposedRotation * state.mLocalCenter, proposedRotation,
+                state.mHalfExtents, state.mPtr, 2.f);
+            if (remaining.length2() >= 0.0001f)
                 continue;
-            }
 
-            // With physics enabled, preserve the original mass/inertia-driven
-            // rotation so an object can still behave like a physical hand-held prop.
-            const float massScale = std::sqrt(std::max(0.25f, state.mMass));
-            const float angularAcceleration = 7.5f / std::max(1.f, massScale * 0.35f);
-            state.mAngularVelocity += requestedAxis * angularAcceleration * std::min(duration, 0.05f);
+            const osg::Vec3f euler = objectQuatToEuler(proposedRotation);
+            rotateObject(state.mPtr, euler.x(), euler.y(), euler.z(), MWBase::RotationFlag_none);
+            if ((proposedOrigin - currentOrigin).length2() > 0.0001f)
+                state.mPtr = moveObject(state.mPtr, proposedOrigin.x(), proposedOrigin.y(), proposedOrigin.z(), true, false);
 
-            const float maxAngularSpeed = 2.8f / std::max(1.f, massScale * 0.18f);
-            const float angularSpeed = state.mAngularVelocity.length();
-            if (angularSpeed > maxAngularSpeed && angularSpeed > 0.0001f)
-                state.mAngularVelocity *= maxAngularSpeed / angularSpeed;
-
+            state.mVelocity.set(0.f, 0.f, 0.f);
+            state.mAngularVelocity.set(0.f, 0.f, 0.f);
             state.mSleepTimer = 0.f;
+            state.mHasLastSafeTransform = true;
+            state.mLastSafeOrigin = proposedOrigin;
+            state.mLastSafeRotation = proposedRotation;
+            if (state.mNetworkSyncTimer <= 0.f)
+            {
+                syncPhysicsObjectTransform(state.mPtr);
+                state.mNetworkSyncTimer = 0.05f;
+            }
+            return;
         }
     }
 
@@ -2181,52 +2221,23 @@ namespace MWWorld
 
     bool World::togglePhysicsGrabPhysics()
     {
+        // Kept in the interface for compatibility with older callers, but X006
+        // placement has no physics mode. Every grabbed object remains kinematic.
         for (PhysicsObjectState& state : mPhysicsObjects)
         {
             if (!state.mGrabbed)
                 continue;
-
-            if (state.mPlacementOnly)
-            {
-                state.mPhysicsOnRelease = false;
-                return false;
-            }
-
-            state.mPhysicsOnRelease = !state.mPhysicsOnRelease;
-
-            // Switching physics state must take effect immediately, not only when
-            // the object is released. Clear all accumulated spring/impact motion so
-            // Physics OFF cannot keep an old spin, and Physics ON cannot inherit a
-            // one-frame throw impulse from the kinematic placement target.
+            state.mPhysicsOnRelease = false;
             state.mVelocity.set(0.f, 0.f, 0.f);
             state.mAngularVelocity.set(0.f, 0.f, 0.f);
-            state.mSleepTimer = 0.f;
-
-            const MWWorld::Ptr player = getPlayerPtr();
-            const ESM::Position& playerPosition = player.getRefData().getPosition();
-            const osg::Quat viewRotation = osg::Quat(playerPosition.rot[0], osg::Vec3f(-1.f, 0.f, 0.f))
-                * osg::Quat(playerPosition.rot[2], osg::Vec3f(0.f, 0.f, -1.f));
-            const osg::Vec3f viewDirection = viewRotation * osg::Vec3f(0.f, 1.f, 0.f);
-            const osg::Quat yawRotation(playerPosition.rot[2], osg::Vec3f(0.f, 0.f, -1.f));
-            const osg::Vec3f playerForward = yawRotation * osg::Vec3f(0.f, 1.f, 0.f);
-            const osg::Vec3f playerRight = yawRotation * osg::Vec3f(1.f, 0.f, 0.f);
-            const osg::Vec3f playerRelativeOffset = playerRight * state.mManualHoldOffset.x()
-                + playerForward * state.mManualHoldOffset.y()
-                + osg::Vec3f(0.f, 0.f, state.mManualHoldOffset.z());
-            state.mLastHoldTarget = getActorHeadTransform(player).getTrans()
-                + viewDirection * state.mHoldDistance + playerRelativeOffset;
-
-            return state.mPhysicsOnRelease;
+            return false;
         }
-        return true;
+        return false;
     }
 
     bool World::isPhysicsGrabPhysicsEnabled() const
     {
-        for (const PhysicsObjectState& state : mPhysicsObjects)
-            if (state.mGrabbed)
-                return state.mPhysicsOnRelease;
-        return true;
+        return false;
     }
 
     void World::resetPhysicsGrabTransform()
@@ -2236,60 +2247,126 @@ namespace MWWorld
             if (!state.mGrabbed || state.mPtr.isEmpty())
                 continue;
 
-            state.mManualHoldOffset.set(0.f, 0.f, 0.f);
             state.mVelocity.set(0.f, 0.f, 0.f);
             state.mAngularVelocity.set(0.f, 0.f, 0.f);
+            state.mPhysicsOnRelease = false;
+            state.mLocalGrabOffset.set(0.f, 0.f, 0.f);
 
-            // Reset the spring's reference target as well. Otherwise the next
-            // physics tick interprets Ctrl-reset as an enormous one-frame hand
-            // movement and can add an unwanted throw impulse on release.
             const MWWorld::Ptr player = getPlayerPtr();
             const ESM::Position& playerPos = player.getRefData().getPosition();
+            const osg::Vec3f playerOrigin = playerPos.asVec3();
+            const osg::Quat yawRotation(playerPos.rot[2], osg::Vec3f(0.f, 0.f, -1.f));
+            const osg::Vec3f playerForward = yawRotation * osg::Vec3f(0.f, 1.f, 0.f);
+            const osg::Vec3f playerRight = yawRotation * osg::Vec3f(1.f, 0.f, 0.f);
+            const osg::Vec3f playerUp(0.f, 0.f, 1.f);
+
+            // Ctrl is now a practical furniture reset: stand the object upright,
+            // align its heading with the player and move it to a clear working spot
+            // directly in front of the player instead of restoring an arbitrary old
+            // grab transform.
+            const osg::Quat desiredRotation = yawRotation;
+            const float horizontalRadius = std::sqrt(state.mHalfExtents.x() * state.mHalfExtents.x()
+                + state.mHalfExtents.y() * state.mHalfExtents.y());
+            state.mHoldDistance = std::max(90.f, std::min(260.f, 70.f + horizontalRadius));
+            const osg::Vec3f floorProbe = playerOrigin + playerForward * state.mHoldDistance;
+
+            const float probeAbove = std::max(180.f, state.mHalfExtents.z() * 2.f + 80.f);
+            const MWPhysics::RayCastingResult floorHit = mPhysics->castRay(
+                floorProbe + playerUp * probeAbove,
+                floorProbe - playerUp * 320.f,
+                state.mPtr, std::vector<MWWorld::Ptr>(),
+                MWPhysics::CollisionType_World | MWPhysics::CollisionType_HeightMap
+                    | MWPhysics::CollisionType_Door);
+
+            osg::Vec3f desiredCenter;
+            if (floorHit.mHit && floorHit.mHitNormal.z() > 0.25f)
+            {
+                osg::Vec3f normal = floorHit.mHitNormal;
+                normal.normalize();
+                const osg::Vec3f axisX = desiredRotation * osg::Vec3f(1.f, 0.f, 0.f);
+                const osg::Vec3f axisY = desiredRotation * osg::Vec3f(0.f, 1.f, 0.f);
+                const osg::Vec3f axisZ = desiredRotation * osg::Vec3f(0.f, 0.f, 1.f);
+                const float support = std::abs(axisX * normal) * state.mHalfExtents.x()
+                    + std::abs(axisY * normal) * state.mHalfExtents.y()
+                    + std::abs(axisZ * normal) * state.mHalfExtents.z();
+                desiredCenter = floorHit.mHitPos + normal * (support + 0.35f);
+            }
+            else
+            {
+                desiredCenter = floorProbe + playerUp * (state.mHalfExtents.z() + 2.f);
+            }
+
+            osg::Vec3f desiredOrigin = desiredCenter - desiredRotation * state.mLocalCenter;
+            const osg::Vec3f resetCandidateOrigin = desiredOrigin;
+            for (int pass = 0; pass < 4; ++pass)
+            {
+                const osg::Vec3f correction = mPhysics->getBoxPenetrationCorrection(
+                    desiredOrigin + desiredRotation * state.mLocalCenter, desiredRotation,
+                    state.mHalfExtents, state.mPtr, 8.f);
+                if (correction.length2() < 0.0001f)
+                    break;
+                desiredOrigin += correction;
+            }
+
+            const osg::Vec3f resetRemaining = mPhysics->getBoxPenetrationCorrection(
+                desiredOrigin + desiredRotation * state.mLocalCenter, desiredRotation,
+                state.mHalfExtents, state.mPtr, 2.f);
+            if (resetRemaining.length2() >= 0.0001f
+                || (desiredOrigin - resetCandidateOrigin).length2() > 32.f * 32.f)
+            {
+                desiredOrigin = state.mHasLastSafeTransform
+                    ? state.mLastSafeOrigin : state.mGrabStartOrigin;
+            }
+            desiredCenter = desiredOrigin + desiredRotation * state.mLocalCenter;
+
+            const osg::Vec3f euler = objectQuatToEuler(desiredRotation);
+            rotateObject(state.mPtr, euler.x(), euler.y(), euler.z(), MWBase::RotationFlag_none);
+            state.mPtr = moveObject(state.mPtr, desiredOrigin.x(), desiredOrigin.y(), desiredOrigin.z(), true, false);
+
+            // Express the reset position through the normal player-relative hold
+            // coordinates so the next update keeps the object exactly where Ctrl put it.
             const osg::Quat viewRotation = osg::Quat(playerPos.rot[0], osg::Vec3f(-1.f, 0.f, 0.f))
                 * osg::Quat(playerPos.rot[2], osg::Vec3f(0.f, 0.f, -1.f));
             const osg::Vec3f viewDirection = viewRotation * osg::Vec3f(0.f, 1.f, 0.f);
-            state.mLastHoldTarget = getActorHeadTransform(player).getTrans()
-                + viewDirection * state.mHoldDistance;
-
-            const osg::Vec3f euler = objectQuatToEuler(state.mGrabStartRotation);
-            rotateObject(state.mPtr, euler.x(), euler.y(), euler.z(), MWBase::RotationFlag_none);
-            // Keep the previous verified safe transform until the next physics
-            // tick validates this restored orientation against nearby geometry.
+            const osg::Vec3f holdOrigin = getActorHeadTransform(player).getTrans();
+            const osg::Vec3f baseAnchor = holdOrigin + viewDirection * state.mHoldDistance;
+            const osg::Vec3f relative = desiredCenter - baseAnchor;
+            state.mManualHoldOffset.set(relative * playerRight, relative * playerForward, relative.z());
+            state.mLastHoldTarget = desiredCenter;
             state.mSleepTimer = 0.f;
+            state.mHasLastSafeTransform = true;
+            state.mLastSafeOrigin = desiredOrigin;
+            state.mLastSafeRotation = desiredRotation;
             syncPhysicsObjectTransform(state.mPtr);
             state.mNetworkSyncTimer = 0.05f;
             return;
         }
     }
 
-    void World::stepPhysicsGrabRotation(float rollSteps, float pitchSteps)
+    void World::stepPhysicsGrabRotation(float horizontalSteps, float verticalSteps)
     {
-        rollSteps = std::max(-1.f, std::min(1.f, rollSteps));
-        pitchSteps = std::max(-1.f, std::min(1.f, pitchSteps));
-        if (std::abs(rollSteps) < 0.001f && std::abs(pitchSteps) < 0.001f)
+        horizontalSteps = std::max(-1.f, std::min(1.f, horizontalSteps));
+        verticalSteps = std::max(-1.f, std::min(1.f, verticalSteps));
+        if (std::abs(horizontalSteps) < 0.001f && std::abs(verticalSteps) < 0.001f)
             return;
-
-        const MWWorld::Ptr player = getPlayerPtr();
-        const ESM::Position& playerPosition = player.getRefData().getPosition();
-        const osg::Quat viewRotation = osg::Quat(playerPosition.rot[0], osg::Vec3f(-1.f, 0.f, 0.f))
-            * osg::Quat(playerPosition.rot[2], osg::Vec3f(0.f, 0.f, -1.f));
-        const osg::Vec3f viewForward = viewRotation * osg::Vec3f(0.f, 1.f, 0.f);
-        const osg::Vec3f viewRight = viewRotation * osg::Vec3f(1.f, 0.f, 0.f);
 
         for (PhysicsObjectState& state : mPhysicsObjects)
         {
             if (!state.mGrabbed || state.mPtr.isEmpty())
                 continue;
 
-            // Keep the existing inertia-driven control when the held object is a
-            // live physics prop. Exact increments are for kinematic placement.
-            if (state.mPhysicsOnRelease)
-            {
-                rotatePhysicsGrab(rollSteps, pitchSteps, 0.05f);
-                return;
-            }
+            const osg::Quat currentRotation = state.mPtr.getRefData().getBaseNode()
+                ? state.mPtr.getRefData().getBaseNode()->getAttitude() : osg::Quat();
+            const osg::Vec3f currentOrigin = state.mPtr.getRefData().getPosition().asVec3();
+            const osg::Vec3f pivot = currentOrigin + currentRotation * state.mLocalCenter;
+            osg::Vec3f verticalAxis = currentRotation * osg::Vec3f(1.f, 0.f, 0.f);
+            if (verticalAxis.length2() < 0.0001f)
+                verticalAxis.set(1.f, 0.f, 0.f);
+            else
+                verticalAxis.normalize();
 
-            osg::Vec3f axis = viewForward * rollSteps + viewRight * pitchSteps;
+            osg::Vec3f axis = osg::Vec3f(0.f, 0.f, 1.f) * horizontalSteps
+                + verticalAxis * verticalSteps;
             const float length = axis.length();
             if (length < 0.0001f)
                 return;
@@ -2298,15 +2375,26 @@ namespace MWWorld
             constexpr float stepAngle = 0.2617993877991494f; // 15 degrees
             osg::Quat deltaRotation;
             deltaRotation.makeRotate(stepAngle * length, axis);
-            const osg::Quat currentRotation = state.mPtr.getRefData().getBaseNode()
-                ? state.mPtr.getRefData().getBaseNode()->getAttitude() : osg::Quat();
             const osg::Quat proposedRotation = deltaRotation * currentRotation;
+            osg::Vec3f proposedOrigin = pivot - proposedRotation * state.mLocalCenter;
+
+            const osg::Vec3f remaining = mPhysics->getBoxPenetrationCorrection(
+                proposedOrigin + proposedRotation * state.mLocalCenter, proposedRotation,
+                state.mHalfExtents, state.mPtr, 2.f);
+            if (remaining.length2() >= 0.0001f)
+                return;
+
             const osg::Vec3f euler = objectQuatToEuler(proposedRotation);
             rotateObject(state.mPtr, euler.x(), euler.y(), euler.z(), MWBase::RotationFlag_none);
+            if ((proposedOrigin - currentOrigin).length2() > 0.0001f)
+                state.mPtr = moveObject(state.mPtr, proposedOrigin.x(), proposedOrigin.y(), proposedOrigin.z(), true, false);
 
             state.mVelocity.set(0.f, 0.f, 0.f);
             state.mAngularVelocity.set(0.f, 0.f, 0.f);
             state.mSleepTimer = 0.f;
+            state.mHasLastSafeTransform = true;
+            state.mLastSafeOrigin = proposedOrigin;
+            state.mLastSafeRotation = proposedRotation;
             if (state.mNetworkSyncTimer <= 0.f)
             {
                 syncPhysicsObjectTransform(state.mPtr);
@@ -2340,6 +2428,7 @@ namespace MWWorld
             state.mHasLastSafeTransform = true;
             state.mLastSafeOrigin = state.mGrabStartOrigin;
             state.mLastSafeRotation = state.mGrabStartRotation;
+            restorePhysicsGrabCollision(state);
             syncPhysicsObjectTransform(state.mPtr);
             state.mNetworkSyncTimer = 0.f;
             return true;

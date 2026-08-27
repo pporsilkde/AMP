@@ -122,8 +122,7 @@ namespace MWInput
         }
 
         // Placement is a gameplay-only state. Entering a GUI/pause transition
-        // finalizes the current object according to its Physics ON/OFF setting
-        // and always removes the persistent hint.
+        // commits the current kinematic transform and removes the persistent hint.
         if (guiMode || !gameRunning)
         {
             if (world->isPhysicsGrabActive())
@@ -140,14 +139,16 @@ namespace MWInput
 
         if (physicsGrabActive)
         {
-            // Placement controls are literal R/F as requested and are consumed by
-            // KeyboardManager, so they never also ready a spell/weapon even when
-            // the user has rebound those gameplay actions. SDL's keyboard state is
-            // still available here for smooth held-key rotation.
-            const Uint8* keys = SDL_GetKeyboardState(nullptr);
-            const float rollInput = keys && keys[SDL_SCANCODE_F] ? 1.f : 0.f;
-            const float pitchInput = keys && keys[SDL_SCANCODE_R] ? 1.f : 0.f;
-            world->rotatePhysicsGrab(rollInput, pitchInput, dt);
+            // X006: no literal R/F. Reuse the player's existing Weapon / Magic
+            // actions so custom keyboard and controller bindings keep working.
+            // Weapon = horizontal self-rotation, Magic = vertical self-rotation;
+            // holding Run reverses either direction.
+            const float rotationDirection = mBindingsManager->actionIsActive(A_Run) ? -1.f : 1.f;
+            const float horizontalRotation = mBindingsManager->actionIsActive(A_ToggleWeapon)
+                ? rotationDirection : 0.f;
+            const float verticalRotation = mBindingsManager->actionIsActive(A_ToggleSpell)
+                ? rotationDirection : 0.f;
+            world->rotatePhysicsGrab(horizontalRotation, verticalRotation, dt);
 
             if (physicsGrabMoveMode != 0)
             {
@@ -235,10 +236,8 @@ namespace MWInput
 
             if (mAttemptJump && MWBase::Environment::get().getInputManager()->getControlSwitch("playerjumping"))
             {
-                // Space is reserved for Physics ON/OFF during any placement-mode
-                // submode, including Walk. KeyboardManager consumes the key; this
-                // guard also prevents controller/alternate Jump bindings from
-                // invoking the old placement behaviour.
+                // Jump is suppressed in every placement submode, including Walk,
+                // so controller/alternate bindings cannot move the player while editing.
                 if (!physicsGrabActive)
                 {
                     player.setUpDown(1);
@@ -295,7 +294,7 @@ namespace MWInput
                 MWBase::Environment::get().getInputManager()->resetIdleTime();
 
             static const bool isToggleSneak = Settings::Manager::getBool("toggle sneak", "Input");
-            if (!isToggleSneak)
+            if (!isToggleSneak && !physicsGrabActive)
             {
                 if(!MWBase::Environment::get().getInputManager()->joystickLastUsed())
                     player.setSneak(mBindingsManager->actionIsActive(A_Sneak));
@@ -435,18 +434,14 @@ namespace MWInput
             toggleWalking();
             break;
         case A_ToggleWeapon:
-            if (MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
-                MWBase::Environment::get().getWorld()->stepPhysicsGrabRotation(1.f, 0.f);
-            else
+            if (!MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
                 toggleWeapon();
             break;
         case A_Rest:
             rest();
             break;
         case A_ToggleSpell:
-            if (MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
-                MWBase::Environment::get().getWorld()->stepPhysicsGrabRotation(0.f, 1.f);
-            else
+            if (!MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
                 toggleSpell();
             break;
         case A_QuickKey1:
@@ -532,8 +527,9 @@ namespace MWInput
             }
             break;
         case A_Jump:
-            if (MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
-                MWBase::Environment::get().getWorld()->togglePhysicsGrabPhysics();
+            // Placement is always kinematic in X006. Jump is simply consumed here
+            // while an object is held; ordinary jumping remains handled by the
+            // existing movement path outside placement.
             break;
         case A_TogglePOV:
             if (MWBase::Environment::get().getWorld()->isPhysicsGrabActive())

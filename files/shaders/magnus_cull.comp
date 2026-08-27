@@ -48,7 +48,13 @@ void main()
         MagnusPointLight light = magnusPointLights[i];
         if (light.radius <= 0.0)
             continue;
-        if (sphereAABBIntersection(light.position.xyz, light.radius, gCluster.minPoint.xyz, gCluster.maxPoint.xyz))
+        // X007: overlap neighbouring clusters slightly. This prevents a local
+        // light from disappearing for a frame while camera rotation moves a
+        // fragment across a tile/depth boundary. Actual attenuation is unchanged.
+        vec3 clusterExtent = max(gCluster.maxPoint.xyz - gCluster.minPoint.xyz, vec3(0.0));
+        vec3 clusterPadding = max(vec3(2.0), clusterExtent * 0.04);
+        if (sphereAABBIntersection(light.position.xyz, light.radius,
+                gCluster.minPoint.xyz - clusterPadding, gCluster.maxPoint.xyz + clusterPadding))
         {
             uint index = atomicAdd(gCount, 1u);
             if (index < uint(@maxLightsPerCluster))

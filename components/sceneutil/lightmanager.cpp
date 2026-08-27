@@ -1639,30 +1639,30 @@ namespace SceneUtil
 
             if (mLightList.size() > maxLights)
             {
-                // remove lights culled by this camera
+                // X007: camera-frustum membership must not decide which local
+                // lights illuminate an already-visible object. Turning the camera
+                // used to swap lights at the max-light limit and caused bright/dark
+                // popping. Rank lights relative to the object instead; this score is
+                // invariant under pure camera rotation.
                 LightManager::LightList lightList = mLightList;
-                for (auto it = lightList.begin(); it != lightList.end() && lightList.size() > maxLights;)
-                {
-                    osg::CullStack::CullingStack& stack = cv->getModelViewCullingStack();
-
-                    osg::BoundingSphere bs = (*it)->mViewBound;
-                    bs._radius = bs._radius * 2.0;
-                    osg::CullingSet& cullingSet = stack.front();
-                    if (cullingSet.isCulled(bs))
-                    {
-                        it = lightList.erase(it);
-                        continue;
-                    }
-                    else
-                        ++it;
-                }
-
                 if (lightList.size() > maxLights)
                 {
-                    // sort by proximity to camera, then get rid of furthest away lights
-                    std::sort(lightList.begin(), lightList.end(), sortLights);
-                    while (lightList.size() > maxLights)
-                        lightList.pop_back();
+                    constexpr float illuminationBias = 81.f;
+                    std::stable_sort(lightList.begin(), lightList.end(),
+                        [&nodeBound](const LightManager::LightSourceViewBound* left,
+                                     const LightManager::LightSourceViewBound* right)
+                        {
+                            const osg::Vec3f leftDelta = left->mViewBound.center() - nodeBound.center();
+                            const osg::Vec3f rightDelta = right->mViewBound.center() - nodeBound.center();
+                            const float leftScore = leftDelta.length2()
+                                - left->mViewBound.radius2() * illuminationBias;
+                            const float rightScore = rightDelta.length2()
+                                - right->mViewBound.radius2() * illuminationBias;
+                            if (leftScore == rightScore)
+                                return left->mLightSource->getId() < right->mLightSource->getId();
+                            return leftScore < rightScore;
+                        });
+                    lightList.resize(maxLights);
                 }
                 stateset = mLightManager->getLightListStateSet(lightList, cv->getTraversalNumber(), cv->getCurrentRenderStage()->getInitialViewMatrix());
             }
