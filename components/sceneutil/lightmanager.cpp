@@ -1630,44 +1630,33 @@ namespace SceneUtil
                 if (l.mViewBound.intersects(nodeBound))
                     mLightList.push_back(&l);
             }
+
+            // X008: rank and trim the list while nodeBound is still valid.
+            // Both light centers and nodeBound are in view space, so their
+            // relative squared distances are invariant under pure camera rotation.
+            const size_t maxLights = mLightManager->getMaxLights() - mLightManager->getStartLight();
+            if (mLightList.size() > maxLights)
+            {
+                const osg::Vec3f nodeCenter = nodeBound.center();
+                std::stable_sort(mLightList.begin(), mLightList.end(),
+                    [nodeCenter](const LightManager::LightSourceViewBound* left,
+                                 const LightManager::LightSourceViewBound* right)
+                    {
+                        const osg::Vec3f leftDelta = left->mViewBound.center() - nodeCenter;
+                        const osg::Vec3f rightDelta = right->mViewBound.center() - nodeCenter;
+                        const float leftScore = leftDelta.length2() - left->mViewBound.radius2() * 81.f;
+                        const float rightScore = rightDelta.length2() - right->mViewBound.radius2() * 81.f;
+                        if (leftScore == rightScore)
+                            return left->mLightSource->getId() < right->mLightSource->getId();
+                        return leftScore < rightScore;
+                    });
+                mLightList.resize(maxLights);
+            }
         }
         if (!mLightList.empty())
         {
-            size_t maxLights = mLightManager->getMaxLights() - mLightManager->getStartLight();
-
-            osg::StateSet* stateset = nullptr;
-
-            if (mLightList.size() > maxLights)
-            {
-                // X007: camera-frustum membership must not decide which local
-                // lights illuminate an already-visible object. Turning the camera
-                // used to swap lights at the max-light limit and caused bright/dark
-                // popping. Rank lights relative to the object instead; this score is
-                // invariant under pure camera rotation.
-                LightManager::LightList lightList = mLightList;
-                if (lightList.size() > maxLights)
-                {
-                    constexpr float illuminationBias = 81.f;
-                    std::stable_sort(lightList.begin(), lightList.end(),
-                        [&nodeBound](const LightManager::LightSourceViewBound* left,
-                                     const LightManager::LightSourceViewBound* right)
-                        {
-                            const osg::Vec3f leftDelta = left->mViewBound.center() - nodeBound.center();
-                            const osg::Vec3f rightDelta = right->mViewBound.center() - nodeBound.center();
-                            const float leftScore = leftDelta.length2()
-                                - left->mViewBound.radius2() * illuminationBias;
-                            const float rightScore = rightDelta.length2()
-                                - right->mViewBound.radius2() * illuminationBias;
-                            if (leftScore == rightScore)
-                                return left->mLightSource->getId() < right->mLightSource->getId();
-                            return leftScore < rightScore;
-                        });
-                    lightList.resize(maxLights);
-                }
-                stateset = mLightManager->getLightListStateSet(lightList, cv->getTraversalNumber(), cv->getCurrentRenderStage()->getInitialViewMatrix());
-            }
-            else
-                stateset = mLightManager->getLightListStateSet(mLightList, cv->getTraversalNumber(), cv->getCurrentRenderStage()->getInitialViewMatrix());
+            osg::StateSet* stateset = mLightManager->getLightListStateSet(
+                mLightList, cv->getTraversalNumber(), cv->getCurrentRenderStage()->getInitialViewMatrix());
 
 
             cv->pushStateSet(stateset);
