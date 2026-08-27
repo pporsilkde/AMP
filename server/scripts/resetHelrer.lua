@@ -156,18 +156,31 @@ periodicCellResets.exemptCellNamesLike = {
 local ViewResetsGuiId = 44332202
 local SaveCellGuiId = 44332203
 
+local cellResetTimersNeedsInitialSave = false
+
 local function loadCellResetTimersFile()
     local path = tes3mp.GetDataPath() .. "/custom/cellResetTimers.json"
     local file = io.open(path, "r")
     if not file then
+        -- A fresh server/profile is expected to have no timer file yet.  Keep an
+        -- empty in-memory schedule and request an immediate write during
+        -- OnServerPostInit so the administrator never has to create it by hand.
+        cellResetTimersNeedsInitialSave = true
         return {}
     end
     file:close()
 
-    local loaded = jsonInterface.load("custom/cellResetTimers.json")
-    if type(loaded) == "table" then
+    local ok, loaded = pcall(jsonInterface.load, "custom/cellResetTimers.json")
+    if ok and type(loaded) == "table" then
         return loaded
     end
+
+    -- Do not let a missing/corrupt timer file take down the whole server.  The
+    -- invalid contents are ignored and replaced by a valid empty JSON object on
+    -- post-init.
+    cellResetTimersNeedsInitialSave = true
+    tes3mp.LogAppend(enumerations.log.WARN,
+        "[resetHelrer] cellResetTimers.json отсутствует или поврежден; будет создан новый пустой файл.")
     return {}
 end
 
@@ -594,26 +607,47 @@ local resetCellsOnStartup = function()
         end
     end
 
+    local worldData = WorldInstance and WorldInstance.data or nil
+    local worldDataChanged = false
+
     if resetWorldKillCountsOnRestart then
-        local clearedCellKills = 0
-        for refId, killCount in pairs(WorldInstance.data.kills) do
-            clearedCellKills = clearedCellKills + WorldInstance.data.kills[refId]
-            WorldInstance.data.kills[refId] = 0
+        local kills = worldData and worldData.kills or nil
+        if type(kills) == "table" then
+            local clearedCellKills = 0
+            for refId, killCount in pairs(kills) do
+                clearedCellKills = clearedCellKills + (tonumber(killCount) or 0)
+                kills[refId] = 0
+            end
+            print("Всего убийств сброшено: " .. clearedCellKills)
+            worldDataChanged = true
+        else
+            tes3mp.LogAppend(enumerations.log.WARN,
+                "[resetHelrer] WorldInstance.data.kills ещё не создан; сброс kill counters при старте пропущен.")
         end
-        print("Всего убийств сброшено: " .. clearedCellKills)
     end
 
     if resetWorldGlobalsResetOnRestart then
-        local clearedGlobals = 0
-        for _key, _data in pairs(WorldInstance.data.clientVariables.globals) do
-            WorldInstance.data.clientVariables.globals[_key] = nil
-            clearedGlobals = clearedGlobals + 1
+        local clientVariables = worldData and worldData.clientVariables or nil
+        local globals = clientVariables and clientVariables.globals or nil
+        if type(globals) == "table" then
+            local clearedGlobals = 0
+            for key, _ in pairs(globals) do
+                globals[key] = nil
+                clearedGlobals = clearedGlobals + 1
+            end
+            tableHelper.cleanNils(globals)
+            print("Всего глобальных переменных сброшено: " .. clearedGlobals)
+            worldDataChanged = true
+        else
+            -- Fresh/legacy world profiles can legitimately have no
+            -- clientVariables table yet.  Treat that as an empty globals set,
+            -- not as a fatal startup error.
+            tes3mp.LogAppend(enumerations.log.WARN,
+                "[resetHelrer] WorldInstance.data.clientVariables.globals ещё не создан; сброс globals при старте пропущен.")
         end
-        tableHelper.cleanNils(WorldInstance.data.clientVariables.globals)
-        print("Всего глобальных переменных сброшено: " .. clearedGlobals)
     end
 
-    if resetWorldKillCountsOnRestart or resetWorldGlobalsResetOnRestart then
+    if worldDataChanged and WorldInstance and type(WorldInstance.QuicksaveToDrive) == "function" then
         WorldInstance:QuicksaveToDrive()
     end
 end
@@ -1763,8 +1797,13 @@ customEventHooks.registerHandler("OnServerPostInit", function(eventStatus)
     end
 
     LoadCellResetTimers()
-    if tableHelper.isEmpty(cellResetTimers) then
+    if cellResetTimersNeedsInitialSave or tableHelper.isEmpty(cellResetTimers) then
         SaveCellResetTimers(true)
+        if cellResetTimersNeedsInitialSave then
+            tes3mp.LogAppend(enumerations.log.INFO,
+                "[resetHelrer] Создан server/data/custom/cellResetTimers.json.")
+            cellResetTimersNeedsInitialSave = false
+        end
     end
     resetCellsOnStartup()
     removeDeletedCellsFromResetTimers()
