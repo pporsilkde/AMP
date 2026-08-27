@@ -128,6 +128,7 @@ namespace MWWorld
                 osg::Vec3f mLastHoldTarget;
                 osg::Vec3f mLastSafeOrigin;
                 osg::Quat mLastSafeRotation;
+                osg::Vec3f mGrabStartOrigin;
                 osg::Quat mGrabStartRotation;
                 float mRadius = 4.f;
                 float mMass = 1.f;
@@ -141,6 +142,7 @@ namespace MWWorld
                 bool mLiquidContainer = false;
                 bool mGrabbed = false;
                 bool mPhysicsOnRelease = true;
+                bool mPlacementOnly = false;
                 int mMoveMode = 0;
                 bool mHadSurfaceContact = false;
                 bool mHasLastSafeTransform = false;
@@ -506,6 +508,8 @@ namespace MWWorld
             bool togglePhysicsGrabPhysics() override;
             bool isPhysicsGrabPhysicsEnabled() const override;
             void resetPhysicsGrabTransform() override;
+            void stepPhysicsGrabRotation(float rollSteps, float pitchSteps) override;
+            bool cancelPhysicsGrab() override;
 
             /// Returns a pointer to the object the provided object would hit (if within the
             /// specified distance), and the point where the hit occurs. This will attempt to

@@ -2653,16 +2653,23 @@ namespace MWGui
             + arenaText("placement.physics") + ": "
             + arenaText(physicsEnabled ? "placement.on" : "placement.off") + "\n"
             + arenaText("placement.rotate") + "\n"
+            + arenaText("placement.rotate_step") + "\n"
             + arenaText("placement.reset") + "\n"
+            + arenaText("placement.cancel") + "\n"
             + arenaText("placement.mode") + ": " + arenaText(modeKeys[safeMode]);
 
+        if (!physicsEnabled)
+            caption += "\n" + arenaText("placement.surface_auto");
         if (safeMode != 0)
+        {
             caption += "\n" + arenaText("placement.move");
+            caption += "\n" + arenaText("placement.fine");
+        }
 
         // Match the Z animation menu width and left offset, but sit slightly
         // below vertical centre so it does not compete with the crosshair/object.
         const int width = 310;
-        const int height = safeMode == 0 ? 166 : 185;
+        const int height = safeMode == 0 ? (physicsEnabled ? 204 : 223) : (physicsEnabled ? 242 : 261);
         const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
         const int left = std::max(14, static_cast<int>(view.width * 0.035f));
         const int top = std::max(14, (view.height - height) / 2 + std::max(24, static_cast<int>(view.height * 0.055f)));

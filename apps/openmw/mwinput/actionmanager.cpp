@@ -1,5 +1,7 @@
 #include "actionmanager.hpp"
 
+#include <algorithm>
+
 #include <MyGUI_InputManager.h>
 
 #include <SDL_keyboard.h>
@@ -133,6 +135,8 @@ namespace MWInput
 
         const bool physicsGrabActive = world->isPhysicsGrabActive();
         const int physicsGrabMoveMode = physicsGrabActive ? world->getPhysicsGrabMoveMode() : 0;
+        if (physicsGrabMoveMode != 0)
+            triedToMove = false;
 
         if (physicsGrabActive)
         {
@@ -147,12 +151,23 @@ namespace MWInput
 
             if (physicsGrabMoveMode != 0)
             {
-                const float firstAxis =
+                const float digitalFirst =
                     (mBindingsManager->actionIsActive(A_MoveRight) ? 1.f : 0.f)
                     - (mBindingsManager->actionIsActive(A_MoveLeft) ? 1.f : 0.f);
-                const float secondAxis =
+                const float digitalSecond =
                     (mBindingsManager->actionIsActive(A_MoveForward) ? 1.f : 0.f)
                     - (mBindingsManager->actionIsActive(A_MoveBackward) ? 1.f : 0.f);
+                const float analogFirst =
+                    (mBindingsManager->getActionValue(A_MoveLeftRight) - 0.5f) * 2.f;
+                const float analogSecond =
+                    (0.5f - mBindingsManager->getActionValue(A_MoveForwardBackward)) * 2.f;
+                float firstAxis = std::max(-1.f, std::min(1.f, digitalFirst + analogFirst));
+                float secondAxis = std::max(-1.f, std::min(1.f, digitalSecond + analogSecond));
+                if (mBindingsManager->actionIsActive(A_Run))
+                {
+                    firstAxis *= 0.25f;
+                    secondAxis *= 0.25f;
+                }
                 world->translatePhysicsGrab(firstAxis, secondAxis, dt);
             }
         }
@@ -253,7 +268,13 @@ namespace MWInput
             {
                 const float switchLimit = 0.25;
                 MWBase::World* world = MWBase::Environment::get().getWorld();
-                if (mBindingsManager->actionIsActive(A_TogglePOV))
+                if (physicsGrabActive)
+                {
+                    if (mPreviewPOVDelay > 0.f)
+                        world->togglePreviewMode(false);
+                    mPreviewPOVDelay = 0.f;
+                }
+                else if (mBindingsManager->actionIsActive(A_TogglePOV))
                 {
                     if (world->isFirstPerson() ? mPreviewPOVDelay > switchLimit : mPreviewPOVDelay == 0)
                         world->togglePreviewMode(true);
@@ -348,7 +369,16 @@ namespace MWInput
             screenshot();
             break;
         case A_Inventory:
-            toggleInventory ();
+            if (MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
+            {
+                MWBase::Environment::get().getWorld()->cancelPhysicsGrab();
+                mActivateHoldObject = MWWorld::Ptr();
+                mActivateHoldTime = 0.f;
+                mActivateHoldPending = false;
+                windowManager->setPhysicsGrabHint(false, 0, false);
+            }
+            else
+                toggleInventory ();
             break;
         case A_Console:
             toggleConsole ();
@@ -405,18 +435,18 @@ namespace MWInput
             toggleWalking();
             break;
         case A_ToggleWeapon:
-            // When an object is physically held, this action is temporarily a
-            // screen-plane rotate modifier.  Do not also draw/sheath the weapon.
-            if (!MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
+            if (MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
+                MWBase::Environment::get().getWorld()->stepPhysicsGrabRotation(1.f, 0.f);
+            else
                 toggleWeapon();
             break;
         case A_Rest:
             rest();
             break;
         case A_ToggleSpell:
-            // Same rule for the second rotation plane.  Outside physics-grab mode
-            // the original ready/unready magic action remains unchanged.
-            if (!MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
+            if (MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
+                MWBase::Environment::get().getWorld()->stepPhysicsGrabRotation(0.f, 1.f);
+            else
                 toggleSpell();
             break;
         case A_QuickKey1:
@@ -492,11 +522,22 @@ namespace MWInput
                 MWBase::Environment::get().getWindowManager()->cycleWeapon(true);
             break;
         case A_Sneak:
-            static const bool isToggleSneak = Settings::Manager::getBool("toggle sneak", "Input");
-            if (isToggleSneak)
+            if (MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
+                MWBase::Environment::get().getWorld()->resetPhysicsGrabTransform();
+            else
             {
-                toggleSneaking();
+                static const bool isToggleSneak = Settings::Manager::getBool("toggle sneak", "Input");
+                if (isToggleSneak)
+                    toggleSneaking();
             }
+            break;
+        case A_Jump:
+            if (MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
+                MWBase::Environment::get().getWorld()->togglePhysicsGrabPhysics();
+            break;
+        case A_TogglePOV:
+            if (MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
+                MWBase::Environment::get().getWorld()->cyclePhysicsGrabMoveMode();
             break;
         }
     }

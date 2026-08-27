@@ -406,6 +406,10 @@ namespace MWBase
             virtual bool isPhysicsGrabPhysicsEnabled() const = 0;
             /// Clear manual placement offset and restore the orientation from grab start.
             virtual void resetPhysicsGrabTransform() = 0;
+            /// Rotate in exact 15-degree increments using the same camera-relative axes as manual rotation.
+            virtual void stepPhysicsGrabRotation(float rollSteps, float pitchSteps) = 0;
+            /// Cancel the current placement and restore the transform captured when the grab began.
+            virtual bool cancelPhysicsGrab() = 0;
 
             virtual float getMaxActivationDistance() = 0;
 
