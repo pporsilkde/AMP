@@ -350,9 +350,26 @@ struct JournalViewModelImpl : JournalViewModel
                     .get<ESM::Dialogue>().search(mTopic.getTopic());
                 if (dialogue)
                 {
+                    if (!itr->mInfoId.empty())
+                    {
+                        for (const ESM::DialInfo& info : dialogue->mInfo)
+                            if (Misc::StringUtils::ciEqual(info.mId, itr->mInfoId))
+                                return info.mResponse;
+                    }
+
+                    const ESM::DialInfo* generic = nullptr;
                     for (const ESM::DialInfo& info : dialogue->mInfo)
-                        if (info.mId == itr->mInfoId)
-                            return info.mResponse;
+                    {
+                        if (info.mResponse.empty())
+                            continue;
+                        if (!info.mActor.empty() || !info.mRace.empty() || !info.mClass.empty()
+                            || !info.mFaction.empty() || !info.mPcFaction.empty() || !info.mCell.empty()
+                            || !info.mSelects.empty())
+                            continue;
+                        generic = &info;
+                    }
+                    if (generic)
+                        return generic->mResponse;
                 }
             }
             catch (...)

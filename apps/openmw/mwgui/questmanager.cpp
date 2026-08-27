@@ -137,7 +137,7 @@ namespace
 
     std::string fallbackTopicEntryText(const std::string& topicId, const std::string& infoId)
     {
-        if (topicId.empty() || infoId.empty())
+        if (topicId.empty())
             return std::string();
 
         try
@@ -147,9 +147,26 @@ namespace
             if (!dialogue)
                 return std::string();
 
+            if (!infoId.empty())
+            {
+                for (const ESM::DialInfo& info : dialogue->mInfo)
+                    if (Misc::StringUtils::ciEqual(info.mId, infoId))
+                        return info.mResponse;
+            }
+
+            const ESM::DialInfo* generic = nullptr;
             for (const ESM::DialInfo& info : dialogue->mInfo)
-                if (info.mId == infoId)
-                    return info.mResponse;
+            {
+                if (info.mResponse.empty())
+                    continue;
+                if (!info.mActor.empty() || !info.mRace.empty() || !info.mClass.empty()
+                    || !info.mFaction.empty() || !info.mPcFaction.empty() || !info.mCell.empty()
+                    || !info.mSelects.empty())
+                    continue;
+                generic = &info;
+            }
+            if (generic)
+                return generic->mResponse;
         }
         catch (...)
         {
