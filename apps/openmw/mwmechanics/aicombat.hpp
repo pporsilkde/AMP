@@ -52,12 +52,18 @@ namespace MWMechanics
             FleeState_Idle,
             FleeState_RunBlindly,
             FleeState_RunToDestination,
+            FleeState_RunToDoor,
             FleeState_RunToGuard
         };
         FleeState mFleeState;
         bool mLOS;
         bool mGeometricLOS;
         float mUpdateLOSTimer;
+        float mTargetLostTimer;
+        float mCrossCellTimer;
+        float mUnreachableTimer;
+        const MWWorld::CellStore* mLastActorCell;
+        int mDoorTransitions;
 
         bool mHasLastSeenTarget;
         osg::Vec3f mLastSeenTargetPos;
@@ -69,6 +75,8 @@ namespace MWMechanics
         int mSearchPointsVisited;
         float mFleeBlindRunTimer;
         ESM::Pathgrid::Point mFleeDest;
+        bool mHasFleeDoor;
+        osg::Vec3f mFleeDoorPos;
 
         bool mUseCustomDestination;
         osg::Vec3f mCustomDestination;
@@ -109,6 +117,7 @@ namespace MWMechanics
         bool mThreatFlee;
         int mFleeGuardActorId;
         bool mFleeAskedGuard;
+        float mHealCooldown;
 
         AiCombatStorage():
         mAttackCooldown(0.0f),
@@ -130,6 +139,11 @@ namespace MWMechanics
         mLOS(false),
         mGeometricLOS(false),
         mUpdateLOSTimer(0.0f),
+        mTargetLostTimer(0.0f),
+        mCrossCellTimer(0.0f),
+        mUnreachableTimer(0.0f),
+        mLastActorCell(nullptr),
+        mDoorTransitions(0),
         mHasLastSeenTarget(false),
         mLastSeenTargetPos(),
         mLastSeenTargetVelocity(),
@@ -139,6 +153,8 @@ namespace MWMechanics
         mSearchDestination(),
         mSearchPointsVisited(0),
         mFleeBlindRunTimer(0.0f),
+        mHasFleeDoor(false),
+        mFleeDoorPos(),
         mUseCustomDestination(false),
         mCustomDestination(),
         mTacticalState(Tactical_None),
@@ -161,7 +177,8 @@ namespace MWMechanics
         mThreatUpdateTimer(0.0f),
         mThreatFlee(false),
         mFleeGuardActorId(-1),
-        mFleeAskedGuard(false)
+        mFleeAskedGuard(false),
+        mHealCooldown(0.0f)
         {}
 
         void startCombatMove(bool isDistantCombat, float distToTarget, float rangeAttack, const MWWorld::Ptr& actor, const MWWorld::Ptr& target);
@@ -225,6 +242,11 @@ namespace MWMechanics
             void updateTacticalMovement(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, float duration,
                 AiCombatStorage& storage, CharacterController& characterController);
             void clearTacticalMovement(const MWWorld::Ptr& actor, AiCombatStorage& storage);
+            void handleCellTransition(const MWWorld::Ptr& actor, AiCombatStorage& storage);
+            void queueDoorTransition(const MWWorld::Ptr& actor, const MWWorld::Ptr& door, AiCombatStorage& storage);
+            bool updateCrossCellPursuit(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, float duration,
+                AiCombatStorage& storage, CharacterController& characterController);
+            bool tryDrinkHealingPotion(const MWWorld::Ptr& actor, AiCombatStorage& storage);
             bool updatePursuitLeash(const MWWorld::Ptr& actor, float duration, AiCombatStorage& storage);
 
             /// Transfer desired movement (from AiCombatStorage) to Actor
