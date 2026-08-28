@@ -15,6 +15,7 @@
 #include <Script/Functions/Objects.hpp>
 #include <Script/Functions/Positions.hpp>
 #include <Script/Functions/Quests.hpp>
+#include <Script/Functions/QuestIndex.hpp>
 #include <Script/Functions/RecordsDynamic.hpp>
 #include <Script/Functions/Shapeshift.hpp>
 #include <Script/Functions/Server.hpp>
@@ -142,6 +143,7 @@ public:
             MISCELLANEOUSAPI,
             POSITIONAPI,
             QUESTAPI,
+            QUESTINDEXAPI,
             RECORDSDYNAMICAPI,
             SHAPESHIFTAPI,
             SERVERAPI,
@@ -177,6 +179,7 @@ public:
             MISCELLANEOUSAPI,
             POSITIONAPI,
             QUESTAPI,
+            QUESTINDEXAPI,
             RECORDSDYNAMICAPI,
             SHAPESHIFTAPI,
             SERVERAPI,
@@ -216,6 +219,7 @@ public:
             {"OnPlayerCooldowns",        Callback<unsigned short>()},
             {"OnPlayerQuickKeys",        Callback<unsigned short>()},
             {"OnPlayerTopic",            Callback<unsigned short>()},
+            {"OnPlayerQuestIndex",       Callback<unsigned short>()},
             {"OnPlayerDisposition",      Callback<unsigned short>()},
             {"OnPlayerBook",             Callback<unsigned short>()},
             {"OnPlayerItemUse",          Callback<unsigned short>()},

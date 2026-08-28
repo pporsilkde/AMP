@@ -203,10 +203,22 @@ function questIndexStore.Reset()
 end
 
 function questIndexStore.RequestFrom(pid, mode)
-    if Players[pid] == nil then return end
+    if Players[pid] == nil then return false end
+
+    -- X015 safety net: if server/scripts from a newer ArenaMP build are ever
+    -- copied over an older server binary, do not crash the whole server.
+    -- Quest item phasing remains fail-closed until the native QuestIndex API
+    -- is available in the matching executable.
+    if type(tes3mp.SendQuestIndexRequest) ~= "function" then
+        tes3mp.LogMessage(enumerations.log.ERROR,
+            "[QuestIndex] Native QuestIndex API is unavailable; phasing remains disabled. Rebuild server/client from the same ArenaMP cumulative patch.")
+        return false
+    end
+
     requested[pid] = mode
     pending[pid] = nil
     tes3mp.SendQuestIndexRequest(pid, mode)
+    return true
 end
 
 --- Called once per player as soon as they are fully logged in.

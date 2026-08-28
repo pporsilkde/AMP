@@ -54,6 +54,7 @@ set(SERVER
     Script/ScriptFunctions.cpp
 
     Script/Functions/Actors.cpp Script/Functions/Objects.cpp Script/Functions/Miscellaneous.cpp
+    Script/Functions/QuestIndex.cpp
     Script/Functions/Worldstate.cpp
 
     Script/Functions/Books.cpp Script/Functions/Cells.cpp Script/Functions/CharClass.cpp
@@ -72,7 +73,7 @@ set(SERVER
 set(SERVER_HEADER
         Script/Types.hpp Script/Script.hpp Script/SystemInterface.hpp
         Script/ScriptFunction.hpp Script/Platform.hpp Script/Language.hpp
-        Script/ScriptFunctions.hpp Script/API/TimerAPI.hpp Script/API/PublicFnAPI.hpp
+        Script/ScriptFunctions.hpp Script/Functions/QuestIndex.hpp Script/API/TimerAPI.hpp Script/API/PublicFnAPI.hpp
         ${LuaScript_Headers}
         ${NativeScript_Headers}
 )
@@ -109,6 +110,7 @@ set(PROCESSORS_PLAYER
         processors/player/ProcessorPlayerSkill.hpp processors/player/ProcessorPlayerSpeech.hpp
         processors/player/ProcessorPlayerSpellbook.hpp processors/player/ProcessorPlayerSpellsActive.hpp
         processors/player/ProcessorPlayerStatsDynamic.hpp processors/player/ProcessorPlayerTopic.hpp
+        processors/player/ProcessorPlayerQuestIndex.hpp
         )
 
 source_group(tes3mp-server\\processors\\player FILES ${PROCESSORS_PLAYER})

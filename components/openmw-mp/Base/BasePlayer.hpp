@@ -10,6 +10,7 @@
 #include <components/esm/loadspel.hpp>
 
 #include <components/openmw-mp/Base/BaseStructs.hpp>
+#include <components/openmw-mp/Base/QuestIndexData.hpp>
 
 #include <RakNetTypes.h>
 
@@ -214,6 +215,9 @@ namespace mwmp
         std::vector<JournalItem> journalChanges;
         FactionChanges factionChanges;
         std::vector<Topic> topicChanges;
+
+        // ArenaMP X013/X015: payload of the last ID_PLAYER_QUEST_INDEX packet.
+        QuestIndexData questIndex;
         std::vector<Book> bookChanges;
         std::vector<CellState> cellStateChanges;
 
