@@ -1,0 +1,14 @@
+ArenaMP X019 - автоматическая генерация questIndex.json
+
+- По умолчанию questIndexAutoGenerate=true.
+- Если server/data/custom/questIndex.json отсутствует или не принят, первый полностью
+  вошедший совместимый клиент получает MODE_UPLOAD и строит QuestItemIndex.
+- Сервер собирает чанки, сверяет число записей и сам пересчитывает indexHash.
+- После успешной проверки первый валидный payload немедленно становится
+  authoritative и сохраняется в server/data/custom/questIndex.json.
+- В JSON дополнительно записываются generatedAt, generatedBy, generationMode.
+- Исправлена гонка: поздняя параллельная выгрузка больше не может перезаписать уже
+  принятый индекс; несовпадение только логируется как drift.
+- Для старого quorum/staff режима установите config.questIndexAutoGenerate=false.
+- protocol TES3MP остаётся 806.
+- Health-bars X014 не включены.

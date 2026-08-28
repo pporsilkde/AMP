@@ -101,8 +101,13 @@ local function load()
     state.loaded = true
 
     if not tes3mp.DoesFileExist(tes3mp.GetModDir() .. "/" .. STORE_PATH) then
-        tes3mp.LogMessage(enumerations.log.INFO,
-            "[QuestIndex] No stored index; quest item phasing stays disabled until one is accepted")
+        if configBool("questIndexAutoGenerate", true) then
+            tes3mp.LogMessage(enumerations.log.INFO,
+                "[QuestIndex] No stored index; questIndex.json will be generated automatically from the first valid client upload")
+        else
+            tes3mp.LogMessage(enumerations.log.INFO,
+                "[QuestIndex] No stored index; quest item phasing stays disabled until one is accepted")
+        end
         return
     end
 
@@ -130,14 +135,17 @@ local function load()
         state.contentKey .. " (hash " .. state.indexHash .. ")")
 end
 
-local function commit(contentKey, indexHash, entries, reason)
+local function commit(contentKey, indexHash, entries, reason, generatedBy, generationMode)
     applyIndex(contentKey, indexHash, entries)
 
     jsonInterface.save(STORE_PATH, {
         contentKey = contentKey,
         indexHash = indexHash,
         entryCount = #entries,
-        entries = entries
+        entries = entries,
+        generatedAt = os.time(),
+        generatedBy = generatedBy or "server",
+        generationMode = generationMode or "confirmed"
     })
 
     confirmations = {}
@@ -175,6 +183,7 @@ function questIndexStore.GetStatus()
         contentKey = state.contentKey,
         indexHash = state.indexHash,
         entryCount = state.entryCount,
+        autoGenerate = configBool("questIndexAutoGenerate", true),
         pendingConfirmations = confirmations
     }
 end
@@ -256,11 +265,36 @@ local function noteDrift(pid, contentKey, indexHash)
 end
 
 local function registerConfirmation(pid, contentKey, indexHash, entries)
+    -- Another upload may have completed while this player was still sending
+    -- chunks. Once an index becomes authoritative, a late upload must never
+    -- replace it. It is only useful as a drift signal.
+    if state.trusted then
+        if contentKey ~= state.contentKey or indexHash ~= state.indexHash then
+            noteDrift(pid, contentKey, indexHash)
+        end
+        return
+    end
+
     local key = contentKey .. "|" .. indexHash
     local accountName = lower(Players[pid].accountName)
+    local chatName = logicHandler.GetChatName(pid)
+
+    -- X019: zero-touch bootstrap. The dedicated server cannot derive quest
+    -- references from ESM/ESP itself, so the first fully logged-in matching
+    -- client acts as the build worker. The server still recomputes the payload
+    -- hash before reaching this function, then immediately persists the result
+    -- as server/data/custom/questIndex.json. Set questIndexAutoGenerate=false
+    -- to restore the older staff/quorum approval flow.
+    if configBool("questIndexAutoGenerate", true) then
+        commit(contentKey, indexHash, entries,
+            "auto-generated from first valid upload by " .. chatName,
+            accountName, "automatic-first-valid-client")
+        return
+    end
 
     if Players[pid]:IsServerStaff() then
-        commit(contentKey, indexHash, entries, "uploaded by staff " .. logicHandler.GetChatName(pid))
+        commit(contentKey, indexHash, entries, "uploaded by staff " .. chatName,
+            accountName, "staff")
         return
     end
 
@@ -283,7 +317,7 @@ local function registerConfirmation(pid, contentKey, indexHash, entries)
 
     if record.count >= required then
         commit(contentKey, indexHash, record.entries,
-            record.count .. " independent confirmations")
+            record.count .. " independent confirmations", accountName, "quorum")
     end
 end
 

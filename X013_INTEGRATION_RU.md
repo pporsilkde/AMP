@@ -170,8 +170,14 @@ end
 ## Конфигурация (`config.lua`, необязательно)
 
 ```lua
--- Сколько независимых игроков должны прислать одинаковый индекс,
--- прежде чем сервер его примет. Выгрузка от стаффа принимается сразу.
+-- X019: по умолчанию true. Если questIndex.json отсутствует или повреждён,
+-- первый полностью принятый клиент автоматически строит индекс, сервер
+-- перепроверяет hash payload и сразу сохраняет server/data/custom/questIndex.json.
+config.questIndexAutoGenerate = true
+
+-- Используется только когда questIndexAutoGenerate = false. Сколько независимых
+-- игроков должны прислать одинаковый индекс, прежде чем сервер его примет.
+-- Выгрузка от стаффа принимается сразу.
 config.questIndexRequiredConfirmations = 2
 
 -- Спрашивать хэш у каждого клиента при входе, даже когда индекс уже принят.
@@ -179,24 +185,27 @@ config.questIndexRequiredConfirmations = 2
 config.questIndexVerifyOnLogin = false
 ```
 
-Значения по умолчанию — `2` и `false`.
+Значения по умолчанию X019 — `questIndexAutoGenerate = true`,
+`questIndexRequiredConfirmations = 2`, `questIndexVerifyOnLogin = false`. При
+включённой автогенерации quorum не используется.
 
 ---
 
-## Первый запуск
+## Первый запуск (X019+)
 
 1. Соберите сервер и клиент из одной ревизии (protocol 806).
-2. Зайдите на сервер аккаунтом стаффа. Сервер увидит, что индекса нет,
-   пришлёт `MODE_UPLOAD`, клиент один раз просканирует ESM/ESP и выгрузит индекс.
-   Выгрузка от стаффа принимается немедленно.
-3. В логе появится:
-   `[QuestIndex] Accepted index with N records (uploaded by staff ...); quest item phasing is now active`
-   и файл `server/data/custom/questIndex.json`.
-4. С этого момента все клиенты получают `MODE_OFF` и не сканируют ничего.
+2. Ничего вручную создавать не нужно. Если `custom/questIndex.json` отсутствует,
+   сервер при входе первого полностью авторизованного игрока пришлёт `MODE_UPLOAD`.
+3. Клиент один раз просканирует ESM/ESP и отправит отсортированный индекс. Сервер
+   повторно вычислит hash фактически полученных entries и только после успешной
+   проверки автоматически сохранит `server/data/custom/questIndex.json`.
+4. В логе появится строка вида:
+   `[QuestIndex] Accepted index with N records (auto-generated from first valid upload ...); quest item phasing is now active`.
+5. Остальные клиенты получают `MODE_OFF` и больше не сканируют ESM/ESP.
 
-Без стаффа индекс соберётся сам, как только `questIndexRequiredConfirmations`
-разных аккаунтов пришлют одинаковый хэш. До этого фазинг выключен, но сервер
-работает нормально.
+Если нужен старый более строгий режим, задайте
+`config.questIndexAutoGenerate = false`: тогда индекс принимается от стаффа сразу
+или после `questIndexRequiredConfirmations` одинаковых независимых выгрузок.
 
 **После добавления или обновления плагина** — удалите `custom/questIndex.json`
 и перезапустите сервер (или вызовите `questIndexStore.Reset()`). Индекс
