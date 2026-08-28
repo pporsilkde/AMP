@@ -102,7 +102,7 @@ namespace MWInput
                 }
             }
 
-            // Arena X010 multiline chat. MyGUI's native multiline EditBox uses
+            // Arena X011 multiline chat. MyGUI's native multiline EditBox uses
             // Return as a line break, while Arena chat historically uses Return
             // to send. Intercept only the focused TES3MP chat editor here:
             //   Enter             -> submit
@@ -115,7 +115,20 @@ namespace MWInput
             {
                 MyGUI::Widget* focus = MyGUI::InputManager::getInstance().getKeyFocusWidget();
                 MyGUI::EditBox* edit = focus ? focus->castType<MyGUI::EditBox>(false) : nullptr;
-                if (edit && edit->getName() == "edit_Command")
+
+                // WindowBase loads layouts with a runtime widget-name prefix.
+                // Comparing against exactly "edit_Command" therefore misses the
+                // real chat field on some builds. Match the stable suffix instead.
+                bool isChatEditor = false;
+                if (edit)
+                {
+                    const std::string& widgetName = edit->getName();
+                    static const std::string suffix = "edit_Command";
+                    isChatEditor = widgetName.size() >= suffix.size()
+                        && widgetName.compare(widgetName.size() - suffix.size(), suffix.size(), suffix) == 0;
+                }
+
+                if (isChatEditor)
                 {
                     const bool insertNewline = (arg.keysym.mod & (KMOD_SHIFT | KMOD_CTRL)) != 0;
                     if (insertNewline)

@@ -95,8 +95,15 @@ namespace mwmp
                 newDelegate(this, &GUIChat::acceptCommand);
         mCommandLine->eventKeyButtonPressed +=
                 newDelegate(this, &GUIChat::keyPress);
+        mCommandLine->eventEditTextChange +=
+                newDelegate(this, &GUIChat::commandTextChanged);
+
+        // X011: use the same real multiline behaviour as OpenMW's book/note
+        // editors. In particular, disable one-line overflow so long text is laid
+        // out into visual rows instead of scrolling horizontally off screen.
         mCommandLine->setEditMultiLine(true);
         mCommandLine->setEditWordWrap(true);
+        mCommandLine->setOverflowToTheLeft(false);
 
         setTitle("Chat");
 
@@ -275,12 +282,20 @@ namespace mwmp
         refreshPresentation();
     }
 
+    void GUIChat::commandTextChanged(MyGUI::EditBox*)
+    {
+        // Reflow immediately after every edit. Waiting for the next frame leaves
+        // the native EditBox with its previous viewport for one input event, which
+        // is especially noticeable when a word first wraps onto row 2 or row 6.
+        updateCommandLineLayout();
+    }
+
     void GUIChat::updateCommandLineLayout()
     {
         if (!mMainWidget || !mCommandLine || !mHistory)
             return;
 
-        // Arena X010: grow the editor from one to five visible rows. The text
+        // Arena X011: grow the editor from one to five visible rows. The text
         // measurement also catches wrapped lines, while the explicit newline
         // count keeps the result stable for short lines and empty paragraphs.
         constexpr int lineHeight = 20;
@@ -306,6 +321,14 @@ namespace mwmp
         const int commandTop = std::max(sideMargin, mainHeight - bottomMargin - commandHeight);
         mCommandLine->setCoord(sideMargin, commandTop,
             std::max(32, mainWidth - sideMargin * 2), commandHeight);
+
+        // Some older MyGUI builds recalculate EditText flow only when these flags
+        // are touched after a geometry change. Keep them explicit here so resize,
+        // UI scaling and the transition to the fifth row cannot restore horizontal
+        // overflow.
+        mCommandLine->setEditMultiLine(true);
+        mCommandLine->setEditWordWrap(true);
+        mCommandLine->setOverflowToTheLeft(false);
 
         const int historyHeight = std::max(20, commandTop - gap - sideMargin);
         mHistory->setCoord(sideMargin, sideMargin,

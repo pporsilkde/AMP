@@ -21,7 +21,7 @@
     </Widget>
 
     <!-- Command line -->
-    <Widget type="EditBox" skin="TES3MP_ChatMsg" position="8 116 404 26" align="HStretch Bottom" name="edit_Command">
+    <Widget type="EditBox" skin="MW_TextBoxEdit" position="8 116 404 26" align="HStretch Bottom" name="edit_Command">
         <Property key="InvertSelected" value="false"/>
         <Property key="MultiLine" value="true"/>
         <Property key="WordWrap" value="true"/>

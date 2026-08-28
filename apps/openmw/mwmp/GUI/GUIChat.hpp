@@ -88,6 +88,7 @@ namespace mwmp
                       MyGUI::Char _char);
 
         void acceptCommand(MyGUI::EditBox* _sender);
+        void commandTextChanged(MyGUI::EditBox* _sender);
 
         void setEditState(bool state);
         void setHistoryReviewState(bool state);
