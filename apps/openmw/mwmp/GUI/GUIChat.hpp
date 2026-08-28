@@ -32,6 +32,7 @@ namespace mwmp
         MyGUI::EditBox* mCommandLine;
         MyGUI::EditBox* mHistory;
         MyGUI::ScrollBar* mHistoryScroll;
+        MyGUI::ScrollBar* mCommandScroll;
 
         typedef std::list<std::string> StringList;
 
@@ -91,6 +92,7 @@ namespace mwmp
         void setEditState(bool state);
         void setHistoryReviewState(bool state);
         void scrollHistoryToBottom();
+        void updateCommandLineLayout();
         void refreshPresentation();
         void revealTemporarily();
         void showSmoothly(float targetAlpha);

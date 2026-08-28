@@ -3,6 +3,7 @@
 #include <cctype>
 
 #include <MyGUI_InputManager.h>
+#include <MyGUI_EditBox.h>
 
 #include <components/settings/settings.hpp>
 
@@ -98,6 +99,37 @@ namespace MWInput
                         break;
                     default:
                         break;
+                }
+            }
+
+            // Arena X010 multiline chat. MyGUI's native multiline EditBox uses
+            // Return as a line break, while Arena chat historically uses Return
+            // to send. Intercept only the focused TES3MP chat editor here:
+            //   Enter             -> submit
+            //   Shift+Enter       -> newline
+            //   Ctrl+Enter        -> newline
+            // The newline is inserted as Unicode text at MyGUI's cursor so UTF-8
+            // messages (including Cyrillic) keep correct cursor positions.
+            if (!consumed && (arg.keysym.scancode == SDL_SCANCODE_RETURN
+                    || arg.keysym.scancode == SDL_SCANCODE_KP_ENTER))
+            {
+                MyGUI::Widget* focus = MyGUI::InputManager::getInstance().getKeyFocusWidget();
+                MyGUI::EditBox* edit = focus ? focus->castType<MyGUI::EditBox>(false) : nullptr;
+                if (edit && edit->getName() == "edit_Command")
+                {
+                    const bool insertNewline = (arg.keysym.mod & (KMOD_SHIFT | KMOD_CTRL)) != 0;
+                    if (insertNewline)
+                    {
+                        MyGUI::UString text = edit->getCaption();
+                        const size_t cursor = std::min(edit->getTextCursor(), text.size());
+                        text.insert(cursor, MyGUI::UString("\n"));
+                        edit->setCaption(text);
+                        edit->setTextCursor(cursor + 1);
+                    }
+                    else
+                        edit->eventEditSelectAccept(edit);
+
+                    consumed = true;
                 }
             }
         }

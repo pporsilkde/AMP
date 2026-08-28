@@ -866,8 +866,11 @@ namespace MWMechanics
         // Only an actor that is genuinely part of this fight follows the target
         // through a door. A creature, or an NPC that merely became alarmed, stops
         // at the threshold like it does in vanilla.
-        const CreatureStats& actorStats = actor.getClass().getCreatureStats(actor);
-        const CreatureStats& targetStats = target.getClass().getCreatureStats(target);
+        // Arena X010: CreatureStats::getActorId() is non-const in this 0.47-based
+        // branch, so keep mutable references here. No state is changed; this only
+        // avoids discarding qualifiers on MSVC while checking combat engagement.
+        CreatureStats& actorStats = actor.getClass().getCreatureStats(actor);
+        CreatureStats& targetStats = target.getClass().getCreatureStats(target);
         const bool engaged = actorStats.getHitAttemptActorId() == targetStats.getActorId()
             || targetStats.getHitAttemptActorId() == actorStats.getActorId();
 

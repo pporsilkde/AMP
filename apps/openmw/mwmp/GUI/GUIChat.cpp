@@ -44,6 +44,7 @@ namespace mwmp
     GUIChat::GUIChat(int x, int y, int w, int h)
             : WindowBase("tes3mp_chat.layout")
             , mHistoryScroll(nullptr)
+            , mCommandScroll(nullptr)
             , windowState(CHAT_TRANSPARENT_30)
             , editState(false)
             , historyReviewState(false)
@@ -75,11 +76,27 @@ namespace mwmp
             mHistoryScroll->setNeedMouseFocus(false);
         }
 
+        for (size_t i = 0; i < mCommandLine->getChildCount(); ++i)
+        {
+            if (MyGUI::ScrollBar* scroll = mCommandLine->getChildAt(i)->castType<MyGUI::ScrollBar>(false))
+            {
+                mCommandScroll = scroll;
+                break;
+            }
+        }
+        if (mCommandScroll)
+        {
+            mCommandScroll->setVisible(false);
+            mCommandScroll->setNeedMouseFocus(false);
+        }
+
         // Set up the command line box
         mCommandLine->eventEditSelectAccept +=
                 newDelegate(this, &GUIChat::acceptCommand);
         mCommandLine->eventKeyButtonPressed +=
                 newDelegate(this, &GUIChat::keyPress);
+        mCommandLine->setEditMultiLine(true);
+        mCommandLine->setEditWordWrap(true);
 
         setTitle("Chat");
 
@@ -92,6 +109,7 @@ namespace mwmp
         mHistory->setNeedKeyFocus(false);
 
         mCommandLine->setVisible(false);
+        updateCommandLineLayout();
         syncSettings();
         applyAlpha(currentAlpha);
     }
@@ -118,6 +136,11 @@ namespace mwmp
 
     void GUIChat::acceptCommand(MyGUI::EditBox *_sender)
     {
+        // A controller Return and MyGUI accept event can arrive in the same
+        // input frame. Once submission closes the editor, ignore any duplicate.
+        if (!editState)
+            return;
+
         const std::string &cm = mCommandLine->getOnlyText();
 
         // If they enter nothing, then it should be canceled.
@@ -149,6 +172,7 @@ namespace mwmp
     void GUIChat::onResChange(int width, int height)
     {
         setCoord(10, 40, width-10, height/2); // Original chat layout, shifted 30 px down.
+        updateCommandLineLayout();
     }
 
     void GUIChat::setFont(const std::string &fntName)
@@ -240,6 +264,7 @@ namespace mwmp
 
         editState = state;
         mCommandLine->setVisible(editState);
+        updateCommandLineLayout();
         MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(editState ? mCommandLine : nullptr);
 
         if (editState)
@@ -248,6 +273,50 @@ namespace mwmp
             revealTime = delay;
 
         refreshPresentation();
+    }
+
+    void GUIChat::updateCommandLineLayout()
+    {
+        if (!mMainWidget || !mCommandLine || !mHistory)
+            return;
+
+        // Arena X010: grow the editor from one to five visible rows. The text
+        // measurement also catches wrapped lines, while the explicit newline
+        // count keeps the result stable for short lines and empty paragraphs.
+        constexpr int lineHeight = 20;
+        constexpr int maxVisibleLines = 5;
+        constexpr int inputPadding = 6;
+        constexpr int sideMargin = 8;
+        constexpr int bottomMargin = 8;
+        constexpr int gap = 6;
+
+        const std::string text = mCommandLine->getOnlyText();
+        int explicitLines = 1;
+        explicitLines += static_cast<int>(std::count(text.begin(), text.end(), '\n'));
+
+        const int measuredHeight = std::max(lineHeight, mCommandLine->getTextSize().height);
+        const int measuredLines = std::max(1, (measuredHeight + lineHeight - 1) / lineHeight);
+        const int contentLines = std::max(explicitLines, measuredLines);
+        const int totalLines = editState ? contentLines : 1;
+        const int visibleLines = std::min(maxVisibleLines, totalLines);
+        const int commandHeight = inputPadding + visibleLines * lineHeight;
+
+        const int mainWidth = mMainWidget->getWidth();
+        const int mainHeight = mMainWidget->getHeight();
+        const int commandTop = std::max(sideMargin, mainHeight - bottomMargin - commandHeight);
+        mCommandLine->setCoord(sideMargin, commandTop,
+            std::max(32, mainWidth - sideMargin * 2), commandHeight);
+
+        const int historyHeight = std::max(20, commandTop - gap - sideMargin);
+        mHistory->setCoord(sideMargin, sideMargin,
+            std::max(32, mainWidth - sideMargin * 2), historyHeight);
+
+        if (mCommandScroll)
+        {
+            const bool overflow = totalLines > maxVisibleLines;
+            mCommandScroll->setVisible(overflow);
+            mCommandScroll->setNeedMouseFocus(overflow && editState);
+        }
     }
 
     void GUIChat::scrollHistoryToBottom()
@@ -297,6 +366,7 @@ namespace mwmp
                 revealTime = delay;
         }
 
+        updateCommandLineLayout();
         refreshPresentation();
     }
 
@@ -333,7 +403,10 @@ namespace mwmp
             setVisible(false);
         }
         else
+        {
+            updateCommandLineLayout();
             refreshPresentation();
+        }
     }
 
     void GUIChat::pressedSay()
@@ -346,6 +419,24 @@ namespace mwmp
 
     void GUIChat::keyPress(MyGUI::Widget *_sender, MyGUI::KeyCode key, MyGUI::Char _char)
     {
+        // Keyboard Return is intercepted before MyGUI in KeyboardManager so that
+        // plain Enter submits while Shift/Ctrl+Enter inserts a line break. This
+        // fallback keeps controller/virtual-keyboard Return behaving as Submit.
+        if (key == MyGUI::KeyCode::Return || key == MyGUI::KeyCode::NumpadEnter)
+        {
+            acceptCommand(mCommandLine);
+            return;
+        }
+
+        updateCommandLineLayout();
+
+        // Once the editor contains multiple visual rows, Up/Down belong to the
+        // text cursor rather than chat history traversal.
+        const bool multiRow = mCommandLine->getOnlyText().find('\n') != std::string::npos
+            || mCommandLine->getTextSize().height > 24;
+        if (multiRow && (key == MyGUI::KeyCode::ArrowUp || key == MyGUI::KeyCode::ArrowDown))
+            return;
+
         if (mCommandHistory.empty()) return;
 
         // Traverse history with up and down arrows
@@ -380,6 +471,8 @@ namespace mwmp
     void GUIChat::update(float dt)
     {
         syncSettings();
+        if (editState)
+            updateCommandLineLayout();
 
         if (mainMenuOpen)
             return;

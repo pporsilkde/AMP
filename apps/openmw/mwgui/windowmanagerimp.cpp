@@ -1523,6 +1523,16 @@ namespace MWGui
         mKeyboardNavigation->restoreFocus(mode);
 
         updateVisible();
+
+        // Arena X010: InventoryWindow::onOpen() is called again by updateVisible()
+        // and would otherwise steal key/controller focus from the container. Always
+        // make a freshly opened/re-targeted container the active transfer side.
+        if (mode == GM_Container && !mGuiModeStates[mode].mWindows.empty())
+        {
+            MyGUI::Widget* focus = mGuiModeStates[mode].mWindows.front()->getDefaultKeyFocus();
+            if (focus && focus->getVisible() && focus->getEnabled())
+                setKeyFocusWidget(focus);
+        }
     }
 
     void WindowManager::popGuiMode(bool noSound)
