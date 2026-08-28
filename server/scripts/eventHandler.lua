@@ -2,6 +2,8 @@ local eventHandler = {}
 
 commandHandler = require("commandHandler")
 local privateCellInstances = require("privateCellInstances")
+local questItemPhasing = require("questItemPhasing")
+local questIndexStore = require("questIndexStore")
 
 local consoleKickMessage = " has been kicked for using the console despite not having the permission to do so.\n"
 
@@ -588,6 +590,10 @@ eventHandler.OnPlayerDisconnect = function(pid)
             Players[pid].loginTimerId = nil
         end
 
+        -- Drop any half-finished quest index upload from this pid so a
+        -- reconnecting slot cannot inherit someone else's buffer.
+        questIndexStore.OnPlayerLeave(pid)
+
         if Players[pid]:IsLoggedIn() then
             local eventStatus = customEventHooks.triggerValidators("OnPlayerDisconnect", {pid})
             
@@ -761,6 +767,7 @@ eventHandler.OnGUIAction = function(pid, idGui, data)
                             Players[pid].loginTimerId = nil
                         end
                         Players[pid]:FinishLogin()
+                        questIndexStore.OnPlayerReady(pid)
                         Players[pid]:Message(localization.Get(pid, "core", "login_success") ..
                             localization.Get(pid, "core", "chat_instructions"))
 
@@ -846,6 +853,12 @@ eventHandler.OnPlayerSendMessage = function(pid, message)
     end
 end
 
+-- ArenaMP X013: a client answering the server's quest index request. Everything
+-- about validation and quorum lives in questIndexStore.
+eventHandler.OnPlayerQuestIndex = function(pid)
+    questIndexStore.OnPacket(pid)
+end
+
 eventHandler.OnPlayerEndCharGen = function(pid)
     if Players[pid] ~= nil and Players[pid]:IsLoggedIn() then
         local eventStatus = customEventHooks.triggerValidators("OnPlayerEndCharGen", {pid})
@@ -855,6 +868,7 @@ eventHandler.OnPlayerEndCharGen = function(pid)
         end
         customEventHooks.triggerHandlers("OnPlayerEndCharGen", eventStatus, {pid})
         customEventHooks.triggerHandlers("OnPlayerAuthentified", eventStatus, {pid})
+        questIndexStore.OnPlayerReady(pid)
     end
 end
 
@@ -1243,6 +1257,10 @@ eventHandler.OnCellLoad = function(pid, cellDescription)
         local eventStatus = customEventHooks.triggerValidators("OnCellLoad", {pid, cellDescription})
         if eventStatus.validDefaultHandler then
             logicHandler.LoadCellForPlayer(pid, cellDescription)
+            -- Apply personal world-source masks after the ordinary cell state has
+            -- been sent, otherwise a canonical quest reference from ESM/ESP could
+            -- briefly reappear for a character that already claimed it.
+            questItemPhasing.LoadWorldClaims(pid, cellDescription)
         end
         customEventHooks.triggerHandlers("OnCellLoad", eventStatus, {pid, cellDescription})
     else
@@ -1425,6 +1443,30 @@ eventHandler.OnGenericObjectEvent = function(pid, cellDescription, packetType)
         local packetTables = packetReader.GetObjectPacketTables(packetType)
         local objects = packetTables.objects
         local targetPlayers = packetTables.players
+
+        -- ArenaMP X012: authored quest sources are phased per character. Consume
+        -- their ObjectDelete before custom/default global deletion logic sees it,
+        -- record a personal claim and echo the delete only to the player who took it.
+        if packetType == "ObjectDelete" and packetOrigin == enumerations.packetOrigin.CLIENT_GAMEPLAY and
+            not tableHelper.isEmpty(objects) then
+            local phasedObjects = {}
+            for uniqueIndex, object in pairs(objects) do
+                if questItemPhasing.IsWorldQuestSource(cellDescription, object) then
+                    object.uniqueIndex = uniqueIndex
+                    if questItemPhasing.ClaimWorld(pid, cellDescription, object) then
+                        questItemPhasing.SendWorldDelete(pid, cellDescription, object)
+                        phasedObjects[uniqueIndex] = object
+                        objects[uniqueIndex] = nil
+                    end
+                end
+            end
+
+            if not tableHelper.isEmpty(phasedObjects) then
+                local phasedStatus = customEventHooks.makeEventStatus(false, false)
+                customEventHooks.triggerHandlers("OnObjectDelete", phasedStatus,
+                    {pid, cellDescription, phasedObjects, {}})
+            end
+        end
 
         if not tableHelper.isEmpty(objects) or not tableHelper.isEmpty(targetPlayers) then
 
@@ -1720,7 +1762,23 @@ eventHandler.OnContainer = function(pid, cellDescription)
         end
 
         local subAction = tes3mp.GetObjectListContainerSubAction()
-        
+
+        -- ArenaMP X012: while the server is still waiting for the first full
+        -- canonical container snapshot after a cell load/reset, no gameplay
+        -- container transaction is allowed. The authority client may already
+        -- render the ESM contents locally, but accepting a REMOVE before the
+        -- authoritative SET is imported would let a previously claimed quest
+        -- source slip through during this short synchronization window.
+        -- REPLY_TO_REQUEST is the only packet that may complete the handshake.
+        if isCellLoaded and LoadedCells[cellDescription]:HasFullContainerData() == false and
+            subAction ~= enumerations.containerSub.REPLY_TO_REQUEST then
+            tes3mp.LogAppend(enumerations.log.INFO,
+                "- Rejected Container while canonical container data for " .. cellDescription ..
+                " is still being synchronized")
+            Players[pid]:Message("That container is still synchronizing. Please try again in a moment.\n")
+            return
+        end
+
         local objects = {}
 
         for index = 0, tes3mp.GetObjectListSize() - 1 do

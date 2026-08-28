@@ -9,6 +9,7 @@ namespace mwmp
     {
     public:
         PacketObjectDelete(RakNet::RakPeerInterface *peer);
+        void Packet(RakNet::BitStream *newBitstream, bool send) override;
     };
 }
 

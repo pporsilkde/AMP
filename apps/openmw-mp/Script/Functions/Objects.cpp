@@ -125,6 +125,16 @@ unsigned int ObjectFunctions::GetObjectMpNum(unsigned int index) noexcept
     return readObjectList->baseObjects.at(index).mpNum;
 }
 
+bool ObjectFunctions::GetObjectQuestItem(unsigned int index) noexcept
+{
+    return readObjectList->baseObjects.at(index).questItem;
+}
+
+const char *ObjectFunctions::GetObjectQuestSourceId(unsigned int index) noexcept
+{
+    return readObjectList->baseObjects.at(index).questSourceId.c_str();
+}
+
 int ObjectFunctions::GetObjectCount(unsigned int index) noexcept
 {
     return readObjectList->baseObjects.at(index).count;
@@ -458,6 +468,16 @@ const char *ObjectFunctions::GetContainerItemPoisonId(unsigned int objectIndex, 
 int ObjectFunctions::GetContainerItemPoisonCharges(unsigned int objectIndex, unsigned int itemIndex) noexcept
 {
     return readObjectList->baseObjects.at(objectIndex).containerItems.at(itemIndex).poisonCharges;
+}
+
+bool ObjectFunctions::GetContainerItemQuestItem(unsigned int objectIndex, unsigned int itemIndex) noexcept
+{
+    return readObjectList->baseObjects.at(objectIndex).containerItems.at(itemIndex).questItem;
+}
+
+const char *ObjectFunctions::GetContainerItemQuestSourceId(unsigned int objectIndex, unsigned int itemIndex) noexcept
+{
+    return readObjectList->baseObjects.at(objectIndex).containerItems.at(itemIndex).questSourceId.c_str();
 }
 
 int ObjectFunctions::GetContainerItemActionCount(unsigned int objectIndex, unsigned int itemIndex) noexcept

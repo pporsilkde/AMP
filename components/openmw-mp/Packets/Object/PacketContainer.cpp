@@ -53,6 +53,8 @@ void PacketContainer::Packet(RakNet::BitStream *newBitstream, bool send)
             RW(containerItem.soul, send, true);
             RW(containerItem.poisonId, send, true);
             RW(containerItem.poisonCharges, send);
+            RW(containerItem.questItem, send);
+            RW(containerItem.questSourceId, send, true);
             RW(containerItem.actionCount, send);
 
             if (!send)

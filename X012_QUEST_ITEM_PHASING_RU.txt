@@ -1,0 +1,18 @@
+ArenaMP X012 — Quest Item Phasing
+
+Кумулятивный патч поверх X011.
+
+Основное:
+- автоматический нативный QuestItemIndex по DIAL/INFO/SCPT и числу физических источников;
+- персональные world/container claims в данных игрока;
+- квестовый world object после взятия скрывается только у взявшего игрока;
+- квестовые предметы в контейнерах/трупах персонализируются, обычный лут остаётся shared;
+- mixed stack разделяется на canonical phaseable subset + shared subset;
+- player-dropped items никогда не создают новые phaseable sources;
+- Take All/DRAG используют ту же модель;
+- после cell reset gameplay-доступ к контейнерам блокируется до первого canonical SET,
+  затем каждому игроку отправляется персональный SET;
+- LAS_quest_items.json используется только как migration hint, если файл существует;
+- protocol version: 807 (Container + ObjectDelete metadata).
+
+Важно: сервер и клиенты X012 должны использовать один и тот же protocol 807 build.

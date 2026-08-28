@@ -231,7 +231,7 @@ namespace MWGui
 
         mwmp::BaseObject baseObject = objectList->getBaseObjectFromPtr(mPtr);
         MWWorld::Ptr itemPtr = mModel->getItem(mSelectedItem).mBase;
-        objectList->addContainerItem(baseObject, itemPtr, itemPtr.getRefData().getCount(), count);
+        objectList->addContainerItem(baseObject, itemPtr, itemPtr.getRefData().getCount(), count, mPtr);
         objectList->addBaseObject(baseObject);
         objectList->sendContainer();
         return true;
@@ -266,7 +266,7 @@ namespace MWGui
 
             mwmp::BaseObject baseObject = objectList->getBaseObjectFromPtr(mPtr);
             MWWorld::Ptr itemPtr = mDragAndDrop->mItem.mBase;
-            objectList->addContainerItem(baseObject, itemPtr, mDragAndDrop->mDraggedCount, 0);
+            objectList->addContainerItem(baseObject, itemPtr, mDragAndDrop->mDraggedCount, 0, mPtr);
             objectList->addBaseObject(baseObject);
             objectList->sendContainer();
         }
@@ -447,7 +447,7 @@ namespace MWGui
             if (!onTakeItem(item, item.mCount))
                 break;
 
-            objectList->addContainerItem(baseObject, item, item.mCount, item.mCount);
+            objectList->addContainerItem(baseObject, item, item.mCount, item.mCount, mPtr);
         }
 
         if (baseObject.containerItems.size() > 0)

@@ -555,6 +555,10 @@ packetReader.GetObjectPacketTables = function(packetType)
                     end
                 end
 
+            elseif packetType == "ObjectDelete" then
+                object.count = tes3mp.GetObjectCount(packetIndex)
+                object.questItem = tes3mp.GetObjectQuestItem(packetIndex)
+                object.questSourceId = tes3mp.GetObjectQuestSourceId(packetIndex)
             elseif packetType == "ObjectLock" then
                 object.lockLevel = tes3mp.GetObjectLockLevel(packetIndex)
             elseif packetType == "ObjectDialogueChoice" then

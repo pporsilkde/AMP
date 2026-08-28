@@ -17,6 +17,12 @@ namespace mwmp
         std::string poisonId;
         int poisonCharges = 0;
 
+        // ArenaMP X012: client-derived quest phasing metadata. The server never
+        // trusts this as inventory data; it is only a hint that this source should
+        // use per-player claim semantics instead of shared removal.
+        bool questItem = false;
+        std::string questSourceId;
+
         int actionCount = 0;
 
         inline bool operator==(const ContainerItem& rhs)
@@ -49,6 +55,11 @@ namespace mwmp
         std::string poisonId = "";
         int poisonCharges = 0;
         int goldValue = 1;
+
+        // ArenaMP X012: only serialized by packets that can consume world quest
+        // sources (currently ObjectDelete).
+        bool questItem = false;
+        std::string questSourceId = "";
         /*
             End of AMP change
         */

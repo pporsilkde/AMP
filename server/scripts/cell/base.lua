@@ -4,6 +4,8 @@ contentFixer = require("contentFixer")
 tableHelper = require("tableHelper")
 inventoryHelper = require("inventoryHelper")
 packetBuilder = require("packetBuilder")
+local questItemPhasing = require("questItemPhasing")
+local questIndexStore = require("questIndexStore")
 
 local BaseCell = class("BaseCell")
 
@@ -459,6 +461,9 @@ function BaseCell:SaveObjectsPlaced(objects)
             end
 
             self.data.objectData[uniqueIndex].location = location
+            -- Preserve provenance so a quest-record item dropped by a player can
+            -- never be mistaken for a reusable canonical quest source later.
+            self.data.objectData[uniqueIndex].droppedByPlayer = object.droppedByPlayer == true
 
             tes3mp.LogAppend(enumerations.log.INFO, "- " .. uniqueIndex .. ", refId: " .. refId ..
                 ", count: " .. count .. ", charge: " .. charge .. ", enchantmentCharge: " .. enchantmentCharge ..
@@ -710,6 +715,10 @@ end
 function BaseCell:SaveContainers(pid)
 
     tes3mp.ReadReceivedObjectList()
+
+    -- Copy exactly once. Any actionCount corrections below are applied to the
+    -- writable copy and must survive until the reply is sent to the attached
+    -- player. Re-copying the received packet later would silently undo them.
     tes3mp.CopyReceivedObjectListToStore()
 
     tes3mp.LogMessage(enumerations.log.INFO, "Saving Container from " .. logicHandler.GetChatName(pid) ..
@@ -718,6 +727,7 @@ function BaseCell:SaveContainers(pid)
     local packetOrigin = tes3mp.GetObjectListOrigin()
     local action = tes3mp.GetObjectListAction()
     local subAction = tes3mp.GetObjectListContainerSubAction()
+    local affectedContainers = {}
 
     for objectIndex = 0, tes3mp.GetObjectListSize() - 1 do
 
@@ -727,86 +737,155 @@ function BaseCell:SaveContainers(pid)
         tes3mp.LogAppend(enumerations.log.INFO, "- " .. uniqueIndex .. ", refId: " .. refId)
 
         self:InitializeObjectData(uniqueIndex, refId)
-
         tableHelper.insertValueIfMissing(self.data.packets.container, uniqueIndex)
+        tableHelper.insertValueIfMissing(affectedContainers, uniqueIndex)
 
         local inventory = self.data.objectData[uniqueIndex].inventory
 
-        -- If this object's inventory is nil, or if the action is SET,
-        -- change the inventory to an empty table
+        -- SET is an authoritative snapshot. This is normally the reply to the
+        -- server's first container-data request for an authored cell.
         if inventory == nil or action == enumerations.container.SET then
             inventory = {}
+        else
+            -- Cell data written before X013 carries no phase metadata. Stamp it
+            -- once from the server-owned index, before any REMOVE is processed,
+            -- so the migration never depends on who happens to open the chest.
+            questItemPhasing.StampInventory(self.description, uniqueIndex, inventory)
         end
 
         for itemIndex = 0, tes3mp.GetContainerChangesSize(objectIndex) - 1 do
 
             local itemRefId = tes3mp.GetContainerItemRefId(objectIndex, itemIndex)
-            local itemCount = tes3mp.GetContainerItemCount(objectIndex, itemIndex)
+            local itemCount = math.max(0, tonumber(tes3mp.GetContainerItemCount(objectIndex, itemIndex)) or 0)
             local itemCharge = tes3mp.GetContainerItemCharge(objectIndex, itemIndex)
             local itemEnchantmentCharge = tes3mp.GetContainerItemEnchantmentCharge(objectIndex, itemIndex)
             local itemSoul = tes3mp.GetContainerItemSoul(objectIndex, itemIndex)
             local itemPoisonId = tes3mp.GetContainerItemPoisonId(objectIndex, itemIndex)
             local itemPoisonCharges = tes3mp.GetContainerItemPoisonCharges(objectIndex, itemIndex)
-            local actionCount = tes3mp.GetContainerItemActionCount(objectIndex, itemIndex)
+            local actionCount = math.max(0, tonumber(tes3mp.GetContainerItemActionCount(objectIndex, itemIndex)) or 0)
+            -- X013: the packet still carries the client's own guess, but it is
+            -- only ever logged. Classification is questIndexStore's job now.
+            local isQuestRecord = questIndexStore.IsQuestItem(itemRefId)
 
-            -- Check if the object's stored inventory contains this item already
-            if inventoryHelper.containsItem(inventory, itemRefId, itemCharge, itemEnchantmentCharge, itemSoul, itemPoisonId, itemPoisonCharges) then
-                local foundIndex = inventoryHelper.getItemIndex(inventory, itemRefId, itemCharge,
+            local foundIndex = nil
+            if inventoryHelper.containsItem(inventory, itemRefId, itemCharge, itemEnchantmentCharge,
+                itemSoul, itemPoisonId, itemPoisonCharges) then
+                foundIndex = inventoryHelper.getItemIndex(inventory, itemRefId, itemCharge,
                     itemEnchantmentCharge, itemSoul, itemPoisonId, itemPoisonCharges)
-                local item = inventory[foundIndex]
+            end
 
-                if action == enumerations.container.ADD then
-                    tes3mp.LogAppend(enumerations.log.VERBOSE, "- Adding count of " .. itemCount .. " to existing item " ..
-                        item.refId .. " with current count of " .. item.count)
-                    item.count = item.count + itemCount
+            if action == enumerations.container.REMOVE then
 
-                elseif action == enumerations.container.REMOVE then
-                    local newCount = item.count - actionCount
-
-                    -- The item will still exist in the container with a lower count
-                    if newCount > 0 then
-                        tes3mp.LogAppend(enumerations.log.VERBOSE, "- Removed count of " .. actionCount .. " from item " ..
-                            item.refId .. " that had count of " .. item.count .. ", resulting in remaining count of " .. newCount)
-                        item.count = newCount
-                    -- The item is to be completely removed
-                    elseif newCount == 0 then
-                        inventory[foundIndex] = nil
-                    else
-                        actionCount = item.count
-                        tes3mp.LogAppend(enumerations.log.WARN, "- Attempt to remove count of " .. actionCount ..
-                            " from item" .. item.refId .. " that only had count of " .. item.count)
-                        tes3mp.LogAppend(enumerations.log.WARN, "- Removed just " .. actionCount .. " instead")
-                        tes3mp.SetContainerItemActionCountByIndex(objectIndex, itemIndex, actionCount)
-                        inventory[foundIndex] = nil
-                    end
-
-                    -- Is this a generated record? If so, remove the link to it
-                    if inventory[foundIndex] == nil and logicHandler.IsGeneratedRecord(itemRefId) then
-                        local recordStore = logicHandler.GetRecordStoreByRecordId(itemRefId)
-
-                        if recordStore ~= nil then
-                            self:RemoveLinkToRecord(recordStore.storeType, itemRefId, uniqueIndex)
-                        end
-                    end
-                end
-            else
-                if action == enumerations.container.REMOVE then
-                    tes3mp.LogAppend(enumerations.log.WARN, "- Attempt to remove count of " .. actionCount .. 
+                if foundIndex == nil then
+                    tes3mp.LogAppend(enumerations.log.WARN, "- Attempt to remove count of " .. actionCount ..
                         " from non-existent item " .. itemRefId)
                     tes3mp.SetContainerItemActionCountByIndex(objectIndex, itemIndex, 0)
                 else
-                    tes3mp.LogAppend(enumerations.log.VERBOSE, "- Added new item " .. itemRefId .. " with count of " ..
-                        itemCount)
+                    local item = inventory[foundIndex]
+                    local requested = actionCount
+                    local phaseAccepted = 0
+
+                    -- X013: a take never establishes a source. Eligibility was
+                    -- stamped when the canonical inventory was recorded, so the
+                    -- player taking the item cannot decide that it is phaseable.
+                    local isPersonalTake = packetOrigin == enumerations.packetOrigin.CLIENT_GAMEPLAY or
+                        subAction == enumerations.containerSub.DRAG or subAction == enumerations.containerSub.TAKE_ALL
+
+                    if isPersonalTake then
+                        phaseAccepted = questItemPhasing.ClaimContainer(pid, self.description, uniqueIndex,
+                            item, requested)
+                    end
+
+                    -- Only the non-canonical part of a mixed stack is globally
+                    -- removable. The canonical quest portion stays in cell data so
+                    -- every other character can still claim it once.
+                    local phaseCount = questItemPhasing.GetContainerPhaseCount(item)
+                    local sharedCount = math.max(0, (tonumber(item.count) or 0) - phaseCount)
+                    local sharedRequested = math.max(0, requested - phaseAccepted)
+                    local sharedAccepted = math.min(sharedRequested, sharedCount)
+                    local accepted = phaseAccepted + sharedAccepted
+
+                    if sharedAccepted > 0 then
+                        item.count = math.max(phaseCount, (tonumber(item.count) or 0) - sharedAccepted)
+                    end
+
+                    tes3mp.SetContainerItemActionCountByIndex(objectIndex, itemIndex, accepted)
+
+                    if accepted < requested then
+                        tes3mp.LogAppend(enumerations.log.WARN, "- Clamped container REMOVE for " .. itemRefId ..
+                            " from " .. requested .. " to " .. accepted .. " (personal phase/shared availability)")
+                    end
+
+                    -- An inventory entry may disappear only if it has no canonical
+                    -- phased units left. In normal X012 operation phaseCount never
+                    -- reaches zero merely because one player takes the quest item.
+                    if (tonumber(item.count) or 0) <= 0 then
+                        inventory[foundIndex] = nil
+
+                        if logicHandler.IsGeneratedRecord(itemRefId) then
+                            local recordStore = logicHandler.GetRecordStoreByRecordId(itemRefId)
+                            if recordStore ~= nil then
+                                self:RemoveLinkToRecord(recordStore.storeType, itemRefId, uniqueIndex)
+                            end
+                        end
+                    end
+                end
+
+            elseif action == enumerations.container.ADD then
+
+                if foundIndex ~= nil then
+                    local item = inventory[foundIndex]
+                    item.count = (tonumber(item.count) or 0) + itemCount
+
+                    if packetOrigin == enumerations.packetOrigin.CLIENT_GAMEPLAY then
+                        -- A player putting a quest-record item back into a chest is
+                        -- adding shared loot, not minting a new canonical source.
+                        if isQuestRecord or item.questPhaseEligible == true then
+                            questItemPhasing.MarkContainerSharedDrop(item)
+                        end
+                    elseif isQuestRecord then
+                        -- Scripted/authored additions can legitimately create a new
+                        -- phaseable quest source in an existing container stack.
+                        questItemPhasing.MarkContainerSource(item, itemCount)
+                    end
+                else
                     inventoryHelper.addItem(inventory, itemRefId, itemCount,
                         itemCharge, itemEnchantmentCharge, itemSoul, itemPoisonId, itemPoisonCharges)
+                    foundIndex = inventoryHelper.getItemIndex(inventory, itemRefId, itemCharge,
+                        itemEnchantmentCharge, itemSoul, itemPoisonId, itemPoisonCharges)
+                    local item = inventory[foundIndex]
 
-                    -- Is this a generated record? If so, add a link to it
+                    if packetOrigin == enumerations.packetOrigin.CLIENT_GAMEPLAY then
+                        if isQuestRecord then questItemPhasing.MarkContainerSharedDrop(item) end
+                    elseif isQuestRecord then
+                        questItemPhasing.MarkContainerSource(item, itemCount)
+                    end
+
                     if logicHandler.IsGeneratedRecord(itemRefId) then
                         local recordStore = logicHandler.GetRecordStoreByRecordId(itemRefId)
-
                         if recordStore ~= nil then
                             self:AddLinkToRecord(recordStore.storeType, itemRefId, uniqueIndex)
                         end
+                    end
+                end
+
+            else -- SET
+
+                inventoryHelper.addItem(inventory, itemRefId, itemCount,
+                    itemCharge, itemEnchantmentCharge, itemSoul, itemPoisonId, itemPoisonCharges)
+                foundIndex = inventoryHelper.getItemIndex(inventory, itemRefId, itemCharge,
+                    itemEnchantmentCharge, itemSoul, itemPoisonId, itemPoisonCharges)
+
+                -- SET is the canonical inventory: this is the one and only place
+                -- where a container stack becomes a phaseable quest source.
+                if foundIndex ~= nil and isQuestRecord then
+                    questItemPhasing.MarkContainerSource(inventory[foundIndex], itemCount)
+                end
+
+                if logicHandler.IsGeneratedRecord(itemRefId) then
+                    local recordStore = logicHandler.GetRecordStoreByRecordId(itemRefId)
+                    if recordStore ~= nil then
+                        self:AddLinkToRecord(recordStore.storeType, itemRefId, uniqueIndex)
                     end
                 end
             end
@@ -816,30 +895,16 @@ function BaseCell:SaveContainers(pid)
         self.data.objectData[uniqueIndex].inventory = inventory
     end
 
-    -- ArenaMP interest management: never broadcast container changes to the
-    -- whole server. Recipients are players who actually have this cell loaded
-    -- (including the neighbouring exterior cells in their OpenMW scene).
-    local isSpecialSubAction = subAction == enumerations.containerSub.REPLY_TO_REQUEST or
-        packetOrigin == enumerations.packetOrigin.CLIENT_SCRIPT_LOCAL or
-        packetOrigin == enumerations.packetOrigin.CLIENT_SCRIPT_GLOBAL or
-        packetOrigin == enumerations.packetOrigin.CLIENT_DIALOGUE
-
+    -- REMOVE carries recipient semantics, so the attached player gets the
+    -- corrected original packet first. Every client (including the taker) then
+    -- receives an authoritative personalized SET of each affected container.
     if action == enumerations.container.REMOVE then
-        -- The player taking the item needs the original REMOVE packet. Other
-        -- observers receive an authoritative SET of the resulting container,
-        -- so none of them can accidentally become the item recipient.
-        tes3mp.CopyReceivedObjectListToStore()
         tes3mp.SetObjectListPid(pid)
         tes3mp.SendContainer(false, false)
+    end
 
-        for objectIndex = 0, tes3mp.GetObjectListSize() - 1 do
-            local uniqueIndex = tes3mp.GetObjectRefNum(objectIndex) .. "-" .. tes3mp.GetObjectMpNum(objectIndex)
-            packetBuilder.UpdateContainerForRelevantPlayers(self, uniqueIndex, pid)
-        end
-    else
-        local skipPid = nil
-        if isSpecialSubAction then skipPid = pid end
-        packetBuilder.SendReceivedContainerToRelevantPlayers(self, skipPid)
+    for _, uniqueIndex in pairs(affectedContainers) do
+        packetBuilder.UpdateContainerForRelevantPlayers(self, uniqueIndex, nil)
     end
 
     self:QuicksaveToDrive()
@@ -1596,22 +1661,27 @@ function BaseCell:LoadContainers(pid, objectData, uniqueIndexArray)
 
             for itemIndex, item in pairs(objectData[uniqueIndex].inventory) do
 
-                if item.enchantmentCharge == nil then
-                    item.enchantmentCharge = -1
+                local visibleCount = questItemPhasing.GetVisibleContainerCount(
+                    pid, self.description, uniqueIndex, item)
+
+                if visibleCount > 0 then
+                    if item.enchantmentCharge == nil then
+                        item.enchantmentCharge = -1
+                    end
+
+                    if item.soul == nil then
+                        item.soul = ""
+                    end
+
+                    tes3mp.SetContainerItemRefId(item.refId)
+                    tes3mp.SetContainerItemCount(visibleCount)
+                    tes3mp.SetContainerItemCharge(item.charge)
+                    tes3mp.SetContainerItemEnchantmentCharge(item.enchantmentCharge)
+                    tes3mp.SetContainerItemSoul(item.soul)
+                    tes3mp.SetContainerItemPoison(item.poisonId or "", item.poisonCharges or 0)
+
+                    tes3mp.AddContainerItem()
                 end
-
-                if item.soul == nil then
-                    item.soul = ""
-                end
-
-                tes3mp.SetContainerItemRefId(item.refId)
-                tes3mp.SetContainerItemCount(item.count)
-                tes3mp.SetContainerItemCharge(item.charge)
-                tes3mp.SetContainerItemEnchantmentCharge(item.enchantmentCharge)
-                tes3mp.SetContainerItemSoul(item.soul)
-                tes3mp.SetContainerItemPoison(item.poisonId or "", item.poisonCharges or 0)
-
-                tes3mp.AddContainerItem()
             end
 
             tes3mp.AddObject()

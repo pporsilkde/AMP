@@ -187,7 +187,7 @@ bool CompanionWindow::requestDrag(int count, ItemView* pendingTarget)
 
     mwmp::BaseObject baseObject = objectList->getBaseObjectFromPtr(mPtr);
     MWWorld::Ptr itemPtr = mModel->getItem(mSelectedItem).mBase;
-    objectList->addContainerItem(baseObject, itemPtr, itemPtr.getRefData().getCount(), count);
+    objectList->addContainerItem(baseObject, itemPtr, itemPtr.getRefData().getCount(), count, mPtr);
     objectList->addBaseObject(baseObject);
     objectList->sendContainer();
     return true;
@@ -216,7 +216,7 @@ void CompanionWindow::dropItem()
 
     mwmp::BaseObject baseObject = objectList->getBaseObjectFromPtr(mPtr);
     MWWorld::Ptr itemPtr = mDragAndDrop->mItem.mBase;
-    objectList->addContainerItem(baseObject, itemPtr, mDragAndDrop->mDraggedCount, 0);
+    objectList->addContainerItem(baseObject, itemPtr, mDragAndDrop->mDraggedCount, 0, mPtr);
     objectList->addBaseObject(baseObject);
     objectList->sendContainer();
 

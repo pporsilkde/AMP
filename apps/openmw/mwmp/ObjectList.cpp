@@ -1,4 +1,5 @@
 #include "ObjectList.hpp"
+#include "QuestItemIndex.hpp"
 #include "Main.hpp"
 #include "Networking.hpp"
 #include "MechanicsHelper.hpp"
@@ -120,7 +121,8 @@ mwmp::BaseObject ObjectList::getBaseObjectFromPtr(const MWWorld::Ptr& ptr)
     return baseObject;
 }
 
-void ObjectList::addContainerItem(mwmp::BaseObject& baseObject, const MWWorld::Ptr& itemPtr, int itemCount, int actionCount)
+void ObjectList::addContainerItem(mwmp::BaseObject& baseObject, const MWWorld::Ptr& itemPtr, int itemCount, int actionCount,
+    const MWWorld::Ptr& sourcePtr)
 {
     mwmp::ContainerItem containerItem;
     containerItem.refId = itemPtr.getCellRef().getRefId();
@@ -132,31 +134,31 @@ void ObjectList::addContainerItem(mwmp::BaseObject& baseObject, const MWWorld::P
     containerItem.poisonCharges = itemPtr.getRefData().getPoisonCharges();
     containerItem.actionCount = actionCount;
 
-    LOG_APPEND(TimedLog::LOG_VERBOSE, "--- Adding container item %s to packet with count %i and actionCount %i",
-        containerItem.refId.c_str(), itemCount, actionCount);
+    QuestItemIndex& questIndex = QuestItemIndex::get();
+    containerItem.questItem = questIndex.isQuestItem(containerItem.refId);
+    if (containerItem.questItem)
+    {
+        if (!sourcePtr.isEmpty())
+            containerItem.questSourceId = questIndex.makeContainerSourceId(sourcePtr, itemPtr);
+        if (containerItem.questSourceId.empty())
+            containerItem.questSourceId = questIndex.makeContainerSourceIdFallback(
+                cell.getShortDescription(), baseObject.refId, baseObject.refNum, baseObject.mpNum, itemPtr);
+    }
+
+    LOG_APPEND(TimedLog::LOG_VERBOSE, "--- Adding container item %s to packet with count %i and actionCount %i%s",
+        containerItem.refId.c_str(), itemCount, actionCount, containerItem.questItem ? " [quest phased]" : "");
 
     baseObject.containerItems.push_back(containerItem);
 }
 
-void ObjectList::addContainerItem(mwmp::BaseObject& baseObject, const MWGui::ItemStack& itemStack, int itemCount, int actionCount)
+void ObjectList::addContainerItem(mwmp::BaseObject& baseObject, const MWGui::ItemStack& itemStack, int itemCount, int actionCount,
+    const MWWorld::Ptr& sourcePtr)
 {
-    mwmp::ContainerItem containerItem;
-    containerItem.refId = itemStack.mBase.getCellRef().getRefId();
-    containerItem.count = itemCount;
-    containerItem.charge = itemStack.mBase.getCellRef().getCharge();
-    containerItem.enchantmentCharge = itemStack.mBase.getCellRef().getEnchantmentCharge();
-    containerItem.soul = itemStack.mBase.getCellRef().getSoul();
-    containerItem.poisonId = itemStack.mBase.getRefData().getPoisonId();
-    containerItem.poisonCharges = itemStack.mBase.getRefData().getPoisonCharges();
-    containerItem.actionCount = actionCount;
-
-    LOG_APPEND(TimedLog::LOG_VERBOSE, "--- Adding container item %s to packet with count %i and actionCount %i",
-        containerItem.refId.c_str(), itemCount, actionCount);
-
-    baseObject.containerItems.push_back(containerItem);
+    addContainerItem(baseObject, itemStack.mBase, itemCount, actionCount, sourcePtr);
 }
 
-void ObjectList::addContainerItem(mwmp::BaseObject& baseObject, const std::string itemId, int itemCount, int actionCount)
+void ObjectList::addContainerItem(mwmp::BaseObject& baseObject, const std::string itemId, int itemCount, int actionCount,
+    const MWWorld::Ptr& sourcePtr)
 {
     mwmp::ContainerItem containerItem;
     containerItem.refId = itemId;
@@ -166,8 +168,13 @@ void ObjectList::addContainerItem(mwmp::BaseObject& baseObject, const std::strin
     containerItem.soul = "";
     containerItem.actionCount = actionCount;
 
-    LOG_APPEND(TimedLog::LOG_VERBOSE, "--- Adding container item %s to packet with count %i and actionCount %i",
-        containerItem.refId.c_str(), itemCount, actionCount);
+    QuestItemIndex& questIndex = QuestItemIndex::get();
+    containerItem.questItem = questIndex.isQuestItem(containerItem.refId);
+    if (containerItem.questItem && !sourcePtr.isEmpty())
+        containerItem.questSourceId = questIndex.makeContainerSourceId(sourcePtr, containerItem.refId);
+
+    LOG_APPEND(TimedLog::LOG_VERBOSE, "--- Adding container item %s to packet with count %i and actionCount %i%s",
+        containerItem.refId.c_str(), itemCount, actionCount, containerItem.questItem ? " [quest phased]" : "");
 
     baseObject.containerItems.push_back(containerItem);
 }
@@ -187,7 +194,7 @@ void ObjectList::addEntireContainer(const MWWorld::Ptr& ptr)
 
     for (const auto itemPtr : containerStore)
     {
-        addContainerItem(baseObject, itemPtr, itemPtr.getRefData().getCount(), itemPtr.getRefData().getCount());
+        addContainerItem(baseObject, itemPtr, itemPtr.getRefData().getCount(), itemPtr.getRefData().getCount(), ptr);
     }
 
     addBaseObject(baseObject);
@@ -1346,6 +1353,13 @@ void ObjectList::addObjectGeneric(const MWWorld::Ptr& ptr)
     cell = *ptr.getCell()->getCell();
 
     mwmp::BaseObject baseObject = getBaseObjectFromPtr(ptr);
+    baseObject.count = ptr.getRefData().getCount();
+
+    QuestItemIndex& questIndex = QuestItemIndex::get();
+    baseObject.questItem = questIndex.isQuestItem(baseObject.refId);
+    if (baseObject.questItem)
+        baseObject.questSourceId = questIndex.makeWorldSourceId(ptr);
+
     addBaseObject(baseObject);
 }
 

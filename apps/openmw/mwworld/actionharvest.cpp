@@ -80,7 +80,7 @@ namespace MWWorld
 
                 Track this item removal in the ID_CONTAINER packet being prepared
             */
-            objectList->addContainerItem(baseObject, *it, 0, itemCount);
+            objectList->addContainerItem(baseObject, *it, 0, itemCount, target);
             /*
                 End of tes3mp addition
             */

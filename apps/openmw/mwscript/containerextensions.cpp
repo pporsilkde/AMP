@@ -219,7 +219,7 @@ namespace MWScript
                         objectList->action = mwmp::BaseObjectList::ADD;
                         objectList->containerSubAction = mwmp::BaseObjectList::NONE;
                         mwmp::BaseObject baseObject = objectList->getBaseObjectFromPtr(ptr);
-                        objectList->addContainerItem(baseObject, item, count, 0);
+                        objectList->addContainerItem(baseObject, item, count, 0, ptr);
                         objectList->addBaseObject(baseObject);
                         objectList->sendContainer();
                     }
@@ -374,7 +374,7 @@ namespace MWScript
                         objectList->containerSubAction = mwmp::BaseObjectList::NONE;
 
                         mwmp::BaseObject baseObject = objectList->getBaseObjectFromPtr(ptr);
-                        objectList->addContainerItem(baseObject, item, 0, count);
+                        objectList->addContainerItem(baseObject, item, 0, count, ptr);
                         objectList->addBaseObject(baseObject);
                         objectList->sendContainer();
                     }

@@ -130,7 +130,7 @@ MWWorld::Ptr ContainerItemModel::copyItem (const ItemStack& item, size_t count, 
     objectList->action = mwmp::BaseObjectList::ADD;
     objectList->containerSubAction = mwmp::BaseObjectList::NONE;
     mwmp::BaseObject baseObject = objectList->getBaseObjectFromPtr(source.first);
-    objectList->addContainerItem(baseObject, item.mBase, count, 0);
+    objectList->addContainerItem(baseObject, item.mBase, count, 0, source.first);
     objectList->addBaseObject(baseObject);
     objectList->sendContainer();
     /*
@@ -182,7 +182,7 @@ void ContainerItemModel::removeItem (const ItemStack& item, size_t count)
                     objectList->action = mwmp::BaseObjectList::REMOVE;
                     objectList->containerSubAction = mwmp::BaseObjectList::NONE;
                     mwmp::BaseObject baseObject = objectList->getBaseObjectFromPtr(source.first);
-                    objectList->addContainerItem(baseObject, *it, it->getRefData().getCount(), toRemove);
+                    objectList->addContainerItem(baseObject, *it, it->getRefData().getCount(), toRemove, source.first);
                     objectList->addBaseObject(baseObject);
                     objectList->sendContainer();
                     

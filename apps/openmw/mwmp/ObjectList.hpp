@@ -20,9 +20,12 @@ namespace mwmp
 
         void addBaseObject(BaseObject baseObject);
         mwmp::BaseObject getBaseObjectFromPtr(const MWWorld::Ptr& ptr);
-        void addContainerItem(mwmp::BaseObject& baseObject, const MWWorld::Ptr& itemPtr, int itemCount, int actionCount);
-        void addContainerItem(mwmp::BaseObject& baseObject, const MWGui::ItemStack& itemStack, int itemCount, int actionCount);
-        void addContainerItem(mwmp::BaseObject& baseObject, const std::string itemId, int itemCount, int actionCount);
+        void addContainerItem(mwmp::BaseObject& baseObject, const MWWorld::Ptr& itemPtr, int itemCount, int actionCount,
+            const MWWorld::Ptr& sourcePtr = MWWorld::Ptr());
+        void addContainerItem(mwmp::BaseObject& baseObject, const MWGui::ItemStack& itemStack, int itemCount, int actionCount,
+            const MWWorld::Ptr& sourcePtr = MWWorld::Ptr());
+        void addContainerItem(mwmp::BaseObject& baseObject, const std::string itemId, int itemCount, int actionCount,
+            const MWWorld::Ptr& sourcePtr = MWWorld::Ptr());
         void addEntireContainer(const MWWorld::Ptr& ptr);
 
         void editContainers(MWWorld::CellStore* cellStore);

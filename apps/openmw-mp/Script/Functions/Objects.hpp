@@ -21,6 +21,8 @@
     SCRIPT_API_ENTRY("GetObjectRefId", ObjectFunctions::GetObjectRefId),\
     SCRIPT_API_ENTRY("GetObjectRefNum", ObjectFunctions::GetObjectRefNum),\
     SCRIPT_API_ENTRY("GetObjectMpNum", ObjectFunctions::GetObjectMpNum),\
+    SCRIPT_API_ENTRY("GetObjectQuestItem", ObjectFunctions::GetObjectQuestItem),\
+    SCRIPT_API_ENTRY("GetObjectQuestSourceId", ObjectFunctions::GetObjectQuestSourceId),\
     SCRIPT_API_ENTRY("GetObjectCount", ObjectFunctions::GetObjectCount),\
     SCRIPT_API_ENTRY("GetObjectCharge", ObjectFunctions::GetObjectCharge),\
     SCRIPT_API_ENTRY("GetObjectEnchantmentCharge", ObjectFunctions::GetObjectEnchantmentCharge),\
@@ -91,6 +93,8 @@
     SCRIPT_API_ENTRY("GetContainerItemSoul", ObjectFunctions::GetContainerItemSoul),\
     SCRIPT_API_ENTRY("GetContainerItemPoisonId", ObjectFunctions::GetContainerItemPoisonId),\
     SCRIPT_API_ENTRY("GetContainerItemPoisonCharges", ObjectFunctions::GetContainerItemPoisonCharges),\
+    SCRIPT_API_ENTRY("GetContainerItemQuestItem", ObjectFunctions::GetContainerItemQuestItem),\
+    SCRIPT_API_ENTRY("GetContainerItemQuestSourceId", ObjectFunctions::GetContainerItemQuestSourceId),\
     SCRIPT_API_ENTRY("GetContainerItemActionCount", ObjectFunctions::GetContainerItemActionCount),\
     \
     SCRIPT_API_ENTRY("DoesObjectHaveContainer", ObjectFunctions::DoesObjectHaveContainer),\
@@ -321,6 +325,8 @@ public:
     * \return The mpNum.
     */
     static unsigned int GetObjectMpNum(unsigned int index) noexcept;
+    static bool GetObjectQuestItem(unsigned int index) noexcept;
+    static const char *GetObjectQuestSourceId(unsigned int index) noexcept;
 
     /**
     * \brief Get the count of the object at a certain index in the read object list.
@@ -851,6 +857,8 @@ public:
     static const char *GetContainerItemSoul(unsigned int objectIndex, unsigned int itemIndex) noexcept;
     static const char *GetContainerItemPoisonId(unsigned int objectIndex, unsigned int itemIndex) noexcept;
     static int GetContainerItemPoisonCharges(unsigned int objectIndex, unsigned int itemIndex) noexcept;
+    static bool GetContainerItemQuestItem(unsigned int objectIndex, unsigned int itemIndex) noexcept;
+    static const char *GetContainerItemQuestSourceId(unsigned int objectIndex, unsigned int itemIndex) noexcept;
 
     /**
     * \brief Get the action count of the container item at a certain itemIndex in the container

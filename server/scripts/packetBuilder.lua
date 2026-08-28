@@ -1,4 +1,5 @@
 packetBuilder = {}
+local questItemPhasing = require("questItemPhasing")
 
 -- ArenaMP AOI routing for container state.  The stock TES3MP scripts use
 -- SendContainer(true, ...), which broadcasts through the server.  Instead, use
@@ -70,20 +71,25 @@ packetBuilder.UpdateContainerForRelevantPlayers = function(cell, uniqueIndex, sk
             if containerData.refId ~= nil then tes3mp.SetObjectRefId(containerData.refId) end
 
             for _, item in pairs(containerData.inventory) do
-                local charge = item.charge or -1
-                local enchantmentCharge = item.enchantmentCharge or -1
-                local soul = item.soul or ""
+                local visibleCount = questItemPhasing.GetVisibleContainerCount(
+                    targetPid, cell.description, uniqueIndex, item)
 
-                if charge < -1 then charge = -1 end
-                if enchantmentCharge < -1 then enchantmentCharge = -1 end
+                if visibleCount > 0 then
+                    local charge = item.charge or -1
+                    local enchantmentCharge = item.enchantmentCharge or -1
+                    local soul = item.soul or ""
 
-                tes3mp.SetContainerItemRefId(item.refId)
-                tes3mp.SetContainerItemCount(item.count)
-                tes3mp.SetContainerItemCharge(charge)
-                tes3mp.SetContainerItemEnchantmentCharge(enchantmentCharge)
-                tes3mp.SetContainerItemSoul(soul)
-                tes3mp.SetContainerItemPoison(item.poisonId or "", item.poisonCharges or 0)
-                tes3mp.AddContainerItem()
+                    if charge < -1 then charge = -1 end
+                    if enchantmentCharge < -1 then enchantmentCharge = -1 end
+
+                    tes3mp.SetContainerItemRefId(item.refId)
+                    tes3mp.SetContainerItemCount(visibleCount)
+                    tes3mp.SetContainerItemCharge(charge)
+                    tes3mp.SetContainerItemEnchantmentCharge(enchantmentCharge)
+                    tes3mp.SetContainerItemSoul(soul)
+                    tes3mp.SetContainerItemPoison(item.poisonId or "", item.poisonCharges or 0)
+                    tes3mp.AddContainerItem()
+                end
             end
 
             tes3mp.AddObject()
