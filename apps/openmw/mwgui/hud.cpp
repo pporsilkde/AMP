@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 #include <iomanip>
 #include <map>
 #include <set>
@@ -92,10 +93,40 @@ namespace
 
     std::string getNpcBarMode()
     {
-        const std::string mode = Settings::Manager::getString("npc bar mode", "HUD");
+        // Settings::Manager throws for keys that are absent from settings-default.cfg,
+        // and this runs once per frame. Never let a missing key take the HUD down.
+        std::string mode;
+        try
+        {
+            mode = Settings::Manager::getString("npc bar mode", "HUD");
+        }
+        catch (const std::exception&)
+        {
+            mode.clear();
+        }
+
         if (mode == "off" || mode == "combat" || mode == "hover" || mode == "both")
             return mode;
-        return Settings::Manager::getBool("target info panel", "GUI") ? "both" : "combat";
+
+        try
+        {
+            return Settings::Manager::getBool("target info panel", "GUI") ? "both" : "combat";
+        }
+        catch (const std::exception&)
+        {
+            return "both";
+        }
+    }
+
+    /// Exterior cells stream their neighbours in, so a fight legitimately spans more
+    /// than one cell. Only interiors are a hard boundary for overhead bars.
+    bool sharesCombatSpace(const MWWorld::Ptr& actor, const MWWorld::Ptr& player)
+    {
+        if (!actor.isInCell() || !player.isInCell())
+            return false;
+        if (actor.getCell() == player.getCell())
+            return true;
+        return actor.getCell()->isExterior() && player.getCell()->isExterior();
     }
 
     bool npcBarShowsHover(const std::string& mode)
@@ -321,6 +352,23 @@ namespace MWGui
         getWidget(mEnemyHealth, "EnemyHealth");
         getWidget(mEnemyName, "EnemyName");
         getWidget(mEnemySummary, "EnemySummary");
+
+        // X014: fixed widget pool for world-space combat health bars. Reusing
+        // widgets avoids GUI allocations while fights are running.
+        constexpr std::size_t combatHealthBarPoolSize = 24;
+        mCombatHealthBars.reserve(combatHealthBarPoolSize);
+        for (std::size_t i = 0; i < combatHealthBarPoolSize; ++i)
+        {
+            CombatHealthBarState state;
+            state.mWidget = mGameplayHud->createWidget<MyGUI::ProgressBar>(
+                "MW_Progress_Red", MyGUI::IntCoord(0, 0, 118, 9),
+                MyGUI::Align::Left | MyGUI::Align::Top,
+                "CombatHealthBar" + MyGUI::utility::toString(i));
+            state.mWidget->setNeedMouseFocus(false);
+            state.mWidget->setVisible(false);
+            mCombatHealthBars.push_back(state);
+        }
+
         getWidget(mHealthText, "HealthText");
         getWidget(mMagickaText, "MagickaText");
         getWidget(mStaminaText, "StaminaText");
@@ -711,23 +759,19 @@ namespace MWGui
             mFpsFrameCount = 0;
         }
 
+        updateCombatHealthBars(dt);
         updateFocusedTargetPanel(dt);
 
         const std::string npcBarMode = getNpcBarMode();
         const bool showHoverNpcBar = npcBarShowsHover(npcBarMode);
-        const bool showCombatNpcBar = npcBarShowsCombat(npcBarMode);
         const bool focusedTargetAlive = !mFocusActor.isEmpty()
             && !mFocusActor.getClass().getCreatureStats(mFocusActor).isDead();
         const bool dialogueOpen = MWBase::Environment::get().getWindowManager()->containsMode(GM_Dialogue);
         const bool focusedTargetPanel = showHoverNpcBar && focusedTargetAlive && !dialogueOpen
             && mFocusActorPanelAlpha > 0.01f;
-        const bool combatTargetPanel = showCombatNpcBar && mEnemyActorId != -1;
-
         mEnemyHealthTimer -= dt;
-        if (mEnemyHealth->getVisible() && mEnemyHealthTimer < 0 && !focusedTargetPanel)
-        {
+        if (mEnemyHealth->getVisible() && !focusedTargetPanel)
             mEnemyHealth->setVisible(false);
-        }
 
         if (mIsDrowning)
             mDrowningFlashTheta += dt * osg::PI*2;
@@ -738,10 +782,8 @@ namespace MWGui
                 && Settings::Manager::getBool("show status effects", "HUD")
                 && mEffectBox->getChildCount() > 0);
 
-        if ((focusedTargetPanel || combatTargetPanel) && mEnemyHealth->getVisible())
-        {
+        if (focusedTargetPanel && mEnemyHealth->getVisible())
             updateEnemyHealthBar();
-        }
 
         if (focusedTargetPanel)
         {
@@ -765,7 +807,7 @@ namespace MWGui
         if (!player.isEmpty())
             drawState = player.getClass().getCreatureStats(player).getDrawState();
 
-        if ((!showHoverNpcBar && !showCombatNpcBar) || (dialogueOpen && mEnemyActorId == -1))
+        if (!showHoverNpcBar || dialogueOpen)
             mEnemyHealth->setVisible(false);
 
         const bool showFocusedTargetInfo = focusedTargetPanel && mEnemyHealth->getVisible();
@@ -1683,8 +1725,22 @@ namespace MWGui
         const bool hoverEnabled = npcBarShowsHover(getNpcBarMode());
         bool panelShouldBeVisible = false;
 
+        bool focusActorInCombat = false;
+        if (actorAlive)
+        {
+            for (const CombatHealthBarState& state : mCombatHealthBars)
+            {
+                if (!state.mActor.isEmpty() && state.mActor == mFocusActor)
+                {
+                    focusActorInCombat = true;
+                    break;
+                }
+            }
+        }
+
         const MyGUI::IntSize& viewSize = MyGUI::RenderManager::getInstance().getViewSize();
-        if (actorAlive && mFocusActorCurrentlyFaced && hoverEnabled && !dialogueOpen && world)
+        if (actorAlive && !focusActorInCombat
+            && mFocusActorCurrentlyFaced && hoverEnabled && !dialogueOpen && world)
         {
             // The target panel is intentionally binary: fully visible or fully hidden.
             // Do not leave semi-transparent text or health bars over the actor's face.
@@ -1755,6 +1811,286 @@ namespace MWGui
         }
     }
 
+    void HUD::hideCombatHealthBars()
+    {
+        mCombatHealthBarScanTimer = 0.f;
+        for (CombatHealthBarState& state : mCombatHealthBars)
+        {
+            state.mActor = MWWorld::Ptr();
+            state.mAlly = false;
+            if (state.mWidget)
+                state.mWidget->setVisible(false);
+        }
+    }
+
+    void HUD::updateCombatHealthBars(float dt)
+    {
+        dt = std::max(0.f, dt);
+
+        const bool enabled = npcBarShowsCombat(getNpcBarMode())
+            && mGameplayHud && mGameplayHud->getVisible()
+            && !MWBase::Environment::get().getWindowManager()->containsMode(GM_Dialogue);
+        if (!enabled)
+        {
+            hideCombatHealthBars();
+            return;
+        }
+
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        MWBase::MechanicsManager* mechanics = MWBase::Environment::get().getMechanicsManager();
+        if (!world || !mechanics)
+        {
+            hideCombatHealthBars();
+            return;
+        }
+
+        const MWWorld::Ptr player = world->getPlayerPtr();
+        if (player.isEmpty() || !player.isInCell())
+        {
+            hideCombatHealthBars();
+            return;
+        }
+
+        // Rebuild only the participant list at 10 Hz. Projection, distance scaling
+        // and health values still update every frame, so bars stay attached to heads.
+        mCombatHealthBarScanTimer -= dt;
+        if (mCombatHealthBarScanTimer <= 0.f)
+        {
+            mCombatHealthBarScanTimer = 0.10f;
+
+            struct Candidate
+            {
+                MWWorld::Ptr mActor;
+                bool mAlly = false;
+                float mDistanceSquared = 0.f;
+            };
+
+            std::map<MWWorld::Ptr, bool> participants; // false = enemy, true = ally
+            for (const MWWorld::Ptr& enemy : mechanics->getActorsFighting(player))
+            {
+                if (!enemy.isEmpty())
+                    participants[enemy] = false;
+            }
+
+            std::set<MWWorld::Ptr> allies;
+            mechanics->getActorsSidingWith(player, allies);
+            for (const MWWorld::Ptr& ally : allies)
+            {
+                if (ally.isEmpty() || participants.count(ally) || !ally.getClass().isActor())
+                    continue;
+
+                const MWMechanics::CreatureStats& stats = ally.getClass().getCreatureStats(ally);
+                if (!stats.isDead() && stats.getAiSequence().isInCombat())
+                    participants[ally] = true;
+            }
+
+            const osg::Vec3f playerPosition = player.getRefData().getPosition().asVec3();
+            constexpr float maximumBarDistance = 4096.f;
+            constexpr float maximumBarDistanceSquared = maximumBarDistance * maximumBarDistance;
+
+            std::vector<Candidate> candidates;
+            candidates.reserve(participants.size());
+            for (const auto& participant : participants)
+            {
+                const MWWorld::Ptr& actor = participant.first;
+                if (actor == player || !sharesCombatSpace(actor, player))
+                    continue;
+                if (actor.getRefData().getCount() <= 0 || !actor.getRefData().isEnabled()
+                    || actor.getRefData().isDeleted() || !actor.getClass().isActor())
+                    continue;
+
+                const MWMechanics::CreatureStats& stats = actor.getClass().getCreatureStats(actor);
+                if (stats.isDead() || stats.getHealth().getCurrent() <= 0.f)
+                    continue;
+                if (!world->getLOS(player, actor))
+                    continue;
+
+                const osg::Vec3f delta = actor.getRefData().getPosition().asVec3() - playerPosition;
+                const float distanceSquared = delta.length2();
+                if (distanceSquared > maximumBarDistanceSquared)
+                    continue;
+
+                Candidate candidate;
+                candidate.mActor = actor;
+                candidate.mAlly = participant.second;
+                candidate.mDistanceSquared = distanceSquared;
+                candidates.push_back(candidate);
+            }
+
+            std::sort(candidates.begin(), candidates.end(),
+                [](const Candidate& left, const Candidate& right)
+                {
+                    return left.mDistanceSquared < right.mDistanceSquared;
+                });
+
+            const std::size_t capacity = mCombatHealthBars.size();
+            if (candidates.size() > capacity)
+                candidates.resize(capacity);
+
+            // Keep every actor on the widget it already owns. Re-filling the pool in
+            // distance order made two participants swap widgets whenever they traded
+            // places, which swapped their colours for a frame and reset the progress
+            // bar in the middle of a fight.
+            std::vector<bool> slotTaken(capacity, false);
+            std::vector<bool> candidatePlaced(candidates.size(), false);
+
+            for (std::size_t i = 0; i < capacity; ++i)
+            {
+                CombatHealthBarState& state = mCombatHealthBars[i];
+                if (state.mActor.isEmpty())
+                    continue;
+
+                bool stillFighting = false;
+                for (std::size_t c = 0; c < candidates.size(); ++c)
+                {
+                    if (candidatePlaced[c] || candidates[c].mActor != state.mActor)
+                        continue;
+
+                    state.mAlly = candidates[c].mAlly;
+                    candidatePlaced[c] = true;
+                    slotTaken[i] = true;
+                    stillFighting = true;
+                    break;
+                }
+
+                if (!stillFighting)
+                {
+                    state.mActor = MWWorld::Ptr();
+                    if (state.mWidget)
+                        state.mWidget->setVisible(false);
+                }
+            }
+
+            std::size_t nextSlot = 0;
+            for (std::size_t c = 0; c < candidates.size(); ++c)
+            {
+                if (candidatePlaced[c])
+                    continue;
+
+                while (nextSlot < capacity && slotTaken[nextSlot])
+                    ++nextSlot;
+                if (nextSlot >= capacity)
+                    break;
+
+                CombatHealthBarState& state = mCombatHealthBars[nextSlot];
+                state.mActor = candidates[c].mActor;
+                state.mAlly = candidates[c].mAlly;
+                slotTaken[nextSlot] = true;
+            }
+
+            // Re-skin against what the widget is actually wearing, not against the
+            // previous ally flag: a slot cleared by hideCombatHealthBars resets that
+            // flag to "enemy" while the widget still carries the green skin.
+            for (CombatHealthBarState& state : mCombatHealthBars)
+            {
+                if (state.mActor.isEmpty() || !state.mWidget || state.mSkinAlly == state.mAlly)
+                    continue;
+
+                state.mWidget->changeWidgetSkin(state.mAlly ? "MW_Progress_Green" : "MW_Progress_Red");
+                state.mWidget->setNeedMouseFocus(false);
+                state.mSkinAlly = state.mAlly;
+            }
+        }
+
+        const MyGUI::IntSize& viewSize = MyGUI::RenderManager::getInstance().getViewSize();
+        const osg::Vec3f playerPosition = player.getRefData().getPosition().asVec3();
+
+        constexpr float fullSizeDistance = 384.f;
+        constexpr float maximumBarDistance = 4096.f;
+        constexpr float fadeStartDistance = maximumBarDistance * 0.78f;
+        constexpr float maximumWidth = 118.f;
+        constexpr float maximumHeight = 9.f;
+        constexpr float minimumScale = 0.40f;
+
+        for (CombatHealthBarState& state : mCombatHealthBars)
+        {
+            MyGUI::ProgressBar* bar = state.mWidget;
+            if (!bar || state.mActor.isEmpty())
+            {
+                if (bar)
+                    bar->setVisible(false);
+                continue;
+            }
+
+            const MWWorld::Ptr& actor = state.mActor;
+            if (!sharesCombatSpace(actor, player)
+                || actor.getRefData().getCount() <= 0 || !actor.getRefData().isEnabled()
+                || actor.getRefData().isDeleted() || !actor.getClass().isActor())
+            {
+                bar->setVisible(false);
+                continue;
+            }
+
+            MWMechanics::CreatureStats& stats = actor.getClass().getCreatureStats(actor);
+            const float maximumHealth = stats.getHealth().getModified();
+            const float currentHealth = stats.getHealth().getCurrent();
+            if (stats.isDead() || maximumHealth <= 0.f || currentHealth <= 0.f)
+            {
+                bar->setVisible(false);
+                continue;
+            }
+
+            const float distance = (actor.getRefData().getPosition().asVec3() - playerPosition).length();
+            if (distance >= maximumBarDistance)
+            {
+                bar->setVisible(false);
+                continue;
+            }
+
+            float minX = 0.f;
+            float minY = 0.f;
+            float maxX = 0.f;
+            float maxY = 0.f;
+            if (!world->getObjectScreenBounds(actor, minX, minY, maxX, maxY))
+            {
+                bar->setVisible(false);
+                continue;
+            }
+
+            const float distanceT = std::max(0.f, std::min(1.f,
+                (distance - fullSizeDistance) / (maximumBarDistance - fullSizeDistance)));
+            const float scale = std::max(minimumScale, 1.f - 0.60f * distanceT);
+            const int width = std::max(40, static_cast<int>(std::lround(maximumWidth * scale)));
+            const int height = std::max(4, static_cast<int>(std::lround(maximumHeight * scale)));
+
+            // Anchor on the head itself. Clamping the bar back onto the screen used to
+            // park it against the border for an actor that had already left the view,
+            // where it read as belonging to whoever stood at that edge.
+            const float centreXNormalized = (minX + maxX) * 0.5f;
+            if (centreXNormalized < 0.f || centreXNormalized > 1.f)
+            {
+                bar->setVisible(false);
+                continue;
+            }
+
+            const float centreX = centreXNormalized * viewSize.width;
+            const float actorTop = minY * viewSize.height;
+            const int left = static_cast<int>(std::lround(centreX - width * 0.5f));
+            const int top = static_cast<int>(std::lround(actorTop - height - (4.f + 4.f * scale)));
+
+            if (top + height <= 0 || top >= viewSize.height
+                || left + width <= 0 || left >= viewSize.width)
+            {
+                bar->setVisible(false);
+                continue;
+            }
+
+            const int maximumHealthPoints = std::max(1, static_cast<int>(std::lround(maximumHealth)));
+            const int currentHealthPoints = std::max(0, std::min(maximumHealthPoints,
+                static_cast<int>(std::lround(currentHealth))));
+            bar->setProgressRange(static_cast<std::size_t>(maximumHealthPoints));
+            bar->setProgressPosition(static_cast<std::size_t>(currentHealthPoints));
+            bar->setCoord(left, top, width, height);
+
+            float alpha = 1.f;
+            if (distance > fadeStartDistance)
+                alpha = std::max(0.f, std::min(1.f,
+                    (maximumBarDistance - distance) / (maximumBarDistance - fadeStartDistance)));
+            bar->setAlpha(alpha);
+            bar->setVisible(alpha > 0.01f);
+        }
+    }
+
     void HUD::updateEnemyHealthBar()
     {
         const std::string npcBarMode = getNpcBarMode();
@@ -1767,8 +2103,6 @@ namespace MWGui
         MWWorld::Ptr enemy;
         if (usingFocusActor)
             enemy = mFocusActor;
-        else if (npcBarShowsCombat(npcBarMode) && mEnemyActorId != -1)
-            enemy = MWBase::Environment::get().getWorld()->searchPtrViaActorId(mEnemyActorId);
 
         if (enemy.isEmpty())
         {
@@ -1800,12 +2134,7 @@ namespace MWGui
         mEnemyHealth->setProgressRange(static_cast<size_t>(maximumHealthPoints));
         mEnemyHealth->setProgressPosition(static_cast<size_t>(currentHealthPoints));
 
-        static const float fNPCHealthBarFade = MWBase::Environment::get().getWorld()->getStore()
-            .get<ESM::GameSetting>().find("fNPCHealthBarFade")->mValue.getFloat();
-        const float alpha = usingFocusActor ? mFocusActorPanelAlpha
-            : (fNPCHealthBarFade > 0.f
-                ? std::max(0.f, std::min(1.f, mEnemyHealthTimer / fNPCHealthBarFade))
-                : 1.f);
+        const float alpha = 1.f;
         mEnemyHealth->setAlpha(alpha);
 
         if (usingFocusActor)
@@ -1875,17 +2204,6 @@ namespace MWGui
             if (mEnemySummary)
                 mEnemySummary->setPosition(barLeft, baseY + nameHeight + 2);
         }
-        else
-        {
-            // Combat feedback when the compact target panel is disabled: a thin red bar above player health.
-            if (mEnemyName)
-                mEnemyName->setVisible(false);
-            if (mEnemySummary)
-                mEnemySummary->setVisible(false);
-
-            const MyGUI::IntCoord playerHealth = mHealth->getAbsoluteCoord();
-            mEnemyHealth->setCoord(playerHealth.left, std::max(0, playerHealth.top - 9), playerHealth.width, 7);
-        }
     }
 
     void HUD::setEnemy(const MWWorld::Ptr &enemy)
@@ -1896,10 +2214,8 @@ namespace MWGui
         if (mEnemySummary)
             mEnemySummary->setVisible(false);
         mEnemyHealthTimer = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("fNPCHealthBarTime")->mValue.getFloat();
-        const bool showCombatBar = npcBarShowsCombat(getNpcBarMode());
-        mEnemyHealth->setVisible(showCombatBar);
-        if (showCombatBar)
-            updateEnemyHealthBar();
+        // X014: persistent combat health is rendered in world space above
+        // the actual actor. Keep the actor id only for compatibility with callbacks.
     }
 
     void HUD::resetEnemy()
@@ -1920,6 +2236,7 @@ namespace MWGui
         mFocusActorDistance = -1.f;
         mFocusActorPanelAlpha = 0.f;
         mTargetPanelPositionInitialized = false;
+        hideCombatHealthBars();
         if (mEnemyName)
             mEnemyName->setVisible(false);
         if (mEnemySummary)

@@ -108,6 +108,21 @@ namespace MWGui
         };
 
         std::vector<HorizontalCompassMarkerState> mHorizontalCompassMarkers;
+
+        struct CombatHealthBarState
+        {
+            MyGUI::ProgressBar* mWidget = nullptr;
+            MWWorld::Ptr mActor;
+            bool mAlly = false;
+            // Skin the widget is actually wearing right now. Kept apart from mAlly:
+            // clearing a slot resets mAlly but must not claim the widget went back to
+            // the red skin, otherwise the next enemy inherits a green bar.
+            bool mSkinAlly = false;
+        };
+
+        std::vector<CombatHealthBarState> mCombatHealthBars;
+        float mCombatHealthBarScanTimer = 0.f;
+
         MyGUI::Widget *mDrowningFrame, *mDrowningFlash;
 
         // bottom left elements
@@ -197,6 +212,8 @@ namespace MWGui
 
         void updateEnemyHealthBar();
         void updateFocusedTargetPanel(float dt);
+        void updateCombatHealthBars(float dt);
+        void hideCombatHealthBars();
 
         void updatePositions();
         void updateGameTimeAndCellName(float dt);

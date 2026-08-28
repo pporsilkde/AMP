@@ -58,6 +58,21 @@ local function configBool(name, fallback)
     return fallback
 end
 
+-- X020: autogeneration is now the hard bootstrap default. Older X013-X018
+-- instructions sometimes left config.questIndexAutoGenerate=false in an
+-- existing config.lua. That stale value silently forced quorum mode and left
+-- phasing disabled long enough for the first player to remove a quest source
+-- globally. We intentionally ignore that legacy switch. Administrators who
+-- explicitly want the old two-client/staff approval flow must opt in with the
+-- new unambiguous flag below.
+local function requireQuorumBootstrap()
+    return configBool("questIndexRequireQuorum", false)
+end
+
+local function autoGenerateEnabled()
+    return not requireQuorumBootstrap()
+end
+
 -- Dual modular rolling hash, mirrored byte for byte from
 -- apps/openmw/mwmp/QuestItemIndex.cpp (dualHash). Both moduli are below 2^31 so
 -- every intermediate product stays exactly representable as a Lua number; do not
@@ -101,12 +116,16 @@ local function load()
     state.loaded = true
 
     if not tes3mp.DoesFileExist(tes3mp.GetModDir() .. "/" .. STORE_PATH) then
-        if configBool("questIndexAutoGenerate", true) then
+        if autoGenerateEnabled() then
+            if config ~= nil and config.questIndexAutoGenerate == false then
+                tes3mp.LogMessage(enumerations.log.WARN,
+                    "[QuestIndex] Ignoring legacy config.questIndexAutoGenerate=false; X020 auto-bootstrap is active. Use config.questIndexRequireQuorum=true only if quorum mode is intentionally required")
+            end
             tes3mp.LogMessage(enumerations.log.INFO,
-                "[QuestIndex] No stored index; questIndex.json will be generated automatically from the first valid client upload")
+                "[QuestIndex] No stored index; X020 auto-bootstrap will accept the first valid client upload and create questIndex.json")
         else
             tes3mp.LogMessage(enumerations.log.INFO,
-                "[QuestIndex] No stored index; quest item phasing stays disabled until one is accepted")
+                "[QuestIndex] No stored index; explicit questIndexRequireQuorum=true keeps phasing disabled until quorum/staff approval")
         end
         return
     end
@@ -183,7 +202,8 @@ function questIndexStore.GetStatus()
         contentKey = state.contentKey,
         indexHash = state.indexHash,
         entryCount = state.entryCount,
-        autoGenerate = configBool("questIndexAutoGenerate", true),
+        autoGenerate = autoGenerateEnabled(),
+        requireQuorum = requireQuorumBootstrap(),
         pendingConfirmations = confirmations
     }
 end
@@ -202,7 +222,7 @@ function questIndexStore.Reset()
     driftWarned = {}
 
     tes3mp.LogMessage(enumerations.log.WARN,
-        "[QuestIndex] Index reset; phasing is disabled until a new index is accepted")
+        "[QuestIndex] Index reset; phasing is temporarily disabled while a fresh index is requested")
 
     for pid, _ in pairs(Players) do
         if Players[pid] ~= nil and Players[pid]:IsLoggedIn() then
@@ -283,12 +303,16 @@ local function registerConfirmation(pid, contentKey, indexHash, entries)
     -- references from ESM/ESP itself, so the first fully logged-in matching
     -- client acts as the build worker. The server still recomputes the payload
     -- hash before reaching this function, then immediately persists the result
-    -- as server/data/custom/questIndex.json. Set questIndexAutoGenerate=false
-    -- to restore the older staff/quorum approval flow.
-    if configBool("questIndexAutoGenerate", true) then
+    -- as server/data/custom/questIndex.json. The legacy questIndexAutoGenerate flag is ignored in X020; set
+    -- questIndexRequireQuorum=true to restore the older staff/quorum approval
+    -- flow explicitly.
+    if autoGenerateEnabled() then
+        tes3mp.LogMessage(enumerations.log.INFO,
+            "[QuestIndex] X020 auto-bootstrap: accepting first verified upload from " .. chatName ..
+            " (" .. tostring(#entries) .. " records, hash " .. indexHash .. ")")
         commit(contentKey, indexHash, entries,
             "auto-generated from first valid upload by " .. chatName,
-            accountName, "automatic-first-valid-client")
+            accountName, "automatic-first-valid-client-x020")
         return
     end
 

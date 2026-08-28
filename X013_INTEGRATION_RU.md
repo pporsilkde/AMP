@@ -173,9 +173,12 @@ end
 -- X019: по умолчанию true. Если questIndex.json отсутствует или повреждён,
 -- первый полностью принятый клиент автоматически строит индекс, сервер
 -- перепроверяет hash payload и сразу сохраняет server/data/custom/questIndex.json.
-config.questIndexAutoGenerate = true
+-- X020: автогенерация теперь жёстко включена по умолчанию. Старый
+-- config.questIndexAutoGenerate=false игнорируется, чтобы устаревший config.lua
+-- не оставлял phasing выключенным. Для намеренного строгого режима:
+config.questIndexRequireQuorum = false
 
--- Используется только когда questIndexAutoGenerate = false. Сколько независимых
+-- Используется только когда questIndexRequireQuorum = true. Сколько независимых
 -- игроков должны прислать одинаковый индекс, прежде чем сервер его примет.
 -- Выгрузка от стаффа принимается сразу.
 config.questIndexRequiredConfirmations = 2
@@ -185,9 +188,10 @@ config.questIndexRequiredConfirmations = 2
 config.questIndexVerifyOnLogin = false
 ```
 
-Значения по умолчанию X019 — `questIndexAutoGenerate = true`,
-`questIndexRequiredConfirmations = 2`, `questIndexVerifyOnLogin = false`. При
-включённой автогенерации quorum не используется.
+Значения по умолчанию X020 — автоматический first-valid bootstrap,
+`questIndexRequireQuorum = false`, `questIndexRequiredConfirmations = 2`,
+`questIndexVerifyOnLogin = false`. Старый `questIndexAutoGenerate=false`
+специально игнорируется как потенциально устаревший параметр.
 
 ---
 
@@ -204,7 +208,7 @@ config.questIndexVerifyOnLogin = false
 5. Остальные клиенты получают `MODE_OFF` и больше не сканируют ESM/ESP.
 
 Если нужен старый более строгий режим, задайте
-`config.questIndexAutoGenerate = false`: тогда индекс принимается от стаффа сразу
+`config.questIndexRequireQuorum = true`: тогда индекс принимается от стаффа сразу
 или после `questIndexRequiredConfirmations` одинаковых независимых выгрузок.
 
 **После добавления или обновления плагина** — удалите `custom/questIndex.json`
