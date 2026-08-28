@@ -89,6 +89,7 @@ namespace
             MISCELLANEOUSAPI,
             POSITIONAPI,
             QUESTAPI,
+            QUESTINDEXAPI,
             RECORDSDYNAMICAPI,
             SHAPESHIFTAPI,
             SERVERAPI,
