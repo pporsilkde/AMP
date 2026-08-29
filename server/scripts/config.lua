@@ -14,7 +14,7 @@ config.defaultLanguage = "EN"
 config.dataPath = tes3mp.GetDataPath()
 
 -- The game mode displayed for this server in the server browser
-config.gameMode = "ArenaMP"
+config.gameMode = "ArenaMP MMO"
 
 -- Time to login, in seconds
 config.loginTime = 60
@@ -543,31 +543,31 @@ config.allowWildernessRest = true
 config.allowWait = true
 
 -- Whether journal entries should be shared across the players on the server or not
-config.shareJournal = true
+config.shareJournal = false
 
 -- Whether faction ranks should be shared across the players on the server or not
-config.shareFactionRanks = true
+config.shareFactionRanks = false
 
 -- Whether faction expulsion should be shared across the players on the server or not
 config.shareFactionExpulsion = false
 
 -- Whether faction reputation should be shared across the players on the server or not
-config.shareFactionReputation = true
+config.shareFactionReputation = false
 
 -- Whether dialogue topics should be shared across the players on the server or not
-config.shareTopics = true
+config.shareTopics = false
 
 -- Whether crime bounties should be shared across players on the server or not
 config.shareBounty = false
 
 -- Whether reputation should be shared across players on the server or not
-config.shareReputation = true
+config.shareReputation = false
 
 -- Whether map exploration should be shared across players on the server or not
 config.shareMapExploration = false
 
 -- Whether ingame videos should be played for other players when triggered by one player
-config.shareVideos = true
+config.shareVideos = false
 
 -- Which clientside script records should be blanked out so they are not run
 -- Note: By default, the original character generation scripts are included

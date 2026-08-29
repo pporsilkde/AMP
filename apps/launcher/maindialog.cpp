@@ -110,11 +110,9 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     , mBuildName(QStringLiteral("ArenaMP"))
     , mBuildServerAddress(QStringLiteral("127.0.0.1"))
     , mBuildServerPort(QStringLiteral("25565"))
-    , mBuildVanillaServerCompatibility(false)
     , mBuildServerAddressSpecified(false)
     , mBuildServerPortSpecified(false)
     , mBuildComplete(false)
-    , mPendingVanillaServerCompatibility(false)
     , mGameSettings (mCfgMgr)
 {
     setupUi(this);
@@ -243,18 +241,8 @@ void Launcher::MainDialog::createPages()
     const bool autoStartServer = readLauncherBool(QStringLiteral("General/Server/autoStart"), localServerDefault);
     const bool autoRestartServer = readLauncherBool(QStringLiteral("General/Server/autoRestart"), localServerDefault);
 
-    // build.ini only supplies the initial default. Once the user changes a
-    // main-page checkbox, the launcher setting is preserved across restarts.
-    const QString vanillaDefault = mBuildManifestLoaded && mBuildVanillaServerCompatibility
-        ? QStringLiteral("true") : QStringLiteral("false");
-    const bool vanillaServerCompatibility = mBuildComplete
-        ? mBuildVanillaServerCompatibility
-        : readLauncherBool(QStringLiteral("General/Server/vanillaBuild"), vanillaDefault);
-    const bool hideChatHistory = readLauncherBool(QStringLiteral("General/Chat/hideHistory"), QStringLiteral("false"));
     mPlayPage->setAutoStartServer(autoStartServer);
     mPlayPage->setAutoRestartServer(autoRestartServer);
-    mPlayPage->setVanillaServerCompatibility(vanillaServerCompatibility);
-    mPlayPage->setHideChatHistory(hideChatHistory);
     mPlayPage->setHostBindAddress(mLauncherSettings.value(
         QStringLiteral("General/Server/bindAddress"), QStringLiteral("0.0.0.0")));
 
@@ -323,8 +311,6 @@ void Launcher::MainDialog::createPages()
     connect(mPlayPage, SIGNAL(stopServerButtonClicked()), this, SLOT(stopServer()));
     connect(mPlayPage, SIGNAL(autoStartServerChanged(bool)), this, SLOT(autoStartServerChanged(bool)));
     connect(mPlayPage, SIGNAL(autoRestartServerChanged(bool)), this, SLOT(autoRestartServerChanged(bool)));
-    connect(mPlayPage, SIGNAL(vanillaServerCompatibilityChanged(bool)), this, SLOT(vanillaServerCompatibilityChanged(bool)));
-    connect(mPlayPage, SIGNAL(hideChatHistoryChanged(bool)), this, SLOT(hideChatHistoryChanged(bool)));
     connect(mPlayPage, SIGNAL(updateHashesRequested()), this, SLOT(updateServerDataFileHashes()));
     connect(mPlayPage, SIGNAL(clearServerCellsRequested()), this, SLOT(clearServerCells()));
     connect(mPlayPage, SIGNAL(resetServerDataRequested()), this, SLOT(resetServerData()));
@@ -669,7 +655,6 @@ bool Launcher::MainDialog::loadBuildManifest()
     mBuildDataPath = primaryDataDirectory();
     mBuildServerAddress = QStringLiteral("127.0.0.1");
     mBuildServerPort = QStringLiteral("25565");
-    mBuildVanillaServerCompatibility = false;
     mBuildServerAddressSpecified = false;
     mBuildServerPortSpecified = false;
     mBuildComplete = false;
@@ -765,7 +750,6 @@ bool Launcher::MainDialog::loadBuildManifest()
         ? QStringLiteral("127.0.0.1") : manifest.serverAddress.trimmed();
     mBuildServerPort = manifest.serverPort.trimmed().isEmpty()
         ? QStringLiteral("25565") : manifest.serverPort.trimmed();
-    mBuildVanillaServerCompatibility = manifest.vanillaServerCompatibility;
     mBuildServerAddressSpecified = manifest.serverAddressSpecified;
     mBuildServerPortSpecified = manifest.serverPortSpecified;
     mBuildComplete = manifest.complete;
@@ -776,7 +760,6 @@ bool Launcher::MainDialog::loadBuildManifest()
         mPlayPage->setBuildName(mBuildName);
         mPlayPage->setServerAddress(mBuildServerAddress);
         mPlayPage->setServerPort(mBuildServerPort);
-        mPlayPage->setVanillaServerCompatibility(mBuildVanillaServerCompatibility);
         mPlayPage->setBuildManifestComplete(mBuildComplete);
         if (mBuildServerAddressSpecified)
         {
@@ -811,7 +794,6 @@ bool Launcher::MainDialog::writeBuildManifest()
     bool storedServerAddressSpecified = false;
     QString storedServerPort;
     bool storedServerPortSpecified = false;
-    bool storedVanillaCompatibility = false;
     QString existingManifestPath = manifestPath;
     if (!sourceManifestPath.isEmpty() && QFileInfo::exists(sourceManifestPath))
         existingManifestPath = sourceManifestPath;
@@ -825,7 +807,6 @@ bool Launcher::MainDialog::writeBuildManifest()
             storedServerAddressSpecified = manifest.serverAddressSpecified;
             storedServerPort = manifest.serverPort;
             storedServerPortSpecified = manifest.serverPortSpecified;
-            storedVanillaCompatibility = manifest.vanillaServerCompatibility;
         }
 
     }
@@ -845,7 +826,7 @@ bool Launcher::MainDialog::writeBuildManifest()
         manifest.serverAddressSpecified = storedServerAddressSpecified;
         manifest.serverPort = storedServerPort;
         manifest.serverPortSpecified = storedServerPortSpecified;
-        manifest.vanillaServerCompatibility = storedVanillaCompatibility;
+        manifest.vanillaServerCompatibility = false;
     }
     else if (localServerModeSelected)
     {
@@ -864,8 +845,7 @@ bool Launcher::MainDialog::writeBuildManifest()
         manifest.serverAddressSpecified = !manifest.serverAddress.trimmed().isEmpty();
         manifest.serverPort = mPlayPage != nullptr ? mPlayPage->serverPort() : mBuildServerPort;
         manifest.serverPortSpecified = !manifest.serverPort.trimmed().isEmpty();
-        manifest.vanillaServerCompatibility = mPlayPage != nullptr
-            ? mPlayPage->vanillaServerCompatibility() : mBuildVanillaServerCompatibility;
+        manifest.vanillaServerCompatibility = false;
     }
     manifest.complete = mBuildComplete;
     manifest.contentFiles = mGameSettings.getContentList();
@@ -887,7 +867,6 @@ bool Launcher::MainDialog::writeBuildManifest()
     mBuildDataPath = dataDir;
     mBuildServerAddress = manifest.serverAddress;
     mBuildServerPort = manifest.serverPort;
-    mBuildVanillaServerCompatibility = manifest.vanillaServerCompatibility;
     mBuildServerAddressSpecified = manifest.serverAddressSpecified;
     mBuildServerPortSpecified = manifest.serverPortSpecified;
     mBuildComplete = manifest.complete;
@@ -1063,16 +1042,8 @@ void Launcher::MainDialog::loadSettings()
             ? QStringLiteral("false") : QStringLiteral("true");
         const bool autoStart = readLauncherBool(QStringLiteral("General/Server/autoStart"), localServerDefault);
         const bool autoRestart = readLauncherBool(QStringLiteral("General/Server/autoRestart"), localServerDefault);
-        const QString vanillaDefault = mBuildManifestLoaded && mBuildVanillaServerCompatibility
-            ? QStringLiteral("true") : QStringLiteral("false");
-        const bool vanillaServerCompatibility = mBuildComplete
-            ? mBuildVanillaServerCompatibility
-            : readLauncherBool(QStringLiteral("General/Server/vanillaBuild"), vanillaDefault);
-        const bool hideChatHistory = readLauncherBool(QStringLiteral("General/Chat/hideHistory"), QStringLiteral("false"));
         mPlayPage->setAutoStartServer(autoStart);
         mPlayPage->setAutoRestartServer(autoRestart);
-        mPlayPage->setVanillaServerCompatibility(vanillaServerCompatibility);
-        mPlayPage->setHideChatHistory(hideChatHistory);
         mPlayPage->setBuildName(mBuildName);
 
         mServerDialog->setAutoRestartEnabled(autoRestart);
@@ -1106,14 +1077,10 @@ void Launcher::MainDialog::saveSettings()
         mLauncherSettings.setValue(QStringLiteral("General/Server/autoRestart"),
             mPlayPage->autoRestartServer() ? QStringLiteral("true") : QStringLiteral("false"));
         mLauncherSettings.remove(QStringLiteral("General/Server/vanillaBuild"));
-        mLauncherSettings.setValue(QStringLiteral("General/Server/vanillaBuild"),
-            mPlayPage->vanillaServerCompatibility() ? QStringLiteral("true") : QStringLiteral("false"));
         mLauncherSettings.remove(QStringLiteral("General/Server/bindAddress"));
         mLauncherSettings.setValue(QStringLiteral("General/Server/bindAddress"),
             mPlayPage->hostBindAddress());
         mLauncherSettings.remove(QStringLiteral("General/Chat/hideHistory"));
-        mLauncherSettings.setValue(QStringLiteral("General/Chat/hideHistory"),
-            mPlayPage->hideChatHistory() ? QStringLiteral("true") : QStringLiteral("false"));
         mLauncherSettings.setValue(QStringLiteral("General/Build/name"), mPlayPage->buildName());
     }
 
@@ -1254,16 +1221,13 @@ void Launcher::MainDialog::play()
 
     mPendingClientAddress = mPlayPage->serverAddress();
     mPendingClientPort = mPlayPage->serverPort();
-    mPendingVanillaServerCompatibility = mPlayPage->vanillaServerCompatibility();
-    mPendingHideChatHistory = mPlayPage->hideChatHistory();
 
     bool startedNow = false;
     const bool localServerMode = mPlayPage->autoStartServer();
     if (localServerMode)
     {
-        // Host mode overrides the remote endpoint and vanilla compatibility for
-        // this launch only. The build.ini endpoint remains unchanged.
-        mPendingVanillaServerCompatibility = false;
+        // Host mode overrides the remote endpoint for this launch only.
+        // The build.ini endpoint remains unchanged.
         mServerDialog->setAutoRestartEnabled(mPlayPage->autoRestartServer());
 
         if (!mServerDialog->isRunning())
@@ -1331,15 +1295,8 @@ void Launcher::MainDialog::launchClient()
 
     QStringList arguments;
     arguments.append(QLatin1String("--connect=") + address + QLatin1String(":") + port);
-    if (mPendingVanillaServerCompatibility)
-        arguments.append(QStringLiteral("--vanilla-build-server"));
-    if (mPendingHideChatHistory)
-        arguments.append(QStringLiteral("--hide-chat-history"));
-
     mPendingClientAddress.clear();
     mPendingClientPort.clear();
-    mPendingVanillaServerCompatibility = false;
-    mPendingHideChatHistory = false;
 
     if (mGameInvoker->startProcess(QLatin1String("tes3mp"), arguments, true))
     {
@@ -1599,19 +1556,7 @@ void Launcher::MainDialog::autoRestartServerChanged(bool enabled)
         enabled ? QStringLiteral("true") : QStringLiteral("false"));
 }
 
-void Launcher::MainDialog::vanillaServerCompatibilityChanged(bool enabled)
-{
-    mLauncherSettings.remove(QStringLiteral("General/Server/vanillaBuild"));
-    mLauncherSettings.setValue(QStringLiteral("General/Server/vanillaBuild"),
-        enabled ? QStringLiteral("true") : QStringLiteral("false"));
-}
 
-void Launcher::MainDialog::hideChatHistoryChanged(bool enabled)
-{
-    mLauncherSettings.remove(QStringLiteral("General/Chat/hideHistory"));
-    mLauncherSettings.setValue(QStringLiteral("General/Chat/hideHistory"),
-        enabled ? QStringLiteral("true") : QStringLiteral("false"));
-}
 
 void Launcher::MainDialog::serverRunningChanged(bool running, const QString& address, const QString& port)
 {

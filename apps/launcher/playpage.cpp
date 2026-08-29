@@ -154,13 +154,13 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     mEnforceRequiredCheckBox = new QCheckBox(tr("Enforce required DataFiles"), this);
     mEnforceRequiredCheckBox->setToolTip(tr("Reject clients whose required content list, order or CRC32 hashes do not match the server manifest."));
 
-    mServerModeLabel = new QLabel(tr("Server mode:"), this);
+    mServerModeLabel = new QLabel(tr("Gameplay preset:"), this);
     mServerModeLabel->setStyleSheet(QStringLiteral("font-size: 11pt; font-weight: 500;"));
     mServerModeCombo = new QComboBox(this);
+    mServerModeCombo->addItem(tr("MMO (default)"), QStringLiteral("MMO"));
     mServerModeCombo->addItem(tr("CO-OP"), QStringLiteral("CO-OP"));
-    mServerModeCombo->addItem(tr("MMO"), QStringLiteral("MMO"));
     mServerModeCombo->setMinimumHeight(28);
-    mServerModeCombo->setToolTip(tr("CO-OP shares story and progression between players. MMO keeps player progression separate while required world/actor networking remains enabled."));
+    mServerModeCombo->setToolTip(tr("MMO keeps journal, factions, topics and reputation personal. CO-OP shares story progression between players. This preset changes server gameplay only and never touches graphics settings."));
 
     mClearCellsButton = new QPushButton(tr("Clear server cells"), this);
     mResetServerButton = new QPushButton(tr("Full server reset"), this);
@@ -186,8 +186,6 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
 
     // Compact two-column host controls.
     serverConnectionLayout->removeWidget(autoRestartServerCheckBox);
-    serverConnectionLayout->removeWidget(vanillaServerCheckBox);
-    serverConnectionLayout->removeWidget(hideChatHistoryCheckBox);
     serverConnectionLayout->addWidget(autoRestartServerCheckBox, 4, 0);
     serverConnectionLayout->addWidget(mEnforceRequiredCheckBox, 4, 1);
 
@@ -204,8 +202,6 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     maintenanceLayout->addStretch(1);
     serverConnectionLayout->addLayout(maintenanceLayout, 6, 0, 1, 2);
 
-    serverConnectionLayout->addWidget(vanillaServerCheckBox, 7, 0, 1, 2);
-    serverConnectionLayout->addWidget(hideChatHistoryCheckBox, 8, 0, 1, 2);
 
     refreshHostInterfaces(QStringLiteral("0.0.0.0"));
     updateHostModeUi(autoStartServerCheckBox->isChecked());
@@ -228,8 +224,6 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     connect(mClearCellsButton, SIGNAL(clicked()), this, SIGNAL(clearServerCellsRequested()));
     connect(mResetServerButton, SIGNAL(clicked()), this, SIGNAL(resetServerDataRequested()));
     connect(autoRestartServerCheckBox, SIGNAL(toggled(bool)), this, SIGNAL(autoRestartServerChanged(bool)));
-    connect(vanillaServerCheckBox, SIGNAL(toggled(bool)), this, SIGNAL(vanillaServerCompatibilityChanged(bool)));
-    connect(hideChatHistoryCheckBox, SIGNAL(toggled(bool)), this, SIGNAL(hideChatHistoryChanged(bool)));
     connect(reloadServerSettingsButton, SIGNAL(clicked()), this, SLOT(slotReloadServerSettings()));
     connect(saveServerSettingsButton, SIGNAL(clicked()), this, SLOT(slotSaveServerSettings()));
     connect(applyServerSettingsFormButton, SIGNAL(clicked()), this, SLOT(slotApplyFormToRawConfig()));
@@ -275,10 +269,6 @@ void Launcher::PlayPage::setBuildManifestComplete(bool complete)
     serverAddressEdit->setVisible(!complete);
     serverPortEdit->setVisible(!complete);
 
-    // A complete manifest fixes the network identity together with its endpoint.
-    vanillaServerCheckBox->setEnabled(!complete);
-    if (complete)
-        vanillaServerCheckBox->setToolTip(tr("This value is locked by build.ini (complete=true)."));
 }
 
 void Launcher::PlayPage::setAutoStartServer(bool enabled)
@@ -309,15 +299,7 @@ bool Launcher::PlayPage::enforceDataFiles() const
         : enforceDataFilesCheckBox->isChecked();
 }
 
-void Launcher::PlayPage::setVanillaServerCompatibility(bool enabled)
-{
-    vanillaServerCheckBox->setChecked(enabled);
-}
 
-void Launcher::PlayPage::setHideChatHistory(bool enabled)
-{
-    hideChatHistoryCheckBox->setChecked(enabled);
-}
 
 void Launcher::PlayPage::setServerRunning(bool running, const QString&, const QString&, bool managed)
 {
@@ -366,15 +348,7 @@ bool Launcher::PlayPage::autoRestartServer() const
     return autoRestartServerCheckBox->isChecked();
 }
 
-bool Launcher::PlayPage::vanillaServerCompatibility() const
-{
-    return vanillaServerCheckBox->isChecked();
-}
 
-bool Launcher::PlayPage::hideChatHistory() const
-{
-    return hideChatHistoryCheckBox->isChecked();
-}
 
 QString Launcher::PlayPage::serverPort() const
 {
@@ -639,7 +613,9 @@ void Launcher::PlayPage::populateFormFromConfig(const QString& text)
             && shareTopicsCheckBox->isChecked()
             && shareReputationCheckBox->isChecked();
         const QSignalBlocker blocker(mServerModeCombo);
-        mServerModeCombo->setCurrentIndex(coop ? 0 : 1);
+        const int presetIndex = mServerModeCombo->findData(coop ? QStringLiteral("CO-OP") : QStringLiteral("MMO"));
+        if (presetIndex >= 0)
+            mServerModeCombo->setCurrentIndex(presetIndex);
     }
 
     loadComboBox(databaseTypeComboBox, text, QStringLiteral("databaseType"));
@@ -886,7 +862,8 @@ void Launcher::PlayPage::slotEnforceRequiredToggled(bool enabled)
 
 void Launcher::PlayPage::applyServerModePreset(int index)
 {
-    const bool coop = index == 0;
+    const bool coop = mServerModeCombo != nullptr
+        && mServerModeCombo->itemData(index).toString() == QLatin1String("CO-OP");
     gameModeEdit->setText(coop ? QStringLiteral("ArenaMP CO-OP") : QStringLiteral("ArenaMP MMO"));
     shareJournalCheckBox->setChecked(coop);
     shareFactionRanksCheckBox->setChecked(coop);
@@ -903,6 +880,8 @@ void Launcher::PlayPage::applyServerModePreset(int index)
 
 void Launcher::PlayPage::slotServerModeChanged(int index)
 {
+    // X032: gameplay/server preset only. Do not call MainDialog graphics pages or
+    // Settings::Manager here; graphics quality is an independent launcher state.
     applyServerModePreset(index);
     serverSettingsEditor->setPlainText(updatedConfigFromForm(serverSettingsEditor->toPlainText()));
     saveServerSettings();

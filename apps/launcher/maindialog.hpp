@@ -68,8 +68,6 @@ namespace Launcher
         void launchClient();
         void autoStartServerChanged(bool enabled);
         void autoRestartServerChanged(bool enabled);
-        void vanillaServerCompatibilityChanged(bool enabled);
-        void hideChatHistoryChanged(bool enabled);
         void serverRunningChanged(bool running, const QString& address, const QString& port);
         void updateServerDataFileHashes();
         void clearServerCells();
@@ -122,12 +120,9 @@ namespace Launcher
         QString mBuildDataPath;
         QString mBuildServerAddress;
         QString mBuildServerPort;
-        bool mBuildVanillaServerCompatibility;
         bool mBuildServerAddressSpecified;
         bool mBuildServerPortSpecified;
         bool mBuildComplete;
-        bool mPendingVanillaServerCompatibility;
-        bool mPendingHideChatHistory;
         QString mPendingClientAddress;
         QString mPendingClientPort;
 

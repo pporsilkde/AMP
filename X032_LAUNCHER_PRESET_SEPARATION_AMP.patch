@@ -1,0 +1,928 @@
+--- a/apps/launcher/advancedpage.cpp
++++ b/apps/launcher/advancedpage.cpp
+@@ -189,17 +189,7 @@
+         bool deferAabbUpdate;
+     };
+ 
+-    constexpr std::array<OsgPatchPreset, 6> sOsgPatchPresets{{
+-        {
+-            "MMO (default)",
+-            "ArenaMP multiplayer default: stable threaded rendering, VBOs, terrain/static occlusion, conservative shaders and one background physics/preload worker.",
+-            "DrawThreadPerContext", false,
+-            true, false,
+-            true,
+-            true, true, true,
+-            true, false,
+-            1, 1, true
+-        },
++    constexpr std::array<OsgPatchPreset, 5> sOsgPatchPresets{{
+         {
+             "Safe",
+             "Maximum stability first: single-threaded rendering, conservative physics, and no occlusion culling. Good as a baseline on problematic drivers.",
+--- a/apps/launcher/graphicspage.cpp
++++ b/apps/launcher/graphicspage.cpp
+@@ -11,6 +11,7 @@
+ #include <QOpenGLContext>
+ #include <QOpenGLFunctions>
+ #include <QScreen>
++#include <QSignalBlocker>
+ #include <QThread>
+ 
+ #ifdef _WIN32
+@@ -74,6 +75,11 @@
+     connect(screenComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(screenChanged(int)));
+     connect(framerateLimitCheckBox, SIGNAL(toggled(bool)), this, SLOT(slotFramerateLimitToggled(bool)));
+     connect(shadowDistanceCheckBox, SIGNAL(toggled(bool)), this, SLOT(slotShadowDistLimitToggled(bool)));
++    const auto updateShadowUi = [this](bool) { updateShadowControls(); };
++    connect(playerShadowsCheckBox, &QCheckBox::toggled, this, updateShadowUi);
++    connect(actorShadowsCheckBox, &QCheckBox::toggled, this, updateShadowUi);
++    connect(objectShadowsCheckBox, &QCheckBox::toggled, this, updateShadowUi);
++    connect(terrainShadowsCheckBox, &QCheckBox::toggled, this, updateShadowUi);
+     connect(linkShadowDistanceCheckBox, &QCheckBox::toggled, this, [this](bool linked)
+     {
+         if (linked)
+@@ -82,10 +88,14 @@
+             const int viewDistance = Settings::Manager::getInt("viewing distance", "Camera");
+             shadowDistanceSpinBox->setValue(std::max(512, std::min(16384, viewDistance)));
+         }
+-        shadowDistanceCheckBox->setEnabled(!linked);
+-        slotShadowDistLimitToggled(shadowDistanceCheckBox->isChecked());
++        updateShadowControls();
+     });
+     connect(qualityPresetComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(slotQualityPresetChanged(int)));
++    connect(autoSelectQualityCheckBox, &QCheckBox::toggled, this, [this](bool)
++    {
++        if (!mInitializingQuality)
++            updateQualityDescription();
++    });
+     connect(terrainDetailComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(slotTerrainDetailChanged(int)));
+     connect(pbrQualityComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(slotPbrQualityChanged(int)));
+     connect(applyQualityButton, SIGNAL(clicked()), this, SLOT(slotApplyQualityPreset()));
+@@ -202,12 +212,16 @@
+         lightingMethod = 1;
+     lightingMethodComboBox->setCurrentIndex(lightingMethod);
+ 
+-    // Shadows
+-    actorShadowsCheckBox->setChecked(Settings::Manager::getBool("actor shadows", "Shadows"));
+-    playerShadowsCheckBox->setChecked(Settings::Manager::getBool("player shadows", "Shadows"));
+-    terrainShadowsCheckBox->setChecked(Settings::Manager::getBool("terrain shadows", "Shadows"));
+-    objectShadowsCheckBox->setChecked(Settings::Manager::getBool("object shadows", "Shadows"));
+-    indoorShadowsCheckBox->setChecked(Settings::Manager::getBool("enable indoor shadows", "Shadows"));
++    // X032: the individual shadow flags are meaningful only when the master
++    // switch is enabled. Older settings.cfg files can retain stale actor/object
++    // flags after a Minimum/Auto preset disabled shadows globally; showing those
++    // stale flags as checked made the automatic preset look broken.
++    const bool shadowsEnabled = Settings::Manager::getBool("enable shadows", "Shadows");
++    actorShadowsCheckBox->setChecked(shadowsEnabled && Settings::Manager::getBool("actor shadows", "Shadows"));
++    playerShadowsCheckBox->setChecked(shadowsEnabled && Settings::Manager::getBool("player shadows", "Shadows"));
++    terrainShadowsCheckBox->setChecked(shadowsEnabled && Settings::Manager::getBool("terrain shadows", "Shadows"));
++    objectShadowsCheckBox->setChecked(shadowsEnabled && Settings::Manager::getBool("object shadows", "Shadows"));
++    indoorShadowsCheckBox->setChecked(shadowsEnabled && Settings::Manager::getBool("enable indoor shadows", "Shadows"));
+ 
+     const QString computeBounds = QString::fromStdString(
+         Settings::Manager::getString("compute scene bounds", "Shadows"));
+@@ -218,7 +232,7 @@
+     const bool linkShadowDistance = Settings::Manager::getBool("link shadow distance to viewing distance", "Shadows");
+     linkShadowDistanceCheckBox->setChecked(linkShadowDistance);
+     const int shadowDistLimit = Settings::Manager::getInt("maximum shadow map distance", "Shadows");
+-    shadowDistanceCheckBox->setChecked(linkShadowDistance || shadowDistLimit > 0);
++    shadowDistanceCheckBox->setChecked(shadowsEnabled && (linkShadowDistance || shadowDistLimit > 0));
+     if (linkShadowDistance)
+     {
+         const int viewDistance = Settings::Manager::getInt("viewing distance", "Camera");
+@@ -240,7 +254,7 @@
+     slotFullScreenChanged(fullScreenCheckBox->checkState());
+     slotStandardToggled(standardRadioButton->isChecked());
+     slotFramerateLimitToggled(framerateLimitCheckBox->isChecked());
+-    slotShadowDistLimitToggled(shadowDistanceCheckBox->isChecked());
++    updateShadowControls();
+ }
+ 
+ void Launcher::GraphicsPage::saveSettings()
+@@ -533,7 +547,7 @@
+ QString Launcher::GraphicsPage::qualityName(int level) const
+ {
+     static const std::array<const char*, 6> names = {
+-        "Minimum", "Low", "MMO", "Medium", "High", "Ultra"
++        "Minimum", "Low", "Balanced", "Medium", "High", "Ultra"
+     };
+     return tr(names[std::max(0, std::min(5, level))]);
+ }
+@@ -543,7 +557,7 @@
+     static const std::array<const char*, 6> descriptions = {
+         "Maximum performance for software renderers and very old integrated graphics. Uses simple non-PBR water, shorter view distance, small terrain budget and no realtime shadows.",
+         "For older integrated GPUs. Uses simple non-PBR water, modest view distance, actor shadows and lightweight grass without expensive object shadows.",
+-        "ArenaMP MMO default: stable multiplayer profile with moderate view distance, actor shadows, PBR water and conservative paging/occlusion cost.",
++        "A stable default for entry-level hardware. Enables distant terrain, normal maps, actor shadows and conservative paging.",
+         "Balanced visual quality for modern integrated graphics and mainstream discrete GPUs. Enables object shadows, improved water and denser grass.",
+         "For powerful discrete GPUs. Uses longer view distance, detailed terrain, terrain shadows, higher anisotropy and larger shadow maps.",
+         "Maximum detail for high-end GPUs. Uses the longest draw distances, dense groundcover, high light counts and very large shadow maps."
+@@ -679,12 +693,17 @@
+ 
+ int Launcher::GraphicsPage::recommendQuality(const HardwareInfo& info) const
+ {
+-    if (info.softwareRenderer || info.vendor == QLatin1String("microsoft")
+-        || info.vendor == QLatin1String("unknown"))
++    if (info.softwareRenderer || info.vendor == QLatin1String("microsoft"))
+         return 0;
+ 
+     const QString model = info.renderer.toLower();
+-    int level = 2;
++    // X032: an unknown hardware vendor is not the same thing as a software
++    // renderer. Off-screen OpenGL probing can legitimately fail on hybrid or
++    // remote-desktop systems. Start from Balanced and let CPU/display pressure
++    // lower it instead of silently disabling shadows/water at Minimum.
++    int level = info.vendor == QLatin1String("unknown")
++        ? (info.logicalCores <= 4 ? 1 : 2)
++        : 2;
+ 
+     if (info.vendor == QLatin1String("intel"))
+     {
+@@ -769,14 +788,34 @@
+     mHardwareInfo = detectHardware();
+     mRecommendedQuality = recommendQuality(mHardwareInfo);
+ 
+-    const bool autoSelect = mLauncherSettings.value(
+-        QStringLiteral("General/Graphics/autoSelect"), QStringLiteral("false"))
++    bool autoSelect = mLauncherSettings.value(
++        QStringLiteral("General/Graphics/autoSelect"), QStringLiteral("true"))
+         .compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0;
+     const bool vendorOptimizations = mLauncherSettings.value(
+         QStringLiteral("General/Graphics/vendorOptimizations"), QStringLiteral("true"))
+         .compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0;
+-    const QString mode = mLauncherSettings.value(
+-        QStringLiteral("General/Graphics/qualityMode"), QStringLiteral("2"));
++    QString mode = mLauncherSettings.value(
++        QStringLiteral("General/Graphics/qualityMode"), QStringLiteral("auto"));
++
++    // X032 one-time repair for the X031 experiment that incorrectly made the
++    // multiplayer MMO profile a graphics preset. Fresh X031 installs stored
++    // qualityMode=2 together with autoSelect=false even though the user had not
++    // chosen a fixed graphics profile. Move that exact default pair back to the
++    // independent Auto graphics mode. Explicit future choices are untouched.
++    const QString migrationKey = QStringLiteral("General/Graphics/x032SeparateGameplayPresetMigrated");
++    const bool migrationDone = mLauncherSettings.value(migrationKey, QStringLiteral("false"))
++        .compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0;
++    if (!migrationDone)
++    {
++        if (mode == QLatin1String("2") && !autoSelect)
++        {
++            mode = QStringLiteral("auto");
++            autoSelect = true;
++            storeLauncherValue(QStringLiteral("General/Graphics/qualityMode"), mode);
++            storeLauncherValue(QStringLiteral("General/Graphics/autoSelect"), QStringLiteral("true"));
++        }
++        storeLauncherValue(migrationKey, QStringLiteral("true"));
++    }
+ 
+     autoSelectQualityCheckBox->setChecked(autoSelect);
+     vendorOptimizationsCheckBox->setChecked(vendorOptimizations);
+@@ -803,14 +842,27 @@
+ 
+     if (initialPresetPending && reloadUserSettingsFromDisk())
+     {
+-        const int initialMmoLevel = 2;
+-        applyQualityLevel(initialMmoLevel);
++        int initialLevel = mRecommendedQuality;
++        QString persistedMode = mode;
++        if (mode != QLatin1String("auto"))
++        {
++            bool ok = false;
++            const int storedLevel = mode.toInt(&ok);
++            if (ok)
++                initialLevel = std::max(0, std::min(5, storedLevel));
++            else
++                persistedMode = QStringLiteral("auto");
++        }
++        else if (!autoSelect)
++            initialLevel = 2;
++
++        applyQualityLevel(initialLevel);
+         if (vendorOptimizations)
+-            applyVendorOptimizations(initialMmoLevel);
++            applyVendorOptimizations(initialLevel);
+ 
+         if (saveUserSettingsToDisk())
+         {
+-            storeLauncherValue(QStringLiteral("General/Graphics/qualityMode"), QStringLiteral("2"));
++            storeLauncherValue(QStringLiteral("General/Graphics/qualityMode"), persistedMode);
+             storeLauncherValue(QStringLiteral("General/Graphics/hardwareSignature"), mHardwareInfo.signature());
+             storeLauncherValue(pendingKey, QStringLiteral("false"));
+             storeLauncherValue(QStringLiteral("General/Graphics/initialQualityPresetApplied"),
+@@ -824,10 +876,15 @@
+ void Launcher::GraphicsPage::updateQualityDescription()
+ {
+     const int index = qualityPresetComboBox->currentIndex();
+-    const int level = index == 0 ? mRecommendedQuality : index - 1;
++    const int automaticLevel = autoSelectQualityCheckBox->isChecked() ? mRecommendedQuality : 2;
++    const int level = index == 0 ? automaticLevel : index - 1;
+     QString text;
+     if (index == 0)
+-        text = tr("Automatic recommendation: %1. ").arg(qualityName(level));
++    {
++        text = autoSelectQualityCheckBox->isChecked()
++            ? tr("Automatic recommendation: %1. ").arg(qualityName(level))
++            : tr("Automatic hardware selection is disabled; using Balanced fallback. ");
++    }
+     text += qualityDescription(level);
+     text += tr(" Resolution, screen, fullscreen mode, GUI scale and field of view are not changed.");
+     qualityDescriptionLabel->setText(text);
+@@ -876,7 +933,8 @@
+         return;
+ 
+     const int index = qualityPresetComboBox->currentIndex();
+-    const int level = index == 0 ? mRecommendedQuality : index - 1;
++    const int automaticLevel = autoSelectQualityCheckBox->isChecked() ? mRecommendedQuality : 2;
++    const int level = index == 0 ? automaticLevel : index - 1;
+     applyQualityLevel(level);
+ 
+     if (vendorOptimizationsCheckBox->isChecked())
+@@ -1233,8 +1291,36 @@
+     framerateLimitSpinBox->setEnabled(checked);
+ }
+ 
+-void Launcher::GraphicsPage::slotShadowDistLimitToggled(bool checked)
++void Launcher::GraphicsPage::slotShadowDistLimitToggled(bool)
++{
++    updateShadowControls();
++}
++
++void Launcher::GraphicsPage::updateShadowControls()
+ {
+-    shadowDistanceSpinBox->setEnabled(checked && !linkShadowDistanceCheckBox->isChecked());
+-    fadeStartSpinBox->setEnabled(checked);
++    const bool anyCaster = playerShadowsCheckBox->isChecked()
++        || actorShadowsCheckBox->isChecked()
++        || objectShadowsCheckBox->isChecked()
++        || terrainShadowsCheckBox->isChecked();
++    const bool linked = linkShadowDistanceCheckBox->isChecked();
++
++    if (!anyCaster && shadowDistanceCheckBox->isChecked())
++    {
++        const QSignalBlocker blocker(shadowDistanceCheckBox);
++        shadowDistanceCheckBox->setChecked(false);
++    }
++    else if (anyCaster && linked && !shadowDistanceCheckBox->isChecked())
++    {
++        const QSignalBlocker blocker(shadowDistanceCheckBox);
++        shadowDistanceCheckBox->setChecked(true);
++    }
++
++    linkShadowDistanceCheckBox->setEnabled(anyCaster);
++    shadowDistanceCheckBox->setEnabled(anyCaster && !linked);
++    const bool distanceEnabled = anyCaster && shadowDistanceCheckBox->isChecked();
++    shadowDistanceSpinBox->setEnabled(distanceEnabled && !linked);
++    fadeStartSpinBox->setEnabled(distanceEnabled);
++    shadowResolutionComboBox->setEnabled(anyCaster);
++    shadowComputeSceneBoundsComboBox->setEnabled(anyCaster);
++    indoorShadowsCheckBox->setEnabled(playerShadowsCheckBox->isChecked() || actorShadowsCheckBox->isChecked());
+ }
+--- a/apps/launcher/graphicspage.hpp
++++ b/apps/launcher/graphicspage.hpp
+@@ -1,84 +1,85 @@
+-#ifndef GRAPHICSPAGE_H
+-#define GRAPHICSPAGE_H
+-
+-#include "ui_graphicspage.h"
+-
+-#include <components/settings/settings.hpp>
+-
+-#include "sdlinit.hpp"
+-
+-namespace Config { class LauncherSettings; }
+-namespace Files { struct ConfigurationManager; }
+-
+-namespace Launcher
+-{
+-    class GraphicsSettings;
+-
+-    class GraphicsPage : public QWidget, private Ui::GraphicsPage
+-    {
+-        Q_OBJECT
+-
+-    public:
+-        explicit GraphicsPage(Config::LauncherSettings& launcherSettings, QWidget *parent = nullptr);
+-
+-        void saveSettings();
+-        bool loadSettings();
+-
+-    public slots:
+-        void screenChanged(int screen);
+-
+-    private slots:
+-        void slotFullScreenChanged(int state);
+-        void slotStandardToggled(bool checked);
+-        void slotFramerateLimitToggled(bool checked);
+-        void slotShadowDistLimitToggled(bool checked);
+-        void slotQualityPresetChanged(int index);
+-        void slotTerrainDetailChanged(int index);
+-        void slotPbrQualityChanged(int index);
+-        void slotApplyQualityPreset();
+-        void slotDetectHardware();
+-
+-    private:
+-        struct HardwareInfo
+-        {
+-            QString vendor;
+-            QString renderer;
+-            quint64 dedicatedVramMb = 0;
+-            int logicalCores = 1;
+-            int displayMegapixelsTimes100 = 0;
+-            bool softwareRenderer = false;
+-            bool integrated = false;
+-
+-            QString signature() const;
+-        };
+-
+-        QVector<QStringList> mResolutionsPerScreen;
+-        Config::LauncherSettings& mLauncherSettings;
+-        HardwareInfo mHardwareInfo;
+-        int mRecommendedQuality;
+-        bool mInitializingQuality;
+-
+-        static QStringList getAvailableResolutions(int screen);
+-        static QRect getMaximumResolution();
+-
+-        bool setupSDL();
+-        void syncGraphicsControls();
+-        void initializeQualityPage();
+-        HardwareInfo detectHardware() const;
+-        int recommendQuality(const HardwareInfo& info) const;
+-        void applyQualityLevel(int level);
+-        void applyTerrainDetail(int index);
+-        void applyPbrQuality(int index);
+-        int terrainDetailIndexFromSettings() const;
+-        int pbrQualityIndexFromSettings() const;
+-        void applyVendorOptimizations(int level);
+-        void updateQualityDescription();
+-        void updateHardwareLabels();
+-        bool reloadUserSettingsFromDisk();
+-        bool saveUserSettingsToDisk();
+-        void storeLauncherValue(const QString& key, const QString& value);
+-        QString qualityName(int level) const;
+-        QString qualityDescription(int level) const;
+-    };
+-}
+-#endif
++#ifndef GRAPHICSPAGE_H
++#define GRAPHICSPAGE_H
++
++#include "ui_graphicspage.h"
++
++#include <components/settings/settings.hpp>
++
++#include "sdlinit.hpp"
++
++namespace Config { class LauncherSettings; }
++namespace Files { struct ConfigurationManager; }
++
++namespace Launcher
++{
++    class GraphicsSettings;
++
++    class GraphicsPage : public QWidget, private Ui::GraphicsPage
++    {
++        Q_OBJECT
++
++    public:
++        explicit GraphicsPage(Config::LauncherSettings& launcherSettings, QWidget *parent = nullptr);
++
++        void saveSettings();
++        bool loadSettings();
++
++    public slots:
++        void screenChanged(int screen);
++
++    private slots:
++        void slotFullScreenChanged(int state);
++        void slotStandardToggled(bool checked);
++        void slotFramerateLimitToggled(bool checked);
++        void slotShadowDistLimitToggled(bool checked);
++        void slotQualityPresetChanged(int index);
++        void slotTerrainDetailChanged(int index);
++        void slotPbrQualityChanged(int index);
++        void slotApplyQualityPreset();
++        void slotDetectHardware();
++
++    private:
++        struct HardwareInfo
++        {
++            QString vendor;
++            QString renderer;
++            quint64 dedicatedVramMb = 0;
++            int logicalCores = 1;
++            int displayMegapixelsTimes100 = 0;
++            bool softwareRenderer = false;
++            bool integrated = false;
++
++            QString signature() const;
++        };
++
++        QVector<QStringList> mResolutionsPerScreen;
++        Config::LauncherSettings& mLauncherSettings;
++        HardwareInfo mHardwareInfo;
++        int mRecommendedQuality;
++        bool mInitializingQuality;
++
++        static QStringList getAvailableResolutions(int screen);
++        static QRect getMaximumResolution();
++
++        bool setupSDL();
++        void syncGraphicsControls();
++        void updateShadowControls();
++        void initializeQualityPage();
++        HardwareInfo detectHardware() const;
++        int recommendQuality(const HardwareInfo& info) const;
++        void applyQualityLevel(int level);
++        void applyTerrainDetail(int index);
++        void applyPbrQuality(int index);
++        int terrainDetailIndexFromSettings() const;
++        int pbrQualityIndexFromSettings() const;
++        void applyVendorOptimizations(int level);
++        void updateQualityDescription();
++        void updateHardwareLabels();
++        bool reloadUserSettingsFromDisk();
++        bool saveUserSettingsToDisk();
++        void storeLauncherValue(const QString& key, const QString& value);
++        QString qualityName(int level) const;
++        QString qualityDescription(int level) const;
++    };
++}
++#endif
+--- a/files/ui/advancedpage.ui
++++ b/files/ui/advancedpage.ui
+@@ -1260,11 +1260,6 @@
+                   </item>
+                   <item>
+                    <property name="text">
+-                    <string>MMO (default)</string>
+-                   </property>
+-                  </item>
+-                  <item>
+-                   <property name="text">
+                     <string>Safe</string>
+                    </property>
+                   </item>
+--- a/files/ui/graphicspage.ui
++++ b/files/ui/graphicspage.ui
+@@ -53,7 +53,7 @@
+             </item>
+             <item>
+              <property name="text">
+-              <string>MMO (default)</string>
++              <string>Balanced</string>
+              </property>
+             </item>
+             <item>
+--- a/server/scripts/config.lua
++++ b/server/scripts/config.lua
+@@ -14,7 +14,7 @@
+ config.dataPath = tes3mp.GetDataPath()
+ 
+ -- The game mode displayed for this server in the server browser
+-config.gameMode = "ArenaMP"
++config.gameMode = "ArenaMP MMO"
+ 
+ -- Time to login, in seconds
+ config.loginTime = 60
+@@ -543,31 +543,31 @@
+ config.allowWait = true
+ 
+ -- Whether journal entries should be shared across the players on the server or not
+-config.shareJournal = true
++config.shareJournal = false
+ 
+ -- Whether faction ranks should be shared across the players on the server or not
+-config.shareFactionRanks = true
++config.shareFactionRanks = false
+ 
+ -- Whether faction expulsion should be shared across the players on the server or not
+ config.shareFactionExpulsion = false
+ 
+ -- Whether faction reputation should be shared across the players on the server or not
+-config.shareFactionReputation = true
++config.shareFactionReputation = false
+ 
+ -- Whether dialogue topics should be shared across the players on the server or not
+-config.shareTopics = true
++config.shareTopics = false
+ 
+ -- Whether crime bounties should be shared across players on the server or not
+ config.shareBounty = false
+ 
+ -- Whether reputation should be shared across players on the server or not
+-config.shareReputation = true
++config.shareReputation = false
+ 
+ -- Whether map exploration should be shared across players on the server or not
+ config.shareMapExploration = false
+ 
+ -- Whether ingame videos should be played for other players when triggered by one player
+-config.shareVideos = true
++config.shareVideos = false
+ 
+ -- Which clientside script records should be blanked out so they are not run
+ -- Note: By default, the original character generation scripts are included
+--- a/apps/launcher/playpage.cpp
++++ b/apps/launcher/playpage.cpp
+@@ -154,13 +154,13 @@
+     mEnforceRequiredCheckBox = new QCheckBox(tr("Enforce required DataFiles"), this);
+     mEnforceRequiredCheckBox->setToolTip(tr("Reject clients whose required content list, order or CRC32 hashes do not match the server manifest."));
+ 
+-    mServerModeLabel = new QLabel(tr("Server mode:"), this);
++    mServerModeLabel = new QLabel(tr("Gameplay preset:"), this);
+     mServerModeLabel->setStyleSheet(QStringLiteral("font-size: 11pt; font-weight: 500;"));
+     mServerModeCombo = new QComboBox(this);
++    mServerModeCombo->addItem(tr("MMO (default)"), QStringLiteral("MMO"));
+     mServerModeCombo->addItem(tr("CO-OP"), QStringLiteral("CO-OP"));
+-    mServerModeCombo->addItem(tr("MMO"), QStringLiteral("MMO"));
+     mServerModeCombo->setMinimumHeight(28);
+-    mServerModeCombo->setToolTip(tr("CO-OP shares story and progression between players. MMO keeps player progression separate while required world/actor networking remains enabled."));
++    mServerModeCombo->setToolTip(tr("MMO keeps journal, factions, topics and reputation personal. CO-OP shares story progression between players. This preset changes server gameplay only and never touches graphics settings."));
+ 
+     mClearCellsButton = new QPushButton(tr("Clear server cells"), this);
+     mResetServerButton = new QPushButton(tr("Full server reset"), this);
+@@ -186,8 +186,6 @@
+ 
+     // Compact two-column host controls.
+     serverConnectionLayout->removeWidget(autoRestartServerCheckBox);
+-    serverConnectionLayout->removeWidget(vanillaServerCheckBox);
+-    serverConnectionLayout->removeWidget(hideChatHistoryCheckBox);
+     serverConnectionLayout->addWidget(autoRestartServerCheckBox, 4, 0);
+     serverConnectionLayout->addWidget(mEnforceRequiredCheckBox, 4, 1);
+ 
+@@ -204,8 +202,6 @@
+     maintenanceLayout->addStretch(1);
+     serverConnectionLayout->addLayout(maintenanceLayout, 6, 0, 1, 2);
+ 
+-    serverConnectionLayout->addWidget(vanillaServerCheckBox, 7, 0, 1, 2);
+-    serverConnectionLayout->addWidget(hideChatHistoryCheckBox, 8, 0, 1, 2);
+ 
+     refreshHostInterfaces(QStringLiteral("0.0.0.0"));
+     updateHostModeUi(autoStartServerCheckBox->isChecked());
+@@ -228,8 +224,6 @@
+     connect(mClearCellsButton, SIGNAL(clicked()), this, SIGNAL(clearServerCellsRequested()));
+     connect(mResetServerButton, SIGNAL(clicked()), this, SIGNAL(resetServerDataRequested()));
+     connect(autoRestartServerCheckBox, SIGNAL(toggled(bool)), this, SIGNAL(autoRestartServerChanged(bool)));
+-    connect(vanillaServerCheckBox, SIGNAL(toggled(bool)), this, SIGNAL(vanillaServerCompatibilityChanged(bool)));
+-    connect(hideChatHistoryCheckBox, SIGNAL(toggled(bool)), this, SIGNAL(hideChatHistoryChanged(bool)));
+     connect(reloadServerSettingsButton, SIGNAL(clicked()), this, SLOT(slotReloadServerSettings()));
+     connect(saveServerSettingsButton, SIGNAL(clicked()), this, SLOT(slotSaveServerSettings()));
+     connect(applyServerSettingsFormButton, SIGNAL(clicked()), this, SLOT(slotApplyFormToRawConfig()));
+@@ -275,10 +269,6 @@
+     serverAddressEdit->setVisible(!complete);
+     serverPortEdit->setVisible(!complete);
+ 
+-    // A complete manifest fixes the network identity together with its endpoint.
+-    vanillaServerCheckBox->setEnabled(!complete);
+-    if (complete)
+-        vanillaServerCheckBox->setToolTip(tr("This value is locked by build.ini (complete=true)."));
+ }
+ 
+ void Launcher::PlayPage::setAutoStartServer(bool enabled)
+@@ -309,15 +299,7 @@
+         : enforceDataFilesCheckBox->isChecked();
+ }
+ 
+-void Launcher::PlayPage::setVanillaServerCompatibility(bool enabled)
+-{
+-    vanillaServerCheckBox->setChecked(enabled);
+-}
+ 
+-void Launcher::PlayPage::setHideChatHistory(bool enabled)
+-{
+-    hideChatHistoryCheckBox->setChecked(enabled);
+-}
+ 
+ void Launcher::PlayPage::setServerRunning(bool running, const QString&, const QString&, bool managed)
+ {
+@@ -366,15 +348,7 @@
+     return autoRestartServerCheckBox->isChecked();
+ }
+ 
+-bool Launcher::PlayPage::vanillaServerCompatibility() const
+-{
+-    return vanillaServerCheckBox->isChecked();
+-}
+ 
+-bool Launcher::PlayPage::hideChatHistory() const
+-{
+-    return hideChatHistoryCheckBox->isChecked();
+-}
+ 
+ QString Launcher::PlayPage::serverPort() const
+ {
+@@ -639,7 +613,9 @@
+             && shareTopicsCheckBox->isChecked()
+             && shareReputationCheckBox->isChecked();
+         const QSignalBlocker blocker(mServerModeCombo);
+-        mServerModeCombo->setCurrentIndex(coop ? 0 : 1);
++        const int presetIndex = mServerModeCombo->findData(coop ? QStringLiteral("CO-OP") : QStringLiteral("MMO"));
++        if (presetIndex >= 0)
++            mServerModeCombo->setCurrentIndex(presetIndex);
+     }
+ 
+     loadComboBox(databaseTypeComboBox, text, QStringLiteral("databaseType"));
+@@ -886,7 +862,8 @@
+ 
+ void Launcher::PlayPage::applyServerModePreset(int index)
+ {
+-    const bool coop = index == 0;
++    const bool coop = mServerModeCombo != nullptr
++        && mServerModeCombo->itemData(index).toString() == QLatin1String("CO-OP");
+     gameModeEdit->setText(coop ? QStringLiteral("ArenaMP CO-OP") : QStringLiteral("ArenaMP MMO"));
+     shareJournalCheckBox->setChecked(coop);
+     shareFactionRanksCheckBox->setChecked(coop);
+@@ -903,6 +880,8 @@
+ 
+ void Launcher::PlayPage::slotServerModeChanged(int index)
+ {
++    // X032: gameplay/server preset only. Do not call MainDialog graphics pages or
++    // Settings::Manager here; graphics quality is an independent launcher state.
+     applyServerModePreset(index);
+     serverSettingsEditor->setPlainText(updatedConfigFromForm(serverSettingsEditor->toPlainText()));
+     saveServerSettings();
+--- a/apps/launcher/playpage.hpp
++++ b/apps/launcher/playpage.hpp
+@@ -26,8 +26,6 @@
+         void setServerConsoleWidget(QWidget* widget);
+         void setAutoStartServer(bool enabled);
+         void setAutoRestartServer(bool enabled);
+-        void setVanillaServerCompatibility(bool enabled);
+-        void setHideChatHistory(bool enabled);
+         void setServerRunning(bool running, const QString& address = QString(), const QString& port = QString(), bool managed = true);
+         void setBuildManifestComplete(bool complete);
+ 
+@@ -40,8 +38,6 @@
+         bool autoRestartServer() const;
+         void setEnforceDataFiles(bool enabled);
+         bool enforceDataFiles() const;
+-        bool vanillaServerCompatibility() const;
+-        bool hideChatHistory() const;
+ 
+        void switchToServerConsoleTab();
+        void loadServerSettings();
+@@ -53,8 +49,6 @@
+         void stopServerButtonClicked();
+         void autoStartServerChanged(bool enabled);
+         void autoRestartServerChanged(bool enabled);
+-        void vanillaServerCompatibilityChanged(bool enabled);
+-        void hideChatHistoryChanged(bool enabled);
+         void updateHashesRequested();
+         void clearServerCellsRequested();
+         void resetServerDataRequested();
+--- a/apps/launcher/maindialog.cpp
++++ b/apps/launcher/maindialog.cpp
+@@ -110,11 +110,9 @@
+     , mBuildName(QStringLiteral("ArenaMP"))
+     , mBuildServerAddress(QStringLiteral("127.0.0.1"))
+     , mBuildServerPort(QStringLiteral("25565"))
+-    , mBuildVanillaServerCompatibility(false)
+     , mBuildServerAddressSpecified(false)
+     , mBuildServerPortSpecified(false)
+     , mBuildComplete(false)
+-    , mPendingVanillaServerCompatibility(false)
+     , mGameSettings (mCfgMgr)
+ {
+     setupUi(this);
+@@ -243,18 +241,8 @@
+     const bool autoStartServer = readLauncherBool(QStringLiteral("General/Server/autoStart"), localServerDefault);
+     const bool autoRestartServer = readLauncherBool(QStringLiteral("General/Server/autoRestart"), localServerDefault);
+ 
+-    // build.ini only supplies the initial default. Once the user changes a
+-    // main-page checkbox, the launcher setting is preserved across restarts.
+-    const QString vanillaDefault = mBuildManifestLoaded && mBuildVanillaServerCompatibility
+-        ? QStringLiteral("true") : QStringLiteral("false");
+-    const bool vanillaServerCompatibility = mBuildComplete
+-        ? mBuildVanillaServerCompatibility
+-        : readLauncherBool(QStringLiteral("General/Server/vanillaBuild"), vanillaDefault);
+-    const bool hideChatHistory = readLauncherBool(QStringLiteral("General/Chat/hideHistory"), QStringLiteral("false"));
+     mPlayPage->setAutoStartServer(autoStartServer);
+     mPlayPage->setAutoRestartServer(autoRestartServer);
+-    mPlayPage->setVanillaServerCompatibility(vanillaServerCompatibility);
+-    mPlayPage->setHideChatHistory(hideChatHistory);
+     mPlayPage->setHostBindAddress(mLauncherSettings.value(
+         QStringLiteral("General/Server/bindAddress"), QStringLiteral("0.0.0.0")));
+ 
+@@ -323,8 +311,6 @@
+     connect(mPlayPage, SIGNAL(stopServerButtonClicked()), this, SLOT(stopServer()));
+     connect(mPlayPage, SIGNAL(autoStartServerChanged(bool)), this, SLOT(autoStartServerChanged(bool)));
+     connect(mPlayPage, SIGNAL(autoRestartServerChanged(bool)), this, SLOT(autoRestartServerChanged(bool)));
+-    connect(mPlayPage, SIGNAL(vanillaServerCompatibilityChanged(bool)), this, SLOT(vanillaServerCompatibilityChanged(bool)));
+-    connect(mPlayPage, SIGNAL(hideChatHistoryChanged(bool)), this, SLOT(hideChatHistoryChanged(bool)));
+     connect(mPlayPage, SIGNAL(updateHashesRequested()), this, SLOT(updateServerDataFileHashes()));
+     connect(mPlayPage, SIGNAL(clearServerCellsRequested()), this, SLOT(clearServerCells()));
+     connect(mPlayPage, SIGNAL(resetServerDataRequested()), this, SLOT(resetServerData()));
+@@ -669,7 +655,6 @@
+     mBuildDataPath = primaryDataDirectory();
+     mBuildServerAddress = QStringLiteral("127.0.0.1");
+     mBuildServerPort = QStringLiteral("25565");
+-    mBuildVanillaServerCompatibility = false;
+     mBuildServerAddressSpecified = false;
+     mBuildServerPortSpecified = false;
+     mBuildComplete = false;
+@@ -765,7 +750,6 @@
+         ? QStringLiteral("127.0.0.1") : manifest.serverAddress.trimmed();
+     mBuildServerPort = manifest.serverPort.trimmed().isEmpty()
+         ? QStringLiteral("25565") : manifest.serverPort.trimmed();
+-    mBuildVanillaServerCompatibility = manifest.vanillaServerCompatibility;
+     mBuildServerAddressSpecified = manifest.serverAddressSpecified;
+     mBuildServerPortSpecified = manifest.serverPortSpecified;
+     mBuildComplete = manifest.complete;
+@@ -776,7 +760,6 @@
+         mPlayPage->setBuildName(mBuildName);
+         mPlayPage->setServerAddress(mBuildServerAddress);
+         mPlayPage->setServerPort(mBuildServerPort);
+-        mPlayPage->setVanillaServerCompatibility(mBuildVanillaServerCompatibility);
+         mPlayPage->setBuildManifestComplete(mBuildComplete);
+         if (mBuildServerAddressSpecified)
+         {
+@@ -811,7 +794,6 @@
+     bool storedServerAddressSpecified = false;
+     QString storedServerPort;
+     bool storedServerPortSpecified = false;
+-    bool storedVanillaCompatibility = false;
+     QString existingManifestPath = manifestPath;
+     if (!sourceManifestPath.isEmpty() && QFileInfo::exists(sourceManifestPath))
+         existingManifestPath = sourceManifestPath;
+@@ -825,7 +807,6 @@
+             storedServerAddressSpecified = manifest.serverAddressSpecified;
+             storedServerPort = manifest.serverPort;
+             storedServerPortSpecified = manifest.serverPortSpecified;
+-            storedVanillaCompatibility = manifest.vanillaServerCompatibility;
+         }
+ 
+     }
+@@ -845,7 +826,7 @@
+         manifest.serverAddressSpecified = storedServerAddressSpecified;
+         manifest.serverPort = storedServerPort;
+         manifest.serverPortSpecified = storedServerPortSpecified;
+-        manifest.vanillaServerCompatibility = storedVanillaCompatibility;
++        manifest.vanillaServerCompatibility = false;
+     }
+     else if (localServerModeSelected)
+     {
+@@ -864,8 +845,7 @@
+         manifest.serverAddressSpecified = !manifest.serverAddress.trimmed().isEmpty();
+         manifest.serverPort = mPlayPage != nullptr ? mPlayPage->serverPort() : mBuildServerPort;
+         manifest.serverPortSpecified = !manifest.serverPort.trimmed().isEmpty();
+-        manifest.vanillaServerCompatibility = mPlayPage != nullptr
+-            ? mPlayPage->vanillaServerCompatibility() : mBuildVanillaServerCompatibility;
++        manifest.vanillaServerCompatibility = false;
+     }
+     manifest.complete = mBuildComplete;
+     manifest.contentFiles = mGameSettings.getContentList();
+@@ -887,7 +867,6 @@
+     mBuildDataPath = dataDir;
+     mBuildServerAddress = manifest.serverAddress;
+     mBuildServerPort = manifest.serverPort;
+-    mBuildVanillaServerCompatibility = manifest.vanillaServerCompatibility;
+     mBuildServerAddressSpecified = manifest.serverAddressSpecified;
+     mBuildServerPortSpecified = manifest.serverPortSpecified;
+     mBuildComplete = manifest.complete;
+@@ -1063,16 +1042,8 @@
+             ? QStringLiteral("false") : QStringLiteral("true");
+         const bool autoStart = readLauncherBool(QStringLiteral("General/Server/autoStart"), localServerDefault);
+         const bool autoRestart = readLauncherBool(QStringLiteral("General/Server/autoRestart"), localServerDefault);
+-        const QString vanillaDefault = mBuildManifestLoaded && mBuildVanillaServerCompatibility
+-            ? QStringLiteral("true") : QStringLiteral("false");
+-        const bool vanillaServerCompatibility = mBuildComplete
+-            ? mBuildVanillaServerCompatibility
+-            : readLauncherBool(QStringLiteral("General/Server/vanillaBuild"), vanillaDefault);
+-        const bool hideChatHistory = readLauncherBool(QStringLiteral("General/Chat/hideHistory"), QStringLiteral("false"));
+         mPlayPage->setAutoStartServer(autoStart);
+         mPlayPage->setAutoRestartServer(autoRestart);
+-        mPlayPage->setVanillaServerCompatibility(vanillaServerCompatibility);
+-        mPlayPage->setHideChatHistory(hideChatHistory);
+         mPlayPage->setBuildName(mBuildName);
+ 
+         mServerDialog->setAutoRestartEnabled(autoRestart);
+@@ -1106,14 +1077,10 @@
+         mLauncherSettings.setValue(QStringLiteral("General/Server/autoRestart"),
+             mPlayPage->autoRestartServer() ? QStringLiteral("true") : QStringLiteral("false"));
+         mLauncherSettings.remove(QStringLiteral("General/Server/vanillaBuild"));
+-        mLauncherSettings.setValue(QStringLiteral("General/Server/vanillaBuild"),
+-            mPlayPage->vanillaServerCompatibility() ? QStringLiteral("true") : QStringLiteral("false"));
+         mLauncherSettings.remove(QStringLiteral("General/Server/bindAddress"));
+         mLauncherSettings.setValue(QStringLiteral("General/Server/bindAddress"),
+             mPlayPage->hostBindAddress());
+         mLauncherSettings.remove(QStringLiteral("General/Chat/hideHistory"));
+-        mLauncherSettings.setValue(QStringLiteral("General/Chat/hideHistory"),
+-            mPlayPage->hideChatHistory() ? QStringLiteral("true") : QStringLiteral("false"));
+         mLauncherSettings.setValue(QStringLiteral("General/Build/name"), mPlayPage->buildName());
+     }
+ 
+@@ -1254,16 +1221,13 @@
+ 
+     mPendingClientAddress = mPlayPage->serverAddress();
+     mPendingClientPort = mPlayPage->serverPort();
+-    mPendingVanillaServerCompatibility = mPlayPage->vanillaServerCompatibility();
+-    mPendingHideChatHistory = mPlayPage->hideChatHistory();
+ 
+     bool startedNow = false;
+     const bool localServerMode = mPlayPage->autoStartServer();
+     if (localServerMode)
+     {
+-        // Host mode overrides the remote endpoint and vanilla compatibility for
+-        // this launch only. The build.ini endpoint remains unchanged.
+-        mPendingVanillaServerCompatibility = false;
++        // Host mode overrides the remote endpoint for this launch only.
++        // The build.ini endpoint remains unchanged.
+         mServerDialog->setAutoRestartEnabled(mPlayPage->autoRestartServer());
+ 
+         if (!mServerDialog->isRunning())
+@@ -1331,15 +1295,8 @@
+ 
+     QStringList arguments;
+     arguments.append(QLatin1String("--connect=") + address + QLatin1String(":") + port);
+-    if (mPendingVanillaServerCompatibility)
+-        arguments.append(QStringLiteral("--vanilla-build-server"));
+-    if (mPendingHideChatHistory)
+-        arguments.append(QStringLiteral("--hide-chat-history"));
+-
+     mPendingClientAddress.clear();
+     mPendingClientPort.clear();
+-    mPendingVanillaServerCompatibility = false;
+-    mPendingHideChatHistory = false;
+ 
+     if (mGameInvoker->startProcess(QLatin1String("tes3mp"), arguments, true))
+     {
+@@ -1599,19 +1556,7 @@
+         enabled ? QStringLiteral("true") : QStringLiteral("false"));
+ }
+ 
+-void Launcher::MainDialog::vanillaServerCompatibilityChanged(bool enabled)
+-{
+-    mLauncherSettings.remove(QStringLiteral("General/Server/vanillaBuild"));
+-    mLauncherSettings.setValue(QStringLiteral("General/Server/vanillaBuild"),
+-        enabled ? QStringLiteral("true") : QStringLiteral("false"));
+-}
+ 
+-void Launcher::MainDialog::hideChatHistoryChanged(bool enabled)
+-{
+-    mLauncherSettings.remove(QStringLiteral("General/Chat/hideHistory"));
+-    mLauncherSettings.setValue(QStringLiteral("General/Chat/hideHistory"),
+-        enabled ? QStringLiteral("true") : QStringLiteral("false"));
+-}
+ 
+ void Launcher::MainDialog::serverRunningChanged(bool running, const QString& address, const QString& port)
+ {
+--- a/apps/launcher/maindialog.hpp
++++ b/apps/launcher/maindialog.hpp
+@@ -68,8 +68,6 @@
+         void launchClient();
+         void autoStartServerChanged(bool enabled);
+         void autoRestartServerChanged(bool enabled);
+-        void vanillaServerCompatibilityChanged(bool enabled);
+-        void hideChatHistoryChanged(bool enabled);
+         void serverRunningChanged(bool running, const QString& address, const QString& port);
+         void updateServerDataFileHashes();
+         void clearServerCells();
+@@ -122,12 +120,9 @@
+         QString mBuildDataPath;
+         QString mBuildServerAddress;
+         QString mBuildServerPort;
+-        bool mBuildVanillaServerCompatibility;
+         bool mBuildServerAddressSpecified;
+         bool mBuildServerPortSpecified;
+         bool mBuildComplete;
+-        bool mPendingVanillaServerCompatibility;
+-        bool mPendingHideChatHistory;
+         QString mPendingClientAddress;
+         QString mPendingClientPort;
+ 
+--- a/files/ui/playpage.ui
++++ b/files/ui/playpage.ui
+@@ -178,32 +178,6 @@
+            </property>
+           </widget>
+          </item>
+-         <item row="4" column="0" colspan="2">
+-          <widget class="QCheckBox" name="vanillaServerCheckBox">
+-           <property name="text">
+-            <string>Connect to vanilla-build server</string>
+-           </property>
+-           <property name="toolTip">
+-            <string>Use the official TES3MP 0.8.1 network identity (protocol 10, commit 68954091c5) required by older non-ArenaMP servers. Content files are not changed automatically, and local auto-start is skipped in this mode.</string>
+-           </property>
+-           <property name="checked">
+-            <bool>false</bool>
+-           </property>
+-          </widget>
+-         </item>
+-         <item row="5" column="0" colspan="2">
+-          <widget class="QCheckBox" name="hideChatHistoryCheckBox">
+-           <property name="text">
+-            <string>Hide chat messages</string>
+-           </property>
+-           <property name="toolTip">
+-            <string>Hide received chat messages while keeping the chat input available.</string>
+-           </property>
+-           <property name="checked">
+-            <bool>false</bool>
+-           </property>
+-          </widget>
+-         </item>
+         </layout>
+        </item>
+        <item>

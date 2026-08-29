@@ -178,32 +178,6 @@
            </property>
           </widget>
          </item>
-         <item row="4" column="0" colspan="2">
-          <widget class="QCheckBox" name="vanillaServerCheckBox">
-           <property name="text">
-            <string>Connect to vanilla-build server</string>
-           </property>
-           <property name="toolTip">
-            <string>Use the official TES3MP 0.8.1 network identity (protocol 10, commit 68954091c5) required by older non-ArenaMP servers. Content files are not changed automatically, and local auto-start is skipped in this mode.</string>
-           </property>
-           <property name="checked">
-            <bool>false</bool>
-           </property>
-          </widget>
-         </item>
-         <item row="5" column="0" colspan="2">
-          <widget class="QCheckBox" name="hideChatHistoryCheckBox">
-           <property name="text">
-            <string>Hide chat messages</string>
-           </property>
-           <property name="toolTip">
-            <string>Hide received chat messages while keeping the chat input available.</string>
-           </property>
-           <property name="checked">
-            <bool>false</bool>
-           </property>
-          </widget>
-         </item>
         </layout>
        </item>
        <item>

@@ -189,17 +189,7 @@ namespace
         bool deferAabbUpdate;
     };
 
-    constexpr std::array<OsgPatchPreset, 6> sOsgPatchPresets{{
-        {
-            "MMO (default)",
-            "ArenaMP multiplayer default: stable threaded rendering, VBOs, terrain/static occlusion, conservative shaders and one background physics/preload worker.",
-            "DrawThreadPerContext", false,
-            true, false,
-            true,
-            true, true, true,
-            true, false,
-            1, 1, true
-        },
+    constexpr std::array<OsgPatchPreset, 5> sOsgPatchPresets{{
         {
             "Safe",
             "Maximum stability first: single-threaded rendering, conservative physics, and no occlusion culling. Good as a baseline on problematic drivers.",

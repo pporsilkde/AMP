@@ -26,8 +26,6 @@ namespace Launcher
         void setServerConsoleWidget(QWidget* widget);
         void setAutoStartServer(bool enabled);
         void setAutoRestartServer(bool enabled);
-        void setVanillaServerCompatibility(bool enabled);
-        void setHideChatHistory(bool enabled);
         void setServerRunning(bool running, const QString& address = QString(), const QString& port = QString(), bool managed = true);
         void setBuildManifestComplete(bool complete);
 
@@ -40,8 +38,6 @@ namespace Launcher
         bool autoRestartServer() const;
         void setEnforceDataFiles(bool enabled);
         bool enforceDataFiles() const;
-        bool vanillaServerCompatibility() const;
-        bool hideChatHistory() const;
 
        void switchToServerConsoleTab();
        void loadServerSettings();
@@ -53,8 +49,6 @@ namespace Launcher
         void stopServerButtonClicked();
         void autoStartServerChanged(bool enabled);
         void autoRestartServerChanged(bool enabled);
-        void vanillaServerCompatibilityChanged(bool enabled);
-        void hideChatHistoryChanged(bool enabled);
         void updateHashesRequested();
         void clearServerCellsRequested();
         void resetServerDataRequested();
