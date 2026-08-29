@@ -172,7 +172,7 @@ namespace
         constexpr float sDockEnterSteps = 15.f;  // closer than this -> docked stack
         constexpr float sDockExitSteps = 18.f;   // hysteresis, must exceed the above
         constexpr float sVanishSteps = 40.f;     // beyond this the bar is gone
-        constexpr float sFullSizeSteps = 5.5f;   // no shrinking closer than this
+        constexpr float sFullSizeSteps = 3.5f;   // no shrinking closer than this
 
         constexpr float sDockEnterDistance = sDockEnterSteps * sUnitsPerStep;
         constexpr float sDockExitDistance = sDockExitSteps * sUnitsPerStep;
@@ -183,12 +183,20 @@ namespace
         constexpr float sFadeOutStartDistance = sVanishDistance * 0.90f;
 
         // Overhead bar geometry at full size, and how small it is allowed to get
-        // just before it disappears.
-        constexpr float sHeadWidthMax = 116.f;
-        constexpr float sHeadHeightMax = 9.f;
-        constexpr float sHeadScaleMin = 0.42f;
-        // Gap kept between the top of the actor's bounding box and the bar.
-        constexpr float sHeadClearance = 4.f;
+        // just before it disappears. Deliberately small: the overhead bar is a
+        // glance-value readout, the docked stack is where the detail lives.
+        constexpr float sHeadWidthMax = 92.f;
+        constexpr float sHeadHeightMax = 7.f;
+        constexpr float sHeadScaleMin = 0.28f;
+        // Gap between the top of the actor's hit box and the bar. Kept tight so
+        // the bar reads as belonging to that actor and not as floating above the
+        // scene; the second term shrinks the gap along with the bar itself.
+        constexpr float sHeadClearance = 2.f;
+        // Smallest the widget is ever drawn at. Has to stay below the size the
+        // distance ramp produces at the vanishing distance, otherwise the bar
+        // would stop shrinking early and the falloff would look truncated.
+        constexpr int sHeadMinWidthPixels = 22;
+        constexpr int sHeadMinHeightPixels = 2;
         constexpr int sScreenMargin = 6;
 
         // ------------------------------------------------------------------
@@ -1985,8 +1993,10 @@ namespace MWGui
             return;
         }
 
-        const int width = std::max(40, static_cast<int>(std::lround(state.mWidth)));
-        const int height = std::max(4, static_cast<int>(std::lround(state.mHeight)));
+        const int width = std::max(CombatBar::sHeadMinWidthPixels,
+            static_cast<int>(std::lround(state.mWidth)));
+        const int height = std::max(CombatBar::sHeadMinHeightPixels,
+            static_cast<int>(std::lround(state.mHeight)));
         const int left = static_cast<int>(std::lround(state.mCentreX - width * 0.5f));
         const int top = static_cast<int>(std::lround(state.mCentreY - height * 0.5f));
 
