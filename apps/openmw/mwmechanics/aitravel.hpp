@@ -9,6 +9,7 @@
 
 #include <components/esm/cellid.hpp>
 #include <components/esm/defs.hpp>
+#include <components/esm/loadcell.hpp>
 
 namespace ESM
 {
