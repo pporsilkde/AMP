@@ -118,6 +118,22 @@ namespace MWGui
             // clearing a slot resets mAlly but must not claim the widget went back to
             // the red skin, otherwise the next enemy inherits a green bar.
             bool mSkinAlly = false;
+
+            // X024: presentation state. The raw per-frame anchor produced by
+            // getObjectScreenBounds follows the animated bounding box, so a running
+            // NPC made the bar jump up and down every stride. Everything below is
+            // smoothed in screen space and faded in time, so a bar never appears,
+            // moves or disappears instantly.
+            bool mHasScreenState = false;
+            float mCentreX = 0.f;       // smoothed bar centre, pixels
+            float mCentreY = 0.f;
+            float mWidth = 0.f;         // smoothed bar size, pixels
+            float mHeight = 0.f;
+            float mFrontBlend = 0.f;    // 0 = above the head, 1 = lowered panel
+            float mAlpha = 0.f;
+            float mTargetAlpha = 0.f;
+            float mDisplayHealth = -1.f;
+            float mLingerTimer = 0.f;   // grace before a lost bar starts fading
         };
 
         std::vector<CombatHealthBarState> mCombatHealthBars;
@@ -214,6 +230,9 @@ namespace MWGui
         void updateFocusedTargetPanel(float dt);
         void updateCombatHealthBars(float dt);
         void hideCombatHealthBars();
+        // X024: drive one slot's opacity/geometry towards its target and push the
+        // result into the widget. Called for both live and fading-out slots.
+        void applyCombatHealthBar(CombatHealthBarState& state, float dt);
 
         void updatePositions();
         void updateGameTimeAndCellName(float dt);

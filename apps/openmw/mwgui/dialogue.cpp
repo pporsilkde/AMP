@@ -100,6 +100,17 @@ namespace
         return minimum + (maximum - minimum) * Misc::Rng::rollProbability();
     }
 
+    // X023: dialogue pose changes are deliberately slow and independent of
+    // topic/answer clicks. A pose may be replaced only when this timer expires
+    // (apart from hard safety changes such as equipment/combat state).
+    constexpr float sDialoguePoseMinInterval = 30.f;
+    constexpr float sDialoguePoseMaxInterval = 60.f;
+
+    float randomDialoguePoseInterval()
+    {
+        return randomRange(sDialoguePoseMinInterval, sDialoguePoseMaxInterval);
+    }
+
     std::string gameSettingString(const std::string& id, const std::string& fallback)
     {
         return MWBase::Environment::get().getWindowManager()->getGameSettingString(id, fallback);
@@ -238,6 +249,38 @@ namespace
         const MWWorld::ESMStore& store = MWBase::Environment::get().getWorld()->getStore();
         static const int cutoff = store.get<ESM::GameSetting>().find("iCrimeThreshold")->mValue.getInteger();
         return player.getClass().getNpcStats(player).getBounty() >= cutoff;
+    }
+
+    // X024: the dialogue window used to rotate the NPC towards the local player
+    // every frame through World::rotateObject, without checking who owns the actor.
+    // With two players in dialogue with the same NPC, both clients pushed it
+    // towards their own player while the authority's ActorPosition packets kept
+    // overwriting the result - the NPC visibly vibrated. Turning is now done only
+    // by the client that owns the actor, and only outside a small deadzone, so
+    // ordinary network jitter no longer produces a stream of micro-rotations.
+    bool sDialogueTurnEngaged = false;
+
+    constexpr float sDialogueTurnStartAngle = 8.f;   // degrees
+    constexpr float sDialogueTurnStopAngle = 1.5f;   // degrees
+
+    /// True when this client is allowed to move the dialogue NPC itself.
+    bool ownsDialogueActor(const MWWorld::Ptr& actor)
+    {
+        if (actor.isEmpty())
+            return false;
+        if (!mwmp::Main::isInitialized())
+            return true;
+
+        mwmp::CellController* cellController = mwmp::Main::get().getCellController();
+        if (cellController == nullptr)
+            return false;
+
+        // A DedicatedActor belongs to another player: its transform arrives over
+        // the network and must not be fought over locally.
+        if (cellController->isDedicatedActor(actor))
+            return false;
+
+        return cellController->isLocalActor(actor);
     }
 
     void queueDialogueNpcInteraction(const MWWorld::Ptr& actor, const std::string& group,
@@ -651,6 +694,8 @@ namespace MWGui
             return;
 
         mDynamicDialogueActorActive = true;
+        // X024: a fresh conversation starts outside the turn deadzone.
+        sDialogueTurnEngaged = false;
         mDynamicDialogueActorHasOriginalYaw = true;
         mDynamicDialogueActorOriginalYaw = mPtr.getRefData().getPosition().rot[2];
         mDynamicDialogueActorAnimationTimer = 0.1f;
@@ -677,7 +722,7 @@ namespace MWGui
             // Preserve authored Animated-Morrowind-style controllers. Their
             // actor-root facing is also left untouched during dialogue; only the
             // cinematic camera is allowed to reframe them.
-            mDynamicDialogueActorAnimationTimer = 2.f;
+            mDynamicDialogueActorAnimationTimer = randomDialoguePoseInterval();
             return;
         }
 
@@ -714,7 +759,7 @@ namespace MWGui
             && Misc::Rng::rollDice(100) < 35)
         {
             mDynamicDialogueActorSpeechCooldown = randomRange(1.5f, 2.5f);
-            mDynamicDialogueActorAnimationTimer = randomRange(2.5f, 4.5f);
+            mDynamicDialogueActorAnimationTimer = randomDialoguePoseInterval();
             return;
         }
 
@@ -881,7 +926,7 @@ namespace MWGui
 
         if (available.empty())
         {
-            mDynamicDialogueActorAnimationTimer = speaking ? 2.f : 6.f;
+            mDynamicDialogueActorAnimationTimer = randomDialoguePoseInterval();
             return;
         }
 
@@ -941,9 +986,7 @@ namespace MWGui
             {
                 if (mDynamicDialogueActorOpening)
                     mDynamicDialogueActorOpening = false;
-                mDynamicDialogueActorAnimationTimer
-                    = selectedClosedPose ? randomRange(3.5f, 6.f)
-                    : (speaking ? randomRange(2.5f, 4.5f) : randomRange(4.f, 7.f));
+                mDynamicDialogueActorAnimationTimer = randomDialoguePoseInterval();
                 if (speaking)
                     mDynamicDialogueActorSpeechCooldown = randomRange(1.5f, 3.f);
                 return;
@@ -980,7 +1023,7 @@ namespace MWGui
             mDynamicDialogueActorAnimation.clear();
             mDynamicDialogueActorLeftArmProtected = false;
             mDynamicDialogueActorAnimationSpeech = false;
-            mDynamicDialogueActorAnimationTimer = speaking ? 2.5f : 6.f;
+            mDynamicDialogueActorAnimationTimer = randomDialoguePoseInterval();
             return;
         }
 
@@ -998,9 +1041,7 @@ namespace MWGui
         mDynamicDialogueActorPendingSpeaking = false;
         mDynamicDialogueActorAnimationEnding = false;
         mDynamicDialogueActorTransitionTimer = 0.f;
-        mDynamicDialogueActorAnimationTimer
-            = selectedClosedPose ? randomRange(3.5f, 6.f)
-            : (speaking ? randomRange(2.5f, 4.5f) : randomRange(4.f, 7.f));
+        mDynamicDialogueActorAnimationTimer = randomDialoguePoseInterval();
         if (speaking)
             mDynamicDialogueActorSpeechCooldown = randomRange(1.5f, 3.f);
     }
@@ -1028,7 +1069,11 @@ namespace MWGui
         const MWWorld::LiveCellRef<ESM::NPC>* dialogueNpc = mPtr.get<ESM::NPC>();
         const bool preserveAuthoredSkeleton = dialogueNpc && !dialogueNpc->mBase->mModel.empty();
 
+        // X024: only the owner of this actor may rotate it. On any other client the
+        // NPC's facing comes from the authority over the network; writing to it here
+        // as well is what made the NPC twitch when two players talked to it at once.
         if (!preserveAuthoredSkeleton
+            && ownsDialogueActor(mPtr)
             && Settings::Manager::getBool("dynamic dialogue actor turning", "GUI"))
         {
             const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
@@ -1041,12 +1086,20 @@ namespace MWGui
                     const float targetYaw = std::atan2(delta.x(), delta.y());
                     const ESM::Position& position = mPtr.getRefData().getPosition();
                     const float difference = normalizeAngle(targetYaw - position.rot[2]);
-                    if (std::abs(difference) <= osg::DegreesToRadians(1.5f))
-                    {
-                        MWBase::Environment::get().getWorld()->rotateObject(
-                            mPtr, position.rot[0], position.rot[1], targetYaw);
-                    }
-                    else
+                    const float absDifference = std::abs(difference);
+
+                    // Hysteresis: start turning only past a visible error, and stop
+                    // completely once aligned. Without this the NPC chases every
+                    // small position update of the player and never settles, which
+                    // also floods the network with rotation packets.
+                    if (!sDialogueTurnEngaged
+                        && absDifference >= osg::DegreesToRadians(sDialogueTurnStartAngle))
+                        sDialogueTurnEngaged = true;
+                    else if (sDialogueTurnEngaged
+                        && absDifference <= osg::DegreesToRadians(sDialogueTurnStopAngle))
+                        sDialogueTurnEngaged = false;
+
+                    if (sDialogueTurnEngaged)
                     {
                         const float easedStep = difference * (1.f - std::exp(-7.f * dt));
                         const float maxStep = osg::DegreesToRadians(150.f) * dt;
@@ -1123,40 +1176,23 @@ namespace MWGui
         if (!mDynamicDialogueActorAnimation.empty()
             && !animation->isPlaying(mDynamicDialogueActorAnimation))
         {
+            // Keep the original 30-60 s schedule even if a finite animation clip
+            // reaches its end. With persist=true its final pose remains blended;
+            // restarting the timer here would postpone the next pose unnecessarily.
             mDynamicDialogueActorAnimation.clear();
             mDynamicDialogueActorLeftArmProtected = false;
             mDynamicDialogueActorAnimationSpeech = false;
-            mDynamicDialogueActorAnimationTimer = randomRange(1.5f, 3.f);
         }
 
-        if (speaking)
-        {
-            if (!mDynamicDialogueActorWasSpeaking)
-            {
-                mDynamicDialogueActorWasSpeaking = true;
-                playDynamicDialogueAnimation(true);
-            }
-            return;
-        }
-
-        if (mDynamicDialogueActorWasSpeaking)
-        {
-            mDynamicDialogueActorWasSpeaking = false;
-            if (mDynamicDialogueActorAnimationSpeech && !mDynamicDialogueActorAnimation.empty()
-                && animation->isPlaying(mDynamicDialogueActorAnimation))
-            {
-                animation->disable(mDynamicDialogueActorAnimation);
-                mDynamicDialogueActorAnimation.clear();
-                mDynamicDialogueActorLeftArmProtected = false;
-                mDynamicDialogueActorAnimationSpeech = false;
-                playDynamicDialogueAnimation(false, true);
-                return;
-            }
-        }
+        // X023: speech beginning/ending must not replace the current pose. Clicking
+        // a topic normally starts a new voiced response, so the old speech-edge
+        // logic made the NPC visibly snap to a fresh pose on nearly every click.
+        // Keep speech state only as context for the *next timed* pose selection.
+        mDynamicDialogueActorWasSpeaking = speaking;
 
         mDynamicDialogueActorAnimationTimer -= dt;
         if (mDynamicDialogueActorAnimationTimer <= 0.f)
-            playDynamicDialogueAnimation(false);
+            playDynamicDialogueAnimation(speaking);
     }
 
     void DialogueWindow::stopDynamicDialogueActor()
@@ -1184,6 +1220,7 @@ namespace MWGui
         }
 
         mDynamicDialogueActorActive = false;
+        sDialogueTurnEngaged = false;
         mDynamicDialogueActorHasOriginalYaw = false;
         mDynamicDialogueActorAnimationTimer = 0.f;
         mDynamicDialogueActorTransitionTimer = 0.f;
@@ -1935,7 +1972,8 @@ namespace MWGui
     {
         mHistoryContents.push_back(new Response(text, title, needMargin));
         updateHistory();
-        playDynamicDialogueAnimation(true);
+        // X023: adding a response is UI/dialogue state only. Do not use it as an
+        // animation trigger; pose rotation is handled exclusively by the 30-60 s timer.
     }
 
     void DialogueWindow::addMessageBox(const std::string& text)

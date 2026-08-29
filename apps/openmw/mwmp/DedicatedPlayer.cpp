@@ -3,6 +3,7 @@
 #include <exception>
 #include <sstream>
 #include <boost/algorithm/clamp.hpp>
+#include <components/misc/stringops.hpp>
 #include <components/openmw-mp/TimedLog.hpp>
 #include <apps/openmw/mwmechanics/steering.hpp>
 
@@ -267,6 +268,52 @@ void DedicatedPlayer::move(float dt)
 
     ESM::Position refPos = ptr.getRefData().getPosition();
     MWBase::World *world = MWBase::Environment::get().getWorld();
+
+    // X024: never apply a position sample that belongs to a different coordinate
+    // space than the one this reference currently sits in.
+    //
+    // World::moveObject(ptr, x, y, z) recomputes the destination cell from x/y
+    // whenever the reference is currently in an *exterior* cell. So while a remote
+    // player was walking around an interior and their ID_PLAYER_CELL_CHANGE had
+    // either not arrived yet or been dropped (destination cell not loadable here),
+    // every position packet dragged the still-outdoor body to whatever exterior
+    // grid square the interior's local coordinates happened to map to. That is the
+    // body left standing outside after the player entered a building.
+    //
+    // The same mismatch is what produced the "gliding in a jump pose" look: the
+    // reference was being teleported every frame, so the character controller
+    // never got a coherent movement delta to build a run cycle from, while a stale
+    // airborne flag kept it off the ground.
+    if (!ptr.isInCell() || ptr.getCell()->getCell() == nullptr)
+        return;
+
+    const ESM::Cell* currentCell = ptr.getCell()->getCell();
+    bool sameCoordinateSpace;
+
+    if (currentCell->isExterior())
+        sameCoordinateSpace = cell.isExterior();
+    else
+        sameCoordinateSpace = !cell.isExterior()
+            && Misc::StringUtils::ciEqual(currentCell->mName, cell.mName);
+
+    if (!sameCoordinateSpace)
+    {
+        // Freeze the body where it is and drop transient airborne/movement state
+        // until setCell() puts the reference in the cell the server believes it is
+        // in. Standing still for a few frames is far better than a stray corpse.
+        MWMechanics::Movement* stalledMove = &ptr.getClass().getMovementSettings(ptr);
+        stalledMove->mPosition[0] = 0.f;
+        stalledMove->mPosition[1] = 0.f;
+        stalledMove->mPosition[2] = 0.f;
+
+        if (isJumping || wasJumping)
+        {
+            isJumping = false;
+            wasJumping = false;
+            world->setOnGround(ptr, true);
+        }
+        return;
+    }
 
     const float dx = position.pos[0] - refPos.pos[0];
     const float dy = position.pos[1] - refPos.pos[1];
@@ -579,13 +626,17 @@ void DedicatedPlayer::setShapeshift()
             setEquipment();
     }
 
+    // X022: the gameplay/doorway-safe player scale is 0.85..1.08. Clamp
+    // network data as well so an old profile/client cannot reintroduce 1.15.
+    scale = std::max(0.85f, std::min(1.08f, scale));
     MWBase::Environment::get().getWorld()->scaleObject(ptr, scale);
 }
 
 void DedicatedPlayer::setCell()
 {
     // Prevent cell update when reference doesn't exist
-    if (!reference) return;
+    if (!reference || ptr.isEmpty())
+        return;
 
     MWBase::World *world = MWBase::Environment::get().getWorld();
 
@@ -594,23 +645,47 @@ void DedicatedPlayer::setCell()
 
     MWWorld::CellStore *cellStore = Main::get().getCellController()->getCellStore(cell);
 
-    if (!cellStore)
+    if (!cellStore || cellStore->getCell() == nullptr)
     {
-        LOG_APPEND(TimedLog::LOG_INFO, "%s", "- Cell doesn't exist on this client");
-        world->disable(getPtr());
+        // Never leave a visible remote body in the previous cell when a malformed
+        // or not-yet-resolvable destination arrives.
+        LOG_APPEND(TimedLog::LOG_WARN, "%s", "- Cell doesn't exist on this client; hiding remote reference");
+        world->disable(ptr);
+        removeMarker();
         return;
     }
-    else
-        world->enable(getPtr());
 
-    // Make sure the Ptr's dynamic stats and anim flags are up-to-date, so it doesn't show up
-    // knocked down or in a jump loop when it shouldn't
+    MWWorld::CellStore* oldStore = ptr.getCell();
+    const bool changesCoordinateSpace = oldStore != nullptr && oldStore != cellStore
+        && !(oldStore->isExterior() && cellStore->isExterior());
+
+    if (changesCoordinateSpace)
+    {
+        // CellChange does not carry movement/airborne state. A late AnimFlags
+        // packet from the old cell used to leave remote players permanently in a
+        // jump pose or gliding without a run animation after entering a door.
+        isJumping = false;
+        wasJumping = false;
+        movementFlags &= ~MWMechanics::CreatureStats::Flag_ForceJump;
+        movementFlags &= ~MWMechanics::CreatureStats::Flag_ForceMoveJump;
+        direction.pos[0] = 0.f;
+        direction.pos[1] = 0.f;
+        direction.pos[2] = 0.f;
+    }
+
+    // Move the authoritative reference first. World::moveObject removes its scene
+    // node when the destination cell is inactive, so the old exterior "body" can
+    // no longer survive an interior transition.
+    setPtr(world->moveObject(ptr, cellStore, position.pos[0], position.pos[1], position.pos[2]));
+    world->enable(ptr);
+
+    if (changesCoordinateSpace)
+        world->setOnGround(ptr, true);
+
+    // Apply state only after the Ptr belongs to the new cell. This also prevents
+    // animation controllers from updating a scene node that has just been moved.
     setStatsDynamic();
     setAnimFlags();
-
-    // Allow this player's reference to move across a cell now that a manual cell
-    // update has been called
-    setPtr(world->moveObject(ptr, cellStore, position.pos[0], position.pos[1], position.pos[2]));
 
     // Remove the marker entirely if this player has moved to an interior that is inactive for us
     if (!cell.isExterior() && !Main::get().getCellController()->isActiveWorldCell(cell))
@@ -953,8 +1028,21 @@ void DedicatedPlayer::deleteReference()
     MWBase::World *world = MWBase::Environment::get().getWorld();
 
     LOG_APPEND(TimedLog::LOG_INFO, "- Deleting reference");
-    clearWalkAnimationStyle(ptr);
-    world->deleteObject(ptr);
+
+    // Remove GUI ownership while GUIController is still alive. This is safe both
+    // for a normal disconnect and for the X022 shutdown ordering.
+    removeMarker();
+
+    if (!ptr.isEmpty())
+    {
+        clearWalkAnimationStyle(ptr);
+        world->deleteObject(ptr);
+
+        // X022: world->deleteObject invalidates the live reference. Do not let
+        // ~DedicatedPlayer or setPtr() touch that stale Ptr a second time.
+        ptr = MWWorld::Ptr();
+    }
+
     delete reference;
     reference = nullptr;
 }

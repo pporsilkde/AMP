@@ -649,6 +649,11 @@ void LocalPlayer::updateCell(bool forceUpdate)
         getNetworking()->getPlayerPacket(ID_PLAYER_CELL_CHANGE)->setPlayer(this);
         getNetworking()->getPlayerPacket(ID_PLAYER_CELL_CHANGE)->Send();
 
+        // X022: CellChange and AnimFlags share RELIABLE_ORDERED/CHANNEL_PLAYER.
+        // Send a fresh animation snapshot immediately afterwards so observers do
+        // not keep a pre-door jump/run state until an unrelated flag changes.
+        updateAnimFlags(true);
+
         isChangingRegion = false;
 
         // If this is an interior cell, are there any other players in it? If so,
@@ -1650,6 +1655,8 @@ void LocalPlayer::setShapeshift()
 {
     MWWorld::Ptr ptrPlayer = getPlayerPtr();
 
+    // Match the X022 character-creation and server limits for old profiles too.
+    scale = std::max(0.85f, std::min(1.08f, scale));
     MWBase::Environment::get().getWorld()->scaleObject(ptrPlayer, scale);
     MWBase::Environment::get().getMechanicsManager()->setWerewolf(ptrPlayer, isWerewolf);
 }

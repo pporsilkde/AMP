@@ -1113,6 +1113,9 @@ function BasePlayer:LoadShapeshift()
     if self.data.shapeshift.creatureRefId == nil then self.data.shapeshift.creatureRefId = "" end
     if self.data.shapeshift.displayCreatureName == nil then self.data.shapeshift.displayCreatureName = false end
 
+    -- X022: clamp legacy profiles too, not only new CharGen slider values.
+    self.data.shapeshift.scale = math.max(0.85, math.min(1.08, self.data.shapeshift.scale))
+
     tes3mp.SetScale(self.pid, self.data.shapeshift.scale)
     tes3mp.SetWerewolfState(self.pid, self.data.shapeshift.isWerewolf)
     tes3mp.SetCreatureRefId(self.pid, self.data.shapeshift.creatureRefId)
@@ -1124,7 +1127,8 @@ function BasePlayer:SaveShapeshift(playerPacket)
 
     if self.data.shapeshift == nil then self.data.shapeshift = {} end
 
-    local newScale = playerPacket.shapeshift.scale
+    local requestedScale = playerPacket.shapeshift.scale
+    local newScale = math.max(0.85, math.min(1.08, requestedScale))
 
     if newScale ~= self.data.shapeshift.scale then
         tes3mp.LogMessage(enumerations.log.INFO, "Player " .. logicHandler.GetChatName(self.pid) ..
@@ -1133,6 +1137,14 @@ function BasePlayer:SaveShapeshift(playerPacket)
     end
 
     self.data.shapeshift.isWerewolf = playerPacket.shapeshift.isWerewolf
+
+    -- An old or modified client may still submit >1.08. Correct it immediately
+    -- so local collision/visual scale matches the authoritative server value.
+    if requestedScale ~= newScale then
+        tes3mp.SetScale(self.pid, newScale)
+        tes3mp.SetWerewolfState(self.pid, self.data.shapeshift.isWerewolf)
+        tes3mp.SendShapeshift(self.pid)
+    end
 end
 
 function BasePlayer:LoadCell()
@@ -1950,6 +1962,7 @@ function BasePlayer:SetWerewolfState(state)
 end
 
 function BasePlayer:SetScale(scale)
+    scale = math.max(0.85, math.min(1.08, tonumber(scale) or 1))
     self.data.shapeshift.scale = scale
 
     tes3mp.SetScale(self.pid, scale)

@@ -9,6 +9,14 @@ local questIndexStore = require("questIndexStore")
 
 local BaseCell = class("BaseCell")
 
+-- X022: OpenMW uses INT_MIN exterior coordinates internally while a CellStore is
+-- in a transitional/unloaded state. They are never legitimate TES3 cells.
+local function isTransitionalExteriorCell(cellDescription)
+    local gridX, gridY = string.match(cellDescription or "", "^%s*(-?%d+)%s*,%s*(-?%d+)%s*$")
+    return gridX ~= nil and
+        (tonumber(gridX) == -2147483648 or tonumber(gridY) == -2147483648)
+end
+
 function BaseCell:__init(cellDescription)
 
     self.data =
@@ -1179,7 +1187,13 @@ function BaseCell:SaveActorCellChanges(pid)
         local uniqueIndex = tes3mp.GetActorRefNum(actorIndex) .. "-" .. tes3mp.GetActorMpNum(actorIndex)
         local newCellDescription = tes3mp.GetActorCell(actorIndex)
 
-        if newCellDescription == self.description then
+        -- X022 defense in depth: older clients could accidentally serialize
+        -- OpenMW's transitional exterior sentinel as a real destination. Never
+        -- persist or create a JSON cell for INT_MIN,INT_MIN.
+        if isTransitionalExteriorCell(newCellDescription) then
+            tes3mp.LogAppend(enumerations.log.WARN, "- Rejected transitional ActorCellChange for " ..
+                uniqueIndex .. " to " .. newCellDescription)
+        elseif newCellDescription == self.description then
             tes3mp.LogAppend(enumerations.log.INFO, "- Ignored invalid cell change that was moving " .. uniqueIndex .. " to " ..
                 self.description .. " despite that actor already being in that cell")
         else
@@ -1244,6 +1258,18 @@ function BaseCell:SaveActorCellChanges(pid)
                         tes3mp.LogAppend(enumerations.log.INFO, "-- It is now back in its original cell " .. originalCellDescription)
                         self:MoveObjectData(uniqueIndex, newCell)
 
+                        -- X024: the actor made it home, so drop both the anchor and
+                        -- the hidden travel order the server may have issued for it.
+                        if newCell.data.objectData[uniqueIndex] ~= nil then
+                            newCell.data.objectData[uniqueIndex].home = nil
+
+                            if newCell.data.objectData[uniqueIndex].ai ~= nil
+                                and newCell.data.objectData[uniqueIndex].ai.action == enumerations.ai.TRAVEL then
+                                newCell.data.objectData[uniqueIndex].ai = nil
+                                tableHelper.removeValue(newCell.data.packets.ai, uniqueIndex)
+                            end
+                        end
+
                         tableHelper.removeValue(newCell.data.packets.cellChangeTo, uniqueIndex)
                         tableHelper.removeValue(newCell.data.packets.cellChangeFrom, uniqueIndex)
 
@@ -1277,6 +1303,30 @@ function BaseCell:SaveActorCellChanges(pid)
                 elseif self.data.objectData[uniqueIndex].cellChangeTo ~= newCellDescription then
 
                     tes3mp.LogAppend(enumerations.log.INFO, "-- This was its first move away from its original cell")
+
+                    -- X024: remember where this actor belongs before it leaves.
+                    -- The client-side return-home package is stored in AiState and
+                    -- is lost whenever actor authority moves to another player, so
+                    -- an NPC that started a fight under player A and finished it
+                    -- under player B had nothing left telling it where home was.
+                    -- The server keeps the anchor instead and can hand it to
+                    -- whichever client currently owns the actor.
+                    if config.rememberActorHomes and self.data.objectData[uniqueIndex].home == nil then
+
+                        local currentLocation = self.data.objectData[uniqueIndex].location
+
+                        if currentLocation ~= nil and currentLocation.posX ~= nil then
+                            self.data.objectData[uniqueIndex].home = {
+                                cell = self.description,
+                                posX = currentLocation.posX,
+                                posY = currentLocation.posY,
+                                posZ = currentLocation.posZ,
+                                rotZ = currentLocation.rotZ,
+                                awayTime = os.time()
+                            }
+                            tes3mp.LogAppend(enumerations.log.INFO, "-- Remembered its home in " .. self.description)
+                        end
+                    end
 
                     self:MoveObjectData(uniqueIndex, newCell)
 
@@ -2076,38 +2126,76 @@ function BaseCell:LoadActorCellChanges(pid, objectData)
 
             local newCellDescription = objectData[uniqueIndex].cellChangeTo
 
-            tes3mp.SetActorCell(newCellDescription)
+            if isTransitionalExteriorCell(newCellDescription) then
+                -- X022 migration: X021 and older could already have persisted an
+                -- actor into "-2147483648, -2147483648". Restore its full data
+                -- to the original cell the next time that original cell loads.
+                tes3mp.LogAppend(enumerations.log.WARN, "- Repairing stale transitional cell move for " ..
+                    uniqueIndex .. " from " .. self.description)
 
-            local splitIndex = uniqueIndex:split("-")
-            tes3mp.SetActorRefNum(splitIndex[1])
-            tes3mp.SetActorMpNum(splitIndex[2])
+                if LoadedCells[newCellDescription] == nil then
+                    logicHandler.LoadCell(newCellDescription)
+                    table.insert(temporaryLoadedCells, newCellDescription)
+                end
 
-            -- If the new cell is not loaded, load it temporarily
-            if LoadedCells[newCellDescription] == nil then
-                logicHandler.LoadCell(newCellDescription)
-                table.insert(temporaryLoadedCells, newCellDescription)
-            end
+                local transitionalCell = LoadedCells[newCellDescription]
+                if transitionalCell ~= nil and transitionalCell.data.objectData[uniqueIndex] ~= nil then
+                    transitionalCell:MoveObjectData(uniqueIndex, self)
 
-            if LoadedCells[newCellDescription].data.objectData[uniqueIndex] ~= nil then
+                    tableHelper.removeValue(self.data.packets.cellChangeTo, uniqueIndex)
+                    tableHelper.removeValue(self.data.packets.cellChangeFrom, uniqueIndex)
 
-                local location = LoadedCells[newCellDescription].data.objectData[uniqueIndex].location
+                    if self.data.objectData[uniqueIndex] ~= nil then
+                        self.data.objectData[uniqueIndex].cellChangeTo = nil
+                        self.data.objectData[uniqueIndex].cellChangeFrom = nil
+                    end
 
-                -- Ensure data integrity before proceeeding
-                if tableHelper.getCount(location) == 6 and tableHelper.usesNumericalValues(location) and
-                    LoadedCells[newCellDescription]:ContainsPosition(location.posX, location.posY) then
-
-                    tes3mp.SetActorPosition(location.posX, location.posY, location.posZ)
-                    tes3mp.SetActorRotation(location.rotX, location.rotY, location.rotZ)
-
-                    tes3mp.AddActor()
-
-                    actorCount = actorCount + 1
+                    tableHelper.removeValue(transitionalCell.data.packets.cellChangeTo, uniqueIndex)
+                    tableHelper.removeValue(transitionalCell.data.packets.cellChangeFrom, uniqueIndex)
+                    transitionalCell:QuicksaveToDrive()
+                    self:QuicksaveToDrive()
+                else
+                    tes3mp.LogAppend(enumerations.log.ERROR, "- Could not recover " .. uniqueIndex ..
+                        " because the transitional cell has no matching object data")
+                    tableHelper.removeValue(self.data.packets.cellChangeTo, uniqueIndex)
+                    if self.data.objectData[uniqueIndex] ~= nil then
+                        self.data.objectData[uniqueIndex].cellChangeTo = nil
+                    end
                 end
             else
-                tes3mp.LogAppend(enumerations.log.ERROR, "- Tried to move " .. uniqueIndex .. " from " ..
-                    self.description .. " to  " .. newCellDescription .. " with no position data!")
-                objectData[uniqueIndex] = nil
-                tableHelper.removeValue(self.data.packets.cellChangeTo, uniqueIndex)
+                tes3mp.SetActorCell(newCellDescription)
+
+                local splitIndex = uniqueIndex:split("-")
+                tes3mp.SetActorRefNum(splitIndex[1])
+                tes3mp.SetActorMpNum(splitIndex[2])
+
+                -- If the new cell is not loaded, load it temporarily
+                if LoadedCells[newCellDescription] == nil then
+                    logicHandler.LoadCell(newCellDescription)
+                    table.insert(temporaryLoadedCells, newCellDescription)
+                end
+
+                if LoadedCells[newCellDescription].data.objectData[uniqueIndex] ~= nil then
+
+                    local location = LoadedCells[newCellDescription].data.objectData[uniqueIndex].location
+
+                    -- Ensure data integrity before proceeding
+                    if tableHelper.getCount(location) == 6 and tableHelper.usesNumericalValues(location) and
+                        LoadedCells[newCellDescription]:ContainsPosition(location.posX, location.posY) then
+
+                        tes3mp.SetActorPosition(location.posX, location.posY, location.posZ)
+                        tes3mp.SetActorRotation(location.rotX, location.rotY, location.rotZ)
+
+                        tes3mp.AddActor()
+
+                        actorCount = actorCount + 1
+                    end
+                else
+                    tes3mp.LogAppend(enumerations.log.ERROR, "- Tried to move " .. uniqueIndex .. " from " ..
+                        self.description .. " to  " .. newCellDescription .. " with no position data!")
+                    objectData[uniqueIndex] = nil
+                    tableHelper.removeValue(self.data.packets.cellChangeTo, uniqueIndex)
+                end
             end
         else
             tes3mp.LogAppend(enumerations.log.ERROR, "- Had cellChangeTo packet recorded for " .. uniqueIndex ..

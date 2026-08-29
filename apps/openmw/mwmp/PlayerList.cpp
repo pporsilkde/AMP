@@ -75,9 +75,11 @@ void PlayerList::deletePlayer(RakNet::RakNetGUID guid)
 
 void PlayerList::cleanUp()
 {
-    for (auto &playerEntry : playerList)
-        delete playerEntry.second;
-    playerList.clear();
+    // Use the normal removal path so every remote world reference is detached
+    // while World is still alive. Deleting DedicatedPlayer directly left its Ptr
+    // pointing at a live/deleted reference during shutdown.
+    while (!playerList.empty())
+        deletePlayer(playerList.begin()->first);
 }
 
 DedicatedPlayer *PlayerList::getPlayer(RakNet::RakNetGUID guid)

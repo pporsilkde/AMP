@@ -125,19 +125,32 @@ Main::Main()
 
 Main::~Main()
 {
-    // Flush the final coalesced script-local changes while the connection and ObjectList
-    // still exist. A hard connection loss cannot be recovered here, but a normal quit can.
+    // Flush the final coalesced script-local changes while the connection and
+    // ObjectList still exist. A hard connection loss cannot be recovered here,
+    // but a normal quit can.
     if (mNetworking != nullptr && mLocalPlayer != nullptr && mNetworking->isConnected()
         && mLocalPlayer->isLoggedIn())
         ScriptController::flushQueuedLocalChanges(0.0f, true);
 
-    LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "tes3mp stopped");
-    delete mNetworking;
-    delete mLocalSystem;
-    delete mLocalPlayer;
-    delete mCellController;
-    delete mGUIController;
+    // X022: DedicatedPlayers own MWWorld::Ptrs. They must be removed before the
+    // cell/GUI controllers and, most importantly, before Engine destroys World.
+    // cleanUp() also calls deleteReference() so no stale Ptr reaches a destructor.
     PlayerList::cleanUp();
+
+    delete mNetworking;
+    mNetworking = nullptr;
+    delete mLocalSystem;
+    mLocalSystem = nullptr;
+    delete mLocalPlayer;
+    mLocalPlayer = nullptr;
+    delete mCellController;
+    mCellController = nullptr;
+    delete mGUIController;
+    mGUIController = nullptr;
+
+    // Keep this marker truthful: reaching it now means multiplayer teardown
+    // actually completed, instead of merely having started.
+    LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "tes3mp stopped");
 }
 
 void Main::optionsDesc(boost::program_options::options_description *desc)

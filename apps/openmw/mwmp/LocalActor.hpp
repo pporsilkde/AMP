@@ -19,6 +19,8 @@ namespace mwmp
         void update(bool forceUpdate);
 
         void updateCell();
+        /// X024: false while OpenMW transiently reports the INT_MIN,INT_MIN grid.
+        bool hasValidDestinationCell() const;
         void updatePosition(bool forceUpdate);
         void updateAnimFlags(bool forceUpdate);
         void updateAnimPlay();

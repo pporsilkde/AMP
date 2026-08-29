@@ -780,6 +780,74 @@ logicHandler.GetCellContainingActor = function(actorUniqueIndex)
     return nil
 end
 
+-- X024: walk stray actors back to the cell they came from.
+--
+-- The client already has a hidden return-home package (AiInternalTravel), but it
+-- is part of AiState and is therefore destroyed whenever actor authority moves to
+-- another player. In a busy area authority changes constantly, so an NPC that
+-- chased somebody out of its cell frequently ended up with no memory of where it
+-- belonged and simply stood where the fight ended.
+--
+-- The server keeps that memory instead. Because SetAIForActor persists the AI
+-- package in the actor's objectData, BaseCell:LoadActorAuthority replays it to
+-- every new authority in turn - including a player who was never part of the
+-- fight. AiCombat has a higher priority than AiTravel and does not allow itself
+-- to be cancelled, so issuing the order during a fight is harmless: the actor
+-- keeps fighting and only starts walking home once combat actually ends.
+logicHandler.ReturnStrayActorsHome = function()
+
+    if not config.rememberActorHomes then return end
+
+    local now = os.time()
+
+    for cellDescription, cell in pairs(LoadedCells) do
+
+        -- Only a cell with a live authority can act on the order at all.
+        if cell.authority ~= nil and Players[cell.authority] ~= nil
+            and Players[cell.authority]:IsLoggedIn() then
+
+            for uniqueIndex, objectData in pairs(cell.data.objectData) do
+
+                local home = objectData.home
+
+                if home ~= nil and home.cell ~= nil and home.posX ~= nil
+                    and tableHelper.containsValue(cell.data.packets.actorList, uniqueIndex) then
+
+                    if home.cell == cellDescription then
+                        -- Already back where it belongs.
+                        objectData.home = nil
+
+                        if objectData.ai ~= nil and objectData.ai.action == enumerations.ai.TRAVEL then
+                            objectData.ai = nil
+                            tableHelper.removeValue(cell.data.packets.ai, uniqueIndex)
+                        end
+                    else
+                        local awayTime = home.awayTime or now
+                        home.awayTime = awayTime
+
+                        local alreadyOrdered = objectData.ai ~= nil
+                            and objectData.ai.action == enumerations.ai.TRAVEL
+                            and objectData.ai.posX == home.posX
+                            and objectData.ai.posY == home.posY
+
+                        if not alreadyOrdered and now - awayTime >= config.actorHomeReturnDelay then
+
+                            tes3mp.LogMessage(enumerations.log.INFO, "[X024] Telling " .. uniqueIndex ..
+                                " in " .. cellDescription .. " to return home to " .. home.cell)
+
+                            -- shouldRepeat is passed explicitly: packetBuilder feeds
+                            -- it straight into tes3mp.SetActorAIRepetition(), which
+                            -- expects a real boolean rather than nil.
+                            logicHandler.SetAIForActor(cell, uniqueIndex, enumerations.ai.TRAVEL,
+                                nil, nil, home.posX, home.posY, home.posZ, nil, nil, false)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
 logicHandler.SetAIForActor = function(cell, actorUniqueIndex, action, targetPid, targetUniqueIndex,
     posX, posY, posZ, distance, duration, shouldRepeat)
 
@@ -886,7 +954,8 @@ logicHandler.LoadCellForPlayer = function(pid, cellDescription)
         end
     -- Otherwise, only set this new visitor as the authority if their ping is noticeably lower
     -- than that of the current authority
-    elseif tes3mp.GetAvgPing(pid) < (tes3mp.GetAvgPing(authPid) - config.pingDifferenceRequiredForAuthority) then
+    elseif config.stableCellAuthority ~= true and
+        tes3mp.GetAvgPing(pid) < (tes3mp.GetAvgPing(authPid) - config.pingDifferenceRequiredForAuthority) then
         tes3mp.LogMessage(enumerations.log.WARN, "Player " .. logicHandler.GetChatName(pid) ..
             " took over authority from player " .. logicHandler.GetChatName(authPid) ..
             " in " .. cellDescription .. " for latency reasons")

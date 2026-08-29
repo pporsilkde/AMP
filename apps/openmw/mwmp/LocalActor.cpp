@@ -1,5 +1,6 @@
 #include <components/openmw-mp/TimedLog.hpp>
 #include <cmath>
+#include <limits>
 
 #include "../mwbase/environment.hpp"
 
@@ -73,8 +74,42 @@ void LocalActor::update(bool forceUpdate)
     hasSentData = true;
 }
 
+bool LocalActor::hasValidDestinationCell() const
+{
+    // X024: choke-point guard against OpenMW's transitional exterior sentinel.
+    //
+    // While an exterior CellStore is being unloaded, CellStore::getCell() can
+    // briefly report the grid INT_MIN,INT_MIN. X022 rejected that in
+    // Cell::updateLocal and again in the server's SaveActorCellChanges, but the
+    // check belongs here, at the one place that actually serialises the
+    // destination - otherwise any present or future caller of updateCell() can
+    // still leak it. The client log shows exactly that leak reaching the server,
+    // which then created a real JSON cell named "-2147483648, -2147483648".
+    if (ptr.isEmpty() || !ptr.isInCell())
+        return false;
+
+    const ESM::Cell* destination = ptr.getCell()->getCell();
+    if (destination == nullptr)
+        return false;
+
+    if (destination->isExterior()
+        && (destination->mData.mX == std::numeric_limits<int>::min()
+            || destination->mData.mY == std::numeric_limits<int>::min()))
+        return false;
+
+    return true;
+}
+
 void LocalActor::updateCell()
 {
+    if (!hasValidDestinationCell())
+    {
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
+            "Refusing to send ID_ACTOR_CELL_CHANGE about %s %i-%i: destination cell is transitional",
+            refId.c_str(), refNum, mpNum);
+        return;
+    }
+
     LOG_MESSAGE_SIMPLE(TimedLog::LOG_VERBOSE, "Sending ID_ACTOR_CELL_CHANGE about %s %i-%i in cell %s to server",
                        refId.c_str(), refNum, mpNum, cell.getShortDescription().c_str());
 

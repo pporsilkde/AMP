@@ -884,6 +884,36 @@ config.menuHelperFiles = { "help", "defaultCrafting", "advancedExample" }
 -- Note: Setting this too low will lead to constant authority changes which cause more lag
 config.pingDifferenceRequiredForAuthority = 40
 
+-- X022: keep actor authority stable while the current cell authority is still
+-- present. NPC AI state is client-authoritative, so swapping ownership merely
+-- because another visitor has lower ping can reset combat/return-home state in
+-- populated areas. Authority still transfers immediately when the current
+-- authority unloads/leaves the cell. Set false to restore legacy ping takeovers.
+config.stableCellAuthority = true
+
+-- X024: remember where an actor lived before it first walked out of its own cell,
+-- and hand that anchor to whichever client currently owns the actor.
+-- The client-side return-home package lives in AiState and is destroyed on every
+-- actor authority hand-off, so an NPC that started a fight under one player and
+-- finished it under another had nothing left telling it where to go back to.
+-- With this enabled the server keeps the anchor in the actor's objectData and
+-- issues a hidden Travel order, which BaseCell:LoadActorAuthority replays to each
+-- new authority in turn.
+config.rememberActorHomes = true
+
+-- How many seconds an actor may stay outside its home cell before the server
+-- starts telling its authority to walk it back. The order is stacked *under* an
+-- active AiCombat package, so an NPC that is still fighting keeps fighting and
+-- only walks home once the fight is actually over.
+config.actorHomeReturnDelay = 25
+
+-- How often the stray-actor sweep runs, in seconds. Raise this on servers with
+-- very many loaded cells.
+config.actorHomeReturnInterval = 5
+
+-- Distance in game units within which an actor counts as having arrived home.
+config.actorHomeArrivalDistance = 320
+
 -- The log level enforced on clients by default, determining how much debug information
 -- is displayed in their debug window and logs
 -- Note 1: Set this to -1 to allow clients to use whatever log level they have set in
@@ -1107,7 +1137,7 @@ config.playerKeyOrder = { "login", "name", "passwordHash", "passwordSalt", "time
     "healthCurrent", "magickaBase", "magickaCurrent", "fatigueBase", "fatigueCurrent" }
 
 config.cellKeyOrder = { "packets", "entry", "lastVisit", "recordLinks", "objectData", "refId", "count",
-    "charge", "enchantmentCharge", "location", "actorList", "ai", "summon", "stats", "cellChangeFrom",
+    "charge", "enchantmentCharge", "location", "home", "actorList", "ai", "summon", "stats", "cellChangeFrom",
     "cellChangeTo", "container", "death", "delete", "doorState", "equipment", "inventory", "lock",
     "place", "position", "scale", "spawn", "state", "statsDynamic", "trap" }
 

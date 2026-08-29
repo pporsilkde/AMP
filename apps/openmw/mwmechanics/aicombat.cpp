@@ -85,7 +85,16 @@ namespace
 
     // How long an actor is allowed to try to reach a target that sits in another
     // cell before disengaging.
-    const float sCrossCellGiveUpTime = 20.f;
+    // X022: a target in another coordinate space should not keep an NPC frozen
+    // in combat for 20 seconds, especially when actor authority changes.
+    const float sCrossCellGiveUpTime = 10.f;
+
+    // X024: hard ceilings kept on the package instead of the per-client AiState.
+    // An actor authority hand-off recreates AiCombatStorage and therefore resets
+    // every timer stored there; these two cannot be reset that way, so an NPC can
+    // no longer be kept in combat forever by a crowded cell.
+    const float sForeignSpaceHardGiveUpTime = 14.f;
+    const float sUnresolvedTargetGiveUpTime = 10.f;
 
     // How long an actor keeps trying to reach a target it has line of sight to
     // but no navmesh path to, before ending combat instead of panicking.
@@ -305,9 +314,16 @@ namespace MWMechanics
             lostMovement.mPosition[1] = 0.f;
 
             storage.mTargetLostTimer += duration;
-            return storage.mTargetLostTimer >= sTargetLostTimeout;
+            // X024: storage lives in AiState and is thrown away on every actor
+            // authority hand-off, so with several players around the per-state
+            // timer could be reset forever and the NPC stayed in a combat stance
+            // permanently. The package-level counter cannot be reset that way.
+            mUnresolvedTargetElapsed += duration;
+            return storage.mTargetLostTimer >= sTargetLostTimeout
+                || mUnresolvedTargetElapsed >= sUnresolvedTargetGiveUpTime;
         }
         storage.mTargetLostTimer = 0.f;
+        mUnresolvedTargetElapsed = 0.f;
 
         if (!target.getRefData().getCount() || !target.getRefData().isEnabled()
             || target.getClass().getCreatureStats(target).isDead())
@@ -329,6 +345,7 @@ namespace MWMechanics
             return updateCrossCellPursuit(actor, target, duration, storage, characterController);
 
         storage.mCrossCellTimer = 0.f;
+        mForeignSpaceElapsed = 0.f;
 
         if (updatePursuitLeash(actor, duration, storage))
         {
@@ -854,13 +871,24 @@ namespace MWMechanics
         storage.stopFleeing();
         characterController.setAttackingOrSpell(false);
 
+        // X024: the deadline runs even while we do not own the actor. Otherwise a
+        // busy area where authority keeps bouncing between players would restart
+        // the countdown on every hand-off and the pursuit would never expire.
+        mForeignSpaceElapsed += duration;
+
         const bool controlsActor = !mwmp::Main::isInitialized()
             || mwmp::Main::get().getCellController()->isLocalActor(actor);
         if (!controlsActor)
+        {
+            // Only the authority may end the package; a non-authority client just
+            // keeps the actor still instead of leaving it in a stuck combat pose.
+            stopCrossCellMovement(actor);
             return false;
+        }
 
         storage.mCrossCellTimer += duration;
-        if (storage.mCrossCellTimer >= sCrossCellGiveUpTime)
+        if (storage.mCrossCellTimer >= sCrossCellGiveUpTime
+            || mForeignSpaceElapsed >= sForeignSpaceHardGiveUpTime)
             return true;
 
         // Only an actor that is genuinely part of this fight follows the target
@@ -877,8 +905,11 @@ namespace MWMechanics
         if (!engaged || !actor.getClass().isBipedal(actor)
             || storage.mDoorTransitions >= sMaxDoorTransitions)
         {
+            // There is no valid continuation for this cross-cell fight. Finish
+            // Combat now so AiInternalTravel can return the actor home instead
+            // of freezing until a timer that may be reset by authority hand-off.
             stopCrossCellMovement(actor);
-            return false;
+            return true;
         }
 
         const ESM::Cell* targetCell = target.getCell() != nullptr ? target.getCell()->getCell() : nullptr;
@@ -887,8 +918,11 @@ namespace MWMechanics
 
         if (door.isEmpty())
         {
+            // No direct teleport route to the target's coordinate space: this
+            // pursuit cannot progress from the current cell. End combat and let
+            // the hidden return-home package restore the NPC.
             stopCrossCellMovement(actor);
-            return false;
+            return true;
         }
 
         actor.getClass().getCreatureStats(actor).setMovementFlag(CreatureStats::Flag_Run, true);

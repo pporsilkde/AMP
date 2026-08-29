@@ -129,6 +129,73 @@ namespace
         return actor.getCell()->isExterior() && player.getCell()->isExterior();
     }
 
+    // X024 combat bar presentation constants.
+    //
+    // The bar used to be placed straight from getObjectScreenBounds every frame.
+    // That box is animated, so a running NPC bobbed the bar by several pixels per
+    // stride, and every "not visible right now" branch hid the widget outright,
+    // which read as a hard blink whenever line of sight or the 10 Hz participant
+    // scan flickered. Both are now filtered.
+    namespace CombatBar
+    {
+        // Horizontal tracking has to stay tight or the bar lags behind a strafing
+        // target; vertical is filtered much harder because that is where the run
+        // animation bob lives.
+        constexpr float sSmoothTauX = 0.055f;
+        constexpr float sSmoothTauY = 0.140f;
+        constexpr float sSmoothTauSize = 0.200f;
+        // The head/lowered transition is deliberately slow so it reads as the bar
+        // settling into place rather than snapping to a second position.
+        constexpr float sSmoothTauFront = 0.320f;
+        constexpr float sSmoothTauHealth = 0.220f;
+
+        constexpr float sFadeInTime = 0.12f;
+        constexpr float sFadeOutTime = 0.30f;
+        // How long a bar keeps its last good position after the actor stops being
+        // resolvable. Covers the 100 ms scan period plus a short LOS flicker.
+        constexpr float sLingerTime = 0.35f;
+
+        // Beyond this jump the smoothing is skipped: a camera cut or a teleport
+        // must not drag the bar across the whole screen.
+        constexpr float sSnapFraction = 0.35f;
+
+        // Lowered placement: below the middle of the screen, horizontally centred,
+        // leaning towards the side the actor is actually on.
+        constexpr float sLoweredScreenY = 0.62f;
+        constexpr float sLoweredSway = 0.45f;
+
+        // A bar switches to the lowered placement when the actor is close, or fills
+        // a lot of the view, or its head has climbed into the top of the screen.
+        constexpr float sFrontNearDistance = 340.f;
+        constexpr float sFrontFullDistance = 150.f;
+        constexpr float sFrontCoverageStart = 0.34f;
+        constexpr float sFrontCoverageFull = 0.80f;
+        constexpr float sFrontHeadroom = 0.14f;
+        constexpr float sFrontCentreWindow = 0.34f;
+
+        // Progress bars are driven at a fixed resolution so a smoothed value is
+        // still visible on an actor with very few hit points.
+        constexpr int sProgressResolution = 1000;
+
+        inline float clamp01(float value)
+        {
+            return std::max(0.f, std::min(1.f, value));
+        }
+
+        /// Framerate-independent exponential approach.
+        inline float approach(float current, float target, float tau, float dt)
+        {
+            if (tau <= 0.f || dt <= 0.f)
+                return target;
+            return current + (target - current) * (1.f - std::exp(-dt / tau));
+        }
+
+        inline float lerp(float from, float to, float t)
+        {
+            return from + (to - from) * t;
+        }
+    }
+
     bool npcBarShowsHover(const std::string& mode)
     {
         return mode == "hover" || mode == "both";
@@ -1818,9 +1885,50 @@ namespace MWGui
         {
             state.mActor = MWWorld::Ptr();
             state.mAlly = false;
+            // X024: clear the smoothed geometry too. Keeping it would make the next
+            // actor to land in this slot start its fade-in at the previous actor's
+            // screen position and slide across the view.
+            state.mHasScreenState = false;
+            state.mAlpha = 0.f;
+            state.mTargetAlpha = 0.f;
+            state.mFrontBlend = 0.f;
+            state.mDisplayHealth = -1.f;
+            state.mLingerTimer = 0.f;
             if (state.mWidget)
                 state.mWidget->setVisible(false);
         }
+    }
+
+    void HUD::applyCombatHealthBar(CombatHealthBarState& state, float dt)
+    {
+        MyGUI::ProgressBar* bar = state.mWidget;
+        if (!bar)
+            return;
+
+        const float fadeTau = state.mTargetAlpha > state.mAlpha
+            ? CombatBar::sFadeInTime : CombatBar::sFadeOutTime;
+        state.mAlpha = CombatBar::approach(state.mAlpha, state.mTargetAlpha, fadeTau, dt);
+
+        if (state.mAlpha <= 0.004f || !state.mHasScreenState)
+        {
+            state.mAlpha = std::max(0.f, state.mAlpha);
+            if (state.mTargetAlpha <= 0.f)
+            {
+                state.mAlpha = 0.f;
+                state.mHasScreenState = false;
+            }
+            bar->setVisible(false);
+            return;
+        }
+
+        const int width = std::max(40, static_cast<int>(std::lround(state.mWidth)));
+        const int height = std::max(4, static_cast<int>(std::lround(state.mHeight)));
+        const int left = static_cast<int>(std::lround(state.mCentreX - width * 0.5f));
+        const int top = static_cast<int>(std::lround(state.mCentreY - height * 0.5f));
+
+        bar->setCoord(left, top, width, height);
+        bar->setAlpha(std::min(1.f, state.mAlpha));
+        bar->setVisible(true);
     }
 
     void HUD::updateCombatHealthBars(float dt)
@@ -1994,6 +2102,8 @@ namespace MWGui
 
         const MyGUI::IntSize& viewSize = MyGUI::RenderManager::getInstance().getViewSize();
         const osg::Vec3f playerPosition = player.getRefData().getPosition().asVec3();
+        const float viewWidth = static_cast<float>(std::max(1, viewSize.width));
+        const float viewHeight = static_cast<float>(std::max(1, viewSize.height));
 
         constexpr float fullSizeDistance = 384.f;
         constexpr float maximumBarDistance = 4096.f;
@@ -2005,89 +2115,191 @@ namespace MWGui
         for (CombatHealthBarState& state : mCombatHealthBars)
         {
             MyGUI::ProgressBar* bar = state.mWidget;
-            if (!bar || state.mActor.isEmpty())
-            {
-                if (bar)
-                    bar->setVisible(false);
+            if (!bar)
                 continue;
-            }
+
+            // X024: a slot that cannot be drawn right now is no longer switched off
+            // on the spot. It keeps its last smoothed position for a short grace
+            // period and then fades, so a momentary LOS break, a scan boundary or a
+            // participant leaving combat never produces a blink.
+            bool resolved = false;
+            float targetCentreX = state.mCentreX;
+            float targetCentreY = state.mCentreY;
+            float targetWidth = state.mWidth;
+            float targetHeight = state.mHeight;
+            float distanceAlpha = 1.f;
+            bool dropImmediately = false;
 
             const MWWorld::Ptr& actor = state.mActor;
-            if (!sharesCombatSpace(actor, player)
+            if (actor.isEmpty())
+            {
+                dropImmediately = true;
+            }
+            else if (!sharesCombatSpace(actor, player)
                 || actor.getRefData().getCount() <= 0 || !actor.getRefData().isEnabled()
                 || actor.getRefData().isDeleted() || !actor.getClass().isActor())
             {
-                bar->setVisible(false);
-                continue;
+                dropImmediately = true;
             }
-
-            MWMechanics::CreatureStats& stats = actor.getClass().getCreatureStats(actor);
-            const float maximumHealth = stats.getHealth().getModified();
-            const float currentHealth = stats.getHealth().getCurrent();
-            if (stats.isDead() || maximumHealth <= 0.f || currentHealth <= 0.f)
+            else
             {
-                bar->setVisible(false);
-                continue;
+                MWMechanics::CreatureStats& stats = actor.getClass().getCreatureStats(actor);
+                const float maximumHealth = stats.getHealth().getModified();
+                const float currentHealth = stats.getHealth().getCurrent();
+
+                if (stats.isDead() || maximumHealth <= 0.f || currentHealth <= 0.f)
+                {
+                    // Death still fades rather than blinking, but without the linger:
+                    // there is nothing left to track.
+                    state.mLingerTimer = 0.f;
+                }
+                else
+                {
+                    const float distance = (actor.getRefData().getPosition().asVec3() - playerPosition).length();
+                    float minX = 0.f;
+                    float minY = 0.f;
+                    float maxX = 0.f;
+                    float maxY = 0.f;
+
+                    if (distance < maximumBarDistance && world->getObjectScreenBounds(actor, minX, minY, maxX, maxY))
+                    {
+                        const float distanceT = CombatBar::clamp01(
+                            (distance - fullSizeDistance) / (maximumBarDistance - fullSizeDistance));
+                        const float scale = std::max(minimumScale, 1.f - 0.60f * distanceT);
+                        targetWidth = maximumWidth * scale;
+                        targetHeight = maximumHeight * scale;
+
+                        const float centreXNormalized = (minX + maxX) * 0.5f;
+                        const float headTopNormalized = minY;
+
+                        // How strongly this actor wants the lowered placement.
+                        // Any one of "very close", "fills the view" or "head is
+                        // already at the top edge" is enough; the horizontal term
+                        // keeps the effect for actors actually standing in front of
+                        // the player rather than off to one side.
+                        const float proximityT = CombatBar::clamp01(
+                            (CombatBar::sFrontNearDistance - distance)
+                            / (CombatBar::sFrontNearDistance - CombatBar::sFrontFullDistance));
+                        const float coverage = std::max(0.f, maxY - minY);
+                        const float coverageT = CombatBar::clamp01(
+                            (coverage - CombatBar::sFrontCoverageStart)
+                            / (CombatBar::sFrontCoverageFull - CombatBar::sFrontCoverageStart));
+                        const float headroomT = CombatBar::clamp01(
+                            (CombatBar::sFrontHeadroom - headTopNormalized) / CombatBar::sFrontHeadroom);
+                        const float centreT = CombatBar::clamp01(
+                            (CombatBar::sFrontCentreWindow - std::abs(centreXNormalized - 0.5f))
+                            / CombatBar::sFrontCentreWindow);
+
+                        const float targetFront = CombatBar::clamp01(
+                            std::max(proximityT, std::max(coverageT, headroomT)) * centreT);
+
+                        // Head anchor: just above the actor's bounding box.
+                        const float headCentreX = centreXNormalized * viewWidth;
+                        const float headCentreY = headTopNormalized * viewHeight
+                            - targetHeight * 0.5f - (4.f + 4.f * scale);
+
+                        // Lowered anchor: below the middle of the screen, centred,
+                        // leaning towards whichever side the actor stands on.
+                        const float loweredCentreX = viewWidth
+                            * (0.5f + (centreXNormalized - 0.5f) * CombatBar::sLoweredSway);
+                        const float loweredCentreY = viewHeight * CombatBar::sLoweredScreenY;
+
+                        // Blend with the *smoothed* factor so the bar glides between
+                        // the two placements instead of teleporting between them.
+                        const float blend = CombatBar::approach(
+                            state.mFrontBlend, targetFront, CombatBar::sSmoothTauFront, dt);
+                        state.mFrontBlend = blend;
+
+                        targetCentreX = CombatBar::lerp(headCentreX, loweredCentreX, blend);
+                        targetCentreY = CombatBar::lerp(headCentreY, loweredCentreY, blend);
+
+                        // Off-screen culling now tests the placement that will
+                        // actually be drawn. In lowered mode a head above the top
+                        // edge is exactly the case we want to keep showing.
+                        const bool onScreen = targetCentreX > -targetWidth
+                            && targetCentreX < viewWidth + targetWidth
+                            && targetCentreY > -targetHeight
+                            && targetCentreY < viewHeight + targetHeight;
+
+                        if (onScreen)
+                        {
+                            resolved = true;
+
+                            if (distance > fadeStartDistance)
+                                distanceAlpha = CombatBar::clamp01(
+                                    (maximumBarDistance - distance) / (maximumBarDistance - fadeStartDistance));
+
+                            // Health value is smoothed as well, so a hit slides the
+                            // bar down instead of snapping it. A near-full swing is
+                            // treated as a heal/respawn and applied at once.
+                            if (state.mDisplayHealth < 0.f
+                                || std::abs(state.mDisplayHealth - currentHealth) > maximumHealth * 0.9f)
+                                state.mDisplayHealth = currentHealth;
+                            else
+                                state.mDisplayHealth = CombatBar::approach(
+                                    state.mDisplayHealth, currentHealth, CombatBar::sSmoothTauHealth, dt);
+
+                            const float healthFraction = CombatBar::clamp01(state.mDisplayHealth / maximumHealth);
+                            bar->setProgressRange(static_cast<std::size_t>(CombatBar::sProgressResolution));
+                            bar->setProgressPosition(static_cast<std::size_t>(
+                                std::lround(healthFraction * CombatBar::sProgressResolution)));
+                        }
+                    }
+                }
             }
 
-            const float distance = (actor.getRefData().getPosition().asVec3() - playerPosition).length();
-            if (distance >= maximumBarDistance)
+            if (resolved)
             {
-                bar->setVisible(false);
-                continue;
-            }
+                state.mLingerTimer = CombatBar::sLingerTime;
+                state.mTargetAlpha = distanceAlpha;
 
-            float minX = 0.f;
-            float minY = 0.f;
-            float maxX = 0.f;
-            float maxY = 0.f;
-            if (!world->getObjectScreenBounds(actor, minX, minY, maxX, maxY))
+                if (!state.mHasScreenState)
+                {
+                    // First frame for this actor: start where it belongs and fade in.
+                    state.mCentreX = targetCentreX;
+                    state.mCentreY = targetCentreY;
+                    state.mWidth = targetWidth;
+                    state.mHeight = targetHeight;
+                    state.mHasScreenState = true;
+                }
+                else
+                {
+                    const float snapDistance = viewWidth * CombatBar::sSnapFraction;
+                    if (std::abs(targetCentreX - state.mCentreX) > snapDistance
+                        || std::abs(targetCentreY - state.mCentreY) > snapDistance)
+                    {
+                        // Camera cut or teleport: never drag the bar across the view.
+                        state.mCentreX = targetCentreX;
+                        state.mCentreY = targetCentreY;
+                    }
+                    else
+                    {
+                        state.mCentreX = CombatBar::approach(
+                            state.mCentreX, targetCentreX, CombatBar::sSmoothTauX, dt);
+                        state.mCentreY = CombatBar::approach(
+                            state.mCentreY, targetCentreY, CombatBar::sSmoothTauY, dt);
+                    }
+
+                    state.mWidth = CombatBar::approach(
+                        state.mWidth, targetWidth, CombatBar::sSmoothTauSize, dt);
+                    state.mHeight = CombatBar::approach(
+                        state.mHeight, targetHeight, CombatBar::sSmoothTauSize, dt);
+                }
+            }
+            else
             {
-                bar->setVisible(false);
-                continue;
+                if (dropImmediately)
+                    state.mLingerTimer = 0.f;
+                else
+                    state.mLingerTimer = std::max(0.f, state.mLingerTimer - dt);
+
+                // Hold the last good placement while the grace period runs, then fade.
+                state.mTargetAlpha = state.mLingerTimer > 0.f ? state.mTargetAlpha : 0.f;
+                if (state.mLingerTimer <= 0.f)
+                    state.mDisplayHealth = -1.f;
             }
 
-            const float distanceT = std::max(0.f, std::min(1.f,
-                (distance - fullSizeDistance) / (maximumBarDistance - fullSizeDistance)));
-            const float scale = std::max(minimumScale, 1.f - 0.60f * distanceT);
-            const int width = std::max(40, static_cast<int>(std::lround(maximumWidth * scale)));
-            const int height = std::max(4, static_cast<int>(std::lround(maximumHeight * scale)));
-
-            // Anchor on the head itself. Clamping the bar back onto the screen used to
-            // park it against the border for an actor that had already left the view,
-            // where it read as belonging to whoever stood at that edge.
-            const float centreXNormalized = (minX + maxX) * 0.5f;
-            if (centreXNormalized < 0.f || centreXNormalized > 1.f)
-            {
-                bar->setVisible(false);
-                continue;
-            }
-
-            const float centreX = centreXNormalized * viewSize.width;
-            const float actorTop = minY * viewSize.height;
-            const int left = static_cast<int>(std::lround(centreX - width * 0.5f));
-            const int top = static_cast<int>(std::lround(actorTop - height - (4.f + 4.f * scale)));
-
-            if (top + height <= 0 || top >= viewSize.height
-                || left + width <= 0 || left >= viewSize.width)
-            {
-                bar->setVisible(false);
-                continue;
-            }
-
-            const int maximumHealthPoints = std::max(1, static_cast<int>(std::lround(maximumHealth)));
-            const int currentHealthPoints = std::max(0, std::min(maximumHealthPoints,
-                static_cast<int>(std::lround(currentHealth))));
-            bar->setProgressRange(static_cast<std::size_t>(maximumHealthPoints));
-            bar->setProgressPosition(static_cast<std::size_t>(currentHealthPoints));
-            bar->setCoord(left, top, width, height);
-
-            float alpha = 1.f;
-            if (distance > fadeStartDistance)
-                alpha = std::max(0.f, std::min(1.f,
-                    (maximumBarDistance - distance) / (maximumBarDistance - fadeStartDistance)));
-            bar->setAlpha(alpha);
-            bar->setVisible(alpha > 0.01f);
+            applyCombatHealthBar(state, dt);
         }
     }
 

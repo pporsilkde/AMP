@@ -92,6 +92,7 @@ namespace MWMechanics
         ESM::Position mHomePosition;
         bool mHasHomeCell = false;
         bool mHomeTeleportQueued = false;
+        float mHomeRecoveryTimer = 0.f;
         std::vector<DoorBreadcrumb> mDoorBreadcrumbs;
     };
 }

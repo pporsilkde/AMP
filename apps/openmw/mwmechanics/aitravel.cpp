@@ -1,5 +1,6 @@
 #include "aitravel.hpp"
 
+#include <algorithm>
 #include <utility>
 
 #include <components/esm/aisequence.hpp>
@@ -170,17 +171,100 @@ namespace MWMechanics
 
     bool AiInternalTravel::execute(const MWWorld::Ptr& actor, CharacterController& characterController, AiState& state, float duration)
     {
-        if (!mHasHomeCell || actor.getCell()->getCell()->getCellId() == mHomeCellId)
+        if (actor.getCell() == nullptr || actor.getCell()->getCell() == nullptr)
             return AiTravel::execute(actor, characterController, state, duration);
 
-        // We deliberately do not run a full AI simulation through unloaded cells.
-        // Instead, visibly walk back to the door through which the NPC entered the
-        // currently active pursuit cell. Once the NPC leaves through that door, a
-        // queued world move restores its persistent home cell and exact home point.
+        // X024: a hidden return-home package with no recorded home cell (an old
+        // save, or a package rebuilt after an authority hand-off) used to fall
+        // straight through to AiTravel. AiTravel treats an out-of-range hidden
+        // destination as *completed*, so the package was silently dropped and the
+        // NPC simply stayed wherever the fight had ended. Treat the stored XYZ as
+        // an exterior home point instead and recover the same way as below.
+        if (!mHasHomeCell)
+        {
+            if (!actor.getCell()->isExterior())
+                return AiTravel::execute(actor, characterController, state, duration);
+
+            if (mHomeTeleportQueued)
+                return false;
+
+            const osg::Vec3f actorPosition = actor.getRefData().getPosition().asVec3();
+            const osg::Vec3f fallbackHome = getDestination();
+
+            if (isWithinMaxRange(fallbackHome, actorPosition))
+            {
+                if (AiTravel::execute(actor, characterController, state, duration))
+                    return true;
+
+                mHomeRecoveryTimer += std::max(0.f, duration);
+                if (mHomeRecoveryTimer < 8.f)
+                    return false;
+            }
+
+            // Out of walking range, or walking has made no progress for a while.
+            ESM::Position fallbackPosition = actor.getRefData().getPosition();
+            fallbackPosition.pos[0] = fallbackHome.x();
+            fallbackPosition.pos[1] = fallbackHome.y();
+            fallbackPosition.pos[2] = fallbackHome.z();
+
+            actor.getClass().getMovementSettings(actor).mPosition[1] = 0.f;
+            MWWorld::ActionTeleport::queueDelayedTeleport(
+                actor, std::string(), fallbackPosition, 0.f, -1, true);
+            mHomeTeleportQueued = true;
+            return false;
+        }
+
+        const ESM::Cell* currentCell = actor.getCell()->getCell();
+        if (currentCell->getCellId() == mHomeCellId)
+        {
+            mHomeRecoveryTimer = 0.f;
+            return AiTravel::execute(actor, characterController, state, duration);
+        }
+
+        // We deliberately do not run a full AI simulation through unloaded
+        // interiors. Exterior cells, however, share one coordinate space and an
+        // NPC that crossed an ordinary grid boundary during combat can simply
+        // walk back towards its real home point.
         if (mHomeTeleportQueued)
             return false;
 
-        const ESM::CellId currentCellId = actor.getCell()->getCell()->getCellId();
+        const bool homeIsExterior = mHomeCellName.empty();
+        if (currentCell->isExterior() && homeIsExterior)
+        {
+            const osg::Vec3f actorPosition = actor.getRefData().getPosition().asVec3();
+            const osg::Vec3f homePosition = mHomePosition.asVec3();
+            const bool canWalkHome = isWithinMaxRange(homePosition, actorPosition);
+
+            // AiTravel intentionally treats an out-of-range hidden package as
+            // "complete". Do not call it in that case: completing here would
+            // strand the NPC in the wrong exterior cell.
+            if (canWalkHome)
+            {
+                const bool reached = AiTravel::execute(actor, characterController, state, duration);
+                if (reached)
+                    return true;
+            }
+            else
+                actor.getClass().getMovementSettings(actor).mPosition[1] = 0.f;
+
+            mHomeRecoveryTimer += std::max(0.f, duration);
+
+            // Authority hand-offs or partially unloaded navmeshes can leave the
+            // hidden return package with no useful path forever. Give a nearby
+            // actor a short visible chance to walk home; if it is already beyond
+            // the safe vanilla travel radius, recover sooner.
+            const float recoveryDelay = canWalkHome ? 8.f : 1.5f;
+            if (mHomeRecoveryTimer >= recoveryDelay)
+            {
+                actor.getClass().getMovementSettings(actor).mPosition[1] = 0.f;
+                MWWorld::ActionTeleport::queueDelayedTeleport(
+                    actor, mHomeCellName, mHomePosition, 0.f, -1, true);
+                mHomeTeleportQueued = true;
+            }
+            return false;
+        }
+
+        const ESM::CellId currentCellId = currentCell->getCellId();
         const DoorBreadcrumb* breadcrumb = nullptr;
         for (auto it = mDoorBreadcrumbs.rbegin(); it != mDoorBreadcrumbs.rend(); ++it)
         {
@@ -193,11 +277,22 @@ namespace MWMechanics
 
         if (!breadcrumb)
         {
-            // No trustworthy transition history (e.g. a legacy mid-combat save).
-            // Keep the old hidden-travel package rather than teleporting visibly
-            // or guessing a door/cell relationship.
+            // X022: missing breadcrumbs can happen after authority changes or a
+            // legacy mid-combat state. Waiting forever is worse than a controlled
+            // recovery. Keep the actor still for a brief grace period, then move
+            // it back to its persistent home cell.
+            actor.getClass().getMovementSettings(actor).mPosition[1] = 0.f;
+            mHomeRecoveryTimer += std::max(0.f, duration);
+            if (mHomeRecoveryTimer >= 1.5f)
+            {
+                MWWorld::ActionTeleport::queueDelayedTeleport(
+                    actor, mHomeCellName, mHomePosition, 0.f, -1, true);
+                mHomeTeleportQueued = true;
+            }
             return false;
         }
+
+        mHomeRecoveryTimer = 0.f;
 
         auto& stats = actor.getClass().getCreatureStats(actor);
         stats.setMovementFlag(CreatureStats::Flag_Run, false);

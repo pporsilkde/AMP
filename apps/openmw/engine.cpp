@@ -733,28 +733,25 @@ OMW::Engine::Engine(Files::ConfigurationManager& configurationManager)
 OMW::Engine::~Engine()
 {
     /*
-        Start of tes3mp addition
+        Start of ArenaMP X022 change
 
-        Free up memory allocated by multiplayer's GUIController, but make sure
-        mwmp::Main has actually been initialized
+        Multiplayer owns world-backed Ptrs (remote players, map markers and cell
+        controllers). Tear those down while MWBase::Environment still owns World,
+        WindowManager and MechanicsManager. Destroying Environment first left
+        DedicatedPlayer destructors dereferencing already-freed world objects and
+        caused an access violation after the log had already printed
+        "tes3mp stopped".
     */
     if (mwmp::Main::isInitialized())
+    {
         mwmp::Main::get().getGUIController()->cleanUp();
+        mwmp::Main::destroy();
+    }
     /*
-        End of tes3mp addition
+        End of ArenaMP X022 change
     */
 
     mEnvironment.cleanup();
-
-    /*
-        Start of tes3mp addition
-
-        Free up memory allocated by multiplayer's Main class
-    */
-    mwmp::Main::destroy();
-    /*
-        End of tes3mp addition
-    */
 
     delete mScriptContext;
     mScriptContext = nullptr;

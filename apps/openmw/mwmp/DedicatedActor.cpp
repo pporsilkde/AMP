@@ -285,8 +285,48 @@ void DedicatedActor::setAi()
         LOG_APPEND(TimedLog::LOG_VERBOSE, "-- Travelling to %f, %f, %f",
             aiCoordinates.pos[0], aiCoordinates.pos[1], aiCoordinates.pos[2]);
 
-        MWMechanics::AiTravel package(aiCoordinates.pos[0], aiCoordinates.pos[1], aiCoordinates.pos[2]);
-        ptrCreatureStats->getAiSequence().stack(package, ptr, true);
+        // X024: AiSequence::stack() calls stopCombat() for every "actual" AI
+        // package, and AiTravel is one of them. The server's return-home sweep
+        // would therefore have yanked an NPC out of a fight it was still in the
+        // middle of. AiInternalTravel is the hidden return package and is *not*
+        // an actual AI package, so stacking it leaves the fight running and only
+        // takes effect once combat is over - which is exactly the behaviour we
+        // want for "walk this stray actor back where it belongs".
+        if (ptrCreatureStats->getAiSequence().isInCombat() && ptr.isInCell()
+            && ptr.getCell()->getCell() != nullptr)
+        {
+            ESM::Position homePosition = ptr.getRefData().getPosition();
+            homePosition.pos[0] = aiCoordinates.pos[0];
+            homePosition.pos[1] = aiCoordinates.pos[1];
+            homePosition.pos[2] = aiCoordinates.pos[2];
+
+            MWBase::World* world = MWBase::Environment::get().getWorld();
+
+            // The order carries coordinates only, so the home cell has to be
+            // derived from them. That is exact for an exterior home; an interior
+            // home cannot be expressed this way and keeps the actor's own cell.
+            ESM::CellId homeCellId = ptr.getCell()->getCell()->getCellId();
+            std::string homeCellName = ptr.getCell()->isExterior()
+                ? std::string() : ptr.getCell()->getCell()->mName;
+
+            if (ptr.getCell()->isExterior())
+            {
+                int homeX = 0;
+                int homeY = 0;
+                world->positionToIndex(homePosition.pos[0], homePosition.pos[1], homeX, homeY);
+
+                if (MWWorld::CellStore* homeStore = world->getExterior(homeX, homeY))
+                    homeCellId = homeStore->getCell()->getCellId();
+            }
+
+            MWMechanics::AiInternalTravel package(homePosition, homeCellId, homeCellName);
+            ptrCreatureStats->getAiSequence().stack(package, ptr, false);
+        }
+        else
+        {
+            MWMechanics::AiTravel package(aiCoordinates.pos[0], aiCoordinates.pos[1], aiCoordinates.pos[2]);
+            ptrCreatureStats->getAiSequence().stack(package, ptr, true);
+        }
     }
     else if (aiAction == mwmp::BaseActorList::WANDER)
     {

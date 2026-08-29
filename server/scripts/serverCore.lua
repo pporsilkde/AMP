@@ -144,8 +144,26 @@ end
 
 do
     local previousHourFloor = nil
+    -- X024: seconds left before the next stray-actor sweep.
+    local homeReturnCountdown = 0
 
     function UpdateTime()
+
+        -- X024: periodically remind cell authorities to walk actors that are
+        -- stranded outside their own cell back home. Runs on the existing one
+        -- second timer instead of adding another one.
+        if config.rememberActorHomes then
+
+            homeReturnCountdown = homeReturnCountdown - 1
+
+            if homeReturnCountdown <= 0 then
+                homeReturnCountdown = math.max(1, config.actorHomeReturnInterval)
+
+                if tableHelper.getCount(Players) > 0 then
+                    logicHandler.ReturnStrayActorsHome()
+                end
+            end
+        end
 
         if config.passTimeWhenEmpty or tableHelper.getCount(Players) > 0 then
 

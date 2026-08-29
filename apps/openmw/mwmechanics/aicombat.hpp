@@ -228,6 +228,19 @@ namespace MWMechanics
             void writeState(ESM::AiSequence::AiSequence &sequence) const override;
 
         private:
+            // X024: how long this package has been unable to reach its target
+            // because the target lives in another coordinate space, and how long it
+            // has been running without ever resolving the target at all.
+            //
+            // These used to live in AiCombatStorage, which is part of AiState and is
+            // rebuilt from scratch whenever a client takes over an actor. With many
+            // players in one area the actor authority changes often, every hand-off
+            // reset the counters, and the NPC could stay frozen in a combat stance
+            // indefinitely. Keeping them in the package means they survive both the
+            // hand-off and the save/load round trip.
+            float mForeignSpaceElapsed = 0.f;
+            float mUnresolvedTargetElapsed = 0.f;
+
             /// Returns true if combat should end
             bool attack(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, AiCombatStorage& storage, CharacterController& characterController);
 

@@ -1,3 +1,5 @@
+#include <limits>
+
 #include <components/esm/cellid.hpp>
 #include <components/openmw-mp/TimedLog.hpp>
 
@@ -8,6 +10,10 @@
 #include "../mwworld/worldimp.hpp"
 
 #include "../mwmechanics/xpleveling.hpp"
+#include "../mwmechanics/aitravel.hpp"
+#include "../mwmechanics/aisequence.hpp"
+#include "../mwmechanics/creaturestats.hpp"
+#include "../mwmechanics/movement.hpp"
 
 #include "Cell.hpp"
 #include "Main.hpp"
@@ -17,6 +23,59 @@
 #include "MechanicsHelper.hpp"
 
 using namespace mwmp;
+
+namespace
+{
+    /// X024: an actor handed over to us may already be locked into a fight whose
+    /// target this client cannot resolve at all - the other player has left, or is
+    /// in a coordinate space we do not share. AiCombat is non-cancellable and its
+    /// give-up timers used to live in AiState, which is recreated from scratch by
+    /// exactly this hand-off, so in a busy area the countdown was restarted over
+    /// and over and the NPC stayed frozen with its weapon drawn. Whoever takes
+    /// ownership drops such a fight immediately instead of inheriting it.
+    void dropUnresolvableCombat(const MWWorld::Ptr& ptr)
+    {
+        if (ptr.isEmpty() || !ptr.getClass().isActor())
+            return;
+
+        MWMechanics::CreatureStats& stats = ptr.getClass().getCreatureStats(ptr);
+        if (stats.isDead())
+            return;
+
+        MWMechanics::AiSequence& sequence = stats.getAiSequence();
+        if (!sequence.isInCombat())
+            return;
+
+        // AiSequence has no getTarget() in this 0.47-based branch; the active
+        // package carries it.
+        MWWorld::Ptr target;
+        if (!sequence.isEmpty())
+            target = sequence.getActivePackage().getTarget();
+
+        bool reachable = false;
+
+        if (!target.isEmpty() && target.isInCell()
+            && target.getRefData().getCount() > 0 && !target.getRefData().isDeleted()
+            && !target.getClass().getCreatureStats(target).isDead()
+            && ptr.isInCell())
+        {
+            // Same cell, or two exterior cells, which share one coordinate space.
+            reachable = target.getCell() == ptr.getCell()
+                || (target.getCell()->isExterior() && ptr.getCell()->isExterior());
+        }
+
+        if (!reachable)
+        {
+            LOG_APPEND(TimedLog::LOG_INFO,
+                "%s", "- Dropping an inherited combat package whose target is not reachable from here");
+            sequence.stopCombat();
+
+            MWMechanics::Movement& movement = ptr.getClass().getMovementSettings(ptr);
+            movement.mPosition[0] = 0.f;
+            movement.mPosition[1] = 0.f;
+        }
+    }
+}
 
 mwmp::Cell::Cell(MWWorld::CellStore* cellStore)
 {
@@ -57,8 +116,31 @@ void Cell::updateLocal(bool forceUpdate)
 
         if (newStore != store)
         {
-            actor->updateCell();
             std::string mapIndex = it->first;
+
+            // X022: while an exterior CellStore is being unloaded, OpenMW can
+            // transiently expose the sentinel grid INT_MIN,INT_MIN. Never turn
+            // that internal transitional state into an authoritative network
+            // ActorCellChange (the old code made the server create a real JSON
+            // cell named "-2147483648, -2147483648").
+            const ESM::Cell* newCellRecord = newStore != nullptr ? newStore->getCell() : nullptr;
+            const bool invalidDestination = newCellRecord == nullptr
+                || (newCellRecord->isExterior()
+                    && (newCellRecord->mData.mX == std::numeric_limits<int>::min()
+                        || newCellRecord->mData.mY == std::numeric_limits<int>::min()));
+
+            if (invalidDestination)
+            {
+                LOG_APPEND(TimedLog::LOG_WARN,
+                    "- Dropping transitional ActorCellChange for LocalActor %s; keeping server's last valid cell",
+                    mapIndex.c_str());
+                cellController->removeLocalActorRecord(mapIndex);
+                delete actor;
+                localActors.erase(it++);
+                continue;
+            }
+
+            actor->updateCell();
 
             // If the cell this actor has moved to is under our authority, move them to it
             if (cellController->hasLocalAuthority(actor->cell))
@@ -479,6 +561,37 @@ void Cell::readCellChange(ActorList& actorList)
         if (dedicatedActors.count(mapIndex) > 0)
         {
             DedicatedActor *dedicatedActor = dedicatedActors[mapIndex];
+
+            // X022: preserve a return-home anchor on every observer before the
+            // actor is moved to another cell. Normally AiSequence::stack creates
+            // it when Combat/Pursue/Cast starts, but an authority/packet race can
+            // deliver the cell move first on the client that later becomes the
+            // authority. Without this anchor that client treats the pursuit cell
+            // as the actor's home and the NPC never returns.
+            MWWorld::Ptr actorPtr = dedicatedActor->getPtr();
+            if (!actorPtr.isEmpty() && actorPtr.getCell() != nullptr
+                && actorPtr.getCell()->getCell() != nullptr)
+            {
+                MWMechanics::AiSequence& sequence
+                    = actorPtr.getClass().getCreatureStats(actorPtr).getAiSequence();
+                const MWMechanics::AiPackageTypeId activeType = sequence.getTypeId();
+                const bool temporaryAi = sequence.isInCombat()
+                    || activeType == MWMechanics::AiPackageTypeId::Pursue
+                    || activeType == MWMechanics::AiPackageTypeId::Cast;
+
+                if (temporaryAi
+                    && !sequence.hasPackage(MWMechanics::AiPackageTypeId::InternalTravel))
+                {
+                    const ESM::Position homePosition = actorPtr.getRefData().getPosition();
+                    const ESM::Cell* homeCell = actorPtr.getCell()->getCell();
+                    const std::string homeCellName = homeCell->isExterior()
+                        ? std::string() : homeCell->mName;
+                    MWMechanics::AiInternalTravel returnHome(
+                        homePosition, homeCell->getCellId(), homeCellName);
+                    sequence.stack(returnHome, actorPtr, false);
+                }
+            }
+
             dedicatedActor->cell = baseActor.cell;
             dedicatedActor->position = baseActor.position;
             dedicatedActor->direction = baseActor.direction;
@@ -508,6 +621,7 @@ void Cell::readCellChange(ActorList& actorList)
                     Cell *newCell = cellController->getCell(dedicatedActor->cell);
                     LocalActor *localActor = new LocalActor();
                     localActor->cell = dedicatedActor->cell;
+                    dropUnresolvableCombat(dedicatedActor->getPtr());
                     localActor->setPtr(dedicatedActor->getPtr());
                     localActor->position = dedicatedActor->position;
                     localActor->direction = dedicatedActor->direction;
@@ -535,6 +649,8 @@ void Cell::initializeLocalActor(const MWWorld::Ptr& ptr)
 {
     std::string mapIndex = Main::get().getCellController()->generateMapIndex(ptr);
     LOG_APPEND(TimedLog::LOG_VERBOSE, "- Initializing LocalActor %s in %s", mapIndex.c_str(), getShortDescription().c_str());
+
+    dropUnresolvableCombat(ptr);
 
     LocalActor *actor = new LocalActor();
     actor->cell = *store->getCell();
