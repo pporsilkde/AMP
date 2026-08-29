@@ -1,10 +1,14 @@
 #include <components/openmw-mp/TimedLog.hpp>
+#include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
+#include <vector>
 
 #include "../mwbase/environment.hpp"
 
 #include "../mwmechanics/mechanicsmanagerimp.hpp"
+#include "../mwmechanics/aisequence.hpp"
 #include "../mwmechanics/movement.hpp"
 
 #include "../mwrender/animation.hpp"
@@ -61,6 +65,7 @@ void LocalActor::update(bool forceUpdate)
 {
     updateStatsDynamic(forceUpdate);
     updateEquipment(forceUpdate, false);
+    updateAiState(forceUpdate);
 
     if (forceUpdate || !creatureStats.mDeathAnimationFinished)
     {
@@ -72,6 +77,66 @@ void LocalActor::update(bool forceUpdate)
     }
 
     hasSentData = true;
+}
+
+void LocalActor::updateAiState(bool forceUpdate)
+{
+    if (ptr.isEmpty() || !ptr.getClass().isActor() || !ptr.isInCell()
+        || ptr.getCell() == nullptr || ptr.getCell()->getCell() == nullptr)
+        return;
+
+    MWMechanics::AiSequence& sequence = ptr.getClass().getCreatureStats(ptr).getAiSequence();
+    const bool inCombat = sequence.isInCombat();
+    MWWorld::Ptr activeTarget;
+    const bool hasTarget = inCombat && sequence.getCombatTarget(activeTarget) && !activeTarget.isEmpty();
+    const int targetActorId = hasTarget
+        ? activeTarget.getClass().getCreatureStats(activeTarget).getActorId() : -1;
+    // Hash the complete aggro set, not only the current primary target. With two
+    // players the primary can stay unchanged while a second target is added or
+    // removed; that semantic change must be published immediately.
+    std::vector<int> targetIds;
+    std::vector<MWWorld::Ptr> combatTargets;
+    sequence.getCombatTargets(combatTargets);
+    for (const MWWorld::Ptr& target : combatTargets)
+    {
+        if (!target.isEmpty() && target.getClass().isActor())
+            targetIds.push_back(target.getClass().getCreatureStats(target).getActorId());
+    }
+    std::sort(targetIds.begin(), targetIds.end());
+    std::size_t targetSignature = 1469598103934665603ull;
+    for (int id : targetIds)
+    {
+        targetSignature ^= static_cast<std::size_t>(id);
+        targetSignature *= 1099511628211ull;
+    }
+
+    const std::size_t doorCount = sequence.getReturnHomeDoorTransitionCount();
+    MWMechanics::AiReturnHomeState homeState;
+    const bool hasHome = sequence.getReturnHomeState(homeState);
+
+    // update() has no dt, so use the networking frame cadence as a cheap heartbeat
+    // counter: send every 30 authority updates in combat, plus every semantic change.
+    mAiHeartbeatTimer += 1.f;
+    const bool heartbeatDue = mAiHeartbeatTimer >= (inCombat ? 30.f : 90.f);
+    const bool changed = inCombat != mLastAiWasCombat || targetActorId != mLastAiTargetActorId
+        || targetSignature != mLastAiTargetSignature
+        || doorCount != mLastAiDoorCount || hasHome != mLastAiHadHome;
+
+    if (forceUpdate || changed || heartbeatDue)
+    {
+        ActorList* actorList = Main::get().getNetworking()->getActorList();
+        actorList->reset();
+        actorList->cell = *ptr.getCell()->getCell();
+        actorList->addAiStateActor(ptr, inCombat ? BaseActorList::COMBAT : BaseActorList::COMBAT_END);
+        actorList->sendAiActors();
+        mAiHeartbeatTimer = 0.f;
+    }
+
+    mLastAiWasCombat = inCombat;
+    mLastAiTargetActorId = targetActorId;
+    mLastAiTargetSignature = targetSignature;
+    mLastAiDoorCount = doorCount;
+    mLastAiHadHome = hasHome;
 }
 
 bool LocalActor::hasValidDestinationCell() const

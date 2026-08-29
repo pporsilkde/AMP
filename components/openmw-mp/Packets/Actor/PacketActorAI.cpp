@@ -1,5 +1,6 @@
 #include <components/openmw-mp/NetworkMessages.hpp>
 #include <components/openmw-mp/TimedLog.hpp>
+#include <algorithm>
 #include "PacketActorAI.hpp"
 
 using namespace mwmp;
@@ -11,6 +12,19 @@ PacketActorAI::PacketActorAI(RakNet::RakPeerInterface *peer) : ActorPacket(peer)
 
 void PacketActorAI::Actor(BaseActor &actor, bool send)
 {
+    auto rwTarget = [this, send](Target& target)
+    {
+        RW(target.isPlayer, send);
+        if (target.isPlayer)
+            RW(target.guid, send);
+        else
+        {
+            RW(target.refId, send, true);
+            RW(target.refNum, send);
+            RW(target.mpNum, send);
+        }
+    };
+
     RW(actor.aiAction, send);
 
     if (actor.aiAction != mwmp::BaseActorList::CANCEL)
@@ -34,19 +48,48 @@ void PacketActorAI::Actor(BaseActor &actor, bool send)
 
             if (actor.hasAiTarget)
             {
-                RW(actor.aiTarget.isPlayer, send);
-
-                if (actor.aiTarget.isPlayer)
-                {
-                    RW(actor.aiTarget.guid, send);
-                }
-                else
-                {
-                    RW(actor.aiTarget.refId, send, true);
-                    RW(actor.aiTarget.refNum, send);
-                    RW(actor.aiTarget.mpNum, send);
-                }
+                rwTarget(actor.aiTarget);
             }
+        }
+    }
+
+    // X034: synchronize all combat targets, not only whichever target happened
+    // to be active at packet creation time. This is what lets a new authority
+    // keep a stable aggro set when two or more players are present.
+    unsigned char combatTargetCount = send
+        ? static_cast<unsigned char>(std::min<std::size_t>(actor.aiCombatTargets.size(), 8)) : 0;
+    RW(combatTargetCount, send);
+    if (!send) actor.aiCombatTargets.clear();
+    for (unsigned char i = 0; i < combatTargetCount; ++i)
+    {
+        Target target;
+        if (send) target = actor.aiCombatTargets[i];
+        rwTarget(target);
+        if (!send) actor.aiCombatTargets.push_back(target);
+    }
+
+    RW(actor.aiHasReturnHome, send);
+    if (actor.aiHasReturnHome)
+    {
+        RW(actor.aiHomeCell.mData, send, true);
+        RW(actor.aiHomeCell.mName, send, true);
+        RW(actor.aiHomePosition, send, true);
+
+        unsigned char breadcrumbCount = send
+            ? static_cast<unsigned char>(std::min<std::size_t>(actor.aiDoorBreadcrumbs.size(), 12)) : 0;
+        RW(breadcrumbCount, send);
+        if (!send) actor.aiDoorBreadcrumbs.clear();
+        for (unsigned char i = 0; i < breadcrumbCount; ++i)
+        {
+            ActorAiDoorBreadcrumb breadcrumb;
+            if (send) breadcrumb = actor.aiDoorBreadcrumbs[i];
+            RW(breadcrumb.fromCell.mData, send, true);
+            RW(breadcrumb.fromCell.mName, send, true);
+            RW(breadcrumb.fromPosition, send, true);
+            RW(breadcrumb.toCell.mData, send, true);
+            RW(breadcrumb.toCell.mName, send, true);
+            RW(breadcrumb.toPosition, send, true);
+            if (!send) actor.aiDoorBreadcrumbs.push_back(breadcrumb);
         }
     }
 }

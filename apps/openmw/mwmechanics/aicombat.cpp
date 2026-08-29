@@ -105,7 +105,6 @@ namespace
 
     // Maximum number of teleport doors a single combat package may take the actor
     // through. Keeps a city guard from chasing the player across half of Vvardenfell.
-    const int sMaxDoorTransitions = 2;
 
     // Only look for an escape door within this radius while fleeing.
     const float sFleeDoorSearchRadius = 1800.f;
@@ -800,6 +799,18 @@ namespace MWMechanics
         storage.mFleeGuardActorId = -1;
         storage.mUnreachableTimer = 0.f;
 
+        // X034: a door changes animation/controller state as well as coordinates.
+        // Throw away the pre-door attack decision so the very next update chooses
+        // a fresh weapon/spell action. Otherwise an NPC can stand armed at the
+        // exit until somebody hits it and forces a new combat reaction.
+        storage.stopAttack();
+        storage.stopCombatMove();
+        storage.mCurrentAction.reset();
+        storage.mActionCooldown = 0.f;
+        storage.mAttackCooldown = 0.f;
+        storage.mReadyToAttack = false;
+        storage.mAttack = false;
+
         // Re-anchor the leash in the new cell, otherwise the actor compares an
         // interior position against an exterior origin and immediately gives up.
         storage.mCombatOrigin = actor.getRefData().getPosition().asVec3();
@@ -841,11 +852,8 @@ namespace MWMechanics
             if (destCell != nullptr && actor.getCell() != nullptr)
             {
                 actor.getClass().getCreatureStats(actor).getAiSequence().recordDoorTransition(
-                    actor.getCell()->getCell()->getCellId(),
-                    actor.getCell()->isExterior() ? std::string() : actor.getCell()->getCell()->mName,
-                    actor.getRefData().getPosition(),
-                    destCell->getCell()->getCellId(),
-                    destPosition);
+                    *actor.getCell()->getCell(), actor.getRefData().getPosition(),
+                    *destCell->getCell(), destPosition);
             }
         }
         catch (const std::exception& e)
@@ -898,12 +906,17 @@ namespace MWMechanics
         // branch, so keep mutable references here. No state is changed; this only
         // avoids discarding qualifiers on MSVC while checking combat engagement.
         CreatureStats& actorStats = actor.getClass().getCreatureStats(actor);
-        CreatureStats& targetStats = target.getClass().getCreatureStats(target);
-        const bool engaged = actorStats.getHitAttemptActorId() == targetStats.getActorId()
-            || targetStats.getHitAttemptActorId() == actorStats.getActorId();
+        // X034: hitAttemptActorId is not authoritative network state and may be
+        // stale after a hand-off. The AiCombat package itself is the source of
+        // truth for whether this target should be pursued through the door.
+        const bool engaged = actorStats.getAiSequence().isInCombat(target);
 
+        const std::size_t routeTransitions = actorStats.getAiSequence().getReturnHomeDoorTransitionCount();
+        const std::size_t transitionCount = std::max<std::size_t>(
+            static_cast<std::size_t>(std::max(0, storage.mDoorTransitions)), routeTransitions);
         if (!engaged || !actor.getClass().isBipedal(actor)
-            || storage.mDoorTransitions >= sMaxDoorTransitions)
+            || transitionCount >= static_cast<std::size_t>(std::max(1,
+                Settings::Manager::getInt("combat pursuit max door transitions", "Game"))))
         {
             // There is no valid continuation for this cross-cell fight. Finish
             // Combat now so AiInternalTravel can return the actor home instead
@@ -1568,8 +1581,13 @@ namespace MWMechanics
                     // out into the street (or into the nearest building) reads far
                     // better than sprinting into the corner of the same room, and
                     // it actually breaks line of sight.
+                    const std::size_t fleeRouteTransitions
+                        = actor.getClass().getCreatureStats(actor).getAiSequence().getReturnHomeDoorTransitionCount();
+                    const std::size_t fleeTransitionCount = std::max<std::size_t>(
+                        static_cast<std::size_t>(std::max(0, storage.mDoorTransitions)), fleeRouteTransitions);
                     if (!storage.mHasFleeDoor && actor.getClass().isBipedal(actor)
-                        && storage.mDoorTransitions < sMaxDoorTransitions
+                        && fleeTransitionCount < static_cast<std::size_t>(std::max(1,
+                            Settings::Manager::getInt("combat pursuit max door transitions", "Game")))
                         && (!mwmp::Main::isInitialized()
                             || mwmp::Main::get().getCellController()->isLocalActor(actor)))
                     {

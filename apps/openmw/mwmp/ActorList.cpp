@@ -1,4 +1,7 @@
 #include "ActorList.hpp"
+
+#include "../mwmechanics/aisequence.hpp"
+#include "../mwmechanics/aitravel.hpp"
 #include "Main.hpp"
 #include "Networking.hpp"
 #include "LocalPlayer.hpp"
@@ -7,6 +10,7 @@
 #include "../mwworld/class.hpp"
 
 #include <components/openmw-mp/TimedLog.hpp>
+#include <algorithm>
 
 using namespace mwmp;
 
@@ -83,6 +87,52 @@ void ActorList::addEquipmentActor(BaseActor baseActor)
     equipmentActors.push_back(baseActor);
 }
 
+namespace
+{
+    void appendUniqueTarget(std::vector<mwmp::Target>& targets, const MWWorld::Ptr& ptr)
+    {
+        if (ptr.isEmpty()) return;
+        const mwmp::Target target = mwmp::MechanicsHelper::getTarget(ptr);
+        for (const mwmp::Target& existing : targets)
+        {
+            if (existing.isPlayer == target.isPlayer
+                && ((target.isPlayer && existing.guid == target.guid)
+                    || (!target.isPlayer && existing.refNum == target.refNum && existing.mpNum == target.mpNum)))
+                return;
+        }
+        targets.push_back(target);
+    }
+
+    void fillRecoveryState(const MWWorld::Ptr& actorPtr, mwmp::BaseActor& baseActor)
+    {
+        if (actorPtr.isEmpty()) return;
+        const MWMechanics::AiSequence& sequence
+            = actorPtr.getClass().getCreatureStats(actorPtr).getAiSequence();
+
+        std::vector<MWWorld::Ptr> combatTargets;
+        sequence.getCombatTargets(combatTargets);
+        for (const MWWorld::Ptr& target : combatTargets)
+            appendUniqueTarget(baseActor.aiCombatTargets, target);
+
+        MWMechanics::AiReturnHomeState state;
+        if (sequence.getReturnHomeState(state))
+        {
+            baseActor.aiHasReturnHome = true;
+            baseActor.aiHomeCell = state.mHomeCell;
+            baseActor.aiHomePosition = state.mHomePosition;
+            for (const MWMechanics::AiReturnHomeState::DoorBreadcrumb& src : state.mDoorBreadcrumbs)
+            {
+                mwmp::ActorAiDoorBreadcrumb dst;
+                dst.fromCell = src.mFromCell;
+                dst.fromPosition = src.mFromPosition;
+                dst.toCell = src.mToCell;
+                dst.toPosition = src.mToPosition;
+                baseActor.aiDoorBreadcrumbs.push_back(dst);
+            }
+        }
+    }
+}
+
 void ActorList::addAiActor(BaseActor baseActor)
 {
     aiActors.push_back(baseActor);
@@ -94,7 +144,11 @@ void ActorList::addAiActor(const MWWorld::Ptr& actorPtr, const MWWorld::Ptr& tar
     baseActor.refNum = actorPtr.getCellRef().getRefNum().mIndex;
     baseActor.mpNum = actorPtr.getCellRef().getMpNum();
     baseActor.aiAction = aiAction;
-    baseActor.aiTarget = MechanicsHelper::getTarget(targetPtr);
+    baseActor.hasAiTarget = !targetPtr.isEmpty();
+    if (baseActor.hasAiTarget)
+        baseActor.aiTarget = MechanicsHelper::getTarget(targetPtr);
+    if (aiAction == mwmp::BaseActorList::COMBAT)
+        fillRecoveryState(actorPtr, baseActor);
 
     LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Preparing to send ID_ACTOR_AI about %s %i-%i\n- action: %i",
         actorPtr.getCellRef().getRefId().c_str(), baseActor.refNum, baseActor.mpNum, aiAction);
@@ -108,6 +162,43 @@ void ActorList::addAiActor(const MWWorld::Ptr& actorPtr, const MWWorld::Ptr& tar
     {
         LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "- Has actor target %s %i-%i",
             targetPtr.getCellRef().getRefId().c_str(), baseActor.aiTarget.refNum, baseActor.aiTarget.mpNum);
+    }
+
+    addAiActor(baseActor);
+}
+
+void ActorList::addAiStateActor(const MWWorld::Ptr& actorPtr, unsigned int aiAction)
+{
+    if (actorPtr.isEmpty()) return;
+
+    BaseActor baseActor;
+    baseActor.refNum = actorPtr.getCellRef().getRefNum().mIndex;
+    baseActor.mpNum = actorPtr.getCellRef().getMpNum();
+    baseActor.aiAction = aiAction;
+    fillRecoveryState(actorPtr, baseActor);
+
+    if (aiAction == BaseActorList::COMBAT)
+    {
+        MWWorld::Ptr activeTarget;
+        if (actorPtr.getClass().getCreatureStats(actorPtr).getAiSequence().getCombatTarget(activeTarget)
+            && !activeTarget.isEmpty())
+        {
+            baseActor.hasAiTarget = true;
+            baseActor.aiTarget = MechanicsHelper::getTarget(activeTarget);
+            // Active target is first in the snapshot so observers share the same
+            // immediate focus after an authority hand-off.
+            baseActor.aiCombatTargets.erase(
+                std::remove_if(baseActor.aiCombatTargets.begin(), baseActor.aiCombatTargets.end(),
+                    [&baseActor](const Target& target)
+                    {
+                        return target.isPlayer == baseActor.aiTarget.isPlayer
+                            && ((target.isPlayer && target.guid == baseActor.aiTarget.guid)
+                                || (!target.isPlayer && target.refNum == baseActor.aiTarget.refNum
+                                    && target.mpNum == baseActor.aiTarget.mpNum));
+                    }),
+                baseActor.aiCombatTargets.end());
+            baseActor.aiCombatTargets.insert(baseActor.aiCombatTargets.begin(), baseActor.aiTarget);
+        }
     }
 
     addAiActor(baseActor);

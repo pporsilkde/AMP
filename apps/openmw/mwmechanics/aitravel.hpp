@@ -61,16 +61,24 @@ namespace MWMechanics
             const bool mHidden;
     };
 
-    struct AiInternalTravel final : public AiTravel
+    struct AiReturnHomeState
     {
         struct DoorBreadcrumb
         {
-            ESM::CellId mFromCellId;
-            std::string mFromCellName;
+            ESM::Cell mFromCell;
             ESM::Position mFromPosition;
-            ESM::CellId mToCellId;
+            ESM::Cell mToCell;
             ESM::Position mToPosition;
         };
+
+        ESM::Cell mHomeCell;
+        ESM::Position mHomePosition;
+        std::vector<DoorBreadcrumb> mDoorBreadcrumbs;
+    };
+
+    struct AiInternalTravel final : public AiTravel
+    {
+        using DoorBreadcrumb = AiReturnHomeState::DoorBreadcrumb;
 
         AiInternalTravel(const ESM::Position& homePosition, const ESM::CellId& homeCellId, std::string homeCellName);
         AiInternalTravel(float x, float y, float z);
@@ -80,9 +88,11 @@ namespace MWMechanics
         static constexpr AiPackageTypeId getTypeId() { return AiPackageTypeId::InternalTravel; }
 
         bool execute(const MWWorld::Ptr& actor, CharacterController& characterController, AiState& state, float duration) override;
-        void recordDoorTransition(const ESM::CellId& fromCellId, const std::string& fromCellName,
-            const ESM::Position& fromPosition, const ESM::CellId& toCellId, const ESM::Position& toPosition);
+        void recordDoorTransition(const ESM::Cell& fromCell, const ESM::Position& fromPosition,
+            const ESM::Cell& toCell, const ESM::Position& toPosition);
         std::size_t getDoorTransitionCount() const { return mDoorBreadcrumbs.size(); }
+        bool exportState(AiReturnHomeState& state) const;
+        void restoreState(const AiReturnHomeState& state);
 
         std::unique_ptr<AiPackage> clone() const override;
 

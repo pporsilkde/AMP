@@ -856,6 +856,11 @@ logicHandler.SetAIForActor = function(cell, actorUniqueIndex, action, targetPid,
         local aiData = dataTableBuilder.BuildAIData(targetPid, targetUniqueIndex, action,
             posX, posY, posZ, distance, duration, shouldRepeat)
 
+        if action == enumerations.ai.TRAVEL and cell.data.objectData[actorUniqueIndex] ~= nil
+            and cell.data.objectData[actorUniqueIndex].home ~= nil then
+            aiData.home = tableHelper.deepCopy(cell.data.objectData[actorUniqueIndex].home)
+        end
+
         -- Save this AI package to the actor's objectData in its cell, but only if
         -- the associated action isn't ACTIVATE, because we don't want the activation
         -- to happen every time someone loads the cell

@@ -89,6 +89,19 @@ void DedicatedActor::update(float dt)
     setAnimFlags();
     updateInteractionAnimation();
     setStatsDynamic();
+
+    // X034: ActorAI can arrive in the same burst as ActorCellChange while its
+    // target is still being instantiated in this cell. Retry resolution instead
+    // of permanently dropping combat and waiting for the next hit to wake it.
+    if (mAiResolveRetry > 0.f)
+    {
+        mAiResolveRetry -= std::max(0.f, dt);
+        if (mAiResolveRetry <= 0.f)
+        {
+            mAiResolveRetry = 0.f;
+            setAi();
+        }
+    }
 }
 
 void DedicatedActor::setCell(MWWorld::CellStore *cellStore)
@@ -268,144 +281,138 @@ void DedicatedActor::setEquipment()
 
 void DedicatedActor::setAi()
 {
-    MWMechanics::CreatureStats *ptrCreatureStats = &ptr.getClass().getCreatureStats(ptr);
-    ptrCreatureStats->setAiSetting(MWMechanics::CreatureStats::AI_Fight, 0);
+    if (ptr.isEmpty())
+        return;
+
+    MWMechanics::CreatureStats& creatureStats = ptr.getClass().getCreatureStats(ptr);
+    MWMechanics::AiSequence& sequence = creatureStats.getAiSequence();
+    creatureStats.setAiSetting(MWMechanics::CreatureStats::AI_Fight, 0);
+
+    auto applyReturnHome = [&]()
+    {
+        if (!aiHasReturnHome)
+            return;
+        MWMechanics::AiReturnHomeState state;
+        state.mHomeCell = aiHomeCell;
+        state.mHomePosition = aiHomePosition;
+        for (const ActorAiDoorBreadcrumb& src : aiDoorBreadcrumbs)
+        {
+            MWMechanics::AiReturnHomeState::DoorBreadcrumb dst;
+            dst.mFromCell = src.fromCell;
+            dst.mFromPosition = src.fromPosition;
+            dst.mToCell = src.toCell;
+            dst.mToPosition = src.toPosition;
+            state.mDoorBreadcrumbs.push_back(dst);
+        }
+        sequence.restoreReturnHomeState(state, ptr);
+    };
 
     LOG_APPEND(TimedLog::LOG_VERBOSE, "- actor cellRef: %s %i-%i",
         ptr.getCellRef().getRefId().c_str(), ptr.getCellRef().getRefNum().mIndex, ptr.getCellRef().getMpNum());
 
-    if (aiAction == mwmp::BaseActorList::CANCEL)
+    if (aiAction == BaseActorList::COMBAT_END)
+    {
+        LOG_APPEND(TimedLog::LOG_VERBOSE, "-- Ending synchronized combat state");
+        sequence.stopCombat();
+        sequence.stopPursuit();
+        if (aiHasReturnHome)
+            applyReturnHome();
+        else
+            sequence.clearReturnHomeState();
+        MWMechanics::Movement& movement = ptr.getClass().getMovementSettings(ptr);
+        movement.mPosition[0] = 0.f;
+        movement.mPosition[1] = 0.f;
+        return;
+    }
+
+    if (aiAction == BaseActorList::CANCEL)
     {
         LOG_APPEND(TimedLog::LOG_VERBOSE, "-- Cancelling AI sequence");
-
-        ptrCreatureStats->getAiSequence().clear();
+        sequence.clear();
+        return;
     }
-    else if (aiAction == mwmp::BaseActorList::TRAVEL)
+
+    if (aiHasReturnHome)
+        applyReturnHome();
+
+    if (aiAction == BaseActorList::TRAVEL)
     {
-        LOG_APPEND(TimedLog::LOG_VERBOSE, "-- Travelling to %f, %f, %f",
+        LOG_APPEND(TimedLog::LOG_VERBOSE, "-- Travelling home to %f, %f, %f",
             aiCoordinates.pos[0], aiCoordinates.pos[1], aiCoordinates.pos[2]);
-
-        // X024: AiSequence::stack() calls stopCombat() for every "actual" AI
-        // package, and AiTravel is one of them. The server's return-home sweep
-        // would therefore have yanked an NPC out of a fight it was still in the
-        // middle of. AiInternalTravel is the hidden return package and is *not*
-        // an actual AI package, so stacking it leaves the fight running and only
-        // takes effect once combat is over - which is exactly the behaviour we
-        // want for "walk this stray actor back where it belongs".
-        if (ptrCreatureStats->getAiSequence().isInCombat() && ptr.isInCell()
-            && ptr.getCell()->getCell() != nullptr)
-        {
-            ESM::Position homePosition = ptr.getRefData().getPosition();
-            homePosition.pos[0] = aiCoordinates.pos[0];
-            homePosition.pos[1] = aiCoordinates.pos[1];
-            homePosition.pos[2] = aiCoordinates.pos[2];
-
-            MWBase::World* world = MWBase::Environment::get().getWorld();
-
-            // The order carries coordinates only, so the home cell has to be
-            // derived from them. That is exact for an exterior home; an interior
-            // home cannot be expressed this way and keeps the actor's own cell.
-            ESM::CellId homeCellId = ptr.getCell()->getCell()->getCellId();
-            std::string homeCellName = ptr.getCell()->isExterior()
-                ? std::string() : ptr.getCell()->getCell()->mName;
-
-            if (ptr.getCell()->isExterior())
-            {
-                int homeX = 0;
-                int homeY = 0;
-                world->positionToIndex(homePosition.pos[0], homePosition.pos[1], homeX, homeY);
-
-                if (MWWorld::CellStore* homeStore = world->getExterior(homeX, homeY))
-                    homeCellId = homeStore->getCell()->getCellId();
-            }
-
-            MWMechanics::AiInternalTravel package(homePosition, homeCellId, homeCellName);
-            ptrCreatureStats->getAiSequence().stack(package, ptr, false);
-        }
-        else
+        if (!aiHasReturnHome)
         {
             MWMechanics::AiTravel package(aiCoordinates.pos[0], aiCoordinates.pos[1], aiCoordinates.pos[2]);
-            ptrCreatureStats->getAiSequence().stack(package, ptr, true);
+            sequence.stack(package, ptr, true);
         }
+        return;
     }
-    else if (aiAction == mwmp::BaseActorList::WANDER)
-    {
-        LOG_APPEND(TimedLog::LOG_VERBOSE, "-- Wandering for distance %i and duration %i, repetition is %s",
-            aiDistance, aiDuration, aiShouldRepeat ? "true" : "false");
 
+    if (aiAction == BaseActorList::WANDER)
+    {
         std::vector<unsigned char> idleList;
-
         MWMechanics::AiWander package(aiDistance, aiDuration, -1, idleList, aiShouldRepeat);
-        ptrCreatureStats->getAiSequence().stack(package, ptr, true);
+        sequence.stack(package, ptr, true);
+        return;
     }
-    else if (hasAiTarget)
+
+    auto resolveTarget = [](const Target& target) -> MWWorld::Ptr
     {
-        MWWorld::Ptr targetPtr;
+        if (target.isPlayer)
+            return MechanicsHelper::getPlayerPtr(target);
+        if (Main::get().getCellController()->isLocalActor(target.refNum, target.mpNum))
+            return Main::get().getCellController()->getLocalActor(target.refNum, target.mpNum)->getPtr();
+        if (Main::get().getCellController()->isDedicatedActor(target.refNum, target.mpNum))
+            return Main::get().getCellController()->getDedicatedActor(target.refNum, target.mpNum)->getPtr();
+        return MWBase::Environment::get().getWorld()->searchPtrViaUniqueIndex(target.refNum, target.mpNum);
+    };
 
-        if (aiTarget.isPlayer)
+    if (aiAction == BaseActorList::COMBAT)
+    {
+        // Heartbeats are complete snapshots, so stale combat packages are removed
+        // before recreating the authoritative target set.
+        sequence.stopCombat();
+        std::vector<Target> targets = aiCombatTargets;
+        if (targets.empty() && hasAiTarget)
+            targets.push_back(aiTarget);
+
+        bool unresolvedTarget = false;
+        // AiSequence inserts equal-priority Combat packages before existing ones.
+        // Iterate backwards so targets[0] (the authority's current focus) is
+        // inserted last and remains the active combat package after hand-off.
+        for (auto it = targets.rbegin(); it != targets.rend(); ++it)
         {
-            targetPtr = MechanicsHelper::getPlayerPtr(aiTarget);
-
-            LOG_APPEND(TimedLog::LOG_VERBOSE, "-- Has player target %s",
-                targetPtr.getClass().getName(targetPtr).c_str());
+            MWWorld::Ptr targetPtr = resolveTarget(*it);
+            if (targetPtr.isEmpty())
+            {
+                unresolvedTarget = true;
+                continue;
+            }
+            if (!targetPtr.getClass().getCreatureStats(targetPtr).isDead())
+                sequence.stack(MWMechanics::AiCombat(targetPtr), ptr, false);
         }
-        else
-        {
-            if (mwmp::Main::get().getCellController()->isLocalActor(aiTarget.refNum, aiTarget.mpNum))
-                targetPtr = mwmp::Main::get().getCellController()->getLocalActor(aiTarget.refNum, aiTarget.mpNum)->getPtr();
-            else if (mwmp::Main::get().getCellController()->isDedicatedActor(aiTarget.refNum, aiTarget.mpNum))
-                targetPtr = mwmp::Main::get().getCellController()->getDedicatedActor(aiTarget.refNum, aiTarget.mpNum)->getPtr();
-            else if (aiAction == mwmp::BaseActorList::ACTIVATE)
-                targetPtr = MWBase::Environment::get().getWorld()->searchPtrViaUniqueIndex(aiTarget.refNum, aiTarget.mpNum);
+        // Retry while any advertised target is still loading, even if another
+        // target already resolved. This is essential for 2+ player cells.
+        mAiResolveRetry = unresolvedTarget ? 0.5f : 0.f;
+        return;
+    }
 
-            if (targetPtr)
-            {
-                LOG_APPEND(TimedLog::LOG_VERBOSE, "-- Has actor target %s %i-%i",
-                    targetPtr.getCellRef().getRefId().c_str(), aiTarget.refNum, aiTarget.mpNum);
-            }
-            else
-            {
-                LOG_APPEND(TimedLog::LOG_VERBOSE, "-- Has invalid actor target %i-%i",
-                    aiTarget.refNum, aiTarget.mpNum);
-            }
+    if (!hasAiTarget)
+        return;
 
-        }
+    MWWorld::Ptr targetPtr = resolveTarget(aiTarget);
+    if (targetPtr.isEmpty())
+        return;
 
-        if (targetPtr)
-        {
-            if (aiAction == mwmp::BaseActorList::ACTIVATE)
-            {
-                LOG_APPEND(TimedLog::LOG_VERBOSE, "-- Activating target");
-
-                MWMechanics::AiActivate package(targetPtr);
-                ptrCreatureStats->getAiSequence().stack(package, ptr, true);
-            }
-
-            if (aiAction == mwmp::BaseActorList::COMBAT)
-            {
-                LOG_APPEND(TimedLog::LOG_VERBOSE, "-- Starting combat with target");
-
-                MWMechanics::AiCombat package(targetPtr);
-                ptrCreatureStats->getAiSequence().stack(package, ptr, true);
-            }
-            else if (aiAction == mwmp::BaseActorList::ESCORT)
-            {
-                LOG_APPEND(TimedLog::LOG_VERBOSE, "-- Being escorted by target, for duration %i, to coordinates %f, %f, %f",
-                    aiDuration, aiCoordinates.pos[0], aiCoordinates.pos[1], aiCoordinates.pos[2]);
-
-                MWMechanics::AiEscort package(targetPtr.getCellRef().getRefId(), aiDuration,
-                    aiCoordinates.pos[0], aiCoordinates.pos[1], aiCoordinates.pos[2]);
-                ptrCreatureStats->getAiSequence().stack(package, ptr, true);
-            }
-            else if (aiAction == mwmp::BaseActorList::FOLLOW)
-            {
-                LOG_APPEND(TimedLog::LOG_VERBOSE, "-- Following target");
-
-                MWMechanics::AiFollow package(targetPtr);
-                package.allowAnyDistance(true);
-                ptrCreatureStats->getAiSequence().stack(package, ptr, true);
-            }
-        }
+    if (aiAction == BaseActorList::ACTIVATE)
+        sequence.stack(MWMechanics::AiActivate(targetPtr), ptr, true);
+    else if (aiAction == BaseActorList::ESCORT)
+        sequence.stack(MWMechanics::AiEscort(targetPtr.getCellRef().getRefId(), aiDuration,
+            aiCoordinates.pos[0], aiCoordinates.pos[1], aiCoordinates.pos[2]), ptr, true);
+    else if (aiAction == BaseActorList::FOLLOW)
+    {
+        MWMechanics::AiFollow package(targetPtr);
+        package.allowAnyDistance(true);
+        sequence.stack(package, ptr, true);
     }
 }
 

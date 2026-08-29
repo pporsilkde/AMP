@@ -3,12 +3,22 @@
 
 #include <components/esm/loadcell.hpp>
 
+#include <vector>
+
 #include <components/openmw-mp/Base/BaseStructs.hpp>
 
 #include <RakNetTypes.h>
 
 namespace mwmp
 {
+    struct ActorAiDoorBreadcrumb
+    {
+        ESM::Cell fromCell;
+        ESM::Position fromPosition;
+        ESM::Cell toCell;
+        ESM::Position toPosition;
+    };
+
     class BaseActor
     {
     public:
@@ -17,6 +27,12 @@ namespace mwmp
         {
             hasPositionData = false;
             hasStatsDynamicData = false;
+            hasAiTarget = false;
+            aiAction = 0;
+            aiDistance = 0;
+            aiDuration = 0;
+            aiShouldRepeat = false;
+            aiHasReturnHome = false;
         }
 
         std::string refId = "";
@@ -54,6 +70,14 @@ namespace mwmp
         bool aiShouldRepeat;
         ESM::Position aiCoordinates;
 
+        // X034: a combat snapshot carries the full target set and the suspended
+        // return-home route. This survives authority hand-offs and door changes.
+        std::vector<Target> aiCombatTargets;
+        bool aiHasReturnHome;
+        ESM::Cell aiHomeCell;
+        ESM::Position aiHomePosition;
+        std::vector<ActorAiDoorBreadcrumb> aiDoorBreadcrumbs;
+
         bool hasPositionData;
         bool hasStatsDynamicData;
 
@@ -86,7 +110,10 @@ namespace mwmp
             ESCORT = 3,
             FOLLOW = 4,
             TRAVEL = 5,
-            WANDER = 6
+            WANDER = 6,
+            // X034: finish only combat/pursuit state without deleting authored
+            // Wander/Travel packages. Used by authority heartbeat disengage.
+            COMBAT_END = 7
         };
 
         RakNet::RakNetGUID guid;

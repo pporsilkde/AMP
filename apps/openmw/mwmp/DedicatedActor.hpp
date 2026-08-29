@@ -48,6 +48,7 @@ namespace mwmp
 
         bool mInteractionAnimationActive;
         InteractionAnimationData mInteractionAnimation;
+        float mAiResolveRetry = 0.f;
     };
 }
 

@@ -29,6 +29,8 @@ namespace mwmp
         void addEquipmentActor(BaseActor baseActor);
         void addAiActor(BaseActor baseActor);
         void addAiActor(const MWWorld::Ptr& actorPtr, const MWWorld::Ptr& targetPtr, unsigned int aiAction);
+        /// X034: publish the current combat/return-home state of a LocalActor.
+        void addAiStateActor(const MWWorld::Ptr& actorPtr, unsigned int aiAction);
         void addAttackActor(BaseActor baseActor);
         void addAttackActor(const MWWorld::Ptr& actorPtr, const mwmp::Attack &attack);
         void addCastActor(BaseActor baseActor);

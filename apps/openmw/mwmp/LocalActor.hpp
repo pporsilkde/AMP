@@ -28,6 +28,7 @@ namespace mwmp
         void updateStatsDynamic(bool forceUpdate);
         void updateEquipment(bool forceUpdate, bool sendImmediately = false);
         void updateAttackOrCast();
+        void updateAiState(bool forceUpdate);
 
         void sendEquipment();
         void sendSpellsActive();
@@ -60,6 +61,13 @@ namespace mwmp
         MWMechanics::DynamicStat<float> oldHealth;
         MWMechanics::DynamicStat<float> oldMagicka;
         MWMechanics::DynamicStat<float> oldFatigue;
+
+        bool mLastAiWasCombat = false;
+        int mLastAiTargetActorId = -1;
+        std::size_t mLastAiTargetSignature = 0;
+        std::size_t mLastAiDoorCount = 0;
+        bool mLastAiHadHome = false;
+        float mAiHeartbeatTimer = 0.f;
     };
 }
 

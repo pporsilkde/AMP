@@ -19,6 +19,16 @@ namespace mwmp
 
             if (serverCell != nullptr)
             {
+                // X034: only the current cell authority is allowed to mutate NPC
+                // AI. A late packet from the previous authority must never replace
+                // the new owner's combat target or disengage snapshot.
+                if (*serverCell->getAuthority() != actorList.guid)
+                {
+                    LOG_APPEND(TimedLog::LOG_WARN,
+                        "Rejected ActorAI from non-authority %s for cell %s",
+                        player.npc.mName.c_str(), actorList.cell.getShortDescription().c_str());
+                    return;
+                }
                 Script::Call<Script::CallbackIdentity("OnActorAI")>(player.getId(), actorList.cell.getShortDescription().c_str());
             }
         }

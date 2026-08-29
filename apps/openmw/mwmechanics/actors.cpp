@@ -2359,8 +2359,13 @@ namespace MWMechanics
         if (npcStats.getCrimeId() == -1 || !mechanics->hasStolenItemsFrom(ptr))
             return false;
 
-        const MWWorld::Ptr player = getPlayer();
-        MWWorld::ContainerStore& playerStore = player.getClass().getContainerStore(player);
+        CreatureStats& creatureStats = ptr.getClass().getCreatureStats(ptr);
+        MWWorld::Ptr offender;
+        creatureStats.getAiSequence().getCombatTarget(offender);
+        if (offender.isEmpty() || !offender.getClass().hasContainerStore(offender))
+            return false;
+
+        MWWorld::ContainerStore& playerStore = offender.getClass().getContainerStore(offender);
         for (MWWorld::ContainerStoreIterator it = playerStore.begin(); it != playerStore.end(); ++it)
         {
             // Still on the thief: no restitution has happened yet.
@@ -2379,11 +2384,11 @@ namespace MWMechanics
             recovered = visitor.mBest;
         }
 
-        CreatureStats& creatureStats = ptr.getClass().getCreatureStats(ptr);
-
         if (ptr.getClass().isClass(ptr, "Guard"))
             creatureStats.getAiSequence().stopPursuit();
-        creatureStats.getAiSequence().stopCombat();
+        // Restitution by one thief must not forgive a second player who is still
+        // a valid combat target for another reason.
+        creatureStats.getAiSequence().stopCombat(offender);
 
         creatureStats.setAttacked(false);
         creatureStats.setAlarmed(false);
@@ -2391,7 +2396,7 @@ namespace MWMechanics
         mechanics->clearStolenItemsFrom(ptr);
         npcStats.setCrimeId(-1);
 
-        if (!recovered.isEmpty())
+        if (!recovered.isEmpty() && !creatureStats.getAiSequence().isInCombat())
         {
             // AiActivate already carries the multiplayer object-activation packet,
             // so the pickup is replicated the same way a scripted one would be.
@@ -2720,7 +2725,10 @@ namespace MWMechanics
             if (!inProcessingRange) continue;
 
             MWMechanics::CreatureStats& stats = iter->first.getClass().getCreatureStats(iter->first);
-            if (!stats.isDead() && stats.getAiSequence().isInCombat())
+            // X034: battle music is local-player state, not cell-global state.
+            // A remote player's fight in the same multiplayer cell must not keep
+            // this client's combat playlist alive.
+            if (!stats.isDead() && stats.getAiSequence().isInCombat(player))
             {
                 hasHostiles = true;
                 break;

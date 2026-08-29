@@ -1210,6 +1210,32 @@ function BaseCell:SaveActorCellChanges(pid)
             -- Only proceed if this Actor is actually supposed to exist in this cell
             if self.data.objectData[uniqueIndex] ~= nil then
 
+                -- X034: persist the route independently of whichever client owns
+                -- the actor. Interior transitions are door breadcrumbs; exterior
+                -- grid hops are harmless because the client walks exterior homes
+                -- directly. A reverse hop consumes the previous breadcrumb.
+                local objectData = self.data.objectData[uniqueIndex]
+                local oldLocation = objectData.location
+                local home = objectData.home
+                if home ~= nil and home.cell ~= nil and oldLocation ~= nil and oldLocation.posX ~= nil then
+                    home.route = home.route or {}
+                    local lastHop = home.route[#home.route]
+                    if lastHop ~= nil and lastHop.fromCell == newCellDescription
+                        and lastHop.toCell == self.description then
+                        table.remove(home.route, #home.route)
+                    else
+                        table.insert(home.route, {
+                            fromCell = self.description,
+                            fromX = oldLocation.posX, fromY = oldLocation.posY, fromZ = oldLocation.posZ,
+                            toCell = newCellDescription,
+                            toX = tes3mp.GetActorPosX(actorIndex),
+                            toY = tes3mp.GetActorPosY(actorIndex),
+                            toZ = tes3mp.GetActorPosZ(actorIndex)
+                        })
+                        while #home.route > 12 do table.remove(home.route, 1) end
+                    end
+                end
+
                 -- Was this actor spawned in the old cell, instead of being a pre-existing actor?
                 -- If so, delete it entirely from the old cell and make it get spawned in the new cell
                 if tableHelper.containsValue(self.data.packets.spawn, uniqueIndex) == true then
@@ -1322,9 +1348,19 @@ function BaseCell:SaveActorCellChanges(pid)
                                 posY = currentLocation.posY,
                                 posZ = currentLocation.posZ,
                                 rotZ = currentLocation.rotZ,
-                                awayTime = os.time()
+                                awayTime = os.time(),
+                                route = {
+                                    {
+                                        fromCell = self.description,
+                                        fromX = currentLocation.posX, fromY = currentLocation.posY, fromZ = currentLocation.posZ,
+                                        toCell = newCellDescription,
+                                        toX = tes3mp.GetActorPosX(actorIndex),
+                                        toY = tes3mp.GetActorPosY(actorIndex),
+                                        toZ = tes3mp.GetActorPosZ(actorIndex)
+                                    }
+                                }
                             }
-                            tes3mp.LogAppend(enumerations.log.INFO, "-- Remembered its home in " .. self.description)
+                            tes3mp.LogAppend(enumerations.log.INFO, "-- Remembered its home and first route hop in " .. self.description)
                         end
                     end
 
@@ -1352,6 +1388,10 @@ function BaseCell:SaveActorCellChanges(pid)
                         rotY = tes3mp.GetActorRotY(actorIndex),
                         rotZ = tes3mp.GetActorRotZ(actorIndex)
                     }
+                    -- Door/cell transitions are infrequent but semantically
+                    -- important. Persist the destination immediately so a server
+                    -- restart cannot lose the newest home route breadcrumb.
+                    newCell:QuicksaveToDrive()
                 end
             else
                 tes3mp.LogAppend(enumerations.log.ERROR, "-- Invalid cell change was attempted! Please report " ..

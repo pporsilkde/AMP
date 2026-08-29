@@ -223,34 +223,18 @@ namespace MWWorld
 
             // Send ActorAI to bring all players in the new cell up to speed.
             // Hostile pursuers keep AiCombat and ordinary followers keep AiFollow.
-            // A return-home transition must never fall through to FOLLOW(player):
-            // restore the suspended Wander package instead (or CANCEL for actors
-            // that had no persistent AI package before combat).
+            // A return-home transition must never fall through to FOLLOW(player).
+            // It carries COMBAT_END plus the suspended return-home snapshot until
+            // the final home point is actually reached.
             actorList->cell = baseActor.cell;
             if (returnHome)
             {
-                const MWMechanics::AiSequence& sequence
-                    = actor.getClass().getCreatureStats(actor).getAiSequence();
-                const MWMechanics::AiWander* wander = nullptr;
-                for (auto it = sequence.begin(); it != sequence.end(); ++it)
-                {
-                    if ((*it)->getTypeId() == MWMechanics::AiPackageTypeId::Wander)
-                    {
-                        wander = static_cast<const MWMechanics::AiWander*>(it->get());
-                        break;
-                    }
-                }
-
-                baseActor.hasAiTarget = false;
-                if (wander)
-                {
-                    baseActor.aiAction = mwmp::BaseActorList::WANDER;
-                    baseActor.aiDistance = static_cast<unsigned int>(wander->getDistance());
-                    baseActor.aiDuration = static_cast<unsigned int>(wander->getDuration());
-                    baseActor.aiShouldRepeat = wander->getRepeat();
-                }
-                else
-                    baseActor.aiAction = mwmp::BaseActorList::CANCEL;
+                // X034: a reverse-door hop is only one step of the suspended
+                // return route. Never replace it with WANDER/CANCEL here: doing
+                // so erased the remaining breadcrumbs after the first door.
+                // COMBAT_END carries the still-live AiInternalTravel snapshot and
+                // tells observers that fighting is over without deleting home.
+                actorList->addAiStateActor(actor, mwmp::BaseActorList::COMBAT_END);
             }
             else
             {
@@ -258,9 +242,15 @@ namespace MWWorld
                     ? mwmp::BaseActorList::COMBAT : mwmp::BaseActorList::FOLLOW;
                 const MWWorld::Ptr aiTarget = !teleportTarget.isEmpty()
                     ? teleportTarget : world->getPlayerPtr();
-                baseActor.aiTarget = MechanicsHelper::getTarget(aiTarget);
+                baseActor.hasAiTarget = !aiTarget.isEmpty();
+                if (baseActor.hasAiTarget)
+                    baseActor.aiTarget = MechanicsHelper::getTarget(aiTarget);
+
+                if (baseActor.aiAction == mwmp::BaseActorList::COMBAT)
+                    actorList->addAiStateActor(actor, mwmp::BaseActorList::COMBAT);
+                else
+                    actorList->addAiActor(baseActor);
             }
-            actorList->addAiActor(baseActor);
             actorList->sendAiActors();
             /*
                 End of tes3mp addition

@@ -142,31 +142,76 @@ namespace MWMechanics
         // could be the pursuit destination and would corrupt return-home behavior.
     }
 
-    void AiInternalTravel::recordDoorTransition(const ESM::CellId& fromCellId, const std::string& fromCellName,
-        const ESM::Position& fromPosition, const ESM::CellId& toCellId, const ESM::Position& toPosition)
+    void AiInternalTravel::recordDoorTransition(const ESM::Cell& fromCell, const ESM::Position& fromPosition,
+        const ESM::Cell& toCell, const ESM::Position& toPosition)
     {
         if (!mHasHomeCell)
             return;
 
         DoorBreadcrumb breadcrumb;
-        breadcrumb.mFromCellId = fromCellId;
-        breadcrumb.mFromCellName = fromCellName;
+        breadcrumb.mFromCell = fromCell;
         breadcrumb.mFromPosition = fromPosition;
-        breadcrumb.mToCellId = toCellId;
+        breadcrumb.mToCell = toCell;
         breadcrumb.mToPosition = toPosition;
 
+        // A reverse traversal cancels the last breadcrumb instead of growing a
+        // A->B->A loop. This also makes the state compact when an NPC retreats.
+        if (!mDoorBreadcrumbs.empty())
+        {
+            const DoorBreadcrumb& last = mDoorBreadcrumbs.back();
+            if (last.mFromCell.getCellId() == toCell.getCellId()
+                && last.mToCell.getCellId() == fromCell.getCellId())
+            {
+                mDoorBreadcrumbs.pop_back();
+                return;
+            }
+        }
+
         if (!mDoorBreadcrumbs.empty()
-            && mDoorBreadcrumbs.back().mFromCellId == breadcrumb.mFromCellId
-            && mDoorBreadcrumbs.back().mToCellId == breadcrumb.mToCellId)
+            && mDoorBreadcrumbs.back().mFromCell.getCellId() == breadcrumb.mFromCell.getCellId()
+            && mDoorBreadcrumbs.back().mToCell.getCellId() == breadcrumb.mToCell.getCellId())
         {
             mDoorBreadcrumbs.back() = std::move(breadcrumb);
             return;
         }
 
-        constexpr std::size_t maxBreadcrumbs = 8;
+        constexpr std::size_t maxBreadcrumbs = 12;
         if (mDoorBreadcrumbs.size() >= maxBreadcrumbs)
             mDoorBreadcrumbs.erase(mDoorBreadcrumbs.begin());
         mDoorBreadcrumbs.push_back(std::move(breadcrumb));
+    }
+
+    bool AiInternalTravel::exportState(AiReturnHomeState& state) const
+    {
+        if (!mHasHomeCell)
+            return false;
+
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        MWWorld::CellStore* homeStore = nullptr;
+        if (mHomeCellId.mPaged)
+            homeStore = world->getExterior(mHomeCellId.mIndex.mX, mHomeCellId.mIndex.mY);
+        else if (!mHomeCellName.empty())
+            homeStore = world->getInterior(mHomeCellName);
+        if (homeStore == nullptr || homeStore->getCell() == nullptr)
+            return false;
+
+        state.mHomeCell = *homeStore->getCell();
+        state.mHomePosition = mHomePosition;
+        state.mDoorBreadcrumbs = mDoorBreadcrumbs;
+        return true;
+    }
+
+    void AiInternalTravel::restoreState(const AiReturnHomeState& state)
+    {
+        mHomeCellId = state.mHomeCell.getCellId();
+        mHomeCellName = state.mHomeCell.isExterior() ? std::string() : state.mHomeCell.mName;
+        mHomePosition = state.mHomePosition;
+        mHasHomeCell = true;
+        mHomeTeleportQueued = false;
+        mHomeRecoveryTimer = 0.f;
+        mDoorBreadcrumbs = state.mDoorBreadcrumbs;
+        if (mDoorBreadcrumbs.size() > 12)
+            mDoorBreadcrumbs.erase(mDoorBreadcrumbs.begin(), mDoorBreadcrumbs.end() - 12);
     }
 
     bool AiInternalTravel::execute(const MWWorld::Ptr& actor, CharacterController& characterController, AiState& state, float duration)
@@ -268,7 +313,7 @@ namespace MWMechanics
         const DoorBreadcrumb* breadcrumb = nullptr;
         for (auto it = mDoorBreadcrumbs.rbegin(); it != mDoorBreadcrumbs.rend(); ++it)
         {
-            if (it->mToCellId == currentCellId)
+            if (it->mToCell.getCellId() == currentCellId)
             {
                 breadcrumb = &*it;
                 break;
@@ -304,8 +349,24 @@ namespace MWMechanics
             return false;
 
         actor.getClass().getMovementSettings(actor).mPosition[1] = 0.f;
-        MWWorld::ActionTeleport::queueDelayedTeleport(actor, mHomeCellName, mHomePosition, 0.f, -1, true);
-        mHomeTeleportQueued = true;
+        const std::string previousCellName = breadcrumb->mFromCell.isExterior()
+            ? std::string() : breadcrumb->mFromCell.mName;
+        const ESM::Position previousPosition = breadcrumb->mFromPosition;
+
+        // Consume exactly one door at a time. The remaining breadcrumb stack is
+        // carried in the next AI heartbeat, so another authority can resume the
+        // return route in the following cell.
+        for (auto it = mDoorBreadcrumbs.end(); it != mDoorBreadcrumbs.begin();)
+        {
+            --it;
+            if (&*it == breadcrumb)
+            {
+                mDoorBreadcrumbs.erase(it);
+                break;
+            }
+        }
+        MWWorld::ActionTeleport::queueDelayedTeleport(
+            actor, previousCellName, previousPosition, 0.f, -1, true);
         return false;
     }
 

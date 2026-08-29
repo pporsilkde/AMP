@@ -487,7 +487,7 @@ namespace
                     if (!saneInventoryItem(item, true)) return false;
                 return true;
             case ID_ACTOR_AI:
-                if (actor.aiAction > mwmp::BaseActorList::WANDER) return false;
+                if (actor.aiAction > mwmp::BaseActorList::COMBAT_END) return false;
                 // Validate only fields that PacketActorAI actually serialized
                 // for this AI action; the rest of BaseActor is intentionally
                 // unspecified on receive.
@@ -498,7 +498,23 @@ namespace
                     && !finitePosition(actor.aiCoordinates)) return false;
                 if (actor.aiAction == mwmp::BaseActorList::ACTIVATE || actor.aiAction == mwmp::BaseActorList::COMBAT
                     || actor.aiAction == mwmp::BaseActorList::ESCORT || actor.aiAction == mwmp::BaseActorList::FOLLOW)
-                    return !actor.hasAiTarget || saneTarget(actor.aiTarget);
+                {
+                    if (actor.hasAiTarget && !saneTarget(actor.aiTarget)) return false;
+                }
+                if (actor.aiCombatTargets.size() > 8) return false;
+                for (const mwmp::Target& target : actor.aiCombatTargets)
+                    if (!saneTarget(target)) return false;
+                if (actor.aiHasReturnHome)
+                {
+                    if (!saneCell(actor.aiHomeCell) || !finitePosition(actor.aiHomePosition)
+                        || actor.aiDoorBreadcrumbs.size() > 12) return false;
+                    for (const mwmp::ActorAiDoorBreadcrumb& breadcrumb : actor.aiDoorBreadcrumbs)
+                    {
+                        if (!saneCell(breadcrumb.fromCell) || !saneCell(breadcrumb.toCell)
+                            || !finitePosition(breadcrumb.fromPosition) || !finitePosition(breadcrumb.toPosition))
+                            return false;
+                    }
+                }
                 return true;
             case ID_ACTOR_DEATH:
                 return actor.deathState >= 0 && actor.deathState <= 16 && saneTarget(actor.killer, true);

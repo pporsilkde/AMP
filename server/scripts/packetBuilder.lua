@@ -405,6 +405,21 @@ packetBuilder.AddAIActor = function(actorUniqueIndex, targetPid, aiData)
 
     tes3mp.SetActorAIRepetition(aiData.shouldRepeat)
 
+    -- X034: persistent server-side home/door breadcrumbs are attached to AI
+    -- orders so a new authority can resume an exact return route after restart.
+    if aiData.home ~= nil and aiData.home.cell ~= nil then
+        tes3mp.SetActorAIReturnHome(aiData.home.cell, aiData.home.posX or 0, aiData.home.posY or 0,
+            aiData.home.posZ or 0, aiData.home.rotZ or 0)
+        if aiData.home.route ~= nil then
+            for _, hop in ipairs(aiData.home.route) do
+                if hop.fromCell ~= nil and hop.toCell ~= nil then
+                    tes3mp.AddActorAIDoorBreadcrumb(hop.fromCell, hop.fromX or 0, hop.fromY or 0, hop.fromZ or 0,
+                        hop.toCell, hop.toX or 0, hop.toY or 0, hop.toZ or 0)
+                end
+            end
+        end
+    end
+
     tes3mp.AddActor()
 end
 

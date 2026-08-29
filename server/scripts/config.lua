@@ -923,7 +923,7 @@ config.rememberActorHomes = true
 -- starts telling its authority to walk it back. The order is stacked *under* an
 -- active AiCombat package, so an NPC that is still fighting keeps fighting and
 -- only walks home once the fight is actually over.
-config.actorHomeReturnDelay = 25
+config.actorHomeReturnDelay = 8
 
 -- How often the stray-actor sweep runs, in seconds. Raise this on servers with
 -- very many loaded cells.

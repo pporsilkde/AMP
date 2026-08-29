@@ -486,6 +486,33 @@ void ActorFunctions::SetActorAIRepetition(bool shouldRepeat) noexcept
     tempActor.aiShouldRepeat = shouldRepeat;
 }
 
+void ActorFunctions::SetActorAIReturnHome(const char* cellDescription, double x, double y, double z, double rotZ) noexcept
+{
+    tempActor.aiHasReturnHome = true;
+    tempActor.aiHomeCell = Utils::getCellFromDescription(cellDescription);
+    tempActor.aiHomePosition.pos[0] = x;
+    tempActor.aiHomePosition.pos[1] = y;
+    tempActor.aiHomePosition.pos[2] = z;
+    tempActor.aiHomePosition.rot[2] = rotZ;
+}
+
+void ActorFunctions::AddActorAIDoorBreadcrumb(const char* fromCellDescription, double fromX, double fromY, double fromZ,
+    const char* toCellDescription, double toX, double toY, double toZ) noexcept
+{
+    if (tempActor.aiDoorBreadcrumbs.size() >= 12)
+        return;
+    ActorAiDoorBreadcrumb breadcrumb;
+    breadcrumb.fromCell = Utils::getCellFromDescription(fromCellDescription);
+    breadcrumb.fromPosition.pos[0] = fromX;
+    breadcrumb.fromPosition.pos[1] = fromY;
+    breadcrumb.fromPosition.pos[2] = fromZ;
+    breadcrumb.toCell = Utils::getCellFromDescription(toCellDescription);
+    breadcrumb.toPosition.pos[0] = toX;
+    breadcrumb.toPosition.pos[1] = toY;
+    breadcrumb.toPosition.pos[2] = toZ;
+    tempActor.aiDoorBreadcrumbs.push_back(breadcrumb);
+}
+
 void ActorFunctions::EquipActorItem(unsigned short slot, const char *refId, unsigned int count, int charge, double enchantmentCharge) noexcept
 {
     tempActor.equipmentItems[slot].refId = refId;

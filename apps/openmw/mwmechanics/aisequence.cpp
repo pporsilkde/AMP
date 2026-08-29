@@ -167,9 +167,18 @@ void AiSequence::stopCombat()
     for(auto it = mPackages.begin(); it != mPackages.end(); )
     {
         if ((*it)->getTypeId() == AiPackageTypeId::Combat)
-        {
             it = mPackages.erase(it);
-        }
+        else
+            ++it;
+    }
+}
+
+void AiSequence::stopCombat(const MWWorld::Ptr& target)
+{
+    for (auto it = mPackages.begin(); it != mPackages.end();)
+    {
+        if ((*it)->getTypeId() == AiPackageTypeId::Combat && (*it)->getTarget() == target)
+            it = mPackages.erase(it);
         else
             ++it;
     }
@@ -307,15 +316,15 @@ void AiSequence::execute (const MWWorld::Ptr& actor, CharacterController& charac
     }
 }
 
-void AiSequence::recordDoorTransition(const ESM::CellId& fromCellId, const std::string& fromCellName,
-    const ESM::Position& fromPosition, const ESM::CellId& toCellId, const ESM::Position& toPosition)
+void AiSequence::recordDoorTransition(const ESM::Cell& fromCell, const ESM::Position& fromPosition,
+    const ESM::Cell& toCell, const ESM::Position& toPosition)
 {
     for (const auto& package : mPackages)
     {
         if (package->getTypeId() == AiPackageTypeId::InternalTravel)
         {
             static_cast<AiInternalTravel*>(package.get())->recordDoorTransition(
-                fromCellId, fromCellName, fromPosition, toCellId, toPosition);
+                fromCell, fromPosition, toCell, toPosition);
             return;
         }
     }
@@ -329,6 +338,44 @@ std::size_t AiSequence::getReturnHomeDoorTransitionCount() const
             return static_cast<const AiInternalTravel*>(package.get())->getDoorTransitionCount();
     }
     return 0;
+}
+
+bool AiSequence::getReturnHomeState(AiReturnHomeState& state) const
+{
+    for (const auto& package : mPackages)
+    {
+        if (package->getTypeId() == AiPackageTypeId::InternalTravel)
+            return static_cast<const AiInternalTravel*>(package.get())->exportState(state);
+    }
+    return false;
+}
+
+void AiSequence::restoreReturnHomeState(const AiReturnHomeState& state, const MWWorld::Ptr& actor)
+{
+    for (const auto& package : mPackages)
+    {
+        if (package->getTypeId() == AiPackageTypeId::InternalTravel)
+        {
+            static_cast<AiInternalTravel*>(package.get())->restoreState(state);
+            return;
+        }
+    }
+
+    const std::string homeName = state.mHomeCell.isExterior() ? std::string() : state.mHomeCell.mName;
+    AiInternalTravel travel(state.mHomePosition, state.mHomeCell.getCellId(), homeName);
+    travel.restoreState(state);
+    stack(travel, actor, false);
+}
+
+void AiSequence::clearReturnHomeState()
+{
+    for (auto it = mPackages.begin(); it != mPackages.end();)
+    {
+        if ((*it)->getTypeId() == AiPackageTypeId::InternalTravel)
+            it = mPackages.erase(it);
+        else
+            ++it;
+    }
 }
 
 void AiSequence::clear()

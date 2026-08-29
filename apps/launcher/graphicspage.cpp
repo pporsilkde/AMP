@@ -98,6 +98,14 @@ Launcher::GraphicsPage::GraphicsPage(Config::LauncherSettings& launcherSettings,
     });
     connect(terrainDetailComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(slotTerrainDetailChanged(int)));
     connect(pbrQualityComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(slotPbrQualityChanged(int)));
+    // X033: the quick water selector on Quality and the full Water tab are two
+    // views of the same setting. Keep them synchronized without involving the
+    // multiplayer CO-OP/MMO preset.
+    connect(waterModeComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+        waterModeAdvancedComboBox, &QComboBox::setCurrentIndex);
+    connect(waterModeAdvancedComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
+        waterModeComboBox, &QComboBox::setCurrentIndex);
+    connect(waterRefractionCheckBox, &QCheckBox::toggled, waterRefractionScaleComboBox, &QWidget::setEnabled);
     connect(applyQualityButton, SIGNAL(clicked()), this, SLOT(slotApplyQualityPreset()));
     connect(detectHardwareButton, SIGNAL(clicked()), this, SLOT(slotDetectHardware()));
 
@@ -198,7 +206,30 @@ void Launcher::GraphicsPage::syncGraphicsControls()
     pbrQualityComboBox->setCurrentIndex(pbrIndex);
 
     const std::string waterMode = Settings::Manager::getString("shader mode", "Water");
-    waterModeComboBox->setCurrentIndex(waterMode == "simple" ? 0 : 1);
+    const int waterModeIndex = waterMode == "simple" ? 0 : 1;
+    waterModeComboBox->setCurrentIndex(waterModeIndex);
+    waterModeAdvancedComboBox->setCurrentIndex(waterModeIndex);
+
+    const int waterTextureSize = Settings::Manager::getInt("rtt size", "Water");
+    waterTextureSizeComboBox->setCurrentIndex(waterTextureSize >= 2048 ? 3 : waterTextureSize >= 1024 ? 2 : waterTextureSize >= 512 ? 1 : 0);
+    const bool waterRefraction = Settings::Manager::getBool("refraction", "Water");
+    waterRefractionCheckBox->setChecked(waterRefraction);
+    waterRefractionScaleComboBox->setEnabled(waterRefraction);
+    waterReflectionDetailComboBox->setCurrentIndex(std::max(0, std::min(5, Settings::Manager::getInt("reflection detail", "Water"))));
+    const float refractionScale = Settings::Manager::getFloat("refraction scale", "Water");
+    waterRefractionScaleComboBox->setCurrentIndex(refractionScale <= 1.5f ? 3 : refractionScale <= 2.5f ? 2 : refractionScale <= 3.5f ? 1 : 0);
+    waterSmallFeatureSpinBox->setValue(Settings::Manager::getFloat("small feature culling pixel size", "Water"));
+    waterCausticsSpinBox->setValue(Settings::Manager::getFloat("caustics intensity", "Water"));
+    waterTintSpinBox->setValue(Settings::Manager::getFloat("underwater tint", "Water"));
+    waterWaveSpinBox->setValue(Settings::Manager::getFloat("wave strength", "Water"));
+    waterRoughnessSpinBox->setValue(Settings::Manager::getFloat("surface roughness", "Water"));
+    waterTransparencySpinBox->setValue(Settings::Manager::getFloat("transparency", "Water"));
+    waterFoamSpinBox->setValue(Settings::Manager::getFloat("foam intensity", "Water"));
+    waterHighlightSpinBox->setValue(Settings::Manager::getFloat("highlight intensity", "Water"));
+    waterRippleDetailComboBox->setCurrentIndex(std::max(0, std::min(2, Settings::Manager::getInt("rain ripple detail", "Water"))));
+    waterShaderRipplesCheckBox->setChecked(Settings::Manager::getBool("shader water ripples", "Water"));
+    waterIdleRipplesCheckBox->setChecked(Settings::Manager::getBool("idle actor ripples", "Water"));
+    waterMaxRipplesSpinBox->setValue(std::max(0, std::min(16, Settings::Manager::getInt("max shader ripples", "Water"))));
 
     // Lighting
     int lightingMethod = 1;
@@ -323,12 +354,29 @@ void Launcher::GraphicsPage::saveSettings()
     applyTerrainDetail(terrainIndex);
     applyPbrQuality(pbrIndex);
 
-    // X030: explicit water backend. Simple keeps the lightweight legacy shader,
-    // New enables the current PBR water path. Keep the compatibility bool true
-    // for both shader-backed modes.
+    // X033: full launcher-side water controls. The graphics preset chooses a
+    // sensible backend/texture tier, but manual water tuning remains independent.
+    static const int waterTextureSizes[] = { 256, 512, 1024, 2048 };
+    static const float waterRefractionScales[] = { 4.f, 3.f, 2.f, 1.f };
     Settings::Manager::setString("shader mode", "Water",
-        waterModeComboBox->currentIndex() == 0 ? "simple" : "new");
+        waterModeAdvancedComboBox->currentIndex() == 0 ? "simple" : "new");
     Settings::Manager::setBool("shader", "Water", true);
+    Settings::Manager::setInt("rtt size", "Water", waterTextureSizes[std::max(0, std::min(3, waterTextureSizeComboBox->currentIndex()))]);
+    Settings::Manager::setBool("refraction", "Water", waterRefractionCheckBox->isChecked());
+    Settings::Manager::setInt("reflection detail", "Water", std::max(0, std::min(5, waterReflectionDetailComboBox->currentIndex())));
+    Settings::Manager::setFloat("refraction scale", "Water", waterRefractionScales[std::max(0, std::min(3, waterRefractionScaleComboBox->currentIndex()))]);
+    Settings::Manager::setFloat("small feature culling pixel size", "Water", static_cast<float>(waterSmallFeatureSpinBox->value()));
+    Settings::Manager::setFloat("caustics intensity", "Water", static_cast<float>(waterCausticsSpinBox->value()));
+    Settings::Manager::setFloat("underwater tint", "Water", static_cast<float>(waterTintSpinBox->value()));
+    Settings::Manager::setFloat("wave strength", "Water", static_cast<float>(waterWaveSpinBox->value()));
+    Settings::Manager::setFloat("surface roughness", "Water", static_cast<float>(waterRoughnessSpinBox->value()));
+    Settings::Manager::setFloat("transparency", "Water", static_cast<float>(waterTransparencySpinBox->value()));
+    Settings::Manager::setFloat("foam intensity", "Water", static_cast<float>(waterFoamSpinBox->value()));
+    Settings::Manager::setFloat("highlight intensity", "Water", static_cast<float>(waterHighlightSpinBox->value()));
+    Settings::Manager::setInt("rain ripple detail", "Water", std::max(0, std::min(2, waterRippleDetailComboBox->currentIndex())));
+    Settings::Manager::setBool("shader water ripples", "Water", waterShaderRipplesCheckBox->isChecked());
+    Settings::Manager::setBool("idle actor ripples", "Water", waterIdleRipplesCheckBox->isChecked());
+    Settings::Manager::setInt("max shader ripples", "Water", waterMaxRipplesSpinBox->value());
 
     // Lighting. PBR material maps require the shader-compatible backend.
     static std::array<std::string, 4> lightingMethodMap = {"legacy", "shaders compatibility", "shaders", "clustered"};
@@ -984,11 +1032,11 @@ void Launcher::GraphicsPage::applyQualityLevel(int requestedLevel)
     static const int maxLights[] = { 8, 12, 16, 24, 32, 48 };
     static const int anisotropy[] = { 0, 2, 4, 8, 12, 16 };
     static const int antialiasing[] = { 0, 0, 2, 2, 4, 4 };
-    static const int waterRtt[] = { 256, 256, 256, 512, 512, 512 };
+    static const int waterRtt[] = { 256, 256, 512, 512, 1024, 2048 };
     // Minimum already reflects world objects. Higher presets progressively add
     // actors and groundcover; the limited 0..5 setting range means adjacent
     // presets intentionally share a detail tier.
-    static const int waterReflectionDetail[] = { 3, 3, 4, 4, 5, 5 };
+    static const int waterReflectionDetail[] = { 2, 3, 3, 4, 5, 5 };
     // Shadow-map sizes below 512 are intentionally not used by any quality preset.
     static const int shadowResolution[] = { 512, 512, 1024, 2048, 4096, 8192 };
     static const float grassDensity[] = { 0.30f, 0.45f, 0.65f, 0.80f, 0.90f, 1.00f };
@@ -1101,10 +1149,11 @@ void Launcher::GraphicsPage::applyQualityLevel(int requestedLevel)
     Settings::Manager::setInt("rain ripple detail", "Water", level >= 4 ? 2 : (level >= 2 ? 1 : 0));
     Settings::Manager::setBool("shader water ripples", "Water", level >= 1);
     Settings::Manager::setBool("idle actor ripples", "Water", level >= 2);
-    Settings::Manager::setInt("max shader ripples", "Water", level <= 1 ? 2 : (level <= 3 ? 4 : 6));
+    Settings::Manager::setInt("max shader ripples", "Water", level == 0 ? 1 : (level == 1 ? 2 : (level <= 3 ? 4 : (level == 4 ? 6 : 8))));
     Settings::Manager::setFloat("small feature culling pixel size", "Water",
-        level <= 1 ? 28.f : (level <= 3 ? 20.f : 16.f));
-    Settings::Manager::setFloat("refraction scale", "Water", level <= 1 ? 4.f : (level <= 3 ? 3.f : 2.f));
+        level == 0 ? 32.f : (level == 1 ? 28.f : (level == 2 ? 20.f : (level == 3 ? 18.f : (level == 4 ? 14.f : 10.f))));
+    Settings::Manager::setFloat("refraction scale", "Water",
+        level <= 1 ? 4.f : (level <= 3 ? 3.f : (level == 4 ? 2.f : 1.f)));
 
     Settings::Manager::setBool("enable shadows", "Shadows", level >= 1);
     Settings::Manager::setBool("player shadows", "Shadows", level >= 1);

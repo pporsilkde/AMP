@@ -455,6 +455,11 @@ void Cell::readAi(ActorList& actorList)
             actor->aiCoordinates = baseActor.aiCoordinates;
             actor->hasAiTarget = baseActor.hasAiTarget;
             actor->aiTarget = baseActor.aiTarget;
+            actor->aiCombatTargets = baseActor.aiCombatTargets;
+            actor->aiHasReturnHome = baseActor.aiHasReturnHome;
+            actor->aiHomeCell = baseActor.aiHomeCell;
+            actor->aiHomePosition = baseActor.aiHomePosition;
+            actor->aiDoorBreadcrumbs = baseActor.aiDoorBreadcrumbs;
             actor->setAi();
         }
     }
@@ -807,6 +812,10 @@ void Cell::prepareDedicatedActorsForAuthority()
         }
         actor->setAnimFlags();
         actor->setStatsDynamic();
+        // Re-resolve AI targets immediately before converting to LocalActor.
+        // This closes the door-arrival race where the target did not exist when
+        // the cached snapshot first arrived.
+        actor->setAi();
     }
 }
 

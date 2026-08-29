@@ -8,6 +8,7 @@
 
 #include "aistate.hpp"
 #include "aipackagetypeid.hpp"
+#include "aitravel.hpp"
 
 #include <components/esm/loadnpc.hpp>
 #include <components/esm/cellid.hpp>
@@ -108,6 +109,9 @@ namespace MWMechanics
 
             /// Removes all combat packages until first non-combat or stack empty.
             void stopCombat();
+            /// X034: remove combat only against one target. Other players remain
+            /// valid aggro targets, which is essential for restitution/co-op fights.
+            void stopCombat(const MWWorld::Ptr& target);
 
             /// Has a package been completed during the last update?
             bool isPackageDone() const;
@@ -130,9 +134,12 @@ namespace MWMechanics
             void stack (const AiPackage& package, const MWWorld::Ptr& actor, bool cancelOther=true);
 
             /// Record a real teleport-door transition for a suspended return-home package.
-            void recordDoorTransition(const ESM::CellId& fromCellId, const std::string& fromCellName,
-                const ESM::Position& fromPosition, const ESM::CellId& toCellId, const ESM::Position& toPosition);
+            void recordDoorTransition(const ESM::Cell& fromCell, const ESM::Position& fromPosition,
+                const ESM::Cell& toCell, const ESM::Position& toPosition);
             std::size_t getReturnHomeDoorTransitionCount() const;
+            bool getReturnHomeState(AiReturnHomeState& state) const;
+            void restoreReturnHomeState(const AiReturnHomeState& state, const MWWorld::Ptr& actor);
+            void clearReturnHomeState();
 
             /// Return the current active package.
             /** If there is no active package, it will throw an exception **/

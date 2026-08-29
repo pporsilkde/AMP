@@ -104,6 +104,8 @@
     SCRIPT_API_ENTRY("SetActorAIDistance", ActorFunctions::SetActorAIDistance),\
     SCRIPT_API_ENTRY("SetActorAIDuration", ActorFunctions::SetActorAIDuration),\
     SCRIPT_API_ENTRY("SetActorAIRepetition", ActorFunctions::SetActorAIRepetition),\
+    SCRIPT_API_ENTRY("SetActorAIReturnHome", ActorFunctions::SetActorAIReturnHome),\
+    SCRIPT_API_ENTRY("AddActorAIDoorBreadcrumb", ActorFunctions::AddActorAIDoorBreadcrumb),\
     \
     SCRIPT_API_ENTRY("EquipActorItem", ActorFunctions::EquipActorItem),\
     SCRIPT_API_ENTRY("SetActorEquipmentItemPoison", ActorFunctions::SetActorEquipmentItemPoison),\
@@ -855,6 +857,9 @@ public:
     * \return void
     */
     static void SetActorAIRepetition(bool shouldRepeat) noexcept;
+    static void SetActorAIReturnHome(const char* cellDescription, double x, double y, double z, double rotZ) noexcept;
+    static void AddActorAIDoorBreadcrumb(const char* fromCellDescription, double fromX, double fromY, double fromZ,
+        const char* toCellDescription, double toX, double toY, double toZ) noexcept;
 
     /**
     * \brief Equip an item in a certain slot of the equipment of the temporary actor stored
