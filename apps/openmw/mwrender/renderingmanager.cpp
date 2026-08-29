@@ -859,6 +859,10 @@ namespace MWRender
         {
             mTerrainOccluder.reset(new Terrain::TerrainOccluder(mTerrainStorage.get(), ESM::Land::REAL_SIZE));
             mTerrainOccluder->setLodLevel(std::max(0, Settings::Manager::getInt("occlusion terrain lod", "Camera")));
+            // X029: cap how many new terrain cells a single build may decode, so
+            // the first exterior assembly is spread over frames instead of
+            // decoding the whole 17x17 region in one cull.
+            mTerrainOccluder->setCellBuildBudget(Settings::Manager::getInt("occlusion terrain cell budget", "Camera"));
             sceneRoot->addCullCallback(new SceneOcclusionCallback(
                 mOcclusionCuller.get(),
                 mTerrainOccluder.get(),
@@ -2003,6 +2007,26 @@ namespace MWRender
             stats->setAttribute(frameNumber, "UnrefQueue", mUnrefQueue->getNumItems());
 
             mTerrain->reportStats(frameNumber, stats);
+
+            // X029: the occlusion counters already existed and were read by nothing.
+            // Values are sampled from the last completed cull, so they can lag the
+            // displayed frame by one - fine for a profiler, not a correctness signal.
+            if (mOcclusionCuller.valid())
+            {
+                stats->setAttribute(frameNumber, "Occl Tested", mOcclusionCuller->getNumTested());
+                stats->setAttribute(frameNumber, "Occl Culled", mOcclusionCuller->getNumOccluded());
+                stats->setAttribute(frameNumber, "Occl Occluders", mOcclusionCuller->getNumBuildingOccluders());
+                stats->setAttribute(frameNumber, "Occl Tris", mOcclusionCuller->getNumBuildingTris());
+            }
+
+            if (mTerrainOccluder)
+            {
+                stats->setAttribute(frameNumber, "Occl Terrain Cells", mTerrainOccluder->getCachedCellCount());
+                stats->setAttribute(frameNumber, "Occl Terrain Built", mTerrainOccluder->getLastBuiltCellCount());
+            }
+
+            if (mObjects)
+                mObjects->reportStats(frameNumber, stats);
         }
     }
 
