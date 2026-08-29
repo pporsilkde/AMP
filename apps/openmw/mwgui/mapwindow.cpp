@@ -44,6 +44,31 @@
 namespace
 {
 
+    /*
+        Start of ArenaMP X026 addition
+
+        Multiplayer teardown order. Since X022 the engine destroys mwmp::Main
+        (so that DedicatedPlayer destructors still see a live World) and only
+        afterwards runs MWBase::Environment::cleanup(), which deletes the
+        WindowManager and with it every window. LocalMapBase lives in two of
+        those windows, and its destructor used to call mwmp::Main::get()
+        unconditionally - on a null pMain that reads GUIController through a
+        null this and takes the process down on exit.
+
+        Every access to the multiplayer GUI controller from this file goes
+        through this helper, which simply reports "no multiplayer right now".
+    */
+    mwmp::GUIController* multiplayerGuiController()
+    {
+        if (!mwmp::Main::isInitialized())
+            return nullptr;
+
+        return mwmp::Main::get().getGUIController();
+    }
+    /*
+        End of ArenaMP X026 addition
+    */
+
     const int cellSize = Constants::CellSizeInUnits;
 
     enum LocalMapWidgetDepth
@@ -193,7 +218,8 @@ namespace MWGui
 
             Add a MyGUI delegate for updating player markers
         */
-        mwmp::Main::get().getGUIController()->mPlayerMarkers.eventMarkersChanged += MyGUI::newDelegate(this, &LocalMapBase::updatePlayerMarkers);
+        if (mwmp::GUIController* guiController = multiplayerGuiController())
+            guiController->mPlayerMarkers.eventMarkersChanged += MyGUI::newDelegate(this, &LocalMapBase::updatePlayerMarkers);
         /*
             End of tes3mp addition
         */
@@ -208,7 +234,13 @@ namespace MWGui
 
             Remove a MyGUI delegate for updating player markers
         */
-        mwmp::Main::get().getGUIController()->mPlayerMarkers.eventMarkersChanged -= MyGUI::newDelegate(this, &LocalMapBase::updatePlayerMarkers);
+        /*
+            X026: if multiplayer is already gone, so is the marker collection this
+            delegate was registered on. There is nothing left to unregister from,
+            and reaching for it is exactly what crashed the client on exit.
+        */
+        if (mwmp::GUIController* guiController = multiplayerGuiController())
+            guiController->mPlayerMarkers.eventMarkersChanged -= MyGUI::newDelegate(this, &LocalMapBase::updatePlayerMarkers);
         /*
             End of tes3mp addition
         */
@@ -379,7 +411,8 @@ namespace MWGui
     */
     void LocalMapBase::updatePlayerMarkers()
     {
-        mwmp::Main::get().getGUIController()->updatePlayersMarkers(this);
+        if (mwmp::GUIController* guiController = multiplayerGuiController())
+            guiController->updatePlayersMarkers(this);
     }
     /*
         End of tes3mp addition
@@ -394,7 +427,8 @@ namespace MWGui
     {
         LocalMapBase::updatePlayerMarkers();
 
-        mwmp::Main::get().getGUIController()->updateGlobalMapMarkerTooltips(this);
+        if (mwmp::GUIController* guiController = multiplayerGuiController())
+            guiController->updateGlobalMapMarkerTooltips(this);
     }
     /*
         End of tes3mp addition
