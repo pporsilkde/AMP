@@ -86,15 +86,6 @@ namespace
     // the cinematic framing.
     constexpr float sDialogueCinematicMinDistance = 128.f;
 
-    float normalizeAngle(float angle)
-    {
-        while (angle > osg::PI)
-            angle -= static_cast<float>(osg::PI) * 2.f;
-        while (angle < -osg::PI)
-            angle += static_cast<float>(osg::PI) * 2.f;
-        return angle;
-    }
-
     float randomRange(float minimum, float maximum)
     {
         return minimum + (maximum - minimum) * Misc::Rng::rollProbability();
@@ -251,37 +242,9 @@ namespace
         return player.getClass().getNpcStats(player).getBounty() >= cutoff;
     }
 
-    // X024: the dialogue window used to rotate the NPC towards the local player
-    // every frame through World::rotateObject, without checking who owns the actor.
-    // With two players in dialogue with the same NPC, both clients pushed it
-    // towards their own player while the authority's ActorPosition packets kept
-    // overwriting the result - the NPC visibly vibrated. Turning is now done only
-    // by the client that owns the actor, and only outside a small deadzone, so
-    // ordinary network jitter no longer produces a stream of micro-rotations.
-    bool sDialogueTurnEngaged = false;
-
-    constexpr float sDialogueTurnStartAngle = 8.f;   // degrees
-    constexpr float sDialogueTurnStopAngle = 1.5f;   // degrees
-
-    /// True when this client is allowed to move the dialogue NPC itself.
-    bool ownsDialogueActor(const MWWorld::Ptr& actor)
-    {
-        if (actor.isEmpty())
-            return false;
-        if (!mwmp::Main::isInitialized())
-            return true;
-
-        mwmp::CellController* cellController = mwmp::Main::get().getCellController();
-        if (cellController == nullptr)
-            return false;
-
-        // A DedicatedActor belongs to another player: its transform arrives over
-        // the network and must not be fought over locally.
-        if (cellController->isDedicatedActor(actor))
-            return false;
-
-        return cellController->isLocalActor(actor);
-    }
+    // X027: dialogue root yaw is controlled only by MWMechanics::Actors.
+    // Keeping the GUI out of transform ownership avoids two independent turn
+    // controllers fighting each other in the same frame.
 
     void queueDialogueNpcInteraction(const MWWorld::Ptr& actor, const std::string& group,
         int blendMask, float speed, int loops, bool stop)
@@ -694,8 +657,6 @@ namespace MWGui
             return;
 
         mDynamicDialogueActorActive = true;
-        // X024: a fresh conversation starts outside the turn deadzone.
-        sDialogueTurnEngaged = false;
         mDynamicDialogueActorHasOriginalYaw = true;
         mDynamicDialogueActorOriginalYaw = mPtr.getRefData().getPosition().rot[2];
         mDynamicDialogueActorAnimationTimer = 0.1f;
@@ -1066,50 +1027,10 @@ namespace MWGui
             return;
         }
 
-        const MWWorld::LiveCellRef<ESM::NPC>* dialogueNpc = mPtr.get<ESM::NPC>();
-        const bool preserveAuthoredSkeleton = dialogueNpc && !dialogueNpc->mBase->mModel.empty();
+        // X027: actor-root turning is owned exclusively by MWMechanics::Actors.
+        // This GUI update handles gestures/camera only; it must never compete
+        // with mechanics/network transform ownership for the same yaw.
 
-        // X024: only the owner of this actor may rotate it. On any other client the
-        // NPC's facing comes from the authority over the network; writing to it here
-        // as well is what made the NPC twitch when two players talked to it at once.
-        if (!preserveAuthoredSkeleton
-            && ownsDialogueActor(mPtr)
-            && Settings::Manager::getBool("dynamic dialogue actor turning", "GUI"))
-        {
-            const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
-            if (!player.isEmpty())
-            {
-                const osg::Vec3f delta = player.getRefData().getPosition().asVec3()
-                    - mPtr.getRefData().getPosition().asVec3();
-                if (delta.x() * delta.x() + delta.y() * delta.y() > 1.f)
-                {
-                    const float targetYaw = std::atan2(delta.x(), delta.y());
-                    const ESM::Position& position = mPtr.getRefData().getPosition();
-                    const float difference = normalizeAngle(targetYaw - position.rot[2]);
-                    const float absDifference = std::abs(difference);
-
-                    // Hysteresis: start turning only past a visible error, and stop
-                    // completely once aligned. Without this the NPC chases every
-                    // small position update of the player and never settles, which
-                    // also floods the network with rotation packets.
-                    if (!sDialogueTurnEngaged
-                        && absDifference >= osg::DegreesToRadians(sDialogueTurnStartAngle))
-                        sDialogueTurnEngaged = true;
-                    else if (sDialogueTurnEngaged
-                        && absDifference <= osg::DegreesToRadians(sDialogueTurnStopAngle))
-                        sDialogueTurnEngaged = false;
-
-                    if (sDialogueTurnEngaged)
-                    {
-                        const float easedStep = difference * (1.f - std::exp(-7.f * dt));
-                        const float maxStep = osg::DegreesToRadians(150.f) * dt;
-                        const float step = std::max(-maxStep, std::min(maxStep, easedStep));
-                        MWBase::Environment::get().getWorld()->rotateObject(mPtr,
-                            position.rot[0], position.rot[1], normalizeAngle(position.rot[2] + step));
-                    }
-                }
-            }
-        }
 
         if (!Settings::Manager::getBool("dynamic dialogue actor animations", "GUI"))
         {
@@ -1220,7 +1141,6 @@ namespace MWGui
         }
 
         mDynamicDialogueActorActive = false;
-        sDialogueTurnEngaged = false;
         mDynamicDialogueActorHasOriginalYaw = false;
         mDynamicDialogueActorAnimationTimer = 0.f;
         mDynamicDialogueActorTransitionTimer = 0.f;

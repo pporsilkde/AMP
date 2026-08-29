@@ -1,0 +1,180 @@
+--- a/apps/openmw/mwgui/dialogue.cpp
++++ b/apps/openmw/mwgui/dialogue.cpp
+@@ -86,15 +86,6 @@
+     // the cinematic framing.
+     constexpr float sDialogueCinematicMinDistance = 128.f;
+ 
+-    float normalizeAngle(float angle)
+-    {
+-        while (angle > osg::PI)
+-            angle -= static_cast<float>(osg::PI) * 2.f;
+-        while (angle < -osg::PI)
+-            angle += static_cast<float>(osg::PI) * 2.f;
+-        return angle;
+-    }
+-
+     float randomRange(float minimum, float maximum)
+     {
+         return minimum + (maximum - minimum) * Misc::Rng::rollProbability();
+@@ -251,37 +242,9 @@
+         return player.getClass().getNpcStats(player).getBounty() >= cutoff;
+     }
+ 
+-    // X024: the dialogue window used to rotate the NPC towards the local player
+-    // every frame through World::rotateObject, without checking who owns the actor.
+-    // With two players in dialogue with the same NPC, both clients pushed it
+-    // towards their own player while the authority's ActorPosition packets kept
+-    // overwriting the result - the NPC visibly vibrated. Turning is now done only
+-    // by the client that owns the actor, and only outside a small deadzone, so
+-    // ordinary network jitter no longer produces a stream of micro-rotations.
+-    bool sDialogueTurnEngaged = false;
+-
+-    constexpr float sDialogueTurnStartAngle = 8.f;   // degrees
+-    constexpr float sDialogueTurnStopAngle = 1.5f;   // degrees
+-
+-    /// True when this client is allowed to move the dialogue NPC itself.
+-    bool ownsDialogueActor(const MWWorld::Ptr& actor)
+-    {
+-        if (actor.isEmpty())
+-            return false;
+-        if (!mwmp::Main::isInitialized())
+-            return true;
+-
+-        mwmp::CellController* cellController = mwmp::Main::get().getCellController();
+-        if (cellController == nullptr)
+-            return false;
+-
+-        // A DedicatedActor belongs to another player: its transform arrives over
+-        // the network and must not be fought over locally.
+-        if (cellController->isDedicatedActor(actor))
+-            return false;
+-
+-        return cellController->isLocalActor(actor);
+-    }
++    // X027: dialogue root yaw is controlled only by MWMechanics::Actors.
++    // Keeping the GUI out of transform ownership avoids two independent turn
++    // controllers fighting each other in the same frame.
+ 
+     void queueDialogueNpcInteraction(const MWWorld::Ptr& actor, const std::string& group,
+         int blendMask, float speed, int loops, bool stop)
+@@ -694,8 +657,6 @@
+             return;
+ 
+         mDynamicDialogueActorActive = true;
+-        // X024: a fresh conversation starts outside the turn deadzone.
+-        sDialogueTurnEngaged = false;
+         mDynamicDialogueActorHasOriginalYaw = true;
+         mDynamicDialogueActorOriginalYaw = mPtr.getRefData().getPosition().rot[2];
+         mDynamicDialogueActorAnimationTimer = 0.1f;
+@@ -1066,50 +1027,10 @@
+             return;
+         }
+ 
+-        const MWWorld::LiveCellRef<ESM::NPC>* dialogueNpc = mPtr.get<ESM::NPC>();
+-        const bool preserveAuthoredSkeleton = dialogueNpc && !dialogueNpc->mBase->mModel.empty();
++        // X027: actor-root turning is owned exclusively by MWMechanics::Actors.
++        // This GUI update handles gestures/camera only; it must never compete
++        // with mechanics/network transform ownership for the same yaw.
+ 
+-        // X024: only the owner of this actor may rotate it. On any other client the
+-        // NPC's facing comes from the authority over the network; writing to it here
+-        // as well is what made the NPC twitch when two players talked to it at once.
+-        if (!preserveAuthoredSkeleton
+-            && ownsDialogueActor(mPtr)
+-            && Settings::Manager::getBool("dynamic dialogue actor turning", "GUI"))
+-        {
+-            const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+-            if (!player.isEmpty())
+-            {
+-                const osg::Vec3f delta = player.getRefData().getPosition().asVec3()
+-                    - mPtr.getRefData().getPosition().asVec3();
+-                if (delta.x() * delta.x() + delta.y() * delta.y() > 1.f)
+-                {
+-                    const float targetYaw = std::atan2(delta.x(), delta.y());
+-                    const ESM::Position& position = mPtr.getRefData().getPosition();
+-                    const float difference = normalizeAngle(targetYaw - position.rot[2]);
+-                    const float absDifference = std::abs(difference);
+-
+-                    // Hysteresis: start turning only past a visible error, and stop
+-                    // completely once aligned. Without this the NPC chases every
+-                    // small position update of the player and never settles, which
+-                    // also floods the network with rotation packets.
+-                    if (!sDialogueTurnEngaged
+-                        && absDifference >= osg::DegreesToRadians(sDialogueTurnStartAngle))
+-                        sDialogueTurnEngaged = true;
+-                    else if (sDialogueTurnEngaged
+-                        && absDifference <= osg::DegreesToRadians(sDialogueTurnStopAngle))
+-                        sDialogueTurnEngaged = false;
+-
+-                    if (sDialogueTurnEngaged)
+-                    {
+-                        const float easedStep = difference * (1.f - std::exp(-7.f * dt));
+-                        const float maxStep = osg::DegreesToRadians(150.f) * dt;
+-                        const float step = std::max(-maxStep, std::min(maxStep, easedStep));
+-                        MWBase::Environment::get().getWorld()->rotateObject(mPtr,
+-                            position.rot[0], position.rot[1], normalizeAngle(position.rot[2] + step));
+-                    }
+-                }
+-            }
+-        }
+ 
+         if (!Settings::Manager::getBool("dynamic dialogue actor animations", "GUI"))
+         {
+@@ -1220,7 +1141,6 @@
+         }
+ 
+         mDynamicDialogueActorActive = false;
+-        sDialogueTurnEngaged = false;
+         mDynamicDialogueActorHasOriginalYaw = false;
+         mDynamicDialogueActorAnimationTimer = 0.f;
+         mDynamicDialogueActorTransitionTimer = 0.f;
+--- a/apps/openmw/mwmechanics/actors.cpp
++++ b/apps/openmw/mwmechanics/actors.cpp
+@@ -260,17 +260,27 @@
+     if (hasConstructionSetAnimation(actor))
+         return;
+ 
++    // X027: only the LocalActor authority may rotate the dialogue NPC. Dedicated
++    // actors receive their transform from the owning client and must never be
++    // corrected locally, otherwise network replication reintroduces the twitch.
++    if (mwmp::Main::isInitialized())
++    {
++        mwmp::CellController* cellController = mwmp::Main::get().getCellController();
++        if (!cellController || !cellController->isLocalActor(actor)
++            || cellController->isDedicatedActor(actor))
++            return;
++    }
++
+     const osg::Vec3f delta = player.getRefData().getPosition().asVec3()
+         - actor.getRefData().getPosition().asVec3();
+     if (delta.x() * delta.x() + delta.y() * delta.y() <= 1.f)
+         return;
+ 
+-    // Dialogue in ArenaMW does not pause AI globally. Keep writing the desired
+-    // yaw into the movement controller every mechanics frame so a Wander/Travel
+-    // package cannot win the facing direction on alternate frames.
++    // X027: this is the sole dialogue actor-root turn controller. A 2-degree
++    // deadzone prevents tiny authority/camera corrections after visual alignment.
+     MWMechanics::Movement& movement = actor.getClass().getMovementSettings(actor);
+     movement.mRotation[2] = 0.f;
+-    MWMechanics::zTurn(actor, std::atan2(delta.x(), delta.y()), osg::DegreesToRadians(1.f));
++    MWMechanics::zTurn(actor, std::atan2(delta.x(), delta.y()), osg::DegreesToRadians(2.f));
+ }
+ 
+ bool isContextualGuard(const MWWorld::Ptr& ptr)
+--- a/apps/openmw/mwgui/hud.cpp
++++ b/apps/openmw/mwgui/hud.cpp
+@@ -169,8 +169,11 @@
+         // ------------------------------------------------------------------
+         constexpr float sUnitsPerStep = 70.f;
+ 
+-        constexpr float sDockEnterSteps = 15.f;  // closer than this -> docked stack
+-        constexpr float sDockExitSteps = 18.f;   // hysteresis, must exceed the above
++        // X027: dock only at close conversation/combat range. This is exactly
++        // one third shorter than X025/X026a (15/18 -> 10/12 steps) while
++        // preserving the same hysteresis ratio so the bar does not flap at the edge.
++        constexpr float sDockEnterSteps = 10.f;  // closer than this -> docked stack
++        constexpr float sDockExitSteps = 12.f;   // hysteresis, must exceed the above
+         constexpr float sVanishSteps = 40.f;     // beyond this the bar is gone
+         constexpr float sFullSizeSteps = 3.5f;   // no shrinking closer than this
+ 

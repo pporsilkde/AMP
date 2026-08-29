@@ -260,17 +260,27 @@ void faceDialogueActorToPlayer(const MWWorld::Ptr& actor, const MWWorld::Ptr& pl
     if (hasConstructionSetAnimation(actor))
         return;
 
+    // X027: only the LocalActor authority may rotate the dialogue NPC. Dedicated
+    // actors receive their transform from the owning client and must never be
+    // corrected locally, otherwise network replication reintroduces the twitch.
+    if (mwmp::Main::isInitialized())
+    {
+        mwmp::CellController* cellController = mwmp::Main::get().getCellController();
+        if (!cellController || !cellController->isLocalActor(actor)
+            || cellController->isDedicatedActor(actor))
+            return;
+    }
+
     const osg::Vec3f delta = player.getRefData().getPosition().asVec3()
         - actor.getRefData().getPosition().asVec3();
     if (delta.x() * delta.x() + delta.y() * delta.y() <= 1.f)
         return;
 
-    // Dialogue in ArenaMW does not pause AI globally. Keep writing the desired
-    // yaw into the movement controller every mechanics frame so a Wander/Travel
-    // package cannot win the facing direction on alternate frames.
+    // X027: this is the sole dialogue actor-root turn controller. A 2-degree
+    // deadzone prevents tiny authority/camera corrections after visual alignment.
     MWMechanics::Movement& movement = actor.getClass().getMovementSettings(actor);
     movement.mRotation[2] = 0.f;
-    MWMechanics::zTurn(actor, std::atan2(delta.x(), delta.y()), osg::DegreesToRadians(1.f));
+    MWMechanics::zTurn(actor, std::atan2(delta.x(), delta.y()), osg::DegreesToRadians(2.f));
 }
 
 bool isContextualGuard(const MWWorld::Ptr& ptr)
