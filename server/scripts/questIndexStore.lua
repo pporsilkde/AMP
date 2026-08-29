@@ -31,7 +31,10 @@ local state = {
     contentKey = nil,
     indexHash = nil,
     entries = {},
-    entryCount = 0
+    entryCount = 0,
+    startupRefreshPending = false,
+    storedContentKey = nil,
+    storedIndexHash = nil
 }
 
 local pending = {}
@@ -148,14 +151,45 @@ local function load()
         return
     end
 
-    applyIndex(data.contentKey, data.indexHash, data.entries)
-    tes3mp.LogMessage(enumerations.log.INFO,
-        "[QuestIndex] Loaded " .. state.entryCount .. " phaseable records for content key " ..
-        state.contentKey .. " (hash " .. state.indexHash .. ")")
+    if configBool("questIndexRefreshOnServerStart", true) then
+        -- X031: never carry an authoritative quest classification across a process
+        -- restart without a fresh client-side scan. Keep the verified old metadata
+        -- only for diagnostics; the first valid requested upload will overwrite the
+        -- same JSON file and then re-enable phasing.
+        state.trusted = false
+        state.contentKey = nil
+        state.indexHash = nil
+        state.entries = {}
+        state.entryCount = 0
+        state.startupRefreshPending = true
+        state.storedContentKey = data.contentKey
+        state.storedIndexHash = data.indexHash
+        -- Update the on-disk file immediately so a restart is visible even before
+        -- the first client finishes the fresh scan. Old entries are preserved only
+        -- as diagnostics; state.trusted remains false until commit() overwrites them.
+        data.refreshPending = true
+        data.refreshRequestedAt = os.time()
+        data.generatedBy = "ArenaMP X031 server restart"
+        data.generationMode = "startup-refresh-pending"
+        jsonInterface.save(STORE_PATH, data)
+
+        tes3mp.LogMessage(enumerations.log.INFO,
+            "[QuestIndex] X031 startup refresh: questIndex.json marked for refresh; stored index " .. data.indexHash ..
+            " for content " .. data.contentKey ..
+            " is valid, but a fresh verified upload is required after this server restart")
+    else
+        applyIndex(data.contentKey, data.indexHash, data.entries)
+        tes3mp.LogMessage(enumerations.log.INFO,
+            "[QuestIndex] Loaded " .. state.entryCount .. " phaseable records for content key " ..
+            state.contentKey .. " (hash " .. state.indexHash .. ")")
+    end
 end
 
 local function commit(contentKey, indexHash, entries, reason, generatedBy, generationMode)
     applyIndex(contentKey, indexHash, entries)
+    state.startupRefreshPending = false
+    state.storedContentKey = nil
+    state.storedIndexHash = nil
 
     jsonInterface.save(STORE_PATH, {
         contentKey = contentKey,
@@ -204,6 +238,9 @@ function questIndexStore.GetStatus()
         entryCount = state.entryCount,
         autoGenerate = autoGenerateEnabled(),
         requireQuorum = requireQuorumBootstrap(),
+        startupRefreshPending = state.startupRefreshPending,
+        storedContentKey = state.storedContentKey,
+        storedIndexHash = state.storedIndexHash,
         pendingConfirmations = confirmations
     }
 end
@@ -217,6 +254,9 @@ function questIndexStore.Reset()
     state.indexHash = nil
     state.entries = {}
     state.entryCount = 0
+    state.startupRefreshPending = false
+    state.storedContentKey = nil
+    state.storedIndexHash = nil
     pending = {}
     confirmations = {}
     driftWarned = {}
@@ -248,6 +288,13 @@ function questIndexStore.RequestFrom(pid, mode)
     pending[pid] = nil
     tes3mp.SendQuestIndexRequest(pid, mode)
     return true
+end
+
+--- X031: force lazy store validation during server startup, before any player
+--- can interact with quest sources. When startup refresh is enabled this leaves
+--- phasing fail-closed and primes the first logged-in player for MODE_UPLOAD.
+function questIndexStore.OnServerStart()
+    load()
 end
 
 --- Called once per player as soon as they are fully logged in.

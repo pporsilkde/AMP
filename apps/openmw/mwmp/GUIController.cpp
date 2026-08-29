@@ -88,7 +88,8 @@ void mwmp::GUIController::setupChat()
 
     mChat = new GUIChat(chatX, chatY, chatW, chatH);
     mChat->setDelay(chatDelay);
-    mChat->setHistoryDisplayEnabled(!Main::isChatHistoryHidden());
+    // X031: chat history is always available; full-hide startup mode was removed.
+    mChat->setHistoryDisplayEnabled(true);
 }
 
 void mwmp::GUIController::printChatMessage(std::string &msg)

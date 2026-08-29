@@ -396,6 +396,7 @@ void StatsHandler::setUpScene(osgViewer::ViewerBase *viewer)
             "Occl Tris",
             "Occl Terrain Cells",
             "Occl Terrain Built",
+            "Occl Terrain Rast",
             "Occl Templates",
             "Occl Tpl Hits",
             "Occl Tpl Misses",

@@ -12,6 +12,7 @@ namespace Terrain
     TerrainOccluder::TerrainOccluder(Storage* storage, float cellWorldSize)
         : mStorage(storage)
         , mCellWorldSize(cellWorldSize)
+        , mScratchPositions(new osg::Vec3Array)
     {
     }
 
@@ -35,13 +36,24 @@ namespace Terrain
         mCellBuildBudget = cellsPerBuild;
     }
 
+    void TerrainOccluder::publishStats()
+    {
+        mPublishedCachedCellCount.store(static_cast<unsigned int>(mCellCache.size()), std::memory_order_relaxed);
+        mPublishedLastBuiltCells.store(mLastBuiltCells, std::memory_order_relaxed);
+        mPublishedLastVisibleCells.store(mLastVisibleCells, std::memory_order_relaxed);
+        mPublishedRegionComplete.store(mRegionCacheValid, std::memory_order_relaxed);
+    }
+
     void TerrainOccluder::invalidateCache()
     {
         mRegionCacheValid = false;
         mCachedRadius = -1;
         mCellCache.clear();
-        mPublishedCachedCellCount.store(0, std::memory_order_relaxed);
-        mPublishedLastBuiltCells.store(0, std::memory_order_relaxed);
+        mLastBuiltCells = 0;
+        mLastVisibleCells = 0;
+        if (mScratchPositions.valid())
+            mScratchPositions->clear();
+        publishStats();
     }
 
     TerrainOccluder::CachedCellMesh TerrainOccluder::buildCell(int cellX, int cellY) const
@@ -49,20 +61,20 @@ namespace Terrain
         CachedCellMesh result;
 
         const osg::Vec2f center(cellX + 0.5f, cellY + 0.5f);
-        osg::ref_ptr<osg::Vec3Array> fullRes(new osg::Vec3Array);
+        if (!mScratchPositions.valid())
+            mScratchPositions = new osg::Vec3Array;
+        mScratchPositions->clear();
         osg::ref_ptr<osg::Vec3Array> normals(new osg::Vec3Array);
         osg::ref_ptr<osg::Vec4ubArray> colors(new osg::Vec4ubArray);
         colors->setNormalize(true);
-        mStorage->fillVertexBuffers(0, 1.0f, center, fullRes, normals, colors);
-        if (fullRes->empty())
+        mStorage->fillVertexBuffers(0, 1.0f, center, mScratchPositions, normals, colors);
+        if (mScratchPositions->empty())
             return result;
 
-        const int fullPerSide = static_cast<int>(std::sqrt(static_cast<float>(fullRes->size())));
+        const int fullPerSide = static_cast<int>(std::sqrt(static_cast<float>(mScratchPositions->size())));
         if (fullPerSide < 2)
             return result;
 
-        // Avoid undefined behaviour on a corrupt/external setting while preserving
-        // the old semantics for all practical LOD values.
         const int safeLod = std::min(mLodLevel, 15);
         const int step = std::max(1, 1 << safeLod);
         const int coarsePerSide = (fullPerSide - 1) / step + 1;
@@ -81,7 +93,7 @@ namespace Terrain
                 float minH = std::numeric_limits<float>::max();
                 for (int fj = startJ; fj <= endJ; ++fj)
                     for (int fi = startI; fi <= endI; ++fi)
-                        minH = std::min(minH, (*fullRes)[fj * fullPerSide + fi].z());
+                        minH = std::min(minH, (*mScratchPositions)[fj * fullPerSide + fi].z());
                 quadMins[qj * (coarsePerSide - 1) + qi] = minH;
             }
         }
@@ -104,9 +116,11 @@ namespace Terrain
 
                 const int srcI = std::min(ci * step, fullPerSide - 1);
                 const int srcJ = std::min(cj * step, fullPerSide - 1);
-                osg::Vec3f pos = (*fullRes)[srcJ * fullPerSide + srcI];
+                osg::Vec3f pos = (*mScratchPositions)[srcJ * fullPerSide + srcI];
                 pos.z() = minH;
-                result.mPositions.push_back(pos + worldOffset);
+                pos += worldOffset;
+                result.mPositions.push_back(pos);
+                result.mBounds.expandBy(pos);
             }
         }
 
@@ -138,9 +152,6 @@ namespace Terrain
         if (found != mCellCache.end())
             return &found->second;
 
-        // X029: cells with no LAND record are cached as empty meshes on purpose,
-        // so a missing cell costs its decode attempt exactly once. That attempt is
-        // still the expensive part, so it counts against the budget.
         if (budget <= 0)
             return nullptr;
 
@@ -151,9 +162,6 @@ namespace Terrain
 
     void TerrainOccluder::pruneCellCache(const osg::Vec2i& center, int radiusCells)
     {
-        // Keep two extra rings so a normal one-cell movement can reuse the full
-        // overlap and only generate the newly exposed edge. This bounds memory
-        // while avoiding the old all-or-nothing rebuild.
         const int keepRadius = std::max(1, radiusCells) + 2;
         for (std::map<CellKey, CachedCellMesh>::iterator it = mCellCache.begin(); it != mCellCache.end();)
         {
@@ -166,20 +174,18 @@ namespace Terrain
         }
     }
 
-    bool TerrainOccluder::build(const osg::Vec3f& eyePoint, int radiusCells,
-        std::vector<osg::Vec3f>& outPositions, std::vector<unsigned int>& outIndices)
+    void TerrainOccluder::collectVisibleCells(const osg::Vec3f& eyePoint, int radiusCells,
+        const osg::Polytope& frustum, std::vector<OccluderCellMesh>& out)
     {
-        // Per-frame counter: zero unless this call actually decoded new cells.
         mLastBuiltCells = 0;
-        mPublishedLastBuiltCells.store(0, std::memory_order_relaxed);
+        mLastVisibleCells = 0;
+        out.clear();
 
         if (!hasTerrainData())
         {
-            outPositions.clear();
-            outIndices.clear();
             mRegionCacheValid = false;
-            mPublishedCachedCellCount.store(static_cast<unsigned int>(mCellCache.size()), std::memory_order_relaxed);
-            return true;
+            publishStats();
+            return;
         }
 
         radiusCells = std::max(1, radiusCells);
@@ -187,25 +193,17 @@ namespace Terrain
         const int cellY = static_cast<int>(std::floor(eyePoint.y() / mCellWorldSize));
         const osg::Vec2i cellPos(cellX, cellY);
 
-        if (mRegionCacheValid && cellPos == mCachedCellPos && radiusCells == mCachedRadius)
-        {
-            mPublishedCachedCellCount.store(static_cast<unsigned int>(mCellCache.size()), std::memory_order_relaxed);
-            return false;
-        }
-
-        outPositions.clear();
-        outIndices.clear();
-
-        // X029: budget the expensive part. Cells already in the cache are always
-        // assembled; only newly decoded ones are rationed. When the budget runs
-        // out the region is marked incomplete, so the next frame continues where
-        // this one stopped instead of declaring the region done.
+        // Keep the old X029 budget semantics: cached cells are free, newly decoded
+        // cells consume the budget, and an incomplete region simply contributes
+        // fewer occluders until later frames finish it.
         int budget = mCellBuildBudget > 0 ? mCellBuildBudget : std::numeric_limits<int>::max();
         bool complete = true;
 
-        // X028: region assembly still walks all cells, but expensive LAND decode +
-        // coarse-mesh construction happens only once per cached cell. At radius 8
-        // a one-cell move reuses 272/289 cells and builds only the new 17-cell edge.
+        // Reuse enough storage for the full square while keeping each entry tiny
+        // (two pointers). No vertex/index copying or index rebasing happens here.
+        const int side = radiusCells * 2 + 1;
+        out.reserve(static_cast<std::size_t>(side * side));
+
         for (int cy = cellY - radiusCells; cy <= cellY + radiusCells; ++cy)
         {
             for (int cx = cellX - radiusCells; cx <= cellX + radiusCells; ++cx)
@@ -213,8 +211,6 @@ namespace Terrain
                 const CachedCellMesh* cell = getCell(cx, cy, budget);
                 if (!cell)
                 {
-                    // Not built yet and out of budget. Leaving it out only removes
-                    // an occluder, which can never hide something that is visible.
                     complete = false;
                     continue;
                 }
@@ -222,11 +218,27 @@ namespace Terrain
                 if (cell->mPositions.empty() || cell->mIndices.empty())
                     continue;
 
-                const unsigned int baseIndex = static_cast<unsigned int>(outPositions.size());
-                outPositions.insert(outPositions.end(), cell->mPositions.begin(), cell->mPositions.end());
-                outIndices.reserve(outIndices.size() + cell->mIndices.size());
-                for (std::vector<unsigned int>::const_iterator it = cell->mIndices.begin(); it != cell->mIndices.end(); ++it)
-                    outIndices.push_back(baseIndex + *it);
+                if (mFrustumCulling && cell->mBounds.valid())
+                {
+                    bool outside = false;
+                    const osg::Polytope::PlaneList& planes = frustum.getPlaneList();
+                    for (osg::Polytope::PlaneList::const_iterator plane = planes.begin(); plane != planes.end(); ++plane)
+                    {
+                        if (plane->intersect(cell->mBounds) < 0)
+                        {
+                            outside = true;
+                            break;
+                        }
+                    }
+                    if (outside)
+                        continue;
+                }
+
+                OccluderCellMesh mesh;
+                mesh.mPositions = &cell->mPositions;
+                mesh.mIndices = &cell->mIndices;
+                out.push_back(mesh);
+                ++mLastVisibleCells;
             }
         }
 
@@ -234,13 +246,9 @@ namespace Terrain
         mCachedRadius = radiusCells;
         mRegionCacheValid = complete;
 
-        // X029-safe: prune even while filling. pruneCellCache keeps radius+2,
-        // therefore it cannot evict any cell required by the current radius, and
-        // this prevents cache growth during rapid teleports where a region may not
-        // become complete before the next center is requested.
+        // Safe even while the region is incomplete: current cells lie within
+        // radius, while prune keeps radius+2 rings.
         pruneCellCache(cellPos, radiusCells);
-        mPublishedCachedCellCount.store(static_cast<unsigned int>(mCellCache.size()), std::memory_order_relaxed);
-        mPublishedLastBuiltCells.store(mLastBuiltCells, std::memory_order_relaxed);
-        return true;
+        publishStats();
     }
 }

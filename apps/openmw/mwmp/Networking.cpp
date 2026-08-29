@@ -279,25 +279,12 @@ void Networking::connect(const std::string &ip, unsigned short port, std::vector
     std::stringstream sstr;
     sstr << TES3MP_VERSION;
 
-    const int advertisedProtocol = Main::useVanillaBuildServer()
-        ? TES3MP_VANILLA_PROTO_VERSION
-        : TES3MP_PROTO_VERSION;
+    // X031: ArenaMP no longer impersonates the vanilla TES3MP build identity.
+    // Every client advertises the ArenaMP protocol and stable compatibility hash.
+    const int advertisedProtocol = TES3MP_PROTO_VERSION;
     sstr << advertisedProtocol;
 
-    std::string commitHashString;
-    if (Main::useVanillaBuildServer())
-    {
-        commitHashString = TES3MP_VANILLA_COMMIT_HASH;
-        LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
-            "Vanilla server compatibility enabled: advertising protocol %i and TES3MP commit %.10s",
-            advertisedProtocol, TES3MP_VANILLA_COMMIT_HASH);
-    }
-    else
-    {
-        // ArenaMP uses a stable compatibility identity instead of the current
-        // source Git HEAD, so independently rebuilt client/server stay compatible.
-        commitHashString = TES3MP_COMPAT_COMMIT_HASH;
-    }
+    std::string commitHashString = TES3MP_COMPAT_COMMIT_HASH;
 
     // Remove carriage returns added to version files on Windows.
     commitHashString.erase(std::remove(commitHashString.begin(), commitHashString.end(), '\r'), commitHashString.end());

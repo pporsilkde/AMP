@@ -202,9 +202,9 @@ namespace mwmp
                 scrollHistoryToBottom();
             LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "%s", msg.c_str());
 
-            // A received message temporarily restores full opacity. Auto-hide mode also
-            // fades the chat in for the configured delay. Fully hidden chat stays hidden.
-            if (historyDisplayEnabled && windowState != CHAT_HIDDEN && !mainMenuOpen)
+            // X031: chat can no longer be fully hidden. A received message may
+            // temporarily raise opacity, then returns to the selected visible mode.
+            if (!mainMenuOpen)
                 revealTemporarily();
         }
     }
@@ -239,28 +239,16 @@ namespace mwmp
 
     void GUIChat::pressedChatMode()
     {
-        if (!historyDisplayEnabled)
-        {
-            MWBase::Environment::get().getWindowManager()->messageBox(
-                localizeArena("chat.history_hidden"));
-            return;
-        }
-
+        // X031: F2 cycles only visible opacity modes. Auto-hide and fully hidden
+        // states were removed so multiplayer chat cannot silently disappear.
         windowState = static_cast<ChatWindowState>((static_cast<int>(windowState) + 1) % CHAT_STATE_COUNT);
         Settings::Manager::setString("mode", "Chat", getModeSetting());
         Settings::Manager::saveUser();
-        revealTime = windowState == CHAT_AUTOHIDE ? delay : 0.f;
+        revealTime = 0.f;
 
         const std::string chatMode = getModeMessage();
         LOG_MESSAGE_SIMPLE(TimedLog::LOG_VERBOSE, "Switch chat mode to %s", chatMode.c_str());
         MWBase::Environment::get().getWindowManager()->messageBox(chatMode);
-
-        if (windowState == CHAT_HIDDEN)
-        {
-            setHistoryReviewState(false);
-            setEditState(false);
-        }
-
         refreshPresentation();
     }
 
@@ -276,8 +264,6 @@ namespace mwmp
 
         if (editState)
             revealTime = 0.f;
-        else if (windowState == CHAT_AUTOHIDE)
-            revealTime = delay;
 
         refreshPresentation();
     }
@@ -385,8 +371,6 @@ namespace mwmp
             if (!mainMenuOpen)
                 MWBase::Environment::get().getInputManager()->changeInputMode(false);
             scrollHistoryToBottom();
-            if (windowState == CHAT_AUTOHIDE)
-                revealTime = delay;
         }
 
         updateCommandLineLayout();
@@ -528,22 +512,13 @@ namespace mwmp
         if (mainMenuOpen)
             return;
 
-        if (!historyDisplayEnabled)
-        {
-            if (editState)
-                showSmoothly(sFullyVisibleAlpha);
-            else
-                hideSmoothly();
-            return;
-        }
-
         if (editState || historyReviewState)
         {
             showSmoothly(sFullyVisibleAlpha);
             return;
         }
 
-        if (revealTime > 0.f && windowState != CHAT_HIDDEN)
+        if (revealTime > 0.f)
         {
             showSmoothly(sFullyVisibleAlpha);
             return;
@@ -618,10 +593,6 @@ namespace mwmp
                 return localizeArena("chat.mode.opacity_30");
             case CHAT_TRANSPARENT_60:
                 return localizeArena("chat.mode.opacity_60");
-            case CHAT_AUTOHIDE:
-                return localizeArena("chat.mode.autohide");
-            case CHAT_HIDDEN:
-                return localizeArena("chat.mode.hidden");
             default:
                 return localizeArena("chat.mode.visible");
         }
@@ -635,8 +606,6 @@ namespace mwmp
             case CHAT_VISIBLE: return "visible";
             case CHAT_TRANSPARENT_30: return "transparent30";
             case CHAT_TRANSPARENT_60: return "transparent60";
-            case CHAT_AUTOHIDE: return "autohide";
-            case CHAT_HIDDEN: return "hidden";
             default: return "transparent30";
         }
     }
@@ -647,60 +616,38 @@ namespace mwmp
             windowState = CHAT_VISIBLE;
         else if (mode == "transparent60")
             windowState = CHAT_TRANSPARENT_60;
-        else if (mode == "autohide")
-            windowState = CHAT_AUTOHIDE;
-        else if (mode == "hidden")
-            windowState = CHAT_HIDDEN;
         else
+            // Legacy autohide/hidden values migrate to a visible opacity mode.
             windowState = CHAT_TRANSPARENT_30;
     }
 
     void GUIChat::syncSettings()
     {
-        const bool enabled = externalHistoryDisplayEnabled
-            && Settings::Manager::getBool("enabled", "Chat");
         const float configuredDelay = std::max(0.f, Settings::Manager::getFloat("delay", "Chat"));
         const std::string configuredMode = Settings::Manager::getString("mode", "Chat");
 
-        bool changed = false;
-        if (historyDisplayEnabled != enabled)
-        {
-            historyDisplayEnabled = enabled;
-            mHistory->setVisible(enabled);
-            if (!enabled && historyReviewState)
-                setHistoryReviewState(false);
-            changed = true;
-        }
-        if (std::abs(delay - configuredDelay) > 0.001f)
-        {
-            delay = configuredDelay;
-            revealTime = std::min(revealTime, delay);
-            changed = true;
-        }
+        historyDisplayEnabled = true;
+        externalHistoryDisplayEnabled = true;
+        mHistory->setVisible(true);
+        delay = configuredDelay;
 
         const ChatWindowState previousState = windowState;
         setModeFromSetting(configuredMode);
         if (windowState != previousState)
-        {
-            if (windowState == CHAT_HIDDEN)
-            {
-                if (historyReviewState)
-                    setHistoryReviewState(false);
-                if (editState)
-                    setEditState(false);
-            }
-            revealTime = windowState == CHAT_AUTOHIDE ? delay : 0.f;
-            changed = true;
-        }
+            revealTime = 0.f;
 
-        if (changed)
-            refreshPresentation();
+        refreshPresentation();
     }
 
-    void GUIChat::setHistoryDisplayEnabled(bool enabled)
+    void GUIChat::setHistoryDisplayEnabled(bool)
     {
-        externalHistoryDisplayEnabled = enabled;
-        syncSettings();
+        // X031: retained for ABI/source compatibility with GUIController, but full
+        // chat hiding is intentionally no longer supported.
+        historyDisplayEnabled = true;
+        externalHistoryDisplayEnabled = true;
+        if (mHistory)
+            mHistory->setVisible(true);
+        refreshPresentation();
     }
 
     void GUIChat::setDelay(float newDelay)

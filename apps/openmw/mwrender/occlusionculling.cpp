@@ -279,12 +279,20 @@ namespace MWRender
         mCuller->beginFrame(cam->getViewMatrix(), cam->getProjectionMatrix());
         if (mEnableTerrainOccluder && mTerrainOccluder->hasTerrainData())
         {
-            // X028: TerrainOccluder keeps the assembled region stable while the
-            // eye remains in the same terrain cell. Do not clear/copy these large
-            // arrays every frame; only update them when the region actually changes.
-            mTerrainOccluder->build(cv->getEyePoint(), mRadiusCells, mPositions, mIndices);
-            if (!mPositions.empty() && !mIndices.empty())
-                mCuller->rasterizeOccluder(mPositions, mIndices);
+            // X031: side planes only. The desired transform is inverse(view*proj),
+            // so transformProvidingInverse receives view*proj directly. Near/far
+            // are intentionally omitted: this rejects cells behind/off-axis while
+            // remaining independent of normal/reversed depth conventions.
+            mFrustum.setToUnitFrustum(false, false);
+            mFrustum.transformProvidingInverse(cam->getViewMatrix() * cam->getProjectionMatrix());
+
+            mTerrainOccluder->collectVisibleCells(cv->getEyePoint(), mRadiusCells, mFrustum, mVisibleCells);
+            for (std::vector<Terrain::OccluderCellMesh>::const_iterator it = mVisibleCells.begin();
+                 it != mVisibleCells.end(); ++it)
+            {
+                if (it->mPositions && it->mIndices && !it->mPositions->empty() && !it->mIndices->empty())
+                    mCuller->rasterizeOccluder(*it->mPositions, *it->mIndices);
+            }
         }
         traverse(node, nv);
     }
@@ -508,10 +516,19 @@ namespace MWRender
             { child->accept(*cv); continue; }
             if (bs.radius() >= mOccluderMinRadius)
                 continue;
+            // X031: most children are visible, so avoid the named user-data
+            // lookup on that hot path. Only a child that software occlusion would
+            // reject needs the skipOcclusion escape-hatch lookup (doors, etc.).
+            osg::BoundingBox bb; bb.expandBy(bs);
+            if (mCuller->testVisibleAABB(bb))
+            {
+                child->accept(*cv);
+                continue;
+            }
+
             bool skipOcclusion = false;
             child->getUserValue("skipOcclusion", skipOcclusion);
-            osg::BoundingBox bb; bb.expandBy(bs);
-            if (skipOcclusion || mCuller->testVisibleAABB(bb))
+            if (skipOcclusion)
                 child->accept(*cv);
         }
     }

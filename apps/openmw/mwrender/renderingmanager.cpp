@@ -863,6 +863,7 @@ namespace MWRender
             // the first exterior assembly is spread over frames instead of
             // decoding the whole 17x17 region in one cull.
             mTerrainOccluder->setCellBuildBudget(Settings::Manager::getInt("occlusion terrain cell budget", "Camera"));
+            mTerrainOccluder->setFrustumCulling(Settings::Manager::getBool("occlusion terrain frustum cull", "Camera"));
             sceneRoot->addCullCallback(new SceneOcclusionCallback(
                 mOcclusionCuller.get(),
                 mTerrainOccluder.get(),
@@ -1796,9 +1797,17 @@ namespace MWRender
 
         if (mShadowManager)
         {
-            const float shadowDistance = mLandOptimizationEnabled
-                ? mConfiguredViewDistance * sLandOptimizationShadowDistanceRatio
-                : std::max(0.f, Settings::Manager::getFloat("maximum shadow map distance", "Shadows"));
+            // X030: optional hard link between draw distance and shadow reach.
+            // Use the configured view distance as the stable ceiling, then let
+            // adaptive land optimization scale both together. Shadows are never
+            // allowed beyond 16384 while the link is enabled.
+            const bool linkShadowDistance
+                = Settings::Manager::getBool("link shadow distance to viewing distance", "Shadows");
+            const float shadowDistance = linkShadowDistance
+                ? std::min(16384.f, std::max(0.f, mConfiguredViewDistance))
+                : (mLandOptimizationEnabled
+                    ? mConfiguredViewDistance * sLandOptimizationShadowDistanceRatio
+                    : std::max(0.f, Settings::Manager::getFloat("maximum shadow map distance", "Shadows")));
             mShadowManager->setMaximumShadowMapDistance(shadowDistance * adaptiveDistanceScale);
         }
     }
@@ -2023,6 +2032,7 @@ namespace MWRender
             {
                 stats->setAttribute(frameNumber, "Occl Terrain Cells", mTerrainOccluder->getCachedCellCount());
                 stats->setAttribute(frameNumber, "Occl Terrain Built", mTerrainOccluder->getLastBuiltCellCount());
+                stats->setAttribute(frameNumber, "Occl Terrain Rast", mTerrainOccluder->getLastVisibleCellCount());
             }
 
             if (mObjects)

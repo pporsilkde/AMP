@@ -1,0 +1,2925 @@
+diff -ruN /mnt/data/x030_clean_mp/X031_OCCLUSION_LIVE_CONFIG_MMO_RU.md /mnt/data/x031_mp/X031_OCCLUSION_LIVE_CONFIG_MMO_RU.md
+--- /mnt/data/x030_clean_mp/X031_OCCLUSION_LIVE_CONFIG_MMO_RU.md	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/x031_mp/X031_OCCLUSION_LIVE_CONFIG_MMO_RU.md	2026-08-29 20:04:59.852707207 +0000
+@@ -0,0 +1,48 @@
++# ArenaMP X031 — Occlusion Stage2 / Live RAW Config / MMO Defaults
++
++## Renderer / occlusion
++- Terrain occluder no longer assembles one large rebased mesh every region update.
++- Cached LAND cells are rasterized directly from their own position/index buffers.
++- Side-plane frustum culling rejects terrain occluder cells behind/outside the camera before software rasterization.
++- New setting: `[Camera] occlusion terrain frustum cull = true`.
++- Profiler adds `Occl Terrain Rast` (terrain cells actually submitted to the rasterizer).
++- X029 atomic profiler snapshots are preserved; no direct cross-thread reads of mutable cache counters.
++- One reusable scratch LAND vertex array reduces repeated allocations during cell decode.
++- Small-object culling performs the named `skipOcclusion` lookup only after software occlusion rejected the AABB.
++
++## RAW server config hot reload
++- `server/scripts/config.lua` is watched while the server is running.
++- Default poll interval: `config.rawConfigReloadInterval = 2` seconds, clamped to 1..60.
++- Reload is transactional: syntax/runtime/incomplete-save errors keep the previous working config active.
++- On successful reload, live server rules are reapplied and connected players receive refreshed authoritative settings.
++- Settings consumed directly from the global `config` table take effect on their next normal use/event.
++- Startup-only structural settings (plugin paths/load order/process topology) still require a server restart.
++
++## questIndex.json on restart
++- `config.questIndexRefreshOnServerStart = true` by default.
++- Every server process start marks the stored `custom/questIndex.json` as refresh-pending immediately and updates its restart metadata.
++- Old entries are retained only for diagnostics; quest phasing remains untrusted/fail-closed until a fresh verified client upload arrives.
++- The first valid fresh upload overwrites `questIndex.json`, clears the pending flag and re-enables trusted phasing.
++
++## MMO defaults in Launcher
++- ArenaMP graphics preset level 2 is now labelled `MMO (default)` and is the default for a fresh launcher/wizard instead of Auto.
++- MMO graphics profile keeps 8192 view distance, conservative paging/occlusion cost and the X030 shadow-distance link.
++- OSG Patch page adds `MMO (default)` and fresh defaults are aligned with it: `DrawThreadPerContext`, VBO on, display lists off, terrain/static occlusion on, force shaders on, forced per-pixel lighting off, one preload worker, one async physics worker, deferred AABB updates on.
++- Existing explicit user launcher choices are preserved; only fresh/default state changes automatically.
++
++## Removed legacy ArenaMP options
++- Removed `--vanilla-build-server` and the vanilla TES3MP protocol/commit impersonation path. ArenaMP always advertises its ArenaMP protocol + compatibility hash.
++- Removed hardcoded `mp.tes3mp.com` fallback; local fallback is `localhost` and the shipped client default also points to localhost.
++- Removed `--hide-chat-history`.
++- Chat can no longer enter Auto-hide or Hidden mode. F2 cycles only Visible / 30% / 60% opacity. Old `autohide` or `hidden` settings migrate to a visible 30% mode.
++- Chat history is always enabled. Temporary UI hiding used internally by menu transitions remains intact.
++
++## Validation performed
++- X031 occlusion logic harness: cold radius-8 build 13 frames at budget 24, one-cell step 17 new cells, unlimited mode 289 cells.
++- Side-frustum tests pass for both ordinary and reversed depth projections.
++- Qt `.ui` XML parsed successfully.
++- Lua syntax checks passed for `config.lua`, `configHotReload.lua`, `questIndexStore.lua`, `serverCore.lua`.
++- Mock RAW reload passed: valid reload, syntax rollback, incomplete-save rollback, recovery reload.
++- Mock quest-index startup refresh passed and updates restart metadata while keeping the index untrusted until fresh upload.
++
++Full engine compilation was not run in this environment.
+diff -ruN /mnt/data/x030_clean_mp/X031_occlusion_logic_harness.cpp /mnt/data/x031_mp/X031_occlusion_logic_harness.cpp
+--- /mnt/data/x030_clean_mp/X031_occlusion_logic_harness.cpp	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/x031_mp/X031_occlusion_logic_harness.cpp	2026-08-29 20:04:59.855530151 +0000
+@@ -0,0 +1,109 @@
++#include <algorithm>
++#include <cmath>
++#include <cstdio>
++#include <limits>
++#include <map>
++#include <vector>
++
++struct Vec4 { double v[4]; };
++struct Mat  { double m[4][4]; };
++
++static Mat mul(const Mat& a, const Mat& b)
++{
++    Mat r{};
++    for (int i = 0; i < 4; ++i)
++        for (int j = 0; j < 4; ++j)
++            for (int k = 0; k < 4; ++k)
++                r.m[i][j] += a.m[i][k] * b.m[k][j];
++    return r;
++}
++
++static Vec4 transformPlane(const Vec4& p, const Mat& M)
++{
++    Vec4 r{};
++    for (int i = 0; i < 4; ++i)
++        for (int j = 0; j < 4; ++j)
++            r.v[i] += p.v[j] * M.m[i][j];
++    return r;
++}
++
++static double distance(const Vec4& plane, double x, double y, double z)
++{
++    return plane.v[0]*x + plane.v[1]*y + plane.v[2]*z + plane.v[3];
++}
++
++struct OccluderSim
++{
++    std::map<std::pair<int,int>, bool> cache;
++    bool regionValid = false;
++    std::pair<int,int> cachedPos{0,0};
++    int cachedRadius = -1;
++    int budgetPerBuild = 24;
++    unsigned int lastBuilt = 0;
++
++    void prune(std::pair<int,int> c, int r)
++    {
++        const int keep = std::max(1, r) + 2;
++        for (auto it = cache.begin(); it != cache.end();)
++        {
++            if (std::abs(it->first.first-c.first)>keep || std::abs(it->first.second-c.second)>keep)
++                it=cache.erase(it); else ++it;
++        }
++    }
++    void collect(int cx0,int cy0,int radius)
++    {
++        lastBuilt=0;
++        int budget=budgetPerBuild>0?budgetPerBuild:std::numeric_limits<int>::max();
++        bool complete=true;
++        for(int cy=cy0-radius;cy<=cy0+radius;++cy)
++            for(int cx=cx0-radius;cx<=cx0+radius;++cx)
++            {
++                if(cache.count({cx,cy})) continue;
++                if(budget<=0){complete=false;continue;}
++                --budget; ++lastBuilt; cache[{cx,cy}]=true;
++            }
++        cachedPos={cx0,cy0}; cachedRadius=radius; regionValid=complete; prune(cachedPos,radius);
++    }
++};
++
++static bool testBudget()
++{
++    const int radius=8, region=(2*radius+1)*(2*radius+1);
++    OccluderSim sim; int frames=0;
++    while(!sim.regionValid && frames<1000){sim.collect(0,0,radius);++frames;}
++    const int expect=(region+sim.budgetPerBuild-1)/sim.budgetPerBuild;
++    bool ok=frames==expect;
++    std::printf("cold: %d frames expected %d => %s\n",frames,expect,ok?"ok":"FAIL");
++    sim.collect(1,0,radius); bool step=sim.lastBuilt==unsigned(2*radius+1);
++    std::printf("step: %u built expected %d => %s\n",sim.lastBuilt,2*radius+1,step?"ok":"FAIL");
++    OccluderSim off; off.budgetPerBuild=0; off.collect(0,0,radius); bool unlimited=off.lastBuilt==unsigned(region);
++    std::printf("unlimited: %u expected %d => %s\n",off.lastBuilt,region,unlimited?"ok":"FAIL");
++    return ok&&step&&unlimited;
++}
++
++static Mat perspective(double fovyDeg,double aspect,double zn,double zf)
++{
++    const double f=1.0/std::tan(fovyDeg*3.14159265358979/360.0);
++    Mat P{}; P.m[0][0]=f/aspect; P.m[1][1]=f; P.m[2][2]=(zf+zn)/(zn-zf); P.m[2][3]=-1.0; P.m[3][2]=2.0*zf*zn/(zn-zf); return P;
++}
++
++static bool testFrustum(const char* label,const Mat& proj)
++{
++    Mat view{}; for(int i=0;i<4;++i)view.m[i][i]=1.0;
++    Mat vp=mul(view,proj);
++    const Vec4 clip[4]={{{1,0,0,1}},{{-1,0,0,1}},{{0,1,0,1}},{{0,-1,0,1}}};
++    Vec4 planes[4]; for(int i=0;i<4;++i) planes[i]=transformPlane(clip[i],vp);
++    auto inside=[&](double x,double y,double z){for(auto &p:planes)if(distance(p,x,y,z)<0)return false;return true;};
++    bool ahead=true,behind=true,side=true;
++    for(double d=1;d<20000;d*=2){if(!inside(0,0,-d))ahead=false;if(inside(0,0,d))behind=false;if(inside(10*d,0,-d))side=false;}
++    std::printf("%s ahead=%s behind-reject=%s side-reject=%s\n",label,ahead?"ok":"FAIL",behind?"ok":"FAIL",side?"ok":"FAIL");
++    return ahead&&behind&&side;
++}
++
++int main()
++{
++    bool ok=testBudget();
++    ok &= testFrustum("standard", perspective(75.0,16.0/9.0,1.0,100000.0));
++    ok &= testFrustum("reversed", perspective(75.0,16.0/9.0,100000.0,1.0));
++    return ok?0:1;
++}
+diff -ruN /mnt/data/x030_clean_mp/apps/launcher/advancedpage.cpp /mnt/data/x031_mp/apps/launcher/advancedpage.cpp
+--- /mnt/data/x030_clean_mp/apps/launcher/advancedpage.cpp	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mp/apps/launcher/advancedpage.cpp	2026-08-29 20:03:20.924461916 +0000
+@@ -189,7 +189,17 @@
+         bool deferAabbUpdate;
+     };
+ 
+-    constexpr std::array<OsgPatchPreset, 5> sOsgPatchPresets{{
++    constexpr std::array<OsgPatchPreset, 6> sOsgPatchPresets{{
++        {
++            "MMO (default)",
++            "ArenaMP multiplayer default: stable threaded rendering, VBOs, terrain/static occlusion, conservative shaders and one background physics/preload worker.",
++            "DrawThreadPerContext", false,
++            true, false,
++            true,
++            true, true, true,
++            true, false,
++            1, 1, true
++        },
+         {
+             "Safe",
+             "Maximum stability first: single-threaded rendering, conservative physics, and no occlusion culling. Good as a baseline on problematic drivers.",
+@@ -303,6 +313,7 @@
+         loadSettingBool(progressiveXpCurveCheckBox, "progressive xp curve", "XP Leveling");
+         loadSettingBool(showXpNotificationsCheckBox, "show xp notifications", "XP Leveling");
+         occlusionTerrainBudgetSpinBox->setValue(Settings::Manager::getInt("occlusion terrain cell budget", "Camera"));
++        loadSettingBool(occlusionTerrainFrustumCullCheckBox, "occlusion terrain frustum cull", "Camera");
+     }
+ 
+     // Visuals
+@@ -509,6 +520,7 @@
+         saveSettingBool(progressiveXpCurveCheckBox, "progressive xp curve", "XP Leveling");
+         saveSettingBool(showXpNotificationsCheckBox, "show xp notifications", "XP Leveling");
+         Settings::Manager::setInt("occlusion terrain cell budget", "Camera", occlusionTerrainBudgetSpinBox->value());
++        saveSettingBool(occlusionTerrainFrustumCullCheckBox, "occlusion terrain frustum cull", "Camera");
+     }
+ 
+     // Visuals
+diff -ruN /mnt/data/x030_clean_mp/apps/launcher/graphicspage.cpp /mnt/data/x031_mp/apps/launcher/graphicspage.cpp
+--- /mnt/data/x030_clean_mp/apps/launcher/graphicspage.cpp	2026-08-29 19:37:27.000000000 +0000
++++ /mnt/data/x031_mp/apps/launcher/graphicspage.cpp	2026-08-29 20:03:20.924256816 +0000
+@@ -533,7 +533,7 @@
+ QString Launcher::GraphicsPage::qualityName(int level) const
+ {
+     static const std::array<const char*, 6> names = {
+-        "Minimum", "Low", "Balanced", "Medium", "High", "Ultra"
++        "Minimum", "Low", "MMO", "Medium", "High", "Ultra"
+     };
+     return tr(names[std::max(0, std::min(5, level))]);
+ }
+@@ -543,7 +543,7 @@
+     static const std::array<const char*, 6> descriptions = {
+         "Maximum performance for software renderers and very old integrated graphics. Uses simple non-PBR water, shorter view distance, small terrain budget and no realtime shadows.",
+         "For older integrated GPUs. Uses simple non-PBR water, modest view distance, actor shadows and lightweight grass without expensive object shadows.",
+-        "A stable default for entry-level hardware. Enables distant terrain, normal maps, actor shadows and conservative paging.",
++        "ArenaMP MMO default: stable multiplayer profile with moderate view distance, actor shadows, PBR water and conservative paging/occlusion cost.",
+         "Balanced visual quality for modern integrated graphics and mainstream discrete GPUs. Enables object shadows, improved water and denser grass.",
+         "For powerful discrete GPUs. Uses longer view distance, detailed terrain, terrain shadows, higher anisotropy and larger shadow maps.",
+         "Maximum detail for high-end GPUs. Uses the longest draw distances, dense groundcover, high light counts and very large shadow maps."
+@@ -770,13 +770,13 @@
+     mRecommendedQuality = recommendQuality(mHardwareInfo);
+ 
+     const bool autoSelect = mLauncherSettings.value(
+-        QStringLiteral("General/Graphics/autoSelect"), QStringLiteral("true"))
++        QStringLiteral("General/Graphics/autoSelect"), QStringLiteral("false"))
+         .compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0;
+     const bool vendorOptimizations = mLauncherSettings.value(
+         QStringLiteral("General/Graphics/vendorOptimizations"), QStringLiteral("true"))
+         .compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0;
+     const QString mode = mLauncherSettings.value(
+-        QStringLiteral("General/Graphics/qualityMode"), QStringLiteral("auto"));
++        QStringLiteral("General/Graphics/qualityMode"), QStringLiteral("2"));
+ 
+     autoSelectQualityCheckBox->setChecked(autoSelect);
+     vendorOptimizationsCheckBox->setChecked(vendorOptimizations);
+@@ -803,13 +803,14 @@
+ 
+     if (initialPresetPending && reloadUserSettingsFromDisk())
+     {
+-        applyQualityLevel(mRecommendedQuality);
++        const int initialMmoLevel = 2;
++        applyQualityLevel(initialMmoLevel);
+         if (vendorOptimizations)
+-            applyVendorOptimizations(mRecommendedQuality);
++            applyVendorOptimizations(initialMmoLevel);
+ 
+         if (saveUserSettingsToDisk())
+         {
+-            storeLauncherValue(QStringLiteral("General/Graphics/qualityMode"), QStringLiteral("auto"));
++            storeLauncherValue(QStringLiteral("General/Graphics/qualityMode"), QStringLiteral("2"));
+             storeLauncherValue(QStringLiteral("General/Graphics/hardwareSignature"), mHardwareInfo.signature());
+             storeLauncherValue(pendingKey, QStringLiteral("false"));
+             storeLauncherValue(QStringLiteral("General/Graphics/initialQualityPresetApplied"),
+@@ -978,6 +979,7 @@
+     Settings::Manager::setInt("occlusion buffer height", "Camera", occlusionHeight[level]);
+     Settings::Manager::setInt("occlusion terrain radius", "Camera", occlusionTerrainRadius[level]);
+     Settings::Manager::setInt("occlusion terrain cell budget", "Camera", occlusionTerrainCellBudget[level]);
++    Settings::Manager::setBool("occlusion terrain frustum cull", "Camera", true);
+     Settings::Manager::setFloat("occlusion occluder min radius", "Camera", occlusionMinRadius[level]);
+     Settings::Manager::setFloat("occlusion occluder max radius", "Camera", occlusionMaxRadius[level]);
+     Settings::Manager::setFloat("occlusion occluder shrink factor", "Camera", occlusionShrinkFactor[level]);
+diff -ruN /mnt/data/x030_clean_mp/apps/openmw/mwmp/GUI/GUIChat.cpp /mnt/data/x031_mp/apps/openmw/mwmp/GUI/GUIChat.cpp
+--- /mnt/data/x030_clean_mp/apps/openmw/mwmp/GUI/GUIChat.cpp	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mp/apps/openmw/mwmp/GUI/GUIChat.cpp	2026-08-29 20:03:20.923702270 +0000
+@@ -202,9 +202,9 @@
+                 scrollHistoryToBottom();
+             LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "%s", msg.c_str());
+ 
+-            // A received message temporarily restores full opacity. Auto-hide mode also
+-            // fades the chat in for the configured delay. Fully hidden chat stays hidden.
+-            if (historyDisplayEnabled && windowState != CHAT_HIDDEN && !mainMenuOpen)
++            // X031: chat can no longer be fully hidden. A received message may
++            // temporarily raise opacity, then returns to the selected visible mode.
++            if (!mainMenuOpen)
+                 revealTemporarily();
+         }
+     }
+@@ -239,28 +239,16 @@
+ 
+     void GUIChat::pressedChatMode()
+     {
+-        if (!historyDisplayEnabled)
+-        {
+-            MWBase::Environment::get().getWindowManager()->messageBox(
+-                localizeArena("chat.history_hidden"));
+-            return;
+-        }
+-
++        // X031: F2 cycles only visible opacity modes. Auto-hide and fully hidden
++        // states were removed so multiplayer chat cannot silently disappear.
+         windowState = static_cast<ChatWindowState>((static_cast<int>(windowState) + 1) % CHAT_STATE_COUNT);
+         Settings::Manager::setString("mode", "Chat", getModeSetting());
+         Settings::Manager::saveUser();
+-        revealTime = windowState == CHAT_AUTOHIDE ? delay : 0.f;
++        revealTime = 0.f;
+ 
+         const std::string chatMode = getModeMessage();
+         LOG_MESSAGE_SIMPLE(TimedLog::LOG_VERBOSE, "Switch chat mode to %s", chatMode.c_str());
+         MWBase::Environment::get().getWindowManager()->messageBox(chatMode);
+-
+-        if (windowState == CHAT_HIDDEN)
+-        {
+-            setHistoryReviewState(false);
+-            setEditState(false);
+-        }
+-
+         refreshPresentation();
+     }
+ 
+@@ -276,8 +264,6 @@
+ 
+         if (editState)
+             revealTime = 0.f;
+-        else if (windowState == CHAT_AUTOHIDE)
+-            revealTime = delay;
+ 
+         refreshPresentation();
+     }
+@@ -385,8 +371,6 @@
+             if (!mainMenuOpen)
+                 MWBase::Environment::get().getInputManager()->changeInputMode(false);
+             scrollHistoryToBottom();
+-            if (windowState == CHAT_AUTOHIDE)
+-                revealTime = delay;
+         }
+ 
+         updateCommandLineLayout();
+@@ -528,22 +512,13 @@
+         if (mainMenuOpen)
+             return;
+ 
+-        if (!historyDisplayEnabled)
+-        {
+-            if (editState)
+-                showSmoothly(sFullyVisibleAlpha);
+-            else
+-                hideSmoothly();
+-            return;
+-        }
+-
+         if (editState || historyReviewState)
+         {
+             showSmoothly(sFullyVisibleAlpha);
+             return;
+         }
+ 
+-        if (revealTime > 0.f && windowState != CHAT_HIDDEN)
++        if (revealTime > 0.f)
+         {
+             showSmoothly(sFullyVisibleAlpha);
+             return;
+@@ -618,10 +593,6 @@
+                 return localizeArena("chat.mode.opacity_30");
+             case CHAT_TRANSPARENT_60:
+                 return localizeArena("chat.mode.opacity_60");
+-            case CHAT_AUTOHIDE:
+-                return localizeArena("chat.mode.autohide");
+-            case CHAT_HIDDEN:
+-                return localizeArena("chat.mode.hidden");
+             default:
+                 return localizeArena("chat.mode.visible");
+         }
+@@ -635,8 +606,6 @@
+             case CHAT_VISIBLE: return "visible";
+             case CHAT_TRANSPARENT_30: return "transparent30";
+             case CHAT_TRANSPARENT_60: return "transparent60";
+-            case CHAT_AUTOHIDE: return "autohide";
+-            case CHAT_HIDDEN: return "hidden";
+             default: return "transparent30";
+         }
+     }
+@@ -647,60 +616,38 @@
+             windowState = CHAT_VISIBLE;
+         else if (mode == "transparent60")
+             windowState = CHAT_TRANSPARENT_60;
+-        else if (mode == "autohide")
+-            windowState = CHAT_AUTOHIDE;
+-        else if (mode == "hidden")
+-            windowState = CHAT_HIDDEN;
+         else
++            // Legacy autohide/hidden values migrate to a visible opacity mode.
+             windowState = CHAT_TRANSPARENT_30;
+     }
+ 
+     void GUIChat::syncSettings()
+     {
+-        const bool enabled = externalHistoryDisplayEnabled
+-            && Settings::Manager::getBool("enabled", "Chat");
+         const float configuredDelay = std::max(0.f, Settings::Manager::getFloat("delay", "Chat"));
+         const std::string configuredMode = Settings::Manager::getString("mode", "Chat");
+ 
+-        bool changed = false;
+-        if (historyDisplayEnabled != enabled)
+-        {
+-            historyDisplayEnabled = enabled;
+-            mHistory->setVisible(enabled);
+-            if (!enabled && historyReviewState)
+-                setHistoryReviewState(false);
+-            changed = true;
+-        }
+-        if (std::abs(delay - configuredDelay) > 0.001f)
+-        {
+-            delay = configuredDelay;
+-            revealTime = std::min(revealTime, delay);
+-            changed = true;
+-        }
++        historyDisplayEnabled = true;
++        externalHistoryDisplayEnabled = true;
++        mHistory->setVisible(true);
++        delay = configuredDelay;
+ 
+         const ChatWindowState previousState = windowState;
+         setModeFromSetting(configuredMode);
+         if (windowState != previousState)
+-        {
+-            if (windowState == CHAT_HIDDEN)
+-            {
+-                if (historyReviewState)
+-                    setHistoryReviewState(false);
+-                if (editState)
+-                    setEditState(false);
+-            }
+-            revealTime = windowState == CHAT_AUTOHIDE ? delay : 0.f;
+-            changed = true;
+-        }
++            revealTime = 0.f;
+ 
+-        if (changed)
+-            refreshPresentation();
++        refreshPresentation();
+     }
+ 
+-    void GUIChat::setHistoryDisplayEnabled(bool enabled)
++    void GUIChat::setHistoryDisplayEnabled(bool)
+     {
+-        externalHistoryDisplayEnabled = enabled;
+-        syncSettings();
++        // X031: retained for ABI/source compatibility with GUIController, but full
++        // chat hiding is intentionally no longer supported.
++        historyDisplayEnabled = true;
++        externalHistoryDisplayEnabled = true;
++        if (mHistory)
++            mHistory->setVisible(true);
++        refreshPresentation();
+     }
+ 
+     void GUIChat::setDelay(float newDelay)
+diff -ruN /mnt/data/x030_clean_mp/apps/openmw/mwmp/GUI/GUIChat.hpp /mnt/data/x031_mp/apps/openmw/mwmp/GUI/GUIChat.hpp
+--- /mnt/data/x030_clean_mp/apps/openmw/mwmp/GUI/GUIChat.hpp	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mp/apps/openmw/mwmp/GUI/GUIChat.hpp	2026-08-29 20:04:59.471025750 +0000
+@@ -24,8 +24,6 @@
+             CHAT_VISIBLE = 0,
+             CHAT_TRANSPARENT_30,
+             CHAT_TRANSPARENT_60,
+-            CHAT_AUTOHIDE,
+-            CHAT_HIDDEN,
+             CHAT_STATE_COUNT
+         };
+ 
+@@ -44,7 +42,7 @@
+         GUIChat(int x, int y, int w, int h);
+ 
+         void pressedChatMode(); //switch chat mode
+-        void pressedSay(); // show chat input, including while the chat itself is hidden
++        void pressedSay(); // show chat input
+         void setDelay(float newDelay);
+         void setHistoryDisplayEnabled(bool enabled);
+ 
+diff -ruN /mnt/data/x030_clean_mp/apps/openmw/mwmp/GUIController.cpp /mnt/data/x031_mp/apps/openmw/mwmp/GUIController.cpp
+--- /mnt/data/x030_clean_mp/apps/openmw/mwmp/GUIController.cpp	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/x031_mp/apps/openmw/mwmp/GUIController.cpp	2026-08-29 20:03:20.923063377 +0000
+@@ -0,0 +1,506 @@
++#include <components/openmw-mp/TimedLog.hpp>
++#include <components/openmw-mp/Base/BasePlayer.hpp>
++
++#include <SDL_system.h>
++
++#include <MyGUI_FactoryManager.h>
++#include <MyGUI_EditBox.h>
++#include <MyGUI_Gui.h>
++#include <MyGUI_ImageBox.h>
++#include <MyGUI_InputManager.h>
++#include <MyGUI_LanguageManager.h>
++#include <MyGUI_RenderManager.h>
++#include <MyGUI_ScrollView.h>
++
++#include <extern/PicoSHA2/picosha2.h>
++
++#include "../mwbase/environment.hpp"
++#include "../mwbase/windowmanager.hpp"
++#include "../mwbase/inputmanager.hpp"
++
++#include "../mwgui/mapwindow.hpp"
++
++#include "../mwworld/worldimp.hpp"
++#include "../mwworld/player.hpp"
++#include "../mwworld/cellstore.hpp"
++
++#include "GUIController.hpp"
++#include "Main.hpp"
++#include "Networking.hpp"
++#include "GUI/PlayerMarkerCollection.hpp"
++#include "GUI/GUIDialogList.hpp"
++#include "GUI/GUIChat.hpp"
++#include "LocalPlayer.hpp"
++#include "DedicatedPlayer.hpp"
++#include "PlayerList.hpp"
++
++
++mwmp::GUIController::GUIController()
++    : mInputBox(nullptr)
++    , mAccountLoginBox(nullptr)
++    , mListBox(nullptr)
++    , mPreLoginPasswordAutoSubmitted(false)
++{
++    mChat = nullptr;
++    keySay = SDL_SCANCODE_Y;
++    keyChatMode = SDL_SCANCODE_F2;
++}
++
++mwmp::GUIController::~GUIController()
++{
++
++}
++
++void mwmp::GUIController::cleanUp()
++{
++    mPlayerMarkers.clear();
++    if (mChat != nullptr)
++        delete mChat;
++    mChat = nullptr;
++
++    // A fresh connection gets one automatic submission from the credentials
++    // collected by the account card, even if the previous connection ended
++    // before authentication completed.
++    mPreLoginPasswordAutoSubmitted = false;
++}
++
++void mwmp::GUIController::refreshGuiMode(MWGui::GuiMode guiMode)
++{
++    if (MWBase::Environment::get().getWindowManager()->containsMode(guiMode))
++    {
++        MWBase::Environment::get().getWindowManager()->removeGuiMode(guiMode);
++        MWBase::Environment::get().getWindowManager()->pushGuiMode(guiMode);
++    }
++}
++
++void mwmp::GUIController::setupChat()
++{
++    assert(mChat == nullptr);
++
++    float chatDelay = Settings::Manager::getFloat("delay", "Chat");
++    int chatY = Settings::Manager::getInt("y", "Chat");
++    int chatX = Settings::Manager::getInt("x", "Chat");
++    int chatW = Settings::Manager::getInt("w", "Chat");
++    int chatH = Settings::Manager::getInt("h", "Chat");
++
++    keySay = SDL_GetScancodeFromName(Settings::Manager::getString("keySay", "Chat").c_str());
++    keyChatMode = SDL_GetScancodeFromName(Settings::Manager::getString("keyChatMode", "Chat").c_str());
++
++    mChat = new GUIChat(chatX, chatY, chatW, chatH);
++    mChat->setDelay(chatDelay);
++    // X031: chat history is always available; full-hide startup mode was removed.
++    mChat->setHistoryDisplayEnabled(true);
++}
++
++void mwmp::GUIController::printChatMessage(std::string &msg)
++{
++    if (mChat != nullptr)
++        mChat->print(msg);
++}
++
++
++void mwmp::GUIController::setChatVisible(bool chatVisible)
++{
++    if (!chatVisible)
++    {
++        mChat->setHistoryReviewState(false);
++        mChat->hideSmoothly();
++    }
++    else
++        mChat->refreshPresentation();
++}
++
++void mwmp::GUIController::showDialogList(const mwmp::BasePlayer::GUIMessageBox &guiMessageBox)
++{
++    MWBase::WindowManager *windowManager = MWBase::Environment::get().getWindowManager();
++
++    if (mListBox != NULL)
++    {
++        windowManager->removeDialog(mListBox);
++        windowManager->removeCurrentModal(mListBox);
++        mListBox = NULL;
++    }
++
++    std::vector<std::string> list;
++
++    std::string buf;
++
++    for (const auto &data : guiMessageBox.data)
++    {
++        if (data == '\n')
++        {
++            list.push_back(buf);
++            buf.erase();
++            continue;
++        }
++        buf += data;
++    }
++
++    list.push_back(buf);
++
++    mListBox = new GUIDialogList(guiMessageBox.label, list);
++    windowManager->pushGuiMode((MWGui::GuiMode)GM_TES3MP_ListBox);
++}
++
++void mwmp::GUIController::showMessageBox(const BasePlayer::GUIMessageBox &guiMessageBox)
++{
++    MWBase::WindowManager *windowManager = MWBase::Environment::get().getWindowManager();
++    windowManager->messageBox(guiMessageBox.label);
++}
++
++std::vector<std::string> splitString(const std::string &str, char delim = ';')
++{
++    std::istringstream ss(str);
++    std::vector<std::string> result;
++    std::string token;
++    while (std::getline(ss, token, delim))
++        result.push_back(token);
++    return result;
++}
++
++void mwmp::GUIController::showCustomMessageBox(const BasePlayer::GUIMessageBox &guiMessageBox)
++{
++    MWBase::WindowManager* windowManager = MWBase::Environment::get().getWindowManager();
++    std::vector<std::string> buttons = splitString(guiMessageBox.buttons);
++    windowManager->interactiveMessageBox(guiMessageBox.label, buttons, false, true);
++}
++
++void mwmp::GUIController::showInputBox(const BasePlayer::GUIMessageBox &guiMessageBox)
++{
++    MWBase::WindowManager *windowManager = MWBase::Environment::get().getWindowManager();
++    LocalPlayer* localPlayer = Main::get().getLocalPlayer();
++
++    const bool passwordDialog = guiMessageBox.type == BasePlayer::GUIMessageBox::PasswordDialog;
++    const bool preLoginAccountPrompt = passwordDialog && !localPlayer->isLoggedIn();
++
++    // CoreScripts' stable GUI ids are LOGIN=1 and REGISTER=2 (tableHelper.enum
++    // is 1-based). Existing accounts may use the password already collected on
++    // the initial ArenaMP account card for a fast login. New accounts must never
++    // auto-submit: registration gets a dedicated confirmation screen first.
++    // CoreScripts uses REGISTER=2. Keep a note-based fallback as well because
++    // older/custom server scripts may preserve PasswordDialog semantics while
++    // using a different GUI id. The registration prompt is the only pre-login
++    // password dialog that normally carries explanatory note text.
++    const bool registrationPrompt = preLoginAccountPrompt
++        && (guiMessageBox.id == 2 || !guiMessageBox.note.empty());
++    const bool loginPrompt = preLoginAccountPrompt && !registrationPrompt;
++
++    LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO,
++        "ArenaMP account PasswordDialog: id=%d registration=%d login=%d",
++        guiMessageBox.id, registrationPrompt ? 1 : 0, loginPrompt ? 1 : 0);
++
++    if (loginPrompt && !mPreLoginPasswordAutoSubmitted)
++    {
++        const std::string savedPassword = Settings::Manager::getString("password", "Login");
++        if (!savedPassword.empty())
++        {
++            mPreLoginPasswordAutoSubmitted = true;
++            submitInputReply(savedPassword);
++            return;
++        }
++    }
++
++    windowManager->removeDialog(mInputBox);
++    mInputBox = nullptr;
++    windowManager->removeDialog(mAccountLoginBox);
++    mAccountLoginBox = nullptr;
++
++    // Do not stack the same TES3MP modal mode repeatedly when a server replaces
++    // one password prompt with another (login retry / registration). A duplicate
++    // mode can keep LocalPlayer::processCharGen() blocked even after the visible
++    // dialog has gone away.
++    const MWGui::GuiMode inputMode = (MWGui::GuiMode)GM_TES3MP_InputBox;
++    if (!windowManager->containsMode(inputMode))
++        windowManager->pushGuiMode(inputMode);
++
++    if (preLoginAccountPrompt)
++    {
++        // Once the server knows the player name it also knows whether the account
++        // exists. Registration therefore has its own branded card with a second
++        // password field. The account name is locked in both modes because changing
++        // it after PlayerBaseInfo requires reconnecting.
++        mAccountLoginBox = new GUILogin(registrationPrompt ? GUILogin::RegisterMode : GUILogin::LoginMode);
++        mAccountLoginBox->setLogin(Settings::Manager::getString("name", "Login"));
++        mAccountLoginBox->setPassword(registrationPrompt
++            ? Settings::Manager::getString("password", "Login")
++            : "");
++        mAccountLoginBox->setLanguage(Settings::Manager::getString("interface language", "General"));
++        mAccountLoginBox->setLoginEditable(false);
++        mAccountLoginBox->setRetryMode(loginPrompt && mPreLoginPasswordAutoSubmitted);
++        mAccountLoginBox->eventDone += MyGUI::newDelegate(this, &GUIController::onAccountLoginDone);
++        mAccountLoginBox->setVisible(true);
++        return;
++    }
++
++    // Ordinary server InputDialog/PasswordDialog windows used after login stay
++    // compact and keep their original semantics.
++    mInputBox = new TextInputDialog();
++    mInputBox->setEditPassword(passwordDialog);
++    mInputBox->setTextLabel(guiMessageBox.label);
++    mInputBox->setTextNote(guiMessageBox.note);
++    mInputBox->eventDone += MyGUI::newDelegate(this, &GUIController::onInputBoxDone);
++    mInputBox->setVisible(true);
++}
++
++void mwmp::GUIController::submitInputReply(const std::string& rawText)
++{
++    LocalPlayer *localPlayer = Main::get().getLocalPlayer();
++    std::string textInput = rawText;
++
++    // Password dialogs use TES3MP's historical client-side double hashing. Keep
++    // the plain password only in local settings; the protocol payload remains
++    // exactly what existing servers expect.
++    if (localPlayer->guiMessageBox.type == BasePlayer::GUIMessageBox::PasswordDialog)
++    {
++        if (!localPlayer->isLoggedIn())
++        {
++            Settings::Manager::setString("password", "Login", rawText);
++            Settings::Manager::saveUser();
++        }
++
++        textInput = picosha2::hash256_hex_string(textInput);
++        textInput = picosha2::hash256_hex_string(textInput
++            + picosha2::hash256_hex_string(picosha2::hash256_hex_string(textInput)));
++    }
++
++    localPlayer->guiMessageBox.data = textInput;
++
++    PlayerPacket *playerPacket = Main::get().getNetworking()->getPlayerPacket(ID_GUI_MESSAGEBOX);
++    playerPacket->setPlayer(localPlayer);
++    playerPacket->Send();
++}
++
++void mwmp::GUIController::onInputBoxDone(MWGui::WindowBase *parWindow)
++{
++    (void)parWindow;
++    submitInputReply(mInputBox->getTextInput());
++
++    MWBase::WindowManager *windowManager = MWBase::Environment::get().getWindowManager();
++    windowManager->removeDialog(mInputBox);
++    mInputBox = nullptr;
++    windowManager->popGuiMode();
++}
++
++void mwmp::GUIController::onAccountLoginDone(MWGui::WindowBase *parWindow)
++{
++    (void)parWindow;
++    if (!mAccountLoginBox)
++        return;
++
++    // Capture everything before destroying the modal. In particular, close the
++    // TES3MP input GUI mode BEFORE the password reply is sent: registration can
++    // make the server answer with ID_PLAYER_CHARGEN immediately, and CharGen is
++    // intentionally blocked while any GUI mode is still active.
++    const std::string password = mAccountLoginBox->getPassword();
++    const std::string language = mAccountLoginBox->getLanguage();
++    const bool registration = mAccountLoginBox->isRegistrationMode();
++
++    Settings::Manager::setString("password", "Login", password);
++    Settings::Manager::setString("interface language", "General", language);
++    Settings::Manager::saveUser();
++    MWBase::Environment::get().getWindowManager()->setArenaLanguage(language);
++
++    if (!registration)
++        mPreLoginPasswordAutoSubmitted = true;
++
++    MWBase::WindowManager *windowManager = MWBase::Environment::get().getWindowManager();
++    windowManager->removeDialog(mAccountLoginBox);
++    mAccountLoginBox = nullptr;
++    windowManager->removeGuiMode((MWGui::GuiMode)GM_TES3MP_InputBox);
++
++    // The account card is shown after the initial PlayerBaseInfo handshake, so
++    // re-send the selected RU/EN flag before the password response. The server
++    // can then localise registration/login result messages for this player.
++    LocalPlayer* localPlayer = Main::get().getLocalPlayer();
++    localPlayer->updateLanguage();
++    PlayerPacket* baseInfoPacket = Main::get().getNetworking()->getPlayerPacket(ID_PLAYER_BASEINFO);
++    baseInfoPacket->setPlayer(localPlayer);
++    baseInfoPacket->Send();
++
++    LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO,
++        "Submitting ArenaMP %s password reply after closing TES3MP input mode",
++        registration ? "registration" : "login");
++    submitInputReply(password);
++}
++
++bool mwmp::GUIController::pressedKey(int key)
++{
++    MWBase::WindowManager *windowManager = MWBase::Environment::get().getWindowManager();
++    if (mChat == nullptr || windowManager->isConsoleMode() || windowManager->getMode() != MWGui::GM_None)
++        return false;
++    if (key == keyChatMode)
++    {
++        mChat->pressedChatMode();
++        return true;
++    }
++    else if (key == keySay)
++    {
++        mChat->pressedSay();
++        return true;
++    }
++    return false;
++}
++
++void mwmp::GUIController::changeChatMode()
++{
++    mChat->pressedChatMode();
++}
++
++bool mwmp::GUIController::getChatEditState()
++{
++    return mChat->editState;
++}
++
++std::string mwmp::GUIController::getChatHistoryText() const
++{
++    return mChat != nullptr ? mChat->getHistoryText() : std::string();
++}
++
++bool mwmp::GUIController::getChatHistoryCoord(int& x, int& y, int& width, int& height) const
++{
++    if (mChat == nullptr || mChat->mHistory == nullptr)
++        return false;
++
++    const MyGUI::IntCoord coord = mChat->mHistory->getAbsoluteCoord();
++    if (coord.width <= 0 || coord.height <= 0)
++        return false;
++
++    x = coord.left;
++    y = coord.top;
++    width = coord.width;
++    height = coord.height;
++    return true;
++}
++
++void mwmp::GUIController::setChatMainMenuOpen(bool state)
++{
++    if (mChat != nullptr)
++        mChat->setMainMenuOpen(state);
++}
++
++void mwmp::GUIController::update(float dt)
++{
++    if (mChat != nullptr)
++        mChat->update(dt);
++
++    // Re-arm automatic credential submission only after a successful login, so
++    // a wrong password produces the retry card instead of an infinite resend loop.
++    if (Main::get().getLocalPlayer()->isLoggedIn())
++        mPreLoginPasswordAutoSubmitted = false;
++}
++
++void mwmp::GUIController::processCustomMessageBoxInput(int pressedButton)
++{
++    LOG_MESSAGE_SIMPLE(TimedLog::LOG_VERBOSE, "Pressed: %d", pressedButton);
++
++    LocalPlayer* localPlayer = Main::get().getLocalPlayer();
++    localPlayer->guiMessageBox.data = MyGUI::utility::toString(pressedButton);
++
++    PlayerPacket* playerPacket = Main::get().getNetworking()->getPlayerPacket(ID_GUI_MESSAGEBOX);
++    playerPacket->setPlayer(Main::get().getLocalPlayer());
++    playerPacket->Send();
++}
++
++void mwmp::GUIController::WM_UpdateVisible(MWGui::GuiMode mode)
++{
++    switch((int)mode)
++    {
++        case GM_TES3MP_InputBox:
++        {
++            if (mInputBox != nullptr)
++                mInputBox->setVisible(true);
++            if (mAccountLoginBox != nullptr)
++                mAccountLoginBox->setVisible(true);
++            break;
++        }
++        case GM_TES3MP_ListBox:
++        {
++            if (mListBox != 0)
++                mListBox->setVisible(true);
++            break;
++        }
++        default:
++            break;
++    }
++}
++
++ESM::CustomMarker mwmp::GUIController::createMarker(const RakNet::RakNetGUID &guid)
++{
++    DedicatedPlayer *player = PlayerList::getPlayer(guid);
++    ESM::CustomMarker mEditingMarker;
++    if (!player)
++    {
++        LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR, "Unknown player guid: %s", guid.ToString());
++        return mEditingMarker;
++    }
++
++    mEditingMarker.mNote = player->npc.mName;
++
++    const ESM::Cell *playerCell = &player->cell;
++
++    mEditingMarker.mCell = player->cell.mCellId;
++
++    mEditingMarker.mWorldX = player->position.pos[0];
++    mEditingMarker.mWorldY = player->position.pos[1];
++
++    mEditingMarker.mCell.mPaged = playerCell->isExterior();
++    if (!playerCell->isExterior())
++        mEditingMarker.mCell.mWorldspace = playerCell->mName;
++    else
++    {
++        mEditingMarker.mCell.mWorldspace = ESM::CellId::sDefaultWorldspace;
++
++        // Don't remove these, or the markers will stop showing up in exteriors
++        mEditingMarker.mCell.mIndex.mX = playerCell->getGridX();
++        mEditingMarker.mCell.mIndex.mY = playerCell->getGridY();
++    }
++    return mEditingMarker;
++}
++
++
++void mwmp::GUIController::updatePlayersMarkers(MWGui::LocalMapBase *localMapBase)
++{
++    // ArenaMP: remote-player marker widgets are intentionally disabled on local maps and the HUD
++    // minimap. Recreating one MyGUI widget per network update/player caused instability when several
++    // players shared a cell. Keep the marker collection for the world-map tooltip path, but never
++    // instantiate local-map widgets for it.
++    std::vector<MyGUI::Widget*>::iterator markerWidgetIterator = localMapBase->mPlayerMarkerWidgets.begin();
++    for (; markerWidgetIterator != localMapBase->mPlayerMarkerWidgets.end(); ++markerWidgetIterator)
++        MyGUI::Gui::getInstance().destroyWidget(*markerWidgetIterator);
++    localMapBase->mPlayerMarkerWidgets.clear();
++}
++
++void mwmp::GUIController::setGlobalMapMarkerTooltip(MWGui::MapWindow *mapWindow, MyGUI::Widget *markerWidget, int x, int y)
++{
++    ESM::CellId cellId;
++    cellId.mIndex.mX = x;
++    cellId.mIndex.mY = y;
++    cellId.mWorldspace = ESM::CellId::sDefaultWorldspace;
++    cellId.mPaged = true;
++    PlayerMarkerCollection::RangeType markers = mPlayerMarkers.getMarkers(cellId);
++    std::vector<std::string> destNotes;
++    for (PlayerMarkerCollection::ContainerType::const_iterator it = markers.first; it != markers.second; ++it)
++        destNotes.push_back(it->second.mNote);
++
++    if (!destNotes.empty())
++    {
++        MWGui::LocalMapBase::MarkerUserData data (nullptr);
++        data.notes = destNotes;
++        data.caption = markerWidget->getUserString("Caption_TextOneLine");
++
++        markerWidget->setUserData(data);
++        markerWidget->setUserString("ToolTipType", "MapMarker");
++    }
++    else
++        markerWidget->setUserString("ToolTipType", "Layout");
++}
++
++void mwmp::GUIController::updateGlobalMapMarkerTooltips(MWGui::MapWindow *mapWindow)
++{
++    for (const auto &widget : mapWindow->mGlobalMapMarkers)
++    {
++        const int x = widget.first.first;
++        const int y = widget.first.second;
++        setGlobalMapMarkerTooltip(mapWindow, widget.second, x, y);
++    }
++}
+diff -ruN /mnt/data/x030_clean_mp/apps/openmw/mwmp/Main.cpp /mnt/data/x031_mp/apps/openmw/mwmp/Main.cpp
+--- /mnt/data/x030_clean_mp/apps/openmw/mwmp/Main.cpp	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mp/apps/openmw/mwmp/Main.cpp	2026-08-29 20:04:59.470755813 +0000
+@@ -69,23 +69,12 @@
+ std::string Main::address = "";
+ std::string Main::serverPassword = TES3MP_DEFAULT_PASSW;
+ std::string Main::resourceDir = "";
+-bool Main::vanillaBuildServer = false;
+-bool Main::hideChatHistory = false;
+ 
+ std::string Main::getResDir()
+ {
+     return resourceDir;
+ }
+ 
+-bool Main::useVanillaBuildServer()
+-{
+-    return vanillaBuildServer;
+-}
+-
+-bool Main::isChatHistoryHidden()
+-{
+-    return hideChatHistory;
+-}
+ 
+ std::string loadSettings(Settings::Manager& settings)
+ {
+@@ -119,7 +108,8 @@
+     mGUIController = new GUIController();
+     mCellController = new CellController();
+ 
+-    server = "mp.tes3mp.com";
++    // X031: never fall back to the public/vanilla TES3MP server.
++    server = "localhost";
+     port = 25565;
+ }
+ 
+@@ -160,19 +150,13 @@
+             ("connect", bpo::value<std::string>()->default_value(""),
+                         "connect to server (e.g. --connect=127.0.0.1:25565)")
+             ("password", bpo::value<std::string>()->default_value(TES3MP_DEFAULT_PASSW),
+-                        "сonnect to a secured server. (e.g. --password=AnyPassword")
+-            ("vanilla-build-server", bpo::value<bool>()->implicit_value(true)->default_value(false),
+-                        "use the official TES3MP 0.8.1 commit identity for older servers")
+-            ("hide-chat-history", bpo::value<bool>()->implicit_value(true)->default_value(false),
+-                        "hide received chat messages while keeping chat input available");
++                        "сonnect to a secured server. (e.g. --password=AnyPassword");
+ }
+ 
+ void Main::configure(const boost::program_options::variables_map &variables)
+ {
+     Main::address = variables["connect"].as<std::string>();
+     Main::serverPassword = variables["password"].as<std::string>();
+-    Main::vanillaBuildServer = variables["vanilla-build-server"].as<bool>();
+-    Main::hideChatHistory = variables["hide-chat-history"].as<bool>();
+     resourceDir = variables["resources"].as<Files::EscapePath>().mPath.string();
+ }
+ 
+diff -ruN /mnt/data/x030_clean_mp/apps/openmw/mwmp/Main.hpp /mnt/data/x031_mp/apps/openmw/mwmp/Main.hpp
+--- /mnt/data/x030_clean_mp/apps/openmw/mwmp/Main.hpp	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/x031_mp/apps/openmw/mwmp/Main.hpp	2026-08-29 20:03:20.922918980 +0000
+@@ -0,0 +1,74 @@
++#ifndef OPENMW_MWMP_MAIN
++#define OPENMW_MWMP_MAIN
++
++#include "../mwworld/ptr.hpp"
++#include <boost/program_options.hpp>
++#include <components/files/collections.hpp>
++
++namespace mwmp
++{
++    class GUIController;
++    class CellController;
++    class LocalSystem;
++    class LocalPlayer;
++    class Networking;
++
++    class Main
++    {
++    public:
++        Main();
++        ~Main();
++
++        static void optionsDesc(boost::program_options::options_description *desc);
++        static void configure(const boost::program_options::variables_map &variables);
++        static bool init(std::vector<std::string> &content, std::vector<std::string> &groundcover, Files::Collections &collections);
++        static void postInit();
++        static bool isInitialized();
++        static void destroy();
++        static const Main &get();
++        static void frame(float dt);
++
++        static bool isValidPacketScript(std::string scriptId);
++        static bool isValidPacketGlobal(std::string globalId);
++        /*
++            Start of AMP addition
++
++            Called when the server sends us a new set of synchronized script and global IDs
++        */
++        static void invalidatePacketScriptCache();
++        /*
++            End of AMP addition
++        */
++
++        static std::string getResDir();
++
++        Networking *getNetworking() const;
++        LocalSystem *getLocalSystem() const;
++        LocalPlayer *getLocalPlayer() const;
++        GUIController *getGUIController() const;
++        CellController *getCellController() const;
++
++        void updateWorld(float dt) const;
++
++    private:
++        static std::string resourceDir;
++        static std::string address;
++        static std::string serverPassword;
++        Main (const Main&);
++        ///< not implemented
++        Main& operator= (const Main&);
++        ///< not implemented
++        static Main *pMain;
++        Networking *mNetworking;
++        LocalSystem *mLocalSystem;
++        LocalPlayer *mLocalPlayer;
++
++        GUIController *mGUIController;
++        CellController *mCellController;
++
++        std::string server;
++        unsigned short port;
++    };
++}
++
++#endif //OPENMW_MWMP_MAIN
+diff -ruN /mnt/data/x030_clean_mp/apps/openmw/mwmp/Networking.cpp /mnt/data/x031_mp/apps/openmw/mwmp/Networking.cpp
+--- /mnt/data/x030_clean_mp/apps/openmw/mwmp/Networking.cpp	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/x031_mp/apps/openmw/mwmp/Networking.cpp	2026-08-29 20:03:20.923004438 +0000
+@@ -0,0 +1,652 @@
++#include <stdexcept>
++#include <algorithm>
++#include <iostream>
++#include <string>
++
++#include <components/openmw-mp/TimedLog.hpp>
++#include <components/openmw-mp/Utils.hpp>
++#include <components/openmw-mp/Version.hpp>
++#include <components/openmw-mp/Packets/PacketPreInit.hpp>
++
++#include <components/esm/cellid.hpp>
++#include <components/files/configurationmanager.hpp>
++
++#include "../mwbase/environment.hpp"
++#include "../mwbase/world.hpp"
++
++#include "../mwclass/npc.hpp"
++
++#include "../mwmechanics/combat.hpp"
++#include "../mwmechanics/npcstats.hpp"
++
++#include "../mwstate/statemanagerimp.hpp"
++
++#include "../mwworld/cellstore.hpp"
++#include "../mwworld/esmstore.hpp"
++#include "../mwworld/inventorystore.hpp"
++
++#include <SDL_messagebox.h>
++#include <RakSleep.h>
++#include <iomanip>
++#include <components/version/version.hpp>
++
++#include "Networking.hpp"
++#include "Main.hpp"
++#include "processors/ProcessorInitializer.hpp"
++#include "processors/SystemProcessor.hpp"
++#include "processors/PlayerProcessor.hpp"
++#include "processors/ObjectProcessor.hpp"
++#include "processors/ActorProcessor.hpp"
++#include "processors/WorldstateProcessor.hpp"
++#include "GUIController.hpp"
++#include "CellController.hpp"
++
++using namespace mwmp;
++
++std::string listDiscrepancies(PacketPreInit::PluginContainer checksums, PacketPreInit::PluginContainer checksumsResponse)
++{
++    std::ostringstream sstr;
++    sstr << "Your plugins or their load order don't match the server's. A full comparison is included in your debug window and latest log file. In short, the following discrepancies have been found:\n\n";
++
++    int discrepancyCount = 0;
++
++    for (size_t fileIndex = 0; fileIndex < checksums.size() || fileIndex < checksumsResponse.size(); fileIndex++)
++    {
++        if (fileIndex >= checksumsResponse.size())
++        {
++            discrepancyCount++;
++
++            if (discrepancyCount > 1)
++                sstr << "\n";
++
++            std::string clientFilename = checksums.at(fileIndex).first;
++
++            sstr << fileIndex << ": ";
++            sstr << clientFilename << " is past the number of plugins used by the server";
++        }
++        else if (fileIndex >= checksums.size())
++        {
++            discrepancyCount++;
++
++            if (discrepancyCount > 1)
++                sstr << "\n";
++
++            std::string serverFilename = checksumsResponse.at(fileIndex).first;
++
++            sstr << fileIndex << ": ";
++            sstr << serverFilename << " is completely missing from the client but required by the server";
++        }
++        else
++        {
++            std::string clientFilename = checksums.at(fileIndex).first;
++            std::string serverFilename = checksumsResponse.at(fileIndex).first;
++
++            std::string clientChecksum = Utils::intToHexStr(checksums.at(fileIndex).second.at(0));
++
++            bool filenameMatches = false;
++            bool checksumMatches = false;
++            std::string eligibleChecksums = "";
++
++            if (Misc::StringUtils::ciEqual(clientFilename, serverFilename))
++                filenameMatches = true;
++
++            if (checksumsResponse.at(fileIndex).second.size() > 0)
++            {
++                for (size_t checksumIndex = 0; checksumIndex < checksumsResponse.at(fileIndex).second.size(); checksumIndex++)
++                {
++                    std::string serverChecksum = Utils::intToHexStr(checksumsResponse.at(fileIndex).second.at(checksumIndex));
++
++                    if (checksumIndex != 0)
++                        eligibleChecksums = eligibleChecksums + " or ";
++
++                    eligibleChecksums = eligibleChecksums + serverChecksum;
++
++                    if (Misc::StringUtils::ciEqual(clientChecksum, serverChecksum))
++                    {
++                        checksumMatches = true;
++                        break;
++                    }
++                }
++            }
++            else
++                checksumMatches = true;
++
++            if (!filenameMatches || !checksumMatches)
++            {
++                discrepancyCount++;
++
++                if (discrepancyCount > 1)
++                    sstr << "\n";
++
++                sstr << fileIndex << ": ";
++
++                if (!filenameMatches)
++                    sstr << clientFilename << " doesn't match " << serverFilename;
++
++                if (!filenameMatches && !checksumMatches)
++                    sstr << ", ";
++
++                if (!checksumMatches)
++                    sstr << "checksum " << clientChecksum << " doesn't match " << eligibleChecksums;
++            }
++        }
++    }
++
++    return sstr.str();
++}
++
++std::string listComparison(PacketPreInit::PluginContainer checksums, PacketPreInit::PluginContainer checksumsResponse,
++                      bool full = false)
++{
++    std::ostringstream sstr;
++    size_t pluginNameLen1 = 0;
++    size_t pluginNameLen2 = 0;
++    for (const auto &checksum : checksums)
++        if (pluginNameLen1 < checksum.first.size())
++            pluginNameLen1 = checksum.first.size();
++
++    for (const auto &checksum : checksums)
++        if (pluginNameLen2 < checksum.first.size())
++            pluginNameLen2 = checksum.first.size();
++
++    Utils::printWithWidth(sstr, "Your current plugins are:", pluginNameLen1 + 16);
++    sstr << "To join this server, use:\n";
++
++    Utils::printWithWidth(sstr, "name", pluginNameLen1 + 2);
++    Utils::printWithWidth(sstr, "hash", 14);
++    Utils::printWithWidth(sstr, "name", pluginNameLen2 + 2);
++    sstr << "hash\n";
++
++    for (size_t i = 0; i < checksums.size() || i < checksumsResponse.size(); i++)
++    {
++        std::string plugin;
++        unsigned val;
++
++        if (i < checksums.size())
++        {
++            plugin = checksums.at(i).first;
++            val = checksums.at(i).second[0];
++
++            Utils::printWithWidth(sstr, plugin, pluginNameLen1 + 2);
++            Utils::printWithWidth(sstr, Utils::intToHexStr(val), 14);
++        }
++        else
++            Utils::printWithWidth(sstr, "", pluginNameLen1 + 16);
++
++        if (i < checksumsResponse.size())
++        {
++            Utils::printWithWidth(sstr, checksumsResponse[i].first, pluginNameLen2 + 2);
++            if (checksumsResponse[i].second.size() > 0)
++            {
++                if (full)
++                    for (size_t j = 0; j < checksumsResponse[i].second.size(); j++)
++                        Utils::printWithWidth(sstr, Utils::intToHexStr(checksumsResponse[i].second[j]), 14);
++                else
++                    sstr << Utils::intToHexStr(checksumsResponse[i].second[0]);
++            }
++            else
++                sstr << "any";
++        }
++
++        sstr << "\n";
++    }
++
++    return sstr.str();
++}
++
++Networking::Networking(): startLocation("default"), peer(RakNet::RakPeerInterface::GetInstance()), systemPacketController(peer),
++    playerPacketController(peer), actorPacketController(peer), objectPacketController(peer),
++    worldstatePacketController(peer)
++{
++
++    RakNet::SocketDescriptor sd;
++    sd.port=0;
++    auto b = peer->Startup(1, &sd, 1);
++    RakAssert(b==RakNet::CRABNET_STARTED);
++
++    systemPacketController.SetStream(0, &bsOut);
++    playerPacketController.SetStream(0, &bsOut);
++    actorPacketController.SetStream(0, &bsOut);
++    objectPacketController.SetStream(0, &bsOut);
++    worldstatePacketController.SetStream(0, &bsOut);
++
++    connected = 0;
++    ProcessorInitializer();
++}
++
++Networking::~Networking()
++{
++    peer->Shutdown(100);
++    peer->CloseConnection(peer->GetSystemAddressFromIndex(0), true, 0);
++    RakNet::RakPeerInterface::DestroyInstance(peer);
++}
++
++void Networking::update()
++{
++    RakNet::Packet *packet;
++    std::string errmsg = "";
++
++    for (packet=peer->Receive(); packet; peer->DeallocatePacket(packet), packet=peer->Receive())
++    {
++        switch (packet->data[0])
++        {
++            case ID_REMOTE_DISCONNECTION_NOTIFICATION:
++                LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Another client has disconnected.");
++                break;
++            case ID_REMOTE_CONNECTION_LOST:
++                LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Another client has lost connection.");
++                break;
++            case ID_REMOTE_NEW_INCOMING_CONNECTION:
++                LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Another client has connected.");
++                break;
++            case ID_CONNECTION_REQUEST_ACCEPTED:
++                LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "Our connection request has been accepted.");
++                break;
++            case ID_NEW_INCOMING_CONNECTION:
++                LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "A connection is incoming.");
++                break;
++            case ID_NO_FREE_INCOMING_CONNECTIONS:
++                errmsg = "The server is full.";
++                break;
++            case ID_DISCONNECTION_NOTIFICATION:
++                errmsg = "We have been disconnected.";
++                break;
++            case ID_CONNECTION_LOST:
++                errmsg = "Connection lost.";
++                break;
++            default:
++                receiveMessage(packet);
++                //LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Message with identifier %i has arrived.", packet->data[0]);
++                break;
++        }
++    }
++
++    if (!errmsg.empty())
++    {
++        LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR, errmsg.c_str());
++        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "tes3mp", errmsg.c_str(), 0);
++        MWBase::Environment::get().getStateManager()->requestQuit();
++    }
++}
++
++void Networking::connect(const std::string &ip, unsigned short port, std::vector<std::string> &content, std::vector<std::string> &groundcover, Files::Collections &collections)
++{
++    RakNet::SystemAddress master;
++    master.SetBinaryAddress(ip.c_str());
++    master.SetPortHostOrder(port);
++    std::string errmsg = "";
++
++    std::stringstream sstr;
++    sstr << TES3MP_VERSION;
++
++    // X031: ArenaMP no longer impersonates the vanilla TES3MP build identity.
++    // Every client advertises the ArenaMP protocol and stable compatibility hash.
++    const int advertisedProtocol = TES3MP_PROTO_VERSION;
++    sstr << advertisedProtocol;
++
++    std::string commitHashString = TES3MP_COMPAT_COMMIT_HASH;
++
++    // Remove carriage returns added to version files on Windows.
++    commitHashString.erase(std::remove(commitHashString.begin(), commitHashString.end(), '\r'), commitHashString.end());
++    sstr << commitHashString;
++
++    if (peer->Connect(master.ToString(false), master.GetPort(), sstr.str().c_str(), (int) sstr.str().size(), 0, 0, 3, 500, 0) != RakNet::CONNECTION_ATTEMPT_STARTED)
++        errmsg = "Connection attempt failed.\n";
++
++    bool queue = true;
++    while (queue)
++    {
++        for (RakNet::Packet *packet = peer->Receive(); packet; peer->DeallocatePacket(packet), packet = peer->Receive())
++        {
++            switch (packet->data[0])
++            {
++                case ID_CONNECTION_ATTEMPT_FAILED:
++                {
++                    errmsg = "Connection failed.\n"
++                            "Either the IP address is wrong or a firewall on either system is blocking\n"
++                            "UDP packets on the port you have chosen.";
++                    queue = false;
++                    break;
++                }
++                case ID_INVALID_PASSWORD:
++                {
++                    errmsg = "Version mismatch!\nYour client is on version " TES3MP_VERSION "\n"
++                        "Please make sure the server is on the same version.";
++                    queue = false;
++                    break;
++                }
++                case ID_INCOMPATIBLE_PROTOCOL_VERSION:
++                {
++                    errmsg = "Network protocol mismatch!\nMake sure your client is really on the same version\n"
++                        "as the server you are trying to connect to.";
++                    queue = false;
++                    break;
++                }
++                case ID_CONNECTION_REQUEST_ACCEPTED:
++                {
++                    serverAddr = packet->systemAddress;
++                    BaseClientPacketProcessor::SetServerAddr(packet->systemAddress);
++
++                    connected = true;
++                    queue = false;
++
++                    LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "Received ID_CONNECTION_REQUESTED_ACCEPTED from %s",
++                                       serverAddr.ToString());
++
++                    break;
++                }
++                case ID_DISCONNECTION_NOTIFICATION:
++                    throw std::runtime_error("ID_DISCONNECTION_NOTIFICATION.\n");
++                case ID_CONNECTION_BANNED:
++                    throw std::runtime_error("You have been banned from this server.\n");
++                case ID_CONNECTION_LOST:
++                    throw std::runtime_error("ID_CONNECTION_LOST.\n");
++                default:
++                    LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Connection message with identifier %i has arrived in initialization.",
++                                       packet->data[0]);
++            }
++        }
++    }
++
++    if (!errmsg.empty())
++    {
++        LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR, errmsg.c_str());
++        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "tes3mp", errmsg.c_str(), 0);
++    }
++    else
++        preInit(content, groundcover, collections);
++
++    getLocalPlayer()->guid = getLocalSystem()->guid = peer->GetMyGUID();
++}
++
++void Networking::preInit(std::vector<std::string> &content, std::vector<std::string> &groundcover, Files::Collections &collections)
++{
++    auto makeChecksums = [&](const std::vector<std::string>& files, PacketPreInit::PluginContainer& output)
++    {
++        output.clear();
++        int idx = 0;
++        for (const std::string& name : files)
++        {
++            boost::filesystem::path filename(name);
++            const Files::MultiDirCollection& col = collections.getCollection(filename.extension().string());
++            if (!col.doesExist(name))
++                throw std::runtime_error("Plugin doesn't exist: " + name);
++
++            PacketPreInit::HashList hashList;
++            const unsigned crc32 = Utils::crc32Checksum(col.getPath(name).string());
++            hashList.push_back(crc32);
++            output.push_back(std::make_pair(name, hashList));
++            LOG_APPEND(TimedLog::LOG_WARN, "idx: %d\tchecksum: %X\tfile: %s\n",
++                idx++, crc32, col.getPath(name).string().c_str());
++        }
++    };
++
++    auto receiveResponse = [&](PacketPreInit::PluginContainer& required,
++                               PacketPreInit::PluginContainer& optionalGroundcover,
++                               uint8_t& phase, bool& supportsSync) -> bool
++    {
++        bool done = false;
++        while (!done)
++        {
++            RakNet::Packet *packet = peer->Receive();
++            if (!packet)
++            {
++                RakSleep(100);
++                continue;
++            }
++
++            RakNet::BitStream bsIn(&packet->data[0], packet->length, false);
++            unsigned char packetId;
++            bsIn.Read(packetId);
++            switch (packetId)
++            {
++                case ID_DISCONNECTION_NOTIFICATION:
++                case ID_CONNECTION_LOST:
++                    connected = false;
++                    done = true;
++                    break;
++                case ID_GAME_PREINIT:
++                {
++                    bsIn.IgnoreBytes((unsigned) RakNet::RakNetGUID::size());
++                    PacketPreInit response(peer);
++                    response.setChecksums(&required);
++                    response.setGroundcoverChecksums(&optionalGroundcover);
++                    response.Packet(&bsIn, false);
++                    if (!response.isPacketValid())
++                    {
++                        connected = false;
++                        peer->DeallocatePacket(packet);
++                        return false;
++                    }
++                    startLocation = response.getStartLocation();
++                    phase = response.getManifestPhase();
++                    supportsSync = response.supportsManifestSync();
++                    done = true;
++                    break;
++                }
++            }
++            peer->DeallocatePacket(packet);
++        }
++        return connected;
++    };
++
++    PacketPreInit::PluginContainer currentChecksums;
++    makeChecksums(content, currentChecksums);
++
++    // New ArenaMP clients announce manifest-sync support in the trailing phase
++    // byte. Old servers simply ignore the extension and keep the legacy flow.
++    PacketPreInit::PluginContainer emptyGroundcover;
++    PacketPreInit request(peer);
++    RakNet::BitStream requestStream;
++    RakNet::RakNetGUID guid;
++    request.setChecksums(&currentChecksums);
++    request.setGroundcoverChecksums(&emptyGroundcover);
++    request.setManifestPhase(PacketPreInit::PHASE_REQUEST);
++    request.setGUID(guid);
++    request.SetSendStream(&requestStream);
++    request.Send(serverAddr);
++
++    PacketPreInit::PluginContainer responseChecksums;
++    PacketPreInit::PluginContainer responseGroundcover;
++    uint8_t responsePhase = PacketPreInit::PHASE_REQUEST;
++    bool serverSupportsSync = false;
++    if (!receiveResponse(responseChecksums, responseGroundcover, responsePhase, serverSupportsSync))
++        return;
++
++    if (serverSupportsSync && responsePhase == PacketPreInit::PHASE_MANIFEST)
++    {
++        LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO,
++            "Server data-file manifest received: %d required content file(s), %d optional groundcover file(s)",
++            static_cast<int>(responseChecksums.size()), static_cast<int>(responseGroundcover.size()));
++
++        std::vector<std::string> orderedContent;
++        PacketPreInit::PluginContainer verificationChecksums;
++        int index = 0;
++        for (const PacketPreInit::PluginPair& requirement : responseChecksums)
++        {
++            boost::filesystem::path filename(requirement.first);
++            const Files::MultiDirCollection& col = collections.getCollection(filename.extension().string());
++            if (!col.doesExist(requirement.first))
++            {
++                LOG_APPEND(TimedLog::LOG_ERROR, "Required server content is missing: %s", requirement.first.c_str());
++                continue;
++            }
++
++            const unsigned crc32 = Utils::crc32Checksum(col.getPath(requirement.first).string());
++            PacketPreInit::HashList hashList(1, crc32);
++            verificationChecksums.push_back(std::make_pair(requirement.first, hashList));
++            orderedContent.push_back(requirement.first);
++            LOG_APPEND(TimedLog::LOG_INFO, "Server order %d: %s [%X]", index++, requirement.first.c_str(), crc32);
++        }
++
++        // The Engine has not loaded ESM/ESP records yet, so changing this vector
++        // here safely changes the order for this launch only without rewriting
++        // the user's persistent OpenMW profile.
++        content = orderedContent;
++
++        std::vector<std::string> orderedGroundcover;
++        for (const PacketPreInit::PluginPair& recommendation : responseGroundcover)
++        {
++            boost::filesystem::path filename(recommendation.first);
++            const Files::MultiDirCollection& col = collections.getCollection(filename.extension().string());
++            if (!col.doesExist(recommendation.first))
++            {
++                LOG_APPEND(TimedLog::LOG_INFO, "Optional groundcover not installed, skipping: %s",
++                    recommendation.first.c_str());
++                continue;
++            }
++
++            const unsigned crc32 = Utils::crc32Checksum(col.getPath(recommendation.first).string());
++            const bool hashAllowed = recommendation.second.empty()
++                || std::find(recommendation.second.begin(), recommendation.second.end(), crc32) != recommendation.second.end();
++            if (!hashAllowed)
++            {
++                LOG_APPEND(TimedLog::LOG_WARN,
++                    "Optional groundcover has a different hash and will be skipped: %s [%X]",
++                    recommendation.first.c_str(), crc32);
++                continue;
++            }
++            orderedGroundcover.push_back(recommendation.first);
++            LOG_APPEND(TimedLog::LOG_INFO, "Optional groundcover enabled: %s [%X]",
++                recommendation.first.c_str(), crc32);
++        }
++        groundcover = orderedGroundcover;
++
++        // Second pre-init: hashes are now calculated in the exact order supplied
++        // by the server. Missing required files result in a shorter container and
++        // are rejected cleanly by the server before the world is loaded.
++        PacketPreInit verify(peer);
++        RakNet::BitStream verifyStream;
++        verify.setChecksums(&verificationChecksums);
++        verify.setGroundcoverChecksums(&emptyGroundcover);
++        verify.setManifestPhase(PacketPreInit::PHASE_VERIFY);
++        verify.setGUID(guid);
++        verify.SetSendStream(&verifyStream);
++        verify.Send(serverAddr);
++
++        PacketPreInit::PluginContainer verifyResponse;
++        PacketPreInit::PluginContainer ignoredGroundcover;
++        uint8_t verifyPhase = PacketPreInit::PHASE_REQUEST;
++        bool verifySupportsSync = false;
++        if (!receiveResponse(verifyResponse, ignoredGroundcover, verifyPhase, verifySupportsSync))
++            return;
++
++        if (verifySupportsSync && verifyPhase == PacketPreInit::PHASE_ACCEPTED)
++        {
++            LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Server content order and hashes accepted");
++            return;
++        }
++
++        const PacketPreInit::PluginContainer& expected = verifyResponse.empty()
++            ? responseChecksums : verifyResponse;
++        const std::string errmsg = listDiscrepancies(verificationChecksums, expected);
++        LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR, errmsg.c_str());
++        LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR, listComparison(verificationChecksums, expected, true).c_str());
++        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "ArenaMP", errmsg.c_str(), 0);
++        connected = false;
++        return;
++    }
++
++    // Legacy server path: an empty response means accepted; a returned plugin
++    // list is the traditional mismatch response.
++    if (!responseChecksums.empty())
++    {
++        const std::string errmsg = listDiscrepancies(currentChecksums, responseChecksums);
++        LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR, errmsg.c_str());
++        LOG_MESSAGE_SIMPLE(TimedLog::LOG_ERROR, listComparison(currentChecksums, responseChecksums, true).c_str());
++        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "tes3mp", errmsg.c_str(), 0);
++        connected = false;
++    }
++}
++
++void Networking::receiveMessage(RakNet::Packet *packet)
++{
++    if (packet->length < 2)
++        return;
++
++    if (systemPacketController.ContainsPacket(packet->data[0]))
++    {
++        if (!SystemProcessor::Process(*packet))
++            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "Unhandled SystemPacket with identifier %i has arrived", packet->data[0]);
++    }
++    else if (playerPacketController.ContainsPacket(packet->data[0]))
++    {
++        if (!PlayerProcessor::Process(*packet))
++            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "Unhandled PlayerPacket with identifier %i has arrived", packet->data[0]);
++    }
++    else if (actorPacketController.ContainsPacket(packet->data[0]))
++    {
++        if (!ActorProcessor::Process(*packet, actorList))
++            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "Unhandled ActorPacket with identifier %i has arrived", packet->data[0]);
++    }
++    else if (objectPacketController.ContainsPacket(packet->data[0]))
++    {
++        if (!ObjectProcessor::Process(*packet, objectList))
++            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "Unhandled ObjectPacket with identifier %i has arrived", packet->data[0]);
++    }
++    else if (worldstatePacketController.ContainsPacket(packet->data[0]))
++    {
++        if (!WorldstateProcessor::Process(*packet, worldstate))
++            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "Unhandled WorldstatePacket with identifier %i has arrived", packet->data[0]);
++    }
++}
++
++SystemPacket *Networking::getSystemPacket(RakNet::MessageID id)
++{
++    return systemPacketController.GetPacket(id);
++}
++
++PlayerPacket *Networking::getPlayerPacket(RakNet::MessageID id)
++{
++    return playerPacketController.GetPacket(id);
++}
++
++ActorPacket *Networking::getActorPacket(RakNet::MessageID id)
++{
++    return actorPacketController.GetPacket(id);
++}
++
++ObjectPacket *Networking::getObjectPacket(RakNet::MessageID id)
++{
++    return objectPacketController.GetPacket(id);
++}
++
++WorldstatePacket *Networking::getWorldstatePacket(RakNet::MessageID id)
++{
++    return worldstatePacketController.GetPacket(id);
++}
++
++LocalSystem *Networking::getLocalSystem()
++{
++    return mwmp::Main::get().getLocalSystem();
++}
++
++LocalPlayer *Networking::getLocalPlayer()
++{
++    return mwmp::Main::get().getLocalPlayer();
++}
++
++ActorList *Networking::getActorList()
++{
++    return &actorList;
++}
++
++ObjectList *Networking::getObjectList()
++{
++    return &objectList;
++}
++
++Worldstate *Networking::getWorldstate()
++{
++    return &worldstate;
++}
++
++bool Networking::isConnected()
++{
++    return connected;
++}
++
++const std::string& Networking::getStartLocation() const
++{
++    return startLocation;
++}
+diff -ruN /mnt/data/x030_clean_mp/apps/openmw/mwrender/occlusionculling.cpp /mnt/data/x031_mp/apps/openmw/mwrender/occlusionculling.cpp
+--- /mnt/data/x030_clean_mp/apps/openmw/mwrender/occlusionculling.cpp	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mp/apps/openmw/mwrender/occlusionculling.cpp	2026-08-29 19:52:45.942801395 +0000
+@@ -279,12 +279,20 @@
+         mCuller->beginFrame(cam->getViewMatrix(), cam->getProjectionMatrix());
+         if (mEnableTerrainOccluder && mTerrainOccluder->hasTerrainData())
+         {
+-            // X028: TerrainOccluder keeps the assembled region stable while the
+-            // eye remains in the same terrain cell. Do not clear/copy these large
+-            // arrays every frame; only update them when the region actually changes.
+-            mTerrainOccluder->build(cv->getEyePoint(), mRadiusCells, mPositions, mIndices);
+-            if (!mPositions.empty() && !mIndices.empty())
+-                mCuller->rasterizeOccluder(mPositions, mIndices);
++            // X031: side planes only. The desired transform is inverse(view*proj),
++            // so transformProvidingInverse receives view*proj directly. Near/far
++            // are intentionally omitted: this rejects cells behind/off-axis while
++            // remaining independent of normal/reversed depth conventions.
++            mFrustum.setToUnitFrustum(false, false);
++            mFrustum.transformProvidingInverse(cam->getViewMatrix() * cam->getProjectionMatrix());
++
++            mTerrainOccluder->collectVisibleCells(cv->getEyePoint(), mRadiusCells, mFrustum, mVisibleCells);
++            for (std::vector<Terrain::OccluderCellMesh>::const_iterator it = mVisibleCells.begin();
++                 it != mVisibleCells.end(); ++it)
++            {
++                if (it->mPositions && it->mIndices && !it->mPositions->empty() && !it->mIndices->empty())
++                    mCuller->rasterizeOccluder(*it->mPositions, *it->mIndices);
++            }
+         }
+         traverse(node, nv);
+     }
+@@ -508,10 +516,19 @@
+             { child->accept(*cv); continue; }
+             if (bs.radius() >= mOccluderMinRadius)
+                 continue;
++            // X031: most children are visible, so avoid the named user-data
++            // lookup on that hot path. Only a child that software occlusion would
++            // reject needs the skipOcclusion escape-hatch lookup (doors, etc.).
++            osg::BoundingBox bb; bb.expandBy(bs);
++            if (mCuller->testVisibleAABB(bb))
++            {
++                child->accept(*cv);
++                continue;
++            }
++
+             bool skipOcclusion = false;
+             child->getUserValue("skipOcclusion", skipOcclusion);
+-            osg::BoundingBox bb; bb.expandBy(bs);
+-            if (skipOcclusion || mCuller->testVisibleAABB(bb))
++            if (skipOcclusion)
+                 child->accept(*cv);
+         }
+     }
+diff -ruN /mnt/data/x030_clean_mp/apps/openmw/mwrender/occlusionculling.hpp /mnt/data/x031_mp/apps/openmw/mwrender/occlusionculling.hpp
+--- /mnt/data/x030_clean_mp/apps/openmw/mwrender/occlusionculling.hpp	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mp/apps/openmw/mwrender/occlusionculling.hpp	2026-08-29 19:57:40.031650531 +0000
+@@ -4,6 +4,7 @@
+ #include <osg/BoundingBox>
+ #include <osg/Object>
+ #include <osg/NodeCallback>
++#include <osg/Polytope>
+ #include <osg/Referenced>
+ #include <osg/Vec3f>
+ #include <osg/observer_ptr>
+@@ -17,6 +18,8 @@
+ #include <unordered_map>
+ #include <vector>
+ 
++#include <components/terrain/terrainoccluder.hpp>
++
+ namespace osg
+ {
+     class Group;
+@@ -29,10 +32,6 @@
+     class OcclusionCuller;
+ }
+ 
+-namespace Terrain
+-{
+-    class TerrainOccluder;
+-}
+ 
+ namespace MWRender
+ {
+@@ -114,8 +113,10 @@
+         int mRadiusCells;
+         bool mEnableTerrainOccluder;
+         unsigned int mLastFrameNumber;
+-        std::vector<osg::Vec3f> mPositions;
+-        std::vector<unsigned int> mIndices;
++        // X031: rasterize cached cells directly. The frustum and the tiny list of
++        // cell references are reused every cull frame.
++        osg::Polytope mFrustum;
++        std::vector<Terrain::OccluderCellMesh> mVisibleCells;
+     };
+ 
+     class PagedOccluderCallback : public osg::NodeCallback
+diff -ruN /mnt/data/x030_clean_mp/apps/openmw/mwrender/renderingmanager.cpp /mnt/data/x031_mp/apps/openmw/mwrender/renderingmanager.cpp
+--- /mnt/data/x030_clean_mp/apps/openmw/mwrender/renderingmanager.cpp	2026-08-29 19:37:27.000000000 +0000
++++ /mnt/data/x031_mp/apps/openmw/mwrender/renderingmanager.cpp	2026-08-29 19:52:45.943114326 +0000
+@@ -863,6 +863,7 @@
+             // the first exterior assembly is spread over frames instead of
+             // decoding the whole 17x17 region in one cull.
+             mTerrainOccluder->setCellBuildBudget(Settings::Manager::getInt("occlusion terrain cell budget", "Camera"));
++            mTerrainOccluder->setFrustumCulling(Settings::Manager::getBool("occlusion terrain frustum cull", "Camera"));
+             sceneRoot->addCullCallback(new SceneOcclusionCallback(
+                 mOcclusionCuller.get(),
+                 mTerrainOccluder.get(),
+@@ -2031,6 +2032,7 @@
+             {
+                 stats->setAttribute(frameNumber, "Occl Terrain Cells", mTerrainOccluder->getCachedCellCount());
+                 stats->setAttribute(frameNumber, "Occl Terrain Built", mTerrainOccluder->getLastBuiltCellCount());
++                stats->setAttribute(frameNumber, "Occl Terrain Rast", mTerrainOccluder->getLastVisibleCellCount());
+             }
+ 
+             if (mObjects)
+diff -ruN /mnt/data/x030_clean_mp/components/resource/stats.cpp /mnt/data/x031_mp/components/resource/stats.cpp
+--- /mnt/data/x030_clean_mp/components/resource/stats.cpp	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mp/components/resource/stats.cpp	2026-08-29 19:57:40.031840687 +0000
+@@ -396,6 +396,7 @@
+             "Occl Tris",
+             "Occl Terrain Cells",
+             "Occl Terrain Built",
++            "Occl Terrain Rast",
+             "Occl Templates",
+             "Occl Tpl Hits",
+             "Occl Tpl Misses",
+diff -ruN /mnt/data/x030_clean_mp/components/terrain/terrainoccluder.cpp /mnt/data/x031_mp/components/terrain/terrainoccluder.cpp
+--- /mnt/data/x030_clean_mp/components/terrain/terrainoccluder.cpp	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mp/components/terrain/terrainoccluder.cpp	2026-08-29 19:54:52.809861433 +0000
+@@ -12,6 +12,7 @@
+     TerrainOccluder::TerrainOccluder(Storage* storage, float cellWorldSize)
+         : mStorage(storage)
+         , mCellWorldSize(cellWorldSize)
++        , mScratchPositions(new osg::Vec3Array)
+     {
+     }
+ 
+@@ -35,13 +36,24 @@
+         mCellBuildBudget = cellsPerBuild;
+     }
+ 
++    void TerrainOccluder::publishStats()
++    {
++        mPublishedCachedCellCount.store(static_cast<unsigned int>(mCellCache.size()), std::memory_order_relaxed);
++        mPublishedLastBuiltCells.store(mLastBuiltCells, std::memory_order_relaxed);
++        mPublishedLastVisibleCells.store(mLastVisibleCells, std::memory_order_relaxed);
++        mPublishedRegionComplete.store(mRegionCacheValid, std::memory_order_relaxed);
++    }
++
+     void TerrainOccluder::invalidateCache()
+     {
+         mRegionCacheValid = false;
+         mCachedRadius = -1;
+         mCellCache.clear();
+-        mPublishedCachedCellCount.store(0, std::memory_order_relaxed);
+-        mPublishedLastBuiltCells.store(0, std::memory_order_relaxed);
++        mLastBuiltCells = 0;
++        mLastVisibleCells = 0;
++        if (mScratchPositions.valid())
++            mScratchPositions->clear();
++        publishStats();
+     }
+ 
+     TerrainOccluder::CachedCellMesh TerrainOccluder::buildCell(int cellX, int cellY) const
+@@ -49,20 +61,20 @@
+         CachedCellMesh result;
+ 
+         const osg::Vec2f center(cellX + 0.5f, cellY + 0.5f);
+-        osg::ref_ptr<osg::Vec3Array> fullRes(new osg::Vec3Array);
++        if (!mScratchPositions.valid())
++            mScratchPositions = new osg::Vec3Array;
++        mScratchPositions->clear();
+         osg::ref_ptr<osg::Vec3Array> normals(new osg::Vec3Array);
+         osg::ref_ptr<osg::Vec4ubArray> colors(new osg::Vec4ubArray);
+         colors->setNormalize(true);
+-        mStorage->fillVertexBuffers(0, 1.0f, center, fullRes, normals, colors);
+-        if (fullRes->empty())
++        mStorage->fillVertexBuffers(0, 1.0f, center, mScratchPositions, normals, colors);
++        if (mScratchPositions->empty())
+             return result;
+ 
+-        const int fullPerSide = static_cast<int>(std::sqrt(static_cast<float>(fullRes->size())));
++        const int fullPerSide = static_cast<int>(std::sqrt(static_cast<float>(mScratchPositions->size())));
+         if (fullPerSide < 2)
+             return result;
+ 
+-        // Avoid undefined behaviour on a corrupt/external setting while preserving
+-        // the old semantics for all practical LOD values.
+         const int safeLod = std::min(mLodLevel, 15);
+         const int step = std::max(1, 1 << safeLod);
+         const int coarsePerSide = (fullPerSide - 1) / step + 1;
+@@ -81,7 +93,7 @@
+                 float minH = std::numeric_limits<float>::max();
+                 for (int fj = startJ; fj <= endJ; ++fj)
+                     for (int fi = startI; fi <= endI; ++fi)
+-                        minH = std::min(minH, (*fullRes)[fj * fullPerSide + fi].z());
++                        minH = std::min(minH, (*mScratchPositions)[fj * fullPerSide + fi].z());
+                 quadMins[qj * (coarsePerSide - 1) + qi] = minH;
+             }
+         }
+@@ -104,9 +116,11 @@
+ 
+                 const int srcI = std::min(ci * step, fullPerSide - 1);
+                 const int srcJ = std::min(cj * step, fullPerSide - 1);
+-                osg::Vec3f pos = (*fullRes)[srcJ * fullPerSide + srcI];
++                osg::Vec3f pos = (*mScratchPositions)[srcJ * fullPerSide + srcI];
+                 pos.z() = minH;
+-                result.mPositions.push_back(pos + worldOffset);
++                pos += worldOffset;
++                result.mPositions.push_back(pos);
++                result.mBounds.expandBy(pos);
+             }
+         }
+ 
+@@ -138,9 +152,6 @@
+         if (found != mCellCache.end())
+             return &found->second;
+ 
+-        // X029: cells with no LAND record are cached as empty meshes on purpose,
+-        // so a missing cell costs its decode attempt exactly once. That attempt is
+-        // still the expensive part, so it counts against the budget.
+         if (budget <= 0)
+             return nullptr;
+ 
+@@ -151,9 +162,6 @@
+ 
+     void TerrainOccluder::pruneCellCache(const osg::Vec2i& center, int radiusCells)
+     {
+-        // Keep two extra rings so a normal one-cell movement can reuse the full
+-        // overlap and only generate the newly exposed edge. This bounds memory
+-        // while avoiding the old all-or-nothing rebuild.
+         const int keepRadius = std::max(1, radiusCells) + 2;
+         for (std::map<CellKey, CachedCellMesh>::iterator it = mCellCache.begin(); it != mCellCache.end();)
+         {
+@@ -166,20 +174,18 @@
+         }
+     }
+ 
+-    bool TerrainOccluder::build(const osg::Vec3f& eyePoint, int radiusCells,
+-        std::vector<osg::Vec3f>& outPositions, std::vector<unsigned int>& outIndices)
++    void TerrainOccluder::collectVisibleCells(const osg::Vec3f& eyePoint, int radiusCells,
++        const osg::Polytope& frustum, std::vector<OccluderCellMesh>& out)
+     {
+-        // Per-frame counter: zero unless this call actually decoded new cells.
+         mLastBuiltCells = 0;
+-        mPublishedLastBuiltCells.store(0, std::memory_order_relaxed);
++        mLastVisibleCells = 0;
++        out.clear();
+ 
+         if (!hasTerrainData())
+         {
+-            outPositions.clear();
+-            outIndices.clear();
+             mRegionCacheValid = false;
+-            mPublishedCachedCellCount.store(static_cast<unsigned int>(mCellCache.size()), std::memory_order_relaxed);
+-            return true;
++            publishStats();
++            return;
+         }
+ 
+         radiusCells = std::max(1, radiusCells);
+@@ -187,25 +193,17 @@
+         const int cellY = static_cast<int>(std::floor(eyePoint.y() / mCellWorldSize));
+         const osg::Vec2i cellPos(cellX, cellY);
+ 
+-        if (mRegionCacheValid && cellPos == mCachedCellPos && radiusCells == mCachedRadius)
+-        {
+-            mPublishedCachedCellCount.store(static_cast<unsigned int>(mCellCache.size()), std::memory_order_relaxed);
+-            return false;
+-        }
+-
+-        outPositions.clear();
+-        outIndices.clear();
+-
+-        // X029: budget the expensive part. Cells already in the cache are always
+-        // assembled; only newly decoded ones are rationed. When the budget runs
+-        // out the region is marked incomplete, so the next frame continues where
+-        // this one stopped instead of declaring the region done.
++        // Keep the old X029 budget semantics: cached cells are free, newly decoded
++        // cells consume the budget, and an incomplete region simply contributes
++        // fewer occluders until later frames finish it.
+         int budget = mCellBuildBudget > 0 ? mCellBuildBudget : std::numeric_limits<int>::max();
+         bool complete = true;
+ 
+-        // X028: region assembly still walks all cells, but expensive LAND decode +
+-        // coarse-mesh construction happens only once per cached cell. At radius 8
+-        // a one-cell move reuses 272/289 cells and builds only the new 17-cell edge.
++        // Reuse enough storage for the full square while keeping each entry tiny
++        // (two pointers). No vertex/index copying or index rebasing happens here.
++        const int side = radiusCells * 2 + 1;
++        out.reserve(static_cast<std::size_t>(side * side));
++
+         for (int cy = cellY - radiusCells; cy <= cellY + radiusCells; ++cy)
+         {
+             for (int cx = cellX - radiusCells; cx <= cellX + radiusCells; ++cx)
+@@ -213,8 +211,6 @@
+                 const CachedCellMesh* cell = getCell(cx, cy, budget);
+                 if (!cell)
+                 {
+-                    // Not built yet and out of budget. Leaving it out only removes
+-                    // an occluder, which can never hide something that is visible.
+                     complete = false;
+                     continue;
+                 }
+@@ -222,11 +218,27 @@
+                 if (cell->mPositions.empty() || cell->mIndices.empty())
+                     continue;
+ 
+-                const unsigned int baseIndex = static_cast<unsigned int>(outPositions.size());
+-                outPositions.insert(outPositions.end(), cell->mPositions.begin(), cell->mPositions.end());
+-                outIndices.reserve(outIndices.size() + cell->mIndices.size());
+-                for (std::vector<unsigned int>::const_iterator it = cell->mIndices.begin(); it != cell->mIndices.end(); ++it)
+-                    outIndices.push_back(baseIndex + *it);
++                if (mFrustumCulling && cell->mBounds.valid())
++                {
++                    bool outside = false;
++                    const osg::Polytope::PlaneList& planes = frustum.getPlaneList();
++                    for (osg::Polytope::PlaneList::const_iterator plane = planes.begin(); plane != planes.end(); ++plane)
++                    {
++                        if (plane->intersect(cell->mBounds) < 0)
++                        {
++                            outside = true;
++                            break;
++                        }
++                    }
++                    if (outside)
++                        continue;
++                }
++
++                OccluderCellMesh mesh;
++                mesh.mPositions = &cell->mPositions;
++                mesh.mIndices = &cell->mIndices;
++                out.push_back(mesh);
++                ++mLastVisibleCells;
+             }
+         }
+ 
+@@ -234,13 +246,9 @@
+         mCachedRadius = radiusCells;
+         mRegionCacheValid = complete;
+ 
+-        // X029-safe: prune even while filling. pruneCellCache keeps radius+2,
+-        // therefore it cannot evict any cell required by the current radius, and
+-        // this prevents cache growth during rapid teleports where a region may not
+-        // become complete before the next center is requested.
++        // Safe even while the region is incomplete: current cells lie within
++        // radius, while prune keeps radius+2 rings.
+         pruneCellCache(cellPos, radiusCells);
+-        mPublishedCachedCellCount.store(static_cast<unsigned int>(mCellCache.size()), std::memory_order_relaxed);
+-        mPublishedLastBuiltCells.store(mLastBuiltCells, std::memory_order_relaxed);
+-        return true;
++        publishStats();
+     }
+ }
+diff -ruN /mnt/data/x030_clean_mp/components/terrain/terrainoccluder.hpp /mnt/data/x031_mp/components/terrain/terrainoccluder.hpp
+--- /mnt/data/x030_clean_mp/components/terrain/terrainoccluder.hpp	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mp/components/terrain/terrainoccluder.hpp	2026-08-29 19:52:45.942418999 +0000
+@@ -6,55 +6,71 @@
+ #include <utility>
+ #include <vector>
+ 
++#include <osg/Array>
++#include <osg/BoundingBox>
++#include <osg/Polytope>
+ #include <osg/Vec2i>
+ #include <osg/Vec3f>
++#include <osg/ref_ptr>
+ 
+ namespace Terrain
+ {
+     class Storage;
+ 
++    /// X031: one cached LAND cell's coarse occluder mesh, handed out by reference.
++    /// References stay valid until the next collectVisibleCells() on the same
++    /// occluder; the caller consumes them immediately in the cull traversal.
++    struct OccluderCellMesh
++    {
++        const std::vector<osg::Vec3f>* mPositions = nullptr;
++        const std::vector<unsigned int>* mIndices = nullptr;
++    };
++
+     class TerrainOccluder
+     {
+     public:
+         TerrainOccluder(Storage* storage, float cellWorldSize);
+ 
+-        // X028: changing the terrain occlusion LOD invalidates both the assembled
+-        // region and the per-cell cache. This keeps runtime setting changes safe.
+         void setLodLevel(int lod);
+-
+-        // X029: upper bound on how many *new* cells a single build() may decode.
+-        // The first entry into an exterior needs (2r+1)^2 cells - 289 at the
+-        // default radius 8 - and decoding all of them in one cull frame is the
+-        // largest remaining occlusion stutter. Spreading them over frames is
+-        // fail-open: a partially assembled occluder hides less, never more.
+         void setCellBuildBudget(int cellsPerBuild);
+ 
+-        // X029: profiler readout. The engine already collected occlusion counters
+-        // that nothing ever read; these follow the same idea for the terrain side.
+-        unsigned int getCachedCellCount() const { return mPublishedCachedCellCount.load(std::memory_order_relaxed); }
+-        unsigned int getLastBuiltCellCount() const { return mPublishedLastBuiltCells.load(std::memory_order_relaxed); }
+-        bool isRegionComplete() const { return mRegionCacheValid; }
++        // X031: reject cached terrain occluder cells outside the camera side
++        // planes before they reach the software rasterizer.
++        void setFrustumCulling(bool enabled) { mFrustumCulling = enabled; }
++
++        /// X031: return cached cells to rasterize this frame without assembling
++        /// one giant rebased mesh. Missing cells are decoded within the X029
++        /// budget. Skipped/missing cells only remove occluders, so the path is
++        /// fail-open: the worst case is drawing more geometry.
++        void collectVisibleCells(const osg::Vec3f& eyePoint, int radiusCells,
++            const osg::Polytope& frustum, std::vector<OccluderCellMesh>& out);
+ 
+-        // Rebuilds the output only when the eye crosses into a different terrain
+-        // cell or the requested radius changes. Returns true when output changed.
+-        bool build(const osg::Vec3f& eyePoint, int radiusCells, std::vector<osg::Vec3f>& outPositions,
+-            std::vector<unsigned int>& outIndices);
+         bool hasTerrainData() const;
+ 
++        // Published snapshots are safe to read from the update/stats thread while
++        // the cull traversal owns the mutable cache.
++        unsigned int getCachedCellCount() const { return mPublishedCachedCellCount.load(std::memory_order_relaxed); }
++        unsigned int getLastBuiltCellCount() const { return mPublishedLastBuiltCells.load(std::memory_order_relaxed); }
++        unsigned int getLastVisibleCellCount() const { return mPublishedLastVisibleCells.load(std::memory_order_relaxed); }
++        bool isRegionComplete() const { return mPublishedRegionComplete.load(std::memory_order_relaxed); }
++
+     private:
+         struct CachedCellMesh
+         {
+             std::vector<osg::Vec3f> mPositions;
+             std::vector<unsigned int> mIndices;
++            // Bounds of the actual coarse occluder mesh. Frustum rejection never
++            // hides scene geometry; it only decides whether this occluder is worth
++            // rasterizing for the current camera.
++            osg::BoundingBox mBounds;
+         };
+ 
+         typedef std::pair<int, int> CellKey;
+ 
+         CachedCellMesh buildCell(int cellX, int cellY) const;
+-        // Returns nullptr when the cell is not cached and the per-build budget is
+-        // already spent. Callers must treat that as "skip this cell for now".
+         const CachedCellMesh* getCell(int cellX, int cellY, int& budget);
+         void pruneCellCache(const osg::Vec2i& center, int radiusCells);
++        void publishStats();
+         void invalidateCache();
+ 
+         Storage* mStorage;
+@@ -65,15 +81,20 @@
+         osg::Vec2i mCachedCellPos;
+         int mCachedRadius = -1;
+ 
+-        // X029: <= 0 means unlimited, which reproduces the X028 behaviour exactly.
+         int mCellBuildBudget = 24;
++        bool mFrustumCulling = true;
+         unsigned int mLastBuiltCells = 0;
++        unsigned int mLastVisibleCells = 0;
++
+         std::atomic<unsigned int> mPublishedCachedCellCount{0};
+         std::atomic<unsigned int> mPublishedLastBuiltCells{0};
++        std::atomic<unsigned int> mPublishedLastVisibleCells{0};
++        std::atomic<bool> mPublishedRegionComplete{false};
++
++        // X031: reuse the largest temporary LAND position array instead of
++        // allocating/freeing it once for every decoded cell.
++        mutable osg::ref_ptr<osg::Vec3Array> mScratchPositions;
+ 
+-        // X028/MGE-inspired incremental terrain occluder cache. MGE XE avoids
+-        // regenerating unchanged distant-land units; here we apply the same idea
+-        // to OpenMW's software occlusion mesh without importing renderer code.
+         std::map<CellKey, CachedCellMesh> mCellCache;
+     };
+ }
+diff -ruN /mnt/data/x030_clean_mp/files/settings-default.cfg /mnt/data/x031_mp/files/settings-default.cfg
+--- /mnt/data/x030_clean_mp/files/settings-default.cfg	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mp/files/settings-default.cfg	2026-08-29 20:03:20.923896724 +0000
+@@ -57,6 +57,9 @@
+ # cost of a briefly incomplete occluder (which only ever draws more, not less).
+ # 0 or below restores the old behaviour of building the whole region at once.
+ occlusion terrain cell budget = 24
++# X031: skip terrain occluder cells outside the camera side planes before software rasterization.
++# Fail-open: disabling/removing an occluder can only draw more scene geometry, never hide it.
++occlusion terrain frustum cull = true
+ occlusion occluder min radius = 500
+ occlusion occluder max radius = 4400
+ occlusion occluder shrink factor = 0.76
+@@ -494,7 +497,7 @@
+ threading model = DrawThreadPerContext
+ 
+ # Lets OSG configure CPU affinity for worker threads. Usually best left off.
+-use configure affinity = true
++use configure affinity = false
+ 
+ [Shaders]
+ 
+@@ -512,7 +515,7 @@
+ pbr subsurface strength = 0.35
+ 
+ force shaders = true
+-force per pixel lighting = true
++force per pixel lighting = false
+ clamp lighting = false
+ 
+ auto use object normal maps = true
+@@ -671,7 +674,7 @@
+ gamma = 1.0
+ screenshot type = regular
+ object vbo = true
+-object display lists = true
++object display lists = false
+ 
+ [Water]
+ # Water rendering mode: off, simple, new.
+@@ -958,7 +961,7 @@
+ # Set the number of background threads used for physics.
+ # If no background threads are used, physics calculations are processed in the main thread
+ # and the settings below have no effect.
+-async num threads = 0
++async num threads = 1
+ 
+ # Set the number of frames an inactive line-of-sight request will be kept
+ # refreshed in the background physics thread cache.
+@@ -1085,7 +1088,7 @@
+ 
+ [Chat]
+ enabled = true
+-mode = transparent30
++mode = visible
+ delay = 5.0
+ 
+ [Equipment Requirements]
+diff -ruN /mnt/data/x030_clean_mp/files/tes3mp/tes3mp-client-default.cfg /mnt/data/x031_mp/files/tes3mp/tes3mp-client-default.cfg
+--- /mnt/data/x030_clean_mp/files/tes3mp/tes3mp-client-default.cfg	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/x031_mp/files/tes3mp/tes3mp-client-default.cfg	2026-08-29 20:03:20.924878594 +0000
+@@ -0,0 +1,23 @@
++[General]
++destinationAddress = localhost
++port = 25565
++password =
++# 0 - Verbose (spam), 1 - Info, 2 - Warnings, 3 - Errors, 4 - Only fatal errors
++logLevel = 0
++
++[Master]
++address = master.tes3mp.com
++port = 25561
++
++[Chat]
++# Use https://wiki.libsdl.org/SDL_Keycode to find the correct key codes when rebinding
++#
++# For chatting
++keySay = Y
++# For enabling or disabling the chat window
++keyChatMode = F2
++x = 1
++y = 25
++w = 260
++h = 400
++# How long the message will be displayed in hidden mode
+diff -ruN /mnt/data/x030_clean_mp/files/ui/advancedpage.ui /mnt/data/x031_mp/files/ui/advancedpage.ui
+--- /mnt/data/x030_clean_mp/files/ui/advancedpage.ui	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mp/files/ui/advancedpage.ui	2026-08-29 20:03:20.924651531 +0000
+@@ -1260,6 +1260,11 @@
+                   </item>
+                   <item>
+                    <property name="text">
++                    <string>MMO (default)</string>
++                   </property>
++                  </item>
++                  <item>
++                   <property name="text">
+                     <string>Safe</string>
+                    </property>
+                   </item>
+@@ -1925,6 +1930,16 @@
+            </widget>
+           </item>
+           <item row="1" column="0" colspan="2">
++           <widget class="QCheckBox" name="occlusionTerrainFrustumCullCheckBox">
++            <property name="text">
++             <string>Frustum-cull terrain occluder cells</string>
++            </property>
++            <property name="toolTip">
++             <string>Skip cached terrain occluder cells outside the camera side planes before software rasterization. Recommended on all presets.</string>
++            </property>
++           </widget>
++          </item>
++          <item row="2" column="0" colspan="2">
+            <widget class="QLabel" name="occlusionTerrainBudgetHintLabel">
+             <property name="text">
+              <string>Recommended: 12–16 on weak CPUs, 24 balanced, 32–40 on fast desktop CPUs.</string>
+diff -ruN /mnt/data/x030_clean_mp/files/ui/graphicspage.ui /mnt/data/x031_mp/files/ui/graphicspage.ui
+--- /mnt/data/x030_clean_mp/files/ui/graphicspage.ui	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mp/files/ui/graphicspage.ui	2026-08-29 20:03:20.924341464 +0000
+@@ -53,7 +53,7 @@
+             </item>
+             <item>
+              <property name="text">
+-              <string>Balanced</string>
++              <string>MMO (default)</string>
+              </property>
+             </item>
+             <item>
+diff -ruN /mnt/data/x030_clean_mp/server/scripts/config.lua /mnt/data/x031_mp/server/scripts/config.lua
+--- /mnt/data/x030_clean_mp/server/scripts/config.lua	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mp/server/scripts/config.lua	2026-08-29 20:03:20.924089915 +0000
+@@ -88,6 +88,16 @@
+ -- convenience profiles; remote servers still choose their own value.
+ config.arenaXpRateMultiplier = 1.0
+ 
++-- X031: RAW config.lua is watched while the server is running. A successful
++-- reload is transactional and is pushed to connected players; malformed edits
++-- leave the previous working table active. Interval is clamped to 1..60 seconds.
++config.rawConfigReloadInterval = 2
++
++-- X031: re-verify/regenerate custom/questIndex.json once for every server process
++-- start. The stored file remains on disk as a diagnostic/fallback copy, but quest
++-- phasing stays fail-closed until the first fresh verified client upload replaces it.
++config.questIndexRefreshOnServerStart = true
++
+ -- Server-authoritative ArenaMP XP progression. These values overwrite the
+ -- client [XP Leveling] category when a player connects.
+ config.xpLeveling = {
+@@ -338,6 +348,9 @@
+ config.arenaActorsProcessingRange = math.max(config.arenaActorsProcessingRange,
+     config.arenaCombatPursuitDoorMaxDistance)
+ config.arenaGlobalXpMultiplier = clampNumber(config.arenaGlobalXpMultiplier, 0.01, 100, 1.0)
++config.arenaXpRateMultiplier = clampNumber(config.arenaXpRateMultiplier, 0.05, 10.0, 1.0)
++config.xpLeveling["xp gain multiplier"] = config.arenaXpRateMultiplier
++config.rawConfigReloadInterval = clampInteger(config.rawConfigReloadInterval, 1, 60, 2)
+ 
+ local serverLanguageAliases = {
+     auto = "AUTO", client = "AUTO", clients = "AUTO", detected = "AUTO",
+@@ -471,7 +484,7 @@
+ config.chatWindowInstructions = color.SkyBlue .. "[Написать в чат - " .. color.Turquoise .. "Y" .. color.SkyBlue .. "] [Скрыть чат - " .. color.Turquoise .. "F2" .. color.SkyBlue .. "] [Все доступные команды  - " .. color.Turquoise .. "/help" .. color.SkyBlue .. "]\n"
+ 
+ -- English equivalent used only for EN clients when per-client localization is enabled.
+-config.chatWindowInstructionsEN = color.SkyBlue .. "[Chat - " .. color.Turquoise .. "Y" .. color.SkyBlue .. "] [Hide chat - " .. color.Turquoise .. "F2" .. color.SkyBlue .. "] [All available commands  - " .. color.Turquoise .. "/help" .. color.SkyBlue .. "]\n"
++config.chatWindowInstructionsEN = color.SkyBlue .. "[Chat - " .. color.Turquoise .. "Y" .. color.SkyBlue .. "] [Chat opacity - " .. color.Turquoise .. "F2" .. color.SkyBlue .. "] [All available commands  - " .. color.Turquoise .. "/help" .. color.SkyBlue .. "]\n"
+ 
+ -- Compact pre-login greeting shown before the password/registration dialog.
+ -- Placeholders: {name} = player name, {count} = online count, {seconds} = login timeout.
+diff -ruN /mnt/data/x030_clean_mp/server/scripts/configHotReload.lua /mnt/data/x031_mp/server/scripts/configHotReload.lua
+--- /mnt/data/x030_clean_mp/server/scripts/configHotReload.lua	1970-01-01 00:00:00.000000000 +0000
++++ /mnt/data/x031_mp/server/scripts/configHotReload.lua	2026-08-29 19:55:54.168635572 +0000
+@@ -0,0 +1,202 @@
++-- ArenaMP X031 - transactional RAW config.lua hot reload.
++--
++-- The watcher compares file contents, so it does not depend on platform-specific
++-- timestamp APIs. A candidate config is executed through Lua's normal module
++-- loader only after saving the old global table. Any syntax/runtime failure rolls
++-- back atomically and is logged once for that exact broken file contents.
++
++local configHotReload = {}
++
++local fileIo = io
++if tes3mp.GetOperatingSystemType() == "Windows" then
++    local ok, io2 = pcall(require, "io2")
++    if ok and io2 ~= nil and type(io2.open) == "function" then
++        fileIo = io2
++    end
++end
++
++local lastAppliedContents = nil
++local lastAttemptedContents = nil
++local lastAttemptFailed = false
++local resolvedPath = nil
++
++local function sourceDirectory()
++    if debug == nil or type(debug.getinfo) ~= "function" then
++        return nil
++    end
++
++    local info = debug.getinfo(1, "S")
++    if info == nil or type(info.source) ~= "string" then
++        return nil
++    end
++
++    local source = info.source
++    if string.sub(source, 1, 1) == "@" then
++        source = string.sub(source, 2)
++    end
++
++    return string.match(source, "^(.*)[/\\][^/\\]+$")
++end
++
++local function candidatePaths()
++    local paths = {}
++    local dir = sourceDirectory()
++    if dir ~= nil and dir ~= "" then
++        table.insert(paths, dir .. "/config.lua")
++    end
++    table.insert(paths, "server/scripts/config.lua")
++    table.insert(paths, "scripts/config.lua")
++    table.insert(paths, "config.lua")
++    return paths
++end
++
++local function readAll(path)
++    local handle = fileIo.open(path, "rb")
++    if handle == nil then
++        return nil
++    end
++
++    local ok, contents = pcall(function() return handle:read("*a") end)
++    pcall(function() handle:close() end)
++    if not ok or type(contents) ~= "string" then
++        return nil
++    end
++    return contents
++end
++
++local function readConfigFile()
++    if resolvedPath ~= nil then
++        local contents = readAll(resolvedPath)
++        if contents ~= nil then
++            return contents
++        end
++        resolvedPath = nil
++    end
++
++    for _, path in ipairs(candidatePaths()) do
++        local contents = readAll(path)
++        if contents ~= nil then
++            resolvedPath = path
++            return contents
++        end
++    end
++    return nil
++end
++
++local function validateCandidate(candidate)
++    if type(candidate) ~= "table" then
++        return false, "config did not produce a table"
++    end
++
++    local requiredTables = {
++        "gameSettings", "vrSettings", "xpLeveling", "equipmentRequirements",
++        "arrowStick", "refinedAlchemy", "alchemyGameplay", "defaultRespawn",
++        "recordStoreLoadOrder"
++    }
++    for _, name in ipairs(requiredTables) do
++        if type(candidate[name]) ~= "table" then
++            return false, "required table config." .. name .. " is missing (file may still be mid-save)"
++        end
++    end
++
++    if type(candidate.difficulty) ~= "number" or
++       type(candidate.allowConsole) ~= "boolean" or
++       type(candidate.physicsFramerate) ~= "number" or
++       type(candidate.enforceDataFiles) ~= "boolean" then
++        return false, "required scalar settings are incomplete (file may still be mid-save)"
++    end
++
++    return true, nil
++end
++
++function configHotReload.Initialize()
++    local contents = readConfigFile()
++    if contents == nil then
++        tes3mp.LogMessage(enumerations.log.WARN,
++            "[X031 ConfigReload] Could not locate config.lua; live reload is disabled until the file becomes readable")
++        return false
++    end
++
++    lastAppliedContents = contents
++    lastAttemptedContents = contents
++    lastAttemptFailed = false
++    tes3mp.LogMessage(enumerations.log.INFO,
++        "[X031 ConfigReload] Watching " .. tostring(resolvedPath))
++    return true
++end
++
++--- Returns true only when a new config was loaded successfully.
++function configHotReload.Check()
++    local contents = readConfigFile()
++    if contents == nil then
++        return false
++    end
++
++    if lastAppliedContents == nil then
++        lastAppliedContents = contents
++        lastAttemptedContents = contents
++        lastAttemptFailed = false
++        return false
++    end
++
++    if contents == lastAppliedContents then
++        return false
++    end
++
++    -- Do not spam the same syntax/runtime error once per second. Saving the file
++    -- again changes its contents and immediately enables another attempt.
++    if lastAttemptFailed and contents == lastAttemptedContents then
++        return false
++    end
++
++    lastAttemptedContents = contents
++    lastAttemptFailed = false
++
++    -- Compile the exact bytes we just watched instead of asking require() to
++    -- resolve a path again. This also lets us reject syntax errors before touching
++    -- the live global config table. LuaJIT/Lua 5.1 provides loadstring; newer Lua
++    -- provides load for a source string.
++    local compiler = loadstring or load
++    local chunk, compileError = compiler(contents, "@" .. tostring(resolvedPath or "config.lua"))
++    if chunk == nil then
++        lastAttemptFailed = true
++        tes3mp.LogMessage(enumerations.log.ERROR,
++            "[X031 ConfigReload] RAW config.lua syntax rejected; previous working config remains active: " ..
++            tostring(compileError))
++        return false
++    end
++
++    local previousConfig = config
++    config = nil
++
++    local ok, result = pcall(chunk)
++    local valid, validationError = false, nil
++    if ok then
++        valid, validationError = validateCandidate(config)
++    end
++
++    if not ok or not valid then
++        config = previousConfig
++        lastAttemptFailed = true
++        local reason = ok and validationError or result
++        tes3mp.LogMessage(enumerations.log.ERROR,
++            "[X031 ConfigReload] RAW config.lua reload rejected; previous working config remains active: " ..
++            tostring(reason))
++        return false
++    end
++
++    -- package.loaded['config'] intentionally stays untouched. Modules which
++    -- required config during startup already hold the normal cached marker, while
++    -- runtime code reads the replaced global config table.
++    lastAppliedContents = contents
++
++    tes3mp.LogMessage(enumerations.log.INFO,
++        "[X031 ConfigReload] RAW config.lua reloaded successfully; applying live server settings")
++    return true
++end
++
++function configHotReload.GetPath()
++    return resolvedPath
++end
++
++return configHotReload
+diff -ruN /mnt/data/x030_clean_mp/server/scripts/questIndexStore.lua /mnt/data/x031_mp/server/scripts/questIndexStore.lua
+--- /mnt/data/x030_clean_mp/server/scripts/questIndexStore.lua	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mp/server/scripts/questIndexStore.lua	2026-08-29 20:03:20.924740666 +0000
+@@ -31,7 +31,10 @@
+     contentKey = nil,
+     indexHash = nil,
+     entries = {},
+-    entryCount = 0
++    entryCount = 0,
++    startupRefreshPending = false,
++    storedContentKey = nil,
++    storedIndexHash = nil
+ }
+ 
+ local pending = {}
+@@ -148,14 +151,45 @@
+         return
+     end
+ 
+-    applyIndex(data.contentKey, data.indexHash, data.entries)
+-    tes3mp.LogMessage(enumerations.log.INFO,
+-        "[QuestIndex] Loaded " .. state.entryCount .. " phaseable records for content key " ..
+-        state.contentKey .. " (hash " .. state.indexHash .. ")")
++    if configBool("questIndexRefreshOnServerStart", true) then
++        -- X031: never carry an authoritative quest classification across a process
++        -- restart without a fresh client-side scan. Keep the verified old metadata
++        -- only for diagnostics; the first valid requested upload will overwrite the
++        -- same JSON file and then re-enable phasing.
++        state.trusted = false
++        state.contentKey = nil
++        state.indexHash = nil
++        state.entries = {}
++        state.entryCount = 0
++        state.startupRefreshPending = true
++        state.storedContentKey = data.contentKey
++        state.storedIndexHash = data.indexHash
++        -- Update the on-disk file immediately so a restart is visible even before
++        -- the first client finishes the fresh scan. Old entries are preserved only
++        -- as diagnostics; state.trusted remains false until commit() overwrites them.
++        data.refreshPending = true
++        data.refreshRequestedAt = os.time()
++        data.generatedBy = "ArenaMP X031 server restart"
++        data.generationMode = "startup-refresh-pending"
++        jsonInterface.save(STORE_PATH, data)
++
++        tes3mp.LogMessage(enumerations.log.INFO,
++            "[QuestIndex] X031 startup refresh: questIndex.json marked for refresh; stored index " .. data.indexHash ..
++            " for content " .. data.contentKey ..
++            " is valid, but a fresh verified upload is required after this server restart")
++    else
++        applyIndex(data.contentKey, data.indexHash, data.entries)
++        tes3mp.LogMessage(enumerations.log.INFO,
++            "[QuestIndex] Loaded " .. state.entryCount .. " phaseable records for content key " ..
++            state.contentKey .. " (hash " .. state.indexHash .. ")")
++    end
+ end
+ 
+ local function commit(contentKey, indexHash, entries, reason, generatedBy, generationMode)
+     applyIndex(contentKey, indexHash, entries)
++    state.startupRefreshPending = false
++    state.storedContentKey = nil
++    state.storedIndexHash = nil
+ 
+     jsonInterface.save(STORE_PATH, {
+         contentKey = contentKey,
+@@ -204,6 +238,9 @@
+         entryCount = state.entryCount,
+         autoGenerate = autoGenerateEnabled(),
+         requireQuorum = requireQuorumBootstrap(),
++        startupRefreshPending = state.startupRefreshPending,
++        storedContentKey = state.storedContentKey,
++        storedIndexHash = state.storedIndexHash,
+         pendingConfirmations = confirmations
+     }
+ end
+@@ -217,6 +254,9 @@
+     state.indexHash = nil
+     state.entries = {}
+     state.entryCount = 0
++    state.startupRefreshPending = false
++    state.storedContentKey = nil
++    state.storedIndexHash = nil
+     pending = {}
+     confirmations = {}
+     driftWarned = {}
+@@ -250,6 +290,13 @@
+     return true
+ end
+ 
++--- X031: force lazy store validation during server startup, before any player
++--- can interact with quest sources. When startup refresh is enabled this leaves
++--- phasing fail-closed and primes the first logged-in player for MODE_UPLOAD.
++function questIndexStore.OnServerStart()
++    load()
++end
++
+ --- Called once per player as soon as they are fully logged in.
+ function questIndexStore.OnPlayerReady(pid)
+     load()
+diff -ruN /mnt/data/x030_clean_mp/server/scripts/serverCore.lua /mnt/data/x031_mp/server/scripts/serverCore.lua
+--- /mnt/data/x030_clean_mp/server/scripts/serverCore.lua	2026-08-29 19:36:29.000000000 +0000
++++ /mnt/data/x031_mp/server/scripts/serverCore.lua	2026-08-29 19:55:54.168828803 +0000
+@@ -40,6 +40,8 @@
+ require("defaultCommands")
+ coreChat = require("coreChat")
+ require("customScripts")
++local configHotReload = require("configHotReload")
++local questIndexStore = require("questIndexStore")
+ -- ArenaMP C19: core cell reset helper now lives in the main scripts folder.
+ -- Lua require caching keeps this safe when an older customScripts.lua still
+ -- loads custom.periodicCellResets through the compatibility shim.
+@@ -142,6 +144,99 @@
+     jsonInterface.save("banlist.json", banList)
+ end
+ 
++-- X031: one place for settings that can safely be re-applied at runtime after a
++-- transactional RAW config.lua reload.
++local function ApplyServerRuleConfig()
++    tes3mp.SetGameMode(config.gameMode)
++    tes3mp.SetDataFileEnforcementState(config.enforceDataFiles)
++    tes3mp.SetScriptErrorIgnoringState(config.ignoreScriptErrors)
++
++    tes3mp.SetPlayerCollisionState(config.enablePlayerCollision)
++    tes3mp.SetActorCollisionState(config.enableActorCollision)
++    tes3mp.SetPlacedObjectCollisionState(config.enablePlacedObjectCollision)
++    tes3mp.UseActorCollisionForPlacedObjects(config.useActorCollisionForPlacedObjects)
++
++    local consoleRuleString = config.allowConsole and "allowed" or "not allowed"
++    local bedRestRuleString = config.allowBedRest and "allowed" or "not allowed"
++    local wildRestRuleString = config.allowWildernessRest and "allowed" or "not allowed"
++    local waitRuleString = config.allowWait and "allowed" or "not allowed"
++
++    tes3mp.SetRuleString("enforceDataFiles", tostring(config.enforceDataFiles))
++    tes3mp.SetRuleString("ignoreScriptErrors", tostring(config.ignoreScriptErrors))
++    tes3mp.SetRuleValue("difficulty", config.difficulty)
++    tes3mp.SetRuleValue("deathPenaltyJailDays", config.deathPenaltyJailDays)
++    tes3mp.SetRuleString("console", consoleRuleString)
++    tes3mp.SetRuleString("bedResting", bedRestRuleString)
++    tes3mp.SetRuleString("wildernessResting", wildRestRuleString)
++    tes3mp.SetRuleString("waiting", waitRuleString)
++    tes3mp.SetRuleValue("enforcedLogLevel", config.enforcedLogLevel)
++    tes3mp.SetRuleValue("physicsFramerate", config.physicsFramerate)
++    tes3mp.SetRuleString("shareJournal", tostring(config.shareJournal))
++    tes3mp.SetRuleString("shareFactionRanks", tostring(config.shareFactionRanks))
++    tes3mp.SetRuleString("shareFactionExpulsion", tostring(config.shareFactionExpulsion))
++    tes3mp.SetRuleString("shareFactionReputation", tostring(config.shareFactionReputation))
++    tes3mp.SetRuleString("shareTopics", tostring(config.shareTopics))
++    tes3mp.SetRuleString("shareBounty", tostring(config.shareBounty))
++    tes3mp.SetRuleString("shareReputation", tostring(config.shareReputation))
++    tes3mp.SetRuleString("shareMapExploration", tostring(config.shareMapExploration))
++    tes3mp.SetRuleString("enablePlacedObjectCollision", tostring(config.enablePlacedObjectCollision))
++
++    local respawnCell
++    if config.respawnAtImperialShrine == true then
++        respawnCell = "nearest Imperial shrine"
++        if config.respawnAtTribunalTemple == true then
++            respawnCell = respawnCell .. " or Tribunal temple"
++        end
++    elseif config.respawnAtTribunalTemple == true then
++        respawnCell = "nearest Tribunal temple"
++    else
++        respawnCell = config.defaultRespawn.cellDescription
++    end
++    tes3mp.SetRuleString("respawnCell", respawnCell)
++end
++
++local function ApplyConfigToOnlinePlayer(pid)
++    if Players[pid] == nil or not Players[pid]:IsLoggedIn() then
++        return
++    end
++
++    tes3mp.SetDifficulty(pid, config.difficulty)
++    tes3mp.SetConsoleAllowed(pid, config.allowConsole)
++    tes3mp.SetBedRestAllowed(pid, config.allowBedRest)
++    tes3mp.SetWildernessRestAllowed(pid, config.allowWildernessRest)
++    tes3mp.SetWaitAllowed(pid, config.allowWait)
++    tes3mp.SetPhysicsFramerate(pid, config.physicsFramerate)
++    tes3mp.SetEnforcedLogLevel(pid, config.enforcedLogLevel)
++
++    tes3mp.ClearGameSettingValues(pid)
++    for _, settingPairTable in pairs(config.gameSettings) do
++        tes3mp.SetGameSettingValue(pid, settingPairTable.name, tostring(settingPairTable.value))
++    end
++
++    tes3mp.ClearVRSettingValues(pid)
++    for _, settingPairTable in pairs(config.vrSettings) do
++        tes3mp.SetVRSettingValue(pid, settingPairTable.name, tostring(settingPairTable.value))
++    end
++    tes3mp.SendSettings(pid)
++
++    -- These helpers read the new global config table on every call. Disabled
++    -- client scripts are deliberately not hot-reloaded because removing a dummy
++    -- replacement cannot restore the original script without reconnect/restart.
++    logicHandler.SendClientScriptSettings(pid, false)
++    logicHandler.SendConfigCollisionOverrides(pid, false)
++end
++
++local function ApplyLiveConfig()
++    ApplyServerRuleConfig()
++    for pid, _ in pairs(Players) do
++        ApplyConfigToOnlinePlayer(pid)
++    end
++    tes3mp.LogMessage(enumerations.log.INFO,
++        "[X031 ConfigReload] Live settings applied to server and connected players")
++end
++
++local rawConfigReloadCountdown = 0
++
+ do
+     local previousHourFloor = nil
+     -- X024: seconds left before the next stray-actor sweep.
+@@ -149,6 +244,17 @@
+ 
+     function UpdateTime()
+ 
++        -- X031: poll the RAW config file on the existing one-second server timer.
++        -- Failed edits are rolled back by configHotReload and do not disturb the
++        -- running server.
++        rawConfigReloadCountdown = rawConfigReloadCountdown - 1
++        if rawConfigReloadCountdown <= 0 then
++            rawConfigReloadCountdown = math.max(1, math.min(60, tonumber(config.rawConfigReloadInterval) or 2))
++            if configHotReload.Check() then
++                ApplyLiveConfig()
++            end
++        end
++
+         -- X024: periodically remind cell authorities to walk actors that are
+         -- stranded outside their own cell back home. Runs on the existing one
+         -- second timer instead of adding another one.
+@@ -221,6 +327,8 @@
+     if eventStatus.validDefaultHandler then
+         friendlyFire.Initialize()
+         logicHandler.InitializeWorld()
++        configHotReload.Initialize()
++        questIndexStore.OnServerStart()
+ 
+         for priorityLevel, recordStoreTypes in ipairs(config.recordStoreLoadOrder) do
+             for _, storeType in ipairs(recordStoreTypes) do
+@@ -256,63 +364,7 @@
+         eventHandler.InitializeDefaultValidators()
+         eventHandler.InitializeDefaultHandlers()
+ 
+-        tes3mp.SetGameMode(config.gameMode)
+-
+-        local consoleRuleString = "allowed"
+-        if not config.allowConsole then
+-            consoleRuleString = "not " .. consoleRuleString
+-        end
+-
+-        local bedRestRuleString = "allowed"
+-        if not config.allowBedRest then
+-            bedRestRuleString = "not " .. bedRestRuleString
+-        end
+-
+-        local wildRestRuleString = "allowed"
+-        if not config.allowWildernessRest then
+-            wildRestRuleString = "not " .. wildRestRuleString
+-        end
+-
+-        local waitRuleString = "allowed"
+-        if not config.allowWait then
+-            waitRuleString = "not " .. waitRuleString
+-        end
+-
+-        tes3mp.SetRuleString("enforceDataFiles", tostring(config.enforceDataFiles))
+-        tes3mp.SetRuleString("ignoreScriptErrors", tostring(config.ignoreScriptErrors))
+-        tes3mp.SetRuleValue("difficulty", config.difficulty)
+-        tes3mp.SetRuleValue("deathPenaltyJailDays", config.deathPenaltyJailDays)
+-        tes3mp.SetRuleString("console", consoleRuleString)
+-        tes3mp.SetRuleString("bedResting", bedRestRuleString)
+-        tes3mp.SetRuleString("wildernessResting", wildRestRuleString)
+-        tes3mp.SetRuleString("waiting", waitRuleString)
+-        tes3mp.SetRuleValue("enforcedLogLevel", config.enforcedLogLevel)
+-        tes3mp.SetRuleValue("physicsFramerate", config.physicsFramerate)
+-        tes3mp.SetRuleString("shareJournal", tostring(config.shareJournal))
+-        tes3mp.SetRuleString("shareFactionRanks", tostring(config.shareFactionRanks))
+-        tes3mp.SetRuleString("shareFactionExpulsion", tostring(config.shareFactionExpulsion))
+-        tes3mp.SetRuleString("shareFactionReputation", tostring(config.shareFactionReputation))
+-        tes3mp.SetRuleString("shareTopics", tostring(config.shareTopics))
+-        tes3mp.SetRuleString("shareBounty", tostring(config.shareBounty))
+-        tes3mp.SetRuleString("shareReputation", tostring(config.shareReputation))
+-        tes3mp.SetRuleString("shareMapExploration", tostring(config.shareMapExploration))
+-        tes3mp.SetRuleString("enablePlacedObjectCollision", tostring(config.enablePlacedObjectCollision))
+-
+-        local respawnCell
+-
+-        if config.respawnAtImperialShrine == true then
+-            respawnCell = "nearest Imperial shrine"
+-
+-            if config.respawnAtTribunalTemple == true then
+-                respawnCell = respawnCell .. " or Tribunal temple"
+-            end
+-        elseif config.respawnAtTribunalTemple == true then
+-            respawnCell = "nearest Tribunal temple"
+-        else
+-            respawnCell = config.defaultRespawn.cellDescription
+-        end
+-
+-        tes3mp.SetRuleString("respawnCell", respawnCell)
++        ApplyServerRuleConfig()
+     end
+     customEventHooks.triggerHandlers("OnServerPostInit", eventStatus, {})
+ end

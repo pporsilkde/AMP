@@ -40,6 +40,8 @@ menuHelper = require("menuHelper")
 require("defaultCommands")
 coreChat = require("coreChat")
 require("customScripts")
+local configHotReload = require("configHotReload")
+local questIndexStore = require("questIndexStore")
 -- ArenaMP C19: core cell reset helper now lives in the main scripts folder.
 -- Lua require caching keeps this safe when an older customScripts.lua still
 -- loads custom.periodicCellResets through the compatibility shim.
@@ -142,12 +144,116 @@ function SaveBanList()
     jsonInterface.save("banlist.json", banList)
 end
 
+-- X031: one place for settings that can safely be re-applied at runtime after a
+-- transactional RAW config.lua reload.
+local function ApplyServerRuleConfig()
+    tes3mp.SetGameMode(config.gameMode)
+    tes3mp.SetDataFileEnforcementState(config.enforceDataFiles)
+    tes3mp.SetScriptErrorIgnoringState(config.ignoreScriptErrors)
+
+    tes3mp.SetPlayerCollisionState(config.enablePlayerCollision)
+    tes3mp.SetActorCollisionState(config.enableActorCollision)
+    tes3mp.SetPlacedObjectCollisionState(config.enablePlacedObjectCollision)
+    tes3mp.UseActorCollisionForPlacedObjects(config.useActorCollisionForPlacedObjects)
+
+    local consoleRuleString = config.allowConsole and "allowed" or "not allowed"
+    local bedRestRuleString = config.allowBedRest and "allowed" or "not allowed"
+    local wildRestRuleString = config.allowWildernessRest and "allowed" or "not allowed"
+    local waitRuleString = config.allowWait and "allowed" or "not allowed"
+
+    tes3mp.SetRuleString("enforceDataFiles", tostring(config.enforceDataFiles))
+    tes3mp.SetRuleString("ignoreScriptErrors", tostring(config.ignoreScriptErrors))
+    tes3mp.SetRuleValue("difficulty", config.difficulty)
+    tes3mp.SetRuleValue("deathPenaltyJailDays", config.deathPenaltyJailDays)
+    tes3mp.SetRuleString("console", consoleRuleString)
+    tes3mp.SetRuleString("bedResting", bedRestRuleString)
+    tes3mp.SetRuleString("wildernessResting", wildRestRuleString)
+    tes3mp.SetRuleString("waiting", waitRuleString)
+    tes3mp.SetRuleValue("enforcedLogLevel", config.enforcedLogLevel)
+    tes3mp.SetRuleValue("physicsFramerate", config.physicsFramerate)
+    tes3mp.SetRuleString("shareJournal", tostring(config.shareJournal))
+    tes3mp.SetRuleString("shareFactionRanks", tostring(config.shareFactionRanks))
+    tes3mp.SetRuleString("shareFactionExpulsion", tostring(config.shareFactionExpulsion))
+    tes3mp.SetRuleString("shareFactionReputation", tostring(config.shareFactionReputation))
+    tes3mp.SetRuleString("shareTopics", tostring(config.shareTopics))
+    tes3mp.SetRuleString("shareBounty", tostring(config.shareBounty))
+    tes3mp.SetRuleString("shareReputation", tostring(config.shareReputation))
+    tes3mp.SetRuleString("shareMapExploration", tostring(config.shareMapExploration))
+    tes3mp.SetRuleString("enablePlacedObjectCollision", tostring(config.enablePlacedObjectCollision))
+
+    local respawnCell
+    if config.respawnAtImperialShrine == true then
+        respawnCell = "nearest Imperial shrine"
+        if config.respawnAtTribunalTemple == true then
+            respawnCell = respawnCell .. " or Tribunal temple"
+        end
+    elseif config.respawnAtTribunalTemple == true then
+        respawnCell = "nearest Tribunal temple"
+    else
+        respawnCell = config.defaultRespawn.cellDescription
+    end
+    tes3mp.SetRuleString("respawnCell", respawnCell)
+end
+
+local function ApplyConfigToOnlinePlayer(pid)
+    if Players[pid] == nil or not Players[pid]:IsLoggedIn() then
+        return
+    end
+
+    tes3mp.SetDifficulty(pid, config.difficulty)
+    tes3mp.SetConsoleAllowed(pid, config.allowConsole)
+    tes3mp.SetBedRestAllowed(pid, config.allowBedRest)
+    tes3mp.SetWildernessRestAllowed(pid, config.allowWildernessRest)
+    tes3mp.SetWaitAllowed(pid, config.allowWait)
+    tes3mp.SetPhysicsFramerate(pid, config.physicsFramerate)
+    tes3mp.SetEnforcedLogLevel(pid, config.enforcedLogLevel)
+
+    tes3mp.ClearGameSettingValues(pid)
+    for _, settingPairTable in pairs(config.gameSettings) do
+        tes3mp.SetGameSettingValue(pid, settingPairTable.name, tostring(settingPairTable.value))
+    end
+
+    tes3mp.ClearVRSettingValues(pid)
+    for _, settingPairTable in pairs(config.vrSettings) do
+        tes3mp.SetVRSettingValue(pid, settingPairTable.name, tostring(settingPairTable.value))
+    end
+    tes3mp.SendSettings(pid)
+
+    -- These helpers read the new global config table on every call. Disabled
+    -- client scripts are deliberately not hot-reloaded because removing a dummy
+    -- replacement cannot restore the original script without reconnect/restart.
+    logicHandler.SendClientScriptSettings(pid, false)
+    logicHandler.SendConfigCollisionOverrides(pid, false)
+end
+
+local function ApplyLiveConfig()
+    ApplyServerRuleConfig()
+    for pid, _ in pairs(Players) do
+        ApplyConfigToOnlinePlayer(pid)
+    end
+    tes3mp.LogMessage(enumerations.log.INFO,
+        "[X031 ConfigReload] Live settings applied to server and connected players")
+end
+
+local rawConfigReloadCountdown = 0
+
 do
     local previousHourFloor = nil
     -- X024: seconds left before the next stray-actor sweep.
     local homeReturnCountdown = 0
 
     function UpdateTime()
+
+        -- X031: poll the RAW config file on the existing one-second server timer.
+        -- Failed edits are rolled back by configHotReload and do not disturb the
+        -- running server.
+        rawConfigReloadCountdown = rawConfigReloadCountdown - 1
+        if rawConfigReloadCountdown <= 0 then
+            rawConfigReloadCountdown = math.max(1, math.min(60, tonumber(config.rawConfigReloadInterval) or 2))
+            if configHotReload.Check() then
+                ApplyLiveConfig()
+            end
+        end
 
         -- X024: periodically remind cell authorities to walk actors that are
         -- stranded outside their own cell back home. Runs on the existing one
@@ -221,6 +327,8 @@ function OnServerInit()
     if eventStatus.validDefaultHandler then
         friendlyFire.Initialize()
         logicHandler.InitializeWorld()
+        configHotReload.Initialize()
+        questIndexStore.OnServerStart()
 
         for priorityLevel, recordStoreTypes in ipairs(config.recordStoreLoadOrder) do
             for _, storeType in ipairs(recordStoreTypes) do
@@ -256,63 +364,7 @@ function OnServerPostInit()
         eventHandler.InitializeDefaultValidators()
         eventHandler.InitializeDefaultHandlers()
 
-        tes3mp.SetGameMode(config.gameMode)
-
-        local consoleRuleString = "allowed"
-        if not config.allowConsole then
-            consoleRuleString = "not " .. consoleRuleString
-        end
-
-        local bedRestRuleString = "allowed"
-        if not config.allowBedRest then
-            bedRestRuleString = "not " .. bedRestRuleString
-        end
-
-        local wildRestRuleString = "allowed"
-        if not config.allowWildernessRest then
-            wildRestRuleString = "not " .. wildRestRuleString
-        end
-
-        local waitRuleString = "allowed"
-        if not config.allowWait then
-            waitRuleString = "not " .. waitRuleString
-        end
-
-        tes3mp.SetRuleString("enforceDataFiles", tostring(config.enforceDataFiles))
-        tes3mp.SetRuleString("ignoreScriptErrors", tostring(config.ignoreScriptErrors))
-        tes3mp.SetRuleValue("difficulty", config.difficulty)
-        tes3mp.SetRuleValue("deathPenaltyJailDays", config.deathPenaltyJailDays)
-        tes3mp.SetRuleString("console", consoleRuleString)
-        tes3mp.SetRuleString("bedResting", bedRestRuleString)
-        tes3mp.SetRuleString("wildernessResting", wildRestRuleString)
-        tes3mp.SetRuleString("waiting", waitRuleString)
-        tes3mp.SetRuleValue("enforcedLogLevel", config.enforcedLogLevel)
-        tes3mp.SetRuleValue("physicsFramerate", config.physicsFramerate)
-        tes3mp.SetRuleString("shareJournal", tostring(config.shareJournal))
-        tes3mp.SetRuleString("shareFactionRanks", tostring(config.shareFactionRanks))
-        tes3mp.SetRuleString("shareFactionExpulsion", tostring(config.shareFactionExpulsion))
-        tes3mp.SetRuleString("shareFactionReputation", tostring(config.shareFactionReputation))
-        tes3mp.SetRuleString("shareTopics", tostring(config.shareTopics))
-        tes3mp.SetRuleString("shareBounty", tostring(config.shareBounty))
-        tes3mp.SetRuleString("shareReputation", tostring(config.shareReputation))
-        tes3mp.SetRuleString("shareMapExploration", tostring(config.shareMapExploration))
-        tes3mp.SetRuleString("enablePlacedObjectCollision", tostring(config.enablePlacedObjectCollision))
-
-        local respawnCell
-
-        if config.respawnAtImperialShrine == true then
-            respawnCell = "nearest Imperial shrine"
-
-            if config.respawnAtTribunalTemple == true then
-                respawnCell = respawnCell .. " or Tribunal temple"
-            end
-        elseif config.respawnAtTribunalTemple == true then
-            respawnCell = "nearest Tribunal temple"
-        else
-            respawnCell = config.defaultRespawn.cellDescription
-        end
-
-        tes3mp.SetRuleString("respawnCell", respawnCell)
+        ApplyServerRuleConfig()
     end
     customEventHooks.triggerHandlers("OnServerPostInit", eventStatus, {})
 end

@@ -4,6 +4,7 @@
 #include <osg/BoundingBox>
 #include <osg/Object>
 #include <osg/NodeCallback>
+#include <osg/Polytope>
 #include <osg/Referenced>
 #include <osg/Vec3f>
 #include <osg/observer_ptr>
@@ -17,6 +18,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <components/terrain/terrainoccluder.hpp>
+
 namespace osg
 {
     class Group;
@@ -29,10 +32,6 @@ namespace SceneUtil
     class OcclusionCuller;
 }
 
-namespace Terrain
-{
-    class TerrainOccluder;
-}
 
 namespace MWRender
 {
@@ -114,8 +113,10 @@ namespace MWRender
         int mRadiusCells;
         bool mEnableTerrainOccluder;
         unsigned int mLastFrameNumber;
-        std::vector<osg::Vec3f> mPositions;
-        std::vector<unsigned int> mIndices;
+        // X031: rasterize cached cells directly. The frustum and the tiny list of
+        // cell references are reused every cull frame.
+        osg::Polytope mFrustum;
+        std::vector<Terrain::OccluderCellMesh> mVisibleCells;
     };
 
     class PagedOccluderCallback : public osg::NodeCallback

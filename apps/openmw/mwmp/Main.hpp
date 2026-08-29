@@ -41,8 +41,6 @@ namespace mwmp
         */
 
         static std::string getResDir();
-        static bool useVanillaBuildServer();
-        static bool isChatHistoryHidden();
 
         Networking *getNetworking() const;
         LocalSystem *getLocalSystem() const;
@@ -56,8 +54,6 @@ namespace mwmp
         static std::string resourceDir;
         static std::string address;
         static std::string serverPassword;
-        static bool vanillaBuildServer;
-        static bool hideChatHistory;
         Main (const Main&);
         ///< not implemented
         Main& operator= (const Main&);

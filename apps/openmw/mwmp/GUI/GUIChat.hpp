@@ -24,8 +24,6 @@ namespace mwmp
             CHAT_VISIBLE = 0,
             CHAT_TRANSPARENT_30,
             CHAT_TRANSPARENT_60,
-            CHAT_AUTOHIDE,
-            CHAT_HIDDEN,
             CHAT_STATE_COUNT
         };
 
@@ -44,7 +42,7 @@ namespace mwmp
         GUIChat(int x, int y, int w, int h);
 
         void pressedChatMode(); //switch chat mode
-        void pressedSay(); // show chat input, including while the chat itself is hidden
+        void pressedSay(); // show chat input
         void setDelay(float newDelay);
         void setHistoryDisplayEnabled(bool enabled);
 

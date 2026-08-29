@@ -81,7 +81,22 @@ config.arenaTwoHandedAccuracyPenalty = true
 config.arenaStavesAccuracyBonus = true
 config.arenaSkillBooksLevelLimit = true
 config.arenaNewConstantEffectDifficulty = true
+-- X030: skill-use-only multiplier (organic skill actions).
 config.arenaGlobalXpMultiplier = 1.0
+-- X030: overall server-authoritative XP rate. 0.50 very slow, 0.75 slow,
+-- 1.00 normal, 1.50 fast, 2.00 very fast. This mirrors the launcher's
+-- convenience profiles; remote servers still choose their own value.
+config.arenaXpRateMultiplier = 1.0
+
+-- X031: RAW config.lua is watched while the server is running. A successful
+-- reload is transactional and is pushed to connected players; malformed edits
+-- leave the previous working table active. Interval is clamped to 1..60 seconds.
+config.rawConfigReloadInterval = 2
+
+-- X031: re-verify/regenerate custom/questIndex.json once for every server process
+-- start. The stored file remains on disk as a diagnostic/fallback copy, but quest
+-- phasing stays fail-closed until the first fresh verified client upload replaces it.
+config.questIndexRefreshOnServerStart = true
 
 -- Server-authoritative ArenaMP XP progression. These values overwrite the
 -- client [XP Leveling] category when a player connects.
@@ -96,7 +111,7 @@ config.xpLeveling = {
     ["xp per level"] = 250, -- legacy fallback only
     ["skill points per level"] = 10,
     ["xp per skill level equivalent"] = 50,
-    ["xp gain multiplier"] = 1.0,
+    ["xp gain multiplier"] = config.arenaXpRateMultiplier,
     ["difficulty xp scaling"] = true,
     ["difficulty xp tier 1 multiplier"] = 1.00,
     ["difficulty xp tier 2 multiplier"] = 1.15,
@@ -333,6 +348,9 @@ end
 config.arenaActorsProcessingRange = math.max(config.arenaActorsProcessingRange,
     config.arenaCombatPursuitDoorMaxDistance)
 config.arenaGlobalXpMultiplier = clampNumber(config.arenaGlobalXpMultiplier, 0.01, 100, 1.0)
+config.arenaXpRateMultiplier = clampNumber(config.arenaXpRateMultiplier, 0.05, 10.0, 1.0)
+config.xpLeveling["xp gain multiplier"] = config.arenaXpRateMultiplier
+config.rawConfigReloadInterval = clampInteger(config.rawConfigReloadInterval, 1, 60, 2)
 
 local serverLanguageAliases = {
     auto = "AUTO", client = "AUTO", clients = "AUTO", detected = "AUTO",
@@ -466,7 +484,7 @@ config.defaultTimeTable = { year = 427, month = 7, day = 16, hour = 9,
 config.chatWindowInstructions = color.SkyBlue .. "[Написать в чат - " .. color.Turquoise .. "Y" .. color.SkyBlue .. "] [Скрыть чат - " .. color.Turquoise .. "F2" .. color.SkyBlue .. "] [Все доступные команды  - " .. color.Turquoise .. "/help" .. color.SkyBlue .. "]\n"
 
 -- English equivalent used only for EN clients when per-client localization is enabled.
-config.chatWindowInstructionsEN = color.SkyBlue .. "[Chat - " .. color.Turquoise .. "Y" .. color.SkyBlue .. "] [Hide chat - " .. color.Turquoise .. "F2" .. color.SkyBlue .. "] [All available commands  - " .. color.Turquoise .. "/help" .. color.SkyBlue .. "]\n"
+config.chatWindowInstructionsEN = color.SkyBlue .. "[Chat - " .. color.Turquoise .. "Y" .. color.SkyBlue .. "] [Chat opacity - " .. color.Turquoise .. "F2" .. color.SkyBlue .. "] [All available commands  - " .. color.Turquoise .. "/help" .. color.SkyBlue .. "]\n"
 
 -- Compact pre-login greeting shown before the password/registration dialog.
 -- Placeholders: {name} = player name, {count} = online count, {seconds} = login timeout.
