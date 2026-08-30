@@ -12,6 +12,7 @@
 #include <QOpenGLFunctions>
 #include <QScreen>
 #include <QSignalBlocker>
+#include <QSpinBox>
 #include <QThread>
 
 #ifdef _WIN32
@@ -61,9 +62,19 @@ Launcher::GraphicsPage::GraphicsPage(Config::LauncherSettings& launcherSettings,
     , mLauncherSettings(launcherSettings)
     , mRecommendedQuality(2)
     , mInitializingQuality(false)
+    , mInitializingOcclusion(false)
 {
     setObjectName ("GraphicsPage");
     setupUi(this);
+
+    // X041: the streaming/occlusion budget used to sit in Advanced -> Arena
+    // Settings, whose save path was never wired up, so nothing the user typed
+    // there ever reached settings.cfg. Here it persists on edit, exactly like
+    // the quality preset next to it.
+    connect(occlusionTerrainBudgetSpinBox, static_cast<void (QSpinBox::*)(int)>(&QSpinBox::valueChanged),
+        this, [this](int) { slotOcclusionSettingChanged(); });
+    connect(occlusionTerrainFrustumCullCheckBox, &QCheckBox::toggled,
+        this, [this](bool) { slotOcclusionSettingChanged(); });
 
     // Set the maximum res we can set in windowed mode
     QRect res = getMaximumResolution();
@@ -158,7 +169,43 @@ bool Launcher::GraphicsPage::loadSettings()
 
     initializeQualityPage();
     syncGraphicsControls();
+    loadOcclusionSettings();
     return true;
+}
+
+void Launcher::GraphicsPage::loadOcclusionSettings()
+{
+    mInitializingOcclusion = true;
+    occlusionTerrainBudgetSpinBox->setValue(Settings::Manager::getInt("occlusion terrain cell budget", "Camera"));
+    occlusionTerrainFrustumCullCheckBox->setChecked(
+        Settings::Manager::getBool("occlusion terrain frustum cull", "Camera"));
+    mInitializingOcclusion = false;
+}
+
+void Launcher::GraphicsPage::applyOcclusionSettingsToManager()
+{
+    const int budget = occlusionTerrainBudgetSpinBox->value();
+    if (budget != Settings::Manager::getInt("occlusion terrain cell budget", "Camera"))
+        Settings::Manager::setInt("occlusion terrain cell budget", "Camera", budget);
+
+    const bool frustumCull = occlusionTerrainFrustumCullCheckBox->isChecked();
+    if (frustumCull != Settings::Manager::getBool("occlusion terrain frustum cull", "Camera"))
+        Settings::Manager::setBool("occlusion terrain frustum cull", "Camera", frustumCull);
+}
+
+void Launcher::GraphicsPage::slotOcclusionSettingChanged()
+{
+    if (mInitializingOcclusion || mInitializingQuality)
+        return;
+
+    // Same discipline as the quality preset: re-read settings.cfg first, touch
+    // only the two keys this group owns, then write back. The game may have
+    // rewritten the file while the Launcher stayed open.
+    if (!reloadUserSettingsFromDisk())
+        return;
+
+    applyOcclusionSettingsToManager();
+    saveUserSettingsToDisk();
 }
 
 void Launcher::GraphicsPage::syncGraphicsControls()
@@ -987,6 +1034,11 @@ void Launcher::GraphicsPage::slotApplyQualityPreset()
 
     if (vendorOptimizationsCheckBox->isChecked())
         applyVendorOptimizations(level);
+
+    // applyQualityLevel() owns "occlusion terrain cell budget" and
+    // "occlusion terrain frustum cull", so show what the preset just chose
+    // rather than leaving the group displaying the previous values.
+    loadOcclusionSettings();
 
     if (!saveUserSettingsToDisk())
         return;

@@ -282,6 +282,61 @@
         </widget>
        </item>
        <item>
+        <widget class="QGroupBox" name="arenaOptimizationGroupBox">
+         <property name="title">
+          <string>Streaming / occlusion</string>
+         </property>
+         <layout class="QGridLayout" name="arenaOptimizationLayout">
+          <item row="0" column="0">
+           <widget class="QLabel" name="occlusionTerrainBudgetLabel">
+            <property name="text">
+             <string>Terrain occluder build budget:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QSpinBox" name="occlusionTerrainBudgetSpinBox">
+            <property name="minimum">
+             <number>0</number>
+            </property>
+            <property name="maximum">
+             <number>128</number>
+            </property>
+            <property name="singleStep">
+             <number>4</number>
+            </property>
+            <property name="suffix">
+             <string> cell(s)</string>
+            </property>
+            <property name="toolTip">
+             <string>Maximum newly decoded LAND cells per terrain-occluder rebuild. 0 builds the whole region at once; lower values reduce cell-transition spikes.</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0" colspan="2">
+           <widget class="QCheckBox" name="occlusionTerrainFrustumCullCheckBox">
+            <property name="text">
+             <string>Frustum-cull terrain occluder cells</string>
+            </property>
+            <property name="toolTip">
+             <string>Skip cached terrain occluder cells outside the camera side planes before software rasterization. Recommended on all presets.</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="0" colspan="2">
+           <widget class="QLabel" name="occlusionTerrainBudgetHintLabel">
+            <property name="text">
+             <string>Recommended: 12–16 on weak CPUs, 24 balanced, 32–40 on fast desktop CPUs.</string>
+            </property>
+            <property name="wordWrap">
+             <bool>true</bool>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
         <spacer name="qualityVerticalSpacer">
          <property name="orientation">
           <enum>Qt::Vertical</enum>

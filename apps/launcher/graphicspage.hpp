@@ -37,6 +37,7 @@ namespace Launcher
         void slotPbrQualityChanged(int index);
         void slotApplyQualityPreset();
         void slotDetectHardware();
+        void slotOcclusionSettingChanged();
 
     private:
         struct HardwareInfo
@@ -57,6 +58,7 @@ namespace Launcher
         HardwareInfo mHardwareInfo;
         int mRecommendedQuality;
         bool mInitializingQuality;
+        bool mInitializingOcclusion;
 
         static QStringList getAvailableResolutions(int screen);
         static QRect getMaximumResolution();
@@ -65,6 +67,10 @@ namespace Launcher
         void syncGraphicsControls();
         void updateShadowControls();
         void initializeQualityPage();
+        // X041: streaming/occlusion budget, moved here from the removed
+        // Advanced -> Arena Settings tab.
+        void loadOcclusionSettings();
+        void applyOcclusionSettingsToManager();
         HardwareInfo detectHardware() const;
         int recommendQuality(const HardwareInfo& info) const;
         void applyQualityLevel(int level);

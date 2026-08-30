@@ -1,5 +1,12 @@
 #include "playpage.hpp"
 
+#include <array>
+#include <cmath>
+#include <exception>
+
+#include <components/settings/parser.hpp>
+#include <components/settings/settings.hpp>
+
 #include <QApplication>
 #include <QAbstractSocket>
 #include <QCheckBox>
@@ -120,6 +127,7 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     : QWidget(parent)
     , mEmbeddedServerConsole(nullptr)
     , mSyncingServerSettingsTabs(false)
+    , mSyncingXpControls(false)
     , mHostInterfaceLabel(nullptr)
     , mHostInterfaceCombo(nullptr)
     , mRefreshHostInterfacesButton(nullptr)
@@ -230,9 +238,126 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     connect(syncServerSettingsFormButton, SIGNAL(clicked()), this, SLOT(slotSyncFormFromRawConfig()));
     connect(serverSettingsModeTabs, SIGNAL(currentChanged(int)), this, SLOT(slotServerSettingsModeChanged(int)));
 
+    // X041: XP progression presets, moved from Advanced -> Arena Settings.
+    // Selecting a named profile updates the overall multiplier; entering
+    // another value marks the preset Custom.
+    connect(xpRatePresetComboBox, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+        this, &PlayPage::slotXpRatePresetChanged);
+    connect(xpGainMultiplierSpinBox, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
+        this, &PlayPage::slotXpGainMultiplierChanged);
+
     pageTabs->setCurrentIndex(0);
     serverSettingsModeTabs->setCurrentIndex(0);
     loadServerSettings();
+}
+
+namespace
+{
+    const std::array<double, 5> sXpRatePresets = { 0.50, 0.75, 1.00, 1.50, 2.00 };
+}
+
+void Launcher::PlayPage::slotXpRatePresetChanged(int index)
+{
+    if (mSyncingXpControls)
+        return;
+    if (index < 0 || index >= static_cast<int>(sXpRatePresets.size()))
+        return; // "Custom"
+
+    mSyncingXpControls = true;
+    xpGainMultiplierSpinBox->setValue(sXpRatePresets[index]);
+    mSyncingXpControls = false;
+}
+
+void Launcher::PlayPage::slotXpGainMultiplierChanged(double value)
+{
+    if (mSyncingXpControls)
+        return;
+
+    int preset = static_cast<int>(sXpRatePresets.size()); // Custom
+    for (int i = 0; i < static_cast<int>(sXpRatePresets.size()); ++i)
+    {
+        if (std::abs(value - sXpRatePresets[i]) < 0.001)
+        {
+            preset = i;
+            break;
+        }
+    }
+
+    if (xpRatePresetComboBox->currentIndex() != preset)
+    {
+        mSyncingXpControls = true;
+        xpRatePresetComboBox->setCurrentIndex(preset);
+        mSyncingXpControls = false;
+    }
+}
+
+void Launcher::PlayPage::loadXpProgressionSettings()
+{
+    mSyncingXpControls = true;
+    xpLevelingEnabledCheckBox->setChecked(Settings::Manager::getBool("enabled", "XP Leveling"));
+    xpGainMultiplierSpinBox->setValue(Settings::Manager::getFloat("xp gain multiplier", "XP Leveling"));
+    skillXpMultiplierSpinBox->setValue(Settings::Manager::getFloat("global XP gain multiplier", "Game"));
+    baseXpToLevelSpinBox->setValue(Settings::Manager::getInt("base xp to level", "XP Leveling"));
+    skillPointsPerLevelSpinBox->setValue(Settings::Manager::getInt("skill points per level", "XP Leveling"));
+    deathXpLossSpinBox->setValue(100.0 * Settings::Manager::getFloat("death xp loss fraction", "XP Leveling"));
+    difficultyXpScalingCheckBox->setChecked(Settings::Manager::getBool("difficulty xp scaling", "XP Leveling"));
+    progressiveXpCurveCheckBox->setChecked(Settings::Manager::getBool("progressive xp curve", "XP Leveling"));
+    showXpNotificationsCheckBox->setChecked(Settings::Manager::getBool("show xp notifications", "XP Leveling"));
+    mSyncingXpControls = false;
+
+    // Reflect the loaded multiplier in the preset combo without echoing back.
+    slotXpGainMultiplierChanged(xpGainMultiplierSpinBox->value());
+}
+
+bool Launcher::PlayPage::saveXpProgressionSettings()
+{
+    // The game may have rewritten settings.cfg while the Launcher stayed open,
+    // so re-read it and touch only the keys this group owns.
+    const std::string path = Settings::Manager::mUserSettingsPath;
+    if (path.empty())
+        return false;
+
+    Settings::Manager::mUserSettings.clear();
+    Settings::Manager::mChangedSettings.clear();
+
+    if (QFileInfo::exists(QString::fromUtf8(path.c_str())))
+    {
+        try
+        {
+            Settings::SettingsFileParser parser;
+            parser.loadSettingsFile(path, Settings::Manager::mUserSettings);
+        }
+        catch (const std::exception& e)
+        {
+            setServerSettingsStatus(tr("Could not read settings.cfg: %1").arg(QString::fromUtf8(e.what())), true);
+            return false;
+        }
+    }
+
+    Settings::Manager::setBool("enabled", "XP Leveling", xpLevelingEnabledCheckBox->isChecked());
+    Settings::Manager::setFloat("xp gain multiplier", "XP Leveling",
+        static_cast<float>(xpGainMultiplierSpinBox->value()));
+    Settings::Manager::setFloat("global XP gain multiplier", "Game",
+        static_cast<float>(skillXpMultiplierSpinBox->value()));
+    Settings::Manager::setInt("base xp to level", "XP Leveling", baseXpToLevelSpinBox->value());
+    Settings::Manager::setInt("skill points per level", "XP Leveling", skillPointsPerLevelSpinBox->value());
+    Settings::Manager::setFloat("death xp loss fraction", "XP Leveling",
+        static_cast<float>(deathXpLossSpinBox->value() / 100.0));
+    Settings::Manager::setBool("difficulty xp scaling", "XP Leveling", difficultyXpScalingCheckBox->isChecked());
+    Settings::Manager::setBool("progressive xp curve", "XP Leveling", progressiveXpCurveCheckBox->isChecked());
+    Settings::Manager::setBool("show xp notifications", "XP Leveling", showXpNotificationsCheckBox->isChecked());
+
+    try
+    {
+        Settings::Manager::saveUser();
+    }
+    catch (const std::exception& e)
+    {
+        setServerSettingsStatus(tr("Could not write settings.cfg: %1").arg(QString::fromUtf8(e.what())), true);
+        return false;
+    }
+
+    return true;
 }
 
 
@@ -767,6 +892,7 @@ void Launcher::PlayPage::loadServerSettings()
 
     serverSettingsEditor->setPlainText(text);
     populateFormFromConfig(text);
+    loadXpProgressionSettings();
 
     QString syncError;
     const bool persistentOk = sourcePath == persistentPath
@@ -805,6 +931,9 @@ bool Launcher::PlayPage::saveServerSettings()
         setServerSettingsStatus(error, true);
         return false;
     }
+
+    if (!saveXpProgressionSettings())
+        return false;
 
     setServerSettingsStatus(tr("Saved persistent server settings"));
     return true;

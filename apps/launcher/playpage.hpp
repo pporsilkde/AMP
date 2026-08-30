@@ -43,6 +43,12 @@ namespace Launcher
        void loadServerSettings();
        bool saveServerSettings();
 
+        // X041: XP progression, moved here from the removed Advanced -> Arena
+        // Settings tab. These are client-side defaults in settings.cfg; a
+        // connected ArenaMP server stays authoritative and may override them.
+        void loadXpProgressionSettings();
+        bool saveXpProgressionSettings();
+
     signals:
         void playButtonClicked();
         void serverButtonClicked();
@@ -67,6 +73,8 @@ namespace Launcher
         void slotApplyFormToRawConfig();
         void slotSyncFormFromRawConfig();
         void slotServerSettingsModeChanged(int index);
+        void slotXpRatePresetChanged(int index);
+        void slotXpGainMultiplierChanged(double value);
 
     private:
         QString serverConfigPath() const;
@@ -90,6 +98,7 @@ namespace Launcher
         QComboBox* mServerModeCombo;
         QPushButton* mClearCellsButton;
         QPushButton* mResetServerButton;
+        bool mSyncingXpControls;
     };
 }
 #endif

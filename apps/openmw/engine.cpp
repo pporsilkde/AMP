@@ -76,6 +76,7 @@
 #include "mwworld/worldimp.hpp"
 
 #include "mwrender/vismask.hpp"
+#include "mwrender/characterpreview.hpp"
 
 #include "mwclass/classes.hpp"
 
@@ -1269,6 +1270,18 @@ void OMW::Engine::go()
     mViewer->setUseConfigureAffinity(false);
 #endif
 
+    // ArenaMP X040: the [OSG] "threading model" setting was written by both
+    // launcher pages and documented in settings-default.cfg, but never reached
+    // the viewer, so osgViewer stayed on AutomaticSelection. On a multi-core
+    // machine with a single graphics context that resolves to
+    // DrawThreadPerContext, which means a user who selected SingleThreaded to
+    // work around a render-thread crash silently got a draw thread anyway.
+    {
+        const osgViewer::ViewerBase::ThreadingModel threadingModel = getViewerThreadingModelSetting();
+        mViewer->setThreadingModel(threadingModel);
+        Log(Debug::Info) << "OSG viewer threading model: " << getViewerThreadingModelName(threadingModel);
+    }
+
     mScreenCaptureOperation = new WriteScreenshotToFileOperation(
         mCfgMgr.getScreenshotPath().string(),
         Settings::Manager::getString("screenshot format", "General"));
@@ -1361,6 +1374,11 @@ void OMW::Engine::go()
 
         mViewer->advance(simulationTime);
 
+        // ArenaMP X040: release CharGen/inventory RTT previews that were retired
+        // a few frames ago. This is the only safe point for it: between frames,
+        // outside every traversal, with the draw thread idle.
+        MWRender::collectRetiredCharacterPreviews(mViewer->getFrameStamp()->getFrameNumber());
+
         if (!frame(dt))
         {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -1412,6 +1430,10 @@ void OMW::Engine::go()
     settings.saveUser(settingspath);
 
     mViewer->stopThreading();
+
+    // Threading is stopped, so any preview still sitting in the retire queue can
+    // now be released unconditionally.
+    MWRender::collectRetiredCharacterPreviews(0, true);
 
     Log(Debug::Info) << "Quitting peacefully.";
 }
