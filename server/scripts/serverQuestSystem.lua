@@ -760,38 +760,44 @@ end
 -- "any" or "not" nests instead.
 local checkRequirementList
 
+-- X048: every failing check now also reports *which* requirement table failed, so
+-- the dialogue layer can tell the player what is missing instead of silently
+-- replaying the same menu.
 local function checkRequirementNode(pid, state, node, depth)
-    if type(node) ~= "table" then return false, "invalid requirement" end
-    if depth > 8 then return false, "requirement nesting too deep" end
+    if type(node) ~= "table" then return false, "invalid requirement", nil end
+    if depth > 8 then return false, "requirement nesting too deep", nil end
 
     if node.all ~= nil then
         return checkRequirementList(pid, state, node.all, depth + 1)
     end
     if node.any ~= nil then
         local list = node.any
-        if type(list) ~= "table" or #list == 0 then return false, "empty any" end
-        local lastWhy = "any"
+        if type(list) ~= "table" or #list == 0 then return false, "empty any", nil end
+        local lastWhy, lastNode = "any", nil
         for _, child in ipairs(list) do
-            local ok, why = checkRequirementNode(pid, state, child, depth + 1)
-            if ok then return true, why end
-            lastWhy = why
+            local ok, why, failing = checkRequirementNode(pid, state, child, depth + 1)
+            if ok then return true, why, nil end
+            lastWhy, lastNode = why, failing
         end
-        return false, lastWhy
+        return false, lastWhy, lastNode
     end
     if node["not"] ~= nil then
         local ok, why = checkRequirementNode(pid, state, node["not"], depth + 1)
-        return not ok, "not " .. tostring(why)
+        if ok then return false, "not " .. tostring(why), node end
+        return true, "not " .. tostring(why), nil
     end
 
-    return serverQuestSystem.CheckRequirement(pid, state, node)
+    local ok, why = serverQuestSystem.CheckRequirement(pid, state, node)
+    if ok then return true, why, nil end
+    return false, why, node
 end
 
 checkRequirementList = function(pid, state, requirements, depth)
     depth = depth or 0
-    if depth > 8 then return false, "requirement nesting too deep" end
+    if depth > 8 then return false, "requirement nesting too deep", nil end
     for _, requirement in ipairs(requirements or {}) do
-        local ok, why = checkRequirementNode(pid, state, requirement, depth)
-        if not ok then return false, why end
+        local ok, why, failing = checkRequirementNode(pid, state, requirement, depth)
+        if not ok then return false, why, failing end
     end
     return true
 end
@@ -827,6 +833,56 @@ local function callIfPresent(name, ...)
     end
     return false
 end
+
+-- X048 ---------------------------------------------------------------------
+-- The server's inventory mirror is only refreshed when the client volunteers a
+-- PlayerInventory packet. Console additem and a few scripted paths do not send
+-- one, so an item requirement could fail while the player really is holding the
+-- item. RequestInventory asks the client for a full inventory dump; it is a new
+-- ScriptFunction, so the call is guarded and simply does nothing on an older
+-- binary.
+local function requestInventoryResync(pid)
+    return callIfPresent("RequestInventory", pid)
+end
+
+-- Player-facing description of a single unmet requirement.
+local function requirementText(pid, requirement)
+    if type(requirement) ~= "table" then return "неизвестное условие" end
+
+    local kind = tostring(requirement.type or "?")
+    local op = tostring(requirement.operator or ">=")
+    local value = requirement.value
+
+    if kind == "item" then
+        local refId = tostring(requirement.refId or "?")
+        local need = math.floor(tonumber(requirement.count or value or 1) or 1)
+        return string.format("предмет \"%s\": нужно %d, у тебя %d", refId, need, inventoryCount(pid, refId))
+    elseif kind == "gold" then
+        local need = math.floor(tonumber(value or requirement.count or 0) or 0)
+        return string.format("золото: нужно %s%d, у тебя %d", op, need, inventoryCount(pid, "gold_001"))
+    elseif kind == "level" then
+        return string.format("уровень %s%s", op, tostring(value))
+    elseif kind == "skill" or kind == "attribute" then
+        return string.format("%s %s %s%s", kind, tostring(requirement.key or requirement.refId or "?"), op, tostring(value))
+    elseif kind == "faction" or kind == "factionRank" then
+        return string.format("фракция %s %s%s", tostring(requirement.key or requirement.refId or "?"), op, tostring(value or ""))
+    elseif kind == "questCompleted" then
+        return string.format("сначала заверши квест %s", tostring(requirement.questId or "?"))
+    elseif kind == "questStage" or kind == "questState" then
+        return string.format("квест %s %s%s", tostring(requirement.questId or "?"), op, tostring(value))
+    end
+
+    return string.format("%s %s%s", kind, op, tostring(value))
+end
+
+-- Requirements the player can satisfy by simply carrying something are worth a
+-- resync + automatic retry; the rest are not going to change within a second.
+local function requirementIsInventoryBased(requirement)
+    if type(requirement) ~= "table" then return false end
+    local kind = tostring(requirement.type or "")
+    return kind == "item" or kind == "gold"
+end
+-- End of X048 --------------------------------------------------------------
 
 local function applyReward(pid, state, reward)
     local kind = tostring(reward.type or "")
@@ -999,8 +1055,8 @@ function serverQuestSystem.StartQuest(pid, questId, force, silent)
         journal = {},
         rewardedStages = {}
     }
-    local requirementsOk, why = serverQuestSystem.CheckStageRequirements(pid, state, stage)
-    if not requirementsOk and not force then return false, "Requirements failed: " .. tostring(why) end
+    local requirementsOk, why, failing = serverQuestSystem.CheckStageRequirements(pid, state, stage)
+    if not requirementsOk and not force then return false, "Requirements failed: " .. tostring(why), failing end
 
     cv.serverQuests[questId] = state
     appendJournal(state, stage)
@@ -1036,8 +1092,8 @@ function serverQuestSystem.AdvanceQuest(pid, questId, targetStage, force, silent
         if not allowed then return false, "Stage transition is not allowed" end
     end
 
-    local requirementsOk, why = serverQuestSystem.CheckStageRequirements(pid, state, target)
-    if not requirementsOk and not force then return false, "Requirements failed: " .. tostring(why) end
+    local requirementsOk, why, failing = serverQuestSystem.CheckStageRequirements(pid, state, target)
+    if not requirementsOk and not force then return false, "Requirements failed: " .. tostring(why), failing end
 
     state.stage = target.index
     state.updatedAt = os.time()
@@ -1327,6 +1383,136 @@ local function sendDialogueResponse(pid, quest, topicId)
     sendTransport(pid, transportLine("RESPONSE", unpackValues(fields)))
 end
 
+-- X048 ---------------------------------------------------------------------
+-- Pending choices waiting for a fresh inventory from the client. Keyed by pid,
+-- dropped after PENDING_CHOICE_TIMEOUT seconds so a stale entry can never fire
+-- against an unrelated later dialogue.
+serverQuestSystem.pendingChoice = serverQuestSystem.pendingChoice or {}
+local PENDING_CHOICE_TIMEOUT = 20
+
+local function notifyJournalUpdate(pid, quest, stage)
+    if stage == nil then return end
+    local text = trim(tostring(stage.journal or ""))
+    if text == "" then return end
+
+    -- The client mirrors these entries into the vanilla journal window through the
+    -- ServerQuestRegistry, so all the server has to do is tell the player to look.
+    callIfPresent("MessageBox", pid, -1, "Дневник обновлён: " .. tostring(quest.name))
+    send(pid, tostring(quest.name) .. " — " .. text)
+end
+
+-- Applies a server-validated dialogue choice. Returns ok, why.
+-- When announce is true the player is told what happened and the dialogue is
+-- refreshed; the deferred retry path uses that too.
+function serverQuestSystem.ApplyChoice(pid, quest, topicId, choiceId, announce)
+    local questId = quest.id
+
+    -- Resolve the current authoritative dialogue again. A client cannot submit a
+    -- choice that is hidden by requirements or that belongs to an old stage.
+    local dialogue = serverQuestSystem.GetCurrentDialogue(pid, questId)
+    local authoritativeChoice = nil
+    for _, candidate in ipairs(dialogue ~= nil and dialogue.choices or {}) do
+        if normalizeId(candidate.id) == choiceId then authoritativeChoice = candidate break end
+    end
+
+    if authoritativeChoice == nil then
+        log(enumerations.log.WARN, "Rejected unavailable quest choice " .. tostring(choiceId) ..
+            " for " .. questId .. " from pid " .. tostring(pid))
+        if announce then
+            sendDialogueResponse(pid, quest, topicId)
+            serverQuestSystem.SyncPlayer(pid)
+        end
+        return false, "unavailable choice"
+    end
+
+    local ok, why, failing = true, nil, nil
+    local stageBefore = nil
+    local existing = serverQuestSystem.GetPlayerState(pid, questId)
+    if existing ~= nil then stageBefore = existing.stage end
+
+    if authoritativeChoice.action == "start" then
+        if existing ~= nil then
+            ok, why = false, "Quest already started"
+        else
+            ok, why, failing = serverQuestSystem.StartQuest(pid, questId, false, true)
+        end
+    elseif authoritativeChoice.action == "advance" then
+        ok, why, failing = serverQuestSystem.AdvanceQuest(pid, questId, authoritativeChoice.targetStage, false, true)
+    elseif authoritativeChoice.action ~= "none" then
+        ok, why = false, "Unsupported choice action"
+    end
+
+    if ok then
+        serverQuestSystem.pendingChoice[pid] = nil
+
+        local state = serverQuestSystem.GetPlayerState(pid, questId)
+        if state ~= nil and state.stage ~= stageBefore then
+            notifyJournalUpdate(pid, quest, findStage(quest, state.stage))
+        end
+    else
+        log(enumerations.log.WARN, "Quest choice failed " .. questId .. ": " .. tostring(why)
+            .. (failing ~= nil and (" [" .. requirementText(pid, failing) .. "]") or ""))
+
+        if announce then
+            if failing ~= nil then
+                send(pid, "Не выполнено условие — " .. requirementText(pid, failing))
+            elseif why ~= nil then
+                send(pid, tostring(why))
+            end
+
+            -- An item/gold requirement may have failed only because our copy of the
+            -- inventory is stale. Ask the client for a fresh one and replay the choice
+            -- as soon as it lands, so the player does not have to click twice.
+            if requirementIsInventoryBased(failing) and requestInventoryResync(pid) then
+                serverQuestSystem.pendingChoice[pid] = {
+                    questId = questId,
+                    topicId = topicId,
+                    choiceId = choiceId,
+                    time = os.time()
+                }
+            end
+        end
+    end
+
+    if announce then
+        sendDialogueResponse(pid, quest, topicId)
+        serverQuestSystem.SyncPlayer(pid)
+    end
+
+    return ok, why
+end
+
+-- Replays a pending choice once the client has answered our inventory request.
+local function onPlayerInventoryResync(eventStatus, pid)
+    if not enabled() then return end
+    if Players[pid] == nil or not Players[pid]:IsLoggedIn() then return end
+
+    local pending = serverQuestSystem.pendingChoice[pid]
+    if pending == nil then return end
+
+    if os.time() - (tonumber(pending.time) or 0) > PENDING_CHOICE_TIMEOUT then
+        serverQuestSystem.pendingChoice[pid] = nil
+        return
+    end
+
+    local quest = serverQuestSystem.quests[pending.questId]
+    if quest == nil then
+        serverQuestSystem.pendingChoice[pid] = nil
+        return
+    end
+
+    serverQuestSystem.pendingChoice[pid] = nil
+
+    local ok = serverQuestSystem.ApplyChoice(pid, quest, pending.topicId, pending.choiceId, false)
+    if ok then
+        log(enumerations.log.INFO, "[ServerQuest] X048 replayed choice " .. tostring(pending.choiceId)
+            .. " for " .. tostring(pending.questId) .. " after inventory resync (pid " .. tostring(pid) .. ")")
+        sendDialogueResponse(pid, quest, pending.topicId)
+        serverQuestSystem.SyncPlayer(pid)
+    end
+end
+-- End of X048 --------------------------------------------------------------
+
 local function validateServerQuestDialogue(eventStatus, pid, cellDescription, objects)
     for _, object in pairs(objects or {}) do
         if object.dialogueChoiceType == enumerations.dialogueChoice.TOPIC then
@@ -1369,39 +1555,9 @@ local function handleServerQuestDialogue(eventStatus, pid, cellDescription, obje
                 end
 
                 if isChoice then
-                    -- Resolve the current authoritative dialogue again. A client cannot
-                    -- submit a choice that is hidden by requirements or from an old stage.
-                    local dialogue = serverQuestSystem.GetCurrentDialogue(pid, questId)
-                    local authoritativeChoice = nil
-                    for _, candidate in ipairs(dialogue ~= nil and dialogue.choices or {}) do
-                        if normalizeId(candidate.id) == choiceId then authoritativeChoice = candidate break end
-                    end
-                    if authoritativeChoice == nil then
-                        log(enumerations.log.WARN, "Rejected unavailable quest choice " .. tostring(choiceId) ..
-                            " for " .. questId .. " from pid " .. tostring(pid))
-                        sendDialogueResponse(pid, quest, topicId)
-                        serverQuestSystem.SyncPlayer(pid)
-                        return
-                    end
-
-                    local ok, why = true, nil
-                    if authoritativeChoice.action == "start" then
-                        if serverQuestSystem.GetPlayerState(pid, questId) ~= nil then
-                            ok, why = false, "Quest already started"
-                        else
-                            ok, why = serverQuestSystem.StartQuest(pid, questId, false, true)
-                        end
-                    elseif authoritativeChoice.action == "advance" then
-                        ok, why = serverQuestSystem.AdvanceQuest(pid, questId, authoritativeChoice.targetStage, false, true)
-                    elseif authoritativeChoice.action ~= "none" then
-                        ok, why = false, "Unsupported choice action"
-                    end
-
-                    if not ok then
-                        log(enumerations.log.WARN, "Quest choice failed " .. questId .. ": " .. tostring(why))
-                    end
-                    sendDialogueResponse(pid, quest, topicId)
-                    serverQuestSystem.SyncPlayer(pid)
+                    -- X048: the whole apply-a-choice path lives in one function now so
+                    -- that the deferred inventory retry can replay it verbatim.
+                    serverQuestSystem.ApplyChoice(pid, quest, topicId, choiceId, true)
                     return
                 end
 
@@ -1418,18 +1574,22 @@ local function handleServerQuestDialogue(eventStatus, pid, cellDescription, obje
                 -- Backward compatibility with X035/X036 linear definitions: if no
                 -- choices are authored, keep the old click-to-start/auto-advance path.
                 if state == nil then
-                    local ok, why = serverQuestSystem.StartQuest(pid, questId, false, true)
+                    local ok, why, failing = serverQuestSystem.StartQuest(pid, questId, false, true)
                     if not ok then
-                        send(pid, "Cannot start " .. quest.name .. ": " .. tostring(why))
+                        send(pid, "Cannot start " .. quest.name .. ": "
+                            .. (failing ~= nil and requirementText(pid, failing) or tostring(why)))
                         serverQuestSystem.SyncPlayer(pid)
                         return
                     end
+                    notifyJournalUpdate(pid, quest, findStage(quest, quest.initialStage))
                 elseif state.state == "active" then
                     local target = findEligibleNextStage(pid, quest, state)
                     if target ~= nil then
                         local ok, why = serverQuestSystem.AdvanceQuest(pid, questId, target.index, false, true)
                         if not ok then
                             log(enumerations.log.WARN, "Failed server quest transition " .. questId .. ": " .. tostring(why))
+                        else
+                            notifyJournalUpdate(pid, quest, target)
                         end
                     end
                 end
@@ -2808,6 +2968,10 @@ local function onObjectActivateQuestResync(eventStatus, pid, cellDescription, ob
         log(enumerations.log.INFO, "[ServerQuest] X047 JIT topic sync for pid " .. tostring(pid)
             .. " in " .. tostring(cellDescription))
         serverQuestSystem.SyncPlayer(pid)
+
+        -- X048: refresh our inventory mirror while the player is still walking up to
+        -- the quest giver, so a hand-in evaluated a second later sees the truth.
+        requestInventoryResync(pid)
     end
 end
 
@@ -2816,7 +2980,16 @@ local function onPlayerAuthentified(eventStatus, pid)
 end
 
 local function onPlayerFinishLogin(eventStatus, pid)
-    if enabled() then serverQuestSystem.SyncPlayer(pid) end
+    if enabled() then
+        serverQuestSystem.SyncPlayer(pid)
+        -- X048: the login inventory is restored from our own save file, so ask the
+        -- client what it actually ended up with.
+        requestInventoryResync(pid)
+    end
+end
+
+local function onPlayerDisconnectQuest(eventStatus, pid)
+    serverQuestSystem.pendingChoice[pid] = nil
 end
 
 function serverQuestSystem.Initialize()
@@ -2864,9 +3037,11 @@ function serverQuestSystem.Initialize()
     customEventHooks.registerHandler("OnObjectActivate", onObjectActivateQuestResync)
     customEventHooks.registerHandler("OnPlayerAuthentified", onPlayerAuthentified)
     customEventHooks.registerHandler("OnPlayerFinishLogin", onPlayerFinishLogin)
+    customEventHooks.registerHandler("OnPlayerInventory", onPlayerInventoryResync)
+    customEventHooks.registerHandler("OnPlayerDisconnect", onPlayerDisconnectQuest)
     customEventHooks.registerValidator("OnObjectDialogueChoice", validateServerQuestDialogue)
     customEventHooks.registerHandler("OnObjectDialogueChoice", handleServerQuestDialogue)
-    log(enumerations.log.INFO, "X047 persistent QuestIndex + JIT quest-topic sync + MyGUI Quest Studio initialized")
+    log(enumerations.log.INFO, "X048 quest hand-in resync + journal injection + Quest Studio autofit initialized")
 end
 
 serverQuestSystem.Initialize()

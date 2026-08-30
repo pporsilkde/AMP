@@ -47,6 +47,7 @@
     SCRIPT_API_ENTRY("SendEquipment", ItemFunctions::SendEquipment),\
     SCRIPT_API_ENTRY("SendInventoryChanges", ItemFunctions::SendInventoryChanges),\
     SCRIPT_API_ENTRY("SendItemUse", ItemFunctions::SendItemUse),\
+    SCRIPT_API_ENTRY("RequestInventory", ItemFunctions::RequestInventory),\
     \
     SCRIPT_API_ENTRY("InitializeInventoryChanges", ItemFunctions::InitializeInventoryChanges),\
     SCRIPT_API_ENTRY("AddItem", ItemFunctions::AddItem)
@@ -319,6 +320,20 @@ public:
     * \return void
     */
     static void SendInventoryChanges(unsigned short pid, bool sendToOtherPlayers, bool skipAttachedPlayer) noexcept;
+
+    /**
+    * \brief Ask a player's client to resend its complete inventory.
+    *
+    * The server's inventory mirror is only as fresh as the last PlayerInventory
+    * packet the client volunteered. Console commands and a few scripted paths
+    * can add items without producing one, which makes server-side item checks
+    * (quest hand-ins, for example) see a stale inventory. This sends a bodiless
+    * ID_PLAYER_INVENTORY packet, which the client answers with a full SET.
+    *
+    * \param pid The player ID.
+    * \return void
+    */
+    static void RequestInventory(unsigned short pid) noexcept;
 
     /**
     * \brief Send a PlayerItemUse causing a player to use their recorded usedItem.

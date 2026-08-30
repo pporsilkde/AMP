@@ -5,6 +5,7 @@
 #include "apps/openmw/mwmp/Main.hpp"
 #include "apps/openmw/mwmp/CellController.hpp"
 #include "apps/openmw/mwmp/MechanicsHelper.hpp"
+#include "apps/openmw/mwmp/ObjectList.hpp"
 
 namespace mwmp
 {
@@ -28,8 +29,16 @@ namespace mwmp
             // If we've received a request for information, comply with it
             if (actorList.action == mwmp::BaseActorList::REQUEST)
             {
-                MechanicsHelper::spawnLeveledCreatures(ptrCellStore);
-                actorList.sendActorsInCell(ptrCellStore);
+                /*
+                    Start of AMP change (X048)
+
+                    Deferred for the same reason as the container reply: spawning leveled
+                    creatures for nine exterior cells in one frame is a visible stall.
+                */
+                ObjectList::queueCellActorRequest(*ptrCellStore->getCell());
+                /*
+                    End of AMP change (X048)
+                */
             }
         }
     };

@@ -2,6 +2,7 @@
 #define OPENMW_OBJECTLIST_HPP
 
 #include <components/openmw-mp/Base/BaseObject.hpp>
+#include <deque>
 #include "../mwgui/itemmodel.hpp"
 #include "../mwworld/worldimp.hpp"
 #include <RakNetTypes.h>
@@ -105,6 +106,23 @@ namespace mwmp
         void sendScriptMemberShort();
         void sendContainer();
         void sendConsoleCommand();
+
+        /*
+            Start of AMP addition (X048)
+
+            Answering the server's per-cell container/actor requests inline meant that
+            walking into an exterior loaded up to nine cells and serialized every
+            container in all of them inside a single frame, which is what produced the
+            visible hitch on every cell transition. The requests are queued here instead
+            and drained at most one cell per frame from Main::updateWorld().
+        */
+        static void queueCellContainerRequest(const ESM::Cell& cell);
+        static void queueCellActorRequest(const ESM::Cell& cell);
+        static void processDeferredCellRequests();
+        static void clearDeferredCellRequests();
+        /*
+            End of AMP addition (X048)
+        */
 
     private:
         Networking *getNetworking();

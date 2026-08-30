@@ -1,4 +1,5 @@
 #include "ObjectList.hpp"
+#include "ActorList.hpp"
 #include "QuestItemIndex.hpp"
 #include "Main.hpp"
 #include "Networking.hpp"
@@ -808,6 +809,93 @@ void ObjectList::moveObjects(MWWorld::CellStore* cellStore)
         }
     }
 }
+
+/*
+    Start of AMP addition (X048)
+
+    Deferred replies to the server's cell data requests. Both queues are keyed by
+    the short cell description so that repeated requests for the same cell within
+    one frame collapse into a single reply.
+*/
+namespace
+{
+    std::deque<ESM::Cell> sPendingContainerCells;
+    std::deque<ESM::Cell> sPendingActorCells;
+
+    bool queueContainsCell(const std::deque<ESM::Cell>& queue, const ESM::Cell& cell)
+    {
+        const std::string wanted = cell.getShortDescription();
+        for (const ESM::Cell& queued : queue)
+            if (queued.getShortDescription() == wanted)
+                return true;
+        return false;
+    }
+}
+
+void ObjectList::queueCellContainerRequest(const ESM::Cell& cell)
+{
+    if (!queueContainsCell(sPendingContainerCells, cell))
+        sPendingContainerCells.push_back(cell);
+}
+
+void ObjectList::queueCellActorRequest(const ESM::Cell& cell)
+{
+    if (!queueContainsCell(sPendingActorCells, cell))
+        sPendingActorCells.push_back(cell);
+}
+
+void ObjectList::clearDeferredCellRequests()
+{
+    sPendingContainerCells.clear();
+    sPendingActorCells.clear();
+}
+
+void ObjectList::processDeferredCellRequests()
+{
+    // One cell per frame per queue. The server does not require these replies to
+    // arrive in the same frame as the request, only that they arrive.
+    if (!sPendingContainerCells.empty())
+    {
+        const ESM::Cell requestedCell = sPendingContainerCells.front();
+        sPendingContainerCells.pop_front();
+
+        MWWorld::CellStore* cellStore = Main::get().getCellController()->getCellStore(requestedCell);
+
+        if (cellStore != nullptr)
+        {
+            LOG_MESSAGE_SIMPLE(TimedLog::LOG_VERBOSE, "Sending deferred container reply for %s",
+                requestedCell.getShortDescription().c_str());
+
+            ObjectList* objectList = Main::get().getNetworking()->getObjectList();
+            objectList->reset();
+            objectList->cell = *cellStore->getCell();
+            objectList->action = mwmp::BaseObjectList::SET;
+            objectList->containerSubAction = mwmp::BaseObjectList::REPLY_TO_REQUEST;
+            objectList->addAllContainers(cellStore);
+            objectList->sendContainer();
+        }
+    }
+
+    if (!sPendingActorCells.empty())
+    {
+        const ESM::Cell requestedCell = sPendingActorCells.front();
+        sPendingActorCells.pop_front();
+
+        MWWorld::CellStore* cellStore = Main::get().getCellController()->getCellStore(requestedCell);
+
+        if (cellStore != nullptr)
+        {
+            LOG_MESSAGE_SIMPLE(TimedLog::LOG_VERBOSE, "Sending deferred actor list reply for %s",
+                requestedCell.getShortDescription().c_str());
+
+            MechanicsHelper::spawnLeveledCreatures(cellStore);
+            Main::get().getNetworking()->getActorList()->sendActorsInCell(cellStore);
+        }
+    }
+}
+/*
+    End of AMP addition (X048)
+*/
 
 void ObjectList::restockObjects(MWWorld::CellStore* cellStore)
 {

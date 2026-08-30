@@ -54,14 +54,19 @@ namespace mwmp
             {
                 if (objectList.baseObjectCount == 0)
                 {
-                    LOG_APPEND(TimedLog::LOG_VERBOSE, "- Request had no objects attached, so we are sending all containers in the cell %s",
+                    /*
+                        Start of AMP change (X048)
+
+                        Serializing every container of a cell is expensive, and an exterior
+                        transition requests up to nine cells at once. Queue the reply and let
+                        Main::updateWorld() send one cell per frame instead of stalling here.
+                    */
+                    LOG_APPEND(TimedLog::LOG_VERBOSE, "- Request had no objects attached, so we are queueing all containers in the cell %s",
                         objectList.cell.getShortDescription().c_str());
-                    objectList.reset();
-                    objectList.cell = *ptrCellStore->getCell();
-                    objectList.action = mwmp::BaseObjectList::SET;
-                    objectList.containerSubAction = mwmp::BaseObjectList::REPLY_TO_REQUEST;
-                    objectList.addAllContainers(ptrCellStore);
-                    objectList.sendContainer();
+                    ObjectList::queueCellContainerRequest(*ptrCellStore->getCell());
+                    /*
+                        End of AMP change (X048)
+                    */
                 }
                 else
                 {

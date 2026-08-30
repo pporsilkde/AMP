@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "arena_caius_drink",
-  "version": 2,
+  "version": 3,
   "name": "Выпивка для Кая",
   "author": "ArenaMP X037 built-in example",
   "status": "published",
@@ -22,7 +22,7 @@
   "stages": [
     {
       "index": 10,
-      "journal": "Кай Косадес попросил меня принести ему бутылку мацта.",
+      "journal": "Кай Косадес попросил меня принести ему бутылку мацта (potion_local_brew_01). Купить её можно почти в любой таверне Балморы.",
       "dialogue": "Ну что, с выпивкой получилось? Мне нужна всего одна бутылка мацта.",
       "requirements": [],
       "rewards": [],
@@ -37,15 +37,7 @@
           "text": "Вот бутылка мацта.",
           "action": "advance",
           "targetStage": 20,
-          "requirements": [
-            {
-              "type": "item",
-              "refId": "potion_mazte_01",
-              "operator": ">=",
-              "count": 1,
-              "value": 1
-            }
-          ]
+          "requirements": []
         },
         {
           "id": "not_yet",
@@ -62,7 +54,7 @@
       "requirements": [
         {
           "type": "item",
-          "refId": "potion_mazte_01",
+          "refId": "potion_local_brew_01",
           "operator": ">=",
           "count": 1,
           "value": 1
@@ -71,7 +63,7 @@
       "rewards": [
         {
           "type": "takeItem",
-          "refId": "potion_mazte_01",
+          "refId": "potion_local_brew_01",
           "count": 1
         },
         {
@@ -99,6 +91,11 @@
       "time": 0,
       "by": "ArenaMP X037",
       "action": "added server-authoritative offer and choices"
+    },
+    {
+      "time": 0,
+      "by": "ArenaMP X048",
+      "action": "hand_over is always offered; the item check lives on stage 20 only, so a missing bottle is reported instead of hiding the answer"
     }
   ],
   "offer": {

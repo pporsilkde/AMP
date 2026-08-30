@@ -322,6 +322,19 @@ void ItemFunctions::SendInventoryChanges(unsigned short pid, bool sendToOtherPla
         packet->Send(true);
 }
 
+void ItemFunctions::RequestInventory(unsigned short pid) noexcept
+{
+    Player *player;
+    GET_PLAYER(pid, player, );
+
+    mwmp::PlayerPacket *packet = mwmp::Networking::get().getPlayerPacketController()->GetPacket(ID_PLAYER_INVENTORY);
+    packet->setPlayer(player);
+
+    // A header-only packet is read as a request by the client, which then
+    // answers with its full inventory as an InventoryChanges::SET.
+    packet->RequestData(player->guid);
+}
+
 void ItemFunctions::SendItemUse(unsigned short pid) noexcept
 {
     Player *player;

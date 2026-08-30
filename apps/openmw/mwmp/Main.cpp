@@ -53,6 +53,7 @@
 #include "PlayerList.hpp"
 #include "GUIController.hpp"
 #include "CellController.hpp"
+#include "ObjectList.hpp"
 #include "MechanicsHelper.hpp"
 #include "RecordHelper.hpp"
 /*
@@ -261,6 +262,17 @@ void Main::updateWorld(float dt) const
     {
         mLocalPlayer->update();
         mCellController->updateLocal(false);
+
+        /*
+            Start of AMP addition (X048)
+
+            Drain at most one queued cell data reply per frame so that exterior cell
+            transitions no longer serialize nine cells' worth of containers at once.
+        */
+        ObjectList::processDeferredCellRequests();
+        /*
+            End of AMP addition (X048)
+        */
     }
 }
 

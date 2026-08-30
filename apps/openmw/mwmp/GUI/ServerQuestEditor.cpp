@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <iomanip>
 #include <sstream>
@@ -9,6 +10,7 @@
 #include <MyGUI_InputManager.h>
 #include <MyGUI_LanguageManager.h>
 #include <MyGUI_TabItem.h>
+#include <MyGUI_FontManager.h>
 #include <MyGUI_RenderManager.h>
 #include <MyGUI_UString.h>
 
@@ -287,7 +289,93 @@ namespace mwmp
         mRefreshButton->eventMouseButtonClick += MyGUI::newDelegate(this, &ServerQuestEditorWindow::notifyRefresh);
 
         applyLocalization();
+
+        // X048: remember the authored geometry before anything rescales it, then make
+        // the window fit the current viewport and use a font that can draw Cyrillic.
+        mBaseSize = mMainWidget->getSize();
+        captureBaseGeometry(mMainWidget);
+        applyGameFont(mMainWidget);
+        fitToViewport();
         center();
+    }
+
+    void ServerQuestEditorWindow::captureBaseGeometry(MyGUI::Widget* widget)
+    {
+        if (widget == nullptr)
+            return;
+
+        mBaseGeometry.emplace_back(widget, widget->getCoord());
+
+        MyGUI::EnumeratorWidgetPtr children = widget->getEnumerator();
+        while (children.next())
+            captureBaseGeometry(children.current());
+    }
+
+    void ServerQuestEditorWindow::fitToViewport()
+    {
+        if (mMainWidget == nullptr || mBaseSize.width <= 0 || mBaseSize.height <= 0)
+            return;
+
+        const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
+        if (view.width <= 0 || view.height <= 0)
+            return;
+
+        // Leave a small margin so the window never touches the screen edge.
+        const float marginated = 0.98f;
+        float scale = 1.0f;
+        if (mBaseSize.width > view.width * marginated || mBaseSize.height > view.height * marginated)
+        {
+            scale = std::min(view.width * marginated / static_cast<float>(mBaseSize.width),
+                view.height * marginated / static_cast<float>(mBaseSize.height));
+        }
+
+        // Below this the bitmap font stops fitting into the controls and the studio
+        // becomes unusable in a different way, so we stop shrinking and accept that
+        // very small resolutions will clip the right-hand tabs.
+        scale = std::max(scale, 0.55f);
+
+        if (std::abs(scale - mAppliedScale) < 0.001f)
+            return;
+
+        mAppliedScale = scale;
+
+        for (const std::pair<MyGUI::Widget*, MyGUI::IntCoord>& entry : mBaseGeometry)
+        {
+            if (entry.first == nullptr)
+                continue;
+
+            const MyGUI::IntCoord& base = entry.second;
+            entry.first->setCoord(
+                static_cast<int>(base.left * scale + 0.5f),
+                static_cast<int>(base.top * scale + 0.5f),
+                static_cast<int>(base.width * scale + 0.5f),
+                static_cast<int>(base.height * scale + 0.5f));
+        }
+
+        mMainWidget->setSize(static_cast<int>(mBaseSize.width * scale + 0.5f),
+            static_cast<int>(mBaseSize.height * scale + 0.5f));
+    }
+
+    void ServerQuestEditorWindow::applyGameFont(MyGUI::Widget* widget)
+    {
+        if (widget == nullptr)
+            return;
+
+        // "Default" is the font OpenMW builds from the Morrowind data files, so it
+        // carries whatever alphabet the installed game uses. Widgets that came from
+        // MyGUI core skins otherwise keep a Latin-only bitmap font.
+        static const std::string fontName = "Default";
+        if (MyGUI::FontManager::getInstance().getByName(fontName) != nullptr)
+        {
+            if (MyGUI::EditBox* edit = widget->castType<MyGUI::EditBox>(false))
+                edit->setFontName(fontName);
+            else if (MyGUI::TextBox* text = widget->castType<MyGUI::TextBox>(false))
+                text->setFontName(fontName);
+        }
+
+        MyGUI::EnumeratorWidgetPtr children = widget->getEnumerator();
+        while (children.next())
+            applyGameFont(children.current());
     }
 
     std::string ServerQuestEditorWindow::tr(const std::string& key)
@@ -380,6 +468,8 @@ namespace mwmp
     void ServerQuestEditorWindow::onOpen()
     {
         WindowModal::onOpen();
+        // X048: the resolution can change between two openings of the studio.
+        fitToViewport();
         center();
         refreshFromRegistry();
         MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mQuestSearch);

@@ -12,8 +12,22 @@
       "id": "arena_caius_drink",
       "name": "Выпивка для Кая",
       "status": "published",
-      "version": 2,
+      "version": 3,
       "author": "ArenaMP X037 built-in example"
+    },
+    {
+      "id": "arena_sellus_gravius_report",
+      "name": "Отчёт для Селлуса Гравиуса",
+      "status": "published",
+      "version": 1,
+      "author": "ArenaMP X048"
+    },
+    {
+      "id": "arena_eydis_fireeye_dues",
+      "name": "Взнос Гильдии бойцов",
+      "status": "published",
+      "version": 1,
+      "author": "ArenaMP X048"
     }
   ]
 }

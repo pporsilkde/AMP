@@ -10,6 +10,9 @@
 #include <MyGUI_ListBox.h>
 #include <MyGUI_TabControl.h>
 #include <MyGUI_TextBox.h>
+#include <MyGUI_Widget.h>
+
+#include <utility>
 
 #include "apps/openmw/mwgui/windowbase.hpp"
 
@@ -55,6 +58,18 @@ namespace mwmp
         static std::string tr(const std::string& key);
         void applyLocalization();
         void localizeLabel(const char* widgetName, const char* key);
+
+        /// X048: the layout is authored at a fixed size and MyGUI never reflows it.
+        /// On a small window (or with a large GUI scaling factor) the bottom bar,
+        /// including the Close button, ends up outside the visible area. The original
+        /// geometry of every widget is captured once and re-applied scaled so the
+        /// whole studio always fits, whatever the resolution.
+        void captureBaseGeometry(MyGUI::Widget* widget);
+        void fitToViewport();
+        /// X048: force the game's own font on the studio widgets. Parts of the layout
+        /// use MyGUI core skins whose default font has no Cyrillic glyphs, which is
+        /// what turns Russian quest names and journal text into empty boxes.
+        static void applyGameFont(MyGUI::Widget* widget);
 
         void selectQuestById(const std::string& id, bool requestDetails);
         void selectStageByIndex(int stage);
@@ -215,6 +230,10 @@ namespace mwmp
         bool mStageComplete = false;
         bool mStageFail = false;
         bool mRefreshing = false;
+
+        std::vector<std::pair<MyGUI::Widget*, MyGUI::IntCoord>> mBaseGeometry;
+        MyGUI::IntSize mBaseSize;
+        float mAppliedScale = 1.0f;
     };
 }
 

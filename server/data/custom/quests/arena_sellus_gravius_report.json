@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "id": "arena_sellus_gravius_report",
+  "version": 1,
+  "name": "Отчёт для Селлуса Гравиуса",
+  "author": "ArenaMP X048",
+  "status": "published",
+  "progressMode": "personal",
+  "giver": {
+    "refId": "sellus gravius",
+    "cell": ""
+  },
+  "initialStage": 10,
+  "topics": [
+    {
+      "id": "arena_sellus_report_topic",
+      "text": "поручение канцелярии",
+      "enabled": true,
+      "green": true
+    }
+  ],
+  "stages": [
+    {
+      "index": 10,
+      "journal": "Селлус Гравиус попросил меня подтвердить, что я прошёл перепись и получил документы. Нужно вернуться к нему и сказать об этом.",
+      "dialogue": "Ну что, все бумаги на руках? Империи нужна отметка, что новоприбывший прошёл перепись.",
+      "requirements": [],
+      "rewards": [],
+      "next": [
+        20
+      ],
+      "complete": false,
+      "fail": false,
+      "choices": [
+        {
+          "id": "confirm",
+          "text": "Да, документы у меня.",
+          "action": "advance",
+          "targetStage": 20,
+          "requirements": []
+        },
+        {
+          "id": "later",
+          "text": "Ещё не разобрался с бумагами.",
+          "action": "none",
+          "requirements": []
+        }
+      ]
+    },
+    {
+      "index": 20,
+      "journal": "Селлус Гравиус поставил отметку в реестре и выдал мне подъёмные.",
+      "dialogue": "Отмечено. Держи подъёмные — Империя не оставляет своих без гроша. Дальше сам.",
+      "requirements": [],
+      "rewards": [
+        {
+          "type": "gold",
+          "amount": 50
+        },
+        {
+          "type": "xp",
+          "amount": 25
+        }
+      ],
+      "next": [],
+      "complete": true,
+      "fail": false,
+      "choices": []
+    }
+  ],
+  "audit": [
+    {
+      "time": 0,
+      "by": "ArenaMP X048",
+      "action": "simple two-stage dialogue quest, no item requirements"
+    }
+  ],
+  "offer": {
+    "dialogue": "Стой. Раз уж ты здесь — у канцелярии к тебе короткое дело.",
+    "choices": [
+      {
+        "id": "accept",
+        "text": "Слушаю.",
+        "action": "start",
+        "requirements": []
+      },
+      {
+        "id": "decline",
+        "text": "Не сейчас.",
+        "action": "none",
+        "requirements": []
+      }
+    ]
+  }
+}

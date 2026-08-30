@@ -17,6 +17,7 @@
 #include "../mwdialogue/keywordsearch.hpp"
 #include "../mwdialogue/topicrecovery.hpp"
 #include "../mwworld/esmstore.hpp"
+#include "../mwmp/ServerQuestRegistry.hpp"
 
 namespace MWGui {
 
@@ -76,8 +77,52 @@ struct JournalViewModelImpl : JournalViewModel
     {
         MWBase::Journal * journal = MWBase::Environment::get().getJournal();
 
-        return journal->begin () == journal->end ();
+        /*
+            Start of AMP change (X048)
+
+            Server-authored quests have no ESM backing at all, so an otherwise empty
+            vanilla journal must still count as non-empty once the server has sent us
+            at least one quest entry, or the journal window refuses to open.
+        */
+        if (!serverJournalEntryCount ())
+            return journal->begin () == journal->end ();
+
+        return false;
+        /*
+            End of AMP change (X048)
+        */
     }
+
+    /*
+        Start of AMP addition (X048)
+
+        The server quest system stores its own journal text, which cannot live in
+        MWDialogue::Journal because JournalEntry::getText() resolves through an ESM
+        INFO record that does not exist for a server quest. The view model therefore
+        merges the ServerQuestRegistry contents in as virtual entries: quest names are
+        appended to the quest index, and their stage texts are yielded as entries the
+        book layout renders exactly like vanilla ones.
+    */
+    static std::string serverQuestDisplayName (const mwmp::ServerQuestState& state)
+    {
+        return state.questName.empty () ? state.questId : state.questName;
+    }
+
+    static bool serverQuestFinished (const mwmp::ServerQuestState& state)
+    {
+        return state.state == "completed" || state.state == "failed";
+    }
+
+    static size_t serverJournalEntryCount ()
+    {
+        size_t count = 0;
+        for (const mwmp::ServerQuestState& state : mwmp::ServerQuestRegistry::get ().getQuestStates ())
+            count += state.journal.size ();
+        return count;
+    }
+    /*
+        End of AMP addition (X048)
+    */
 
     template <typename t_iterator, typename Interface>
     struct BaseEntry : Interface
@@ -232,7 +277,69 @@ struct JournalViewModelImpl : JournalViewModel
                 visitedQuests.insert(quest.getName());
             }
         }
+
+        /*
+            Start of AMP addition (X048)
+
+            Server quests are listed after the vanilla ones. A quest with no journal
+            text yet is skipped so that merely having a green topic does not create an
+            empty page.
+        */
+        for (const mwmp::ServerQuestState& state : mwmp::ServerQuestRegistry::get ().getQuestStates ())
+        {
+            if (state.journal.empty ())
+                continue;
+
+            const std::string name = serverQuestDisplayName (state);
+            if (name.empty ())
+                continue;
+
+            const bool isFinished = serverQuestFinished (state);
+            if (active_only && isFinished)
+                continue;
+
+            if (visitedQuests.find (name) != visitedQuests.end ())
+                continue;
+
+            visitor (name, isFinished);
+            visitedQuests.insert (name);
+        }
+        /*
+            End of AMP addition (X048)
+        */
     }
+
+    /*
+        Start of AMP addition (X048)
+
+        A journal entry backed by a ServerQuestJournalEntry rather than by stored
+        ESM journal data. The timestamp is the wall-clock date the server recorded,
+        because a server quest is not tied to an in-game day.
+    */
+    struct ServerJournalEntryImpl : BaseEntry <const mwmp::ServerQuestJournalEntry *, JournalEntry>
+    {
+        mutable std::string timestamp_buffer;
+
+        ServerJournalEntryImpl (JournalViewModelImpl const * model, const mwmp::ServerQuestJournalEntry * entry) :
+            BaseEntry <const mwmp::ServerQuestJournalEntry *, JournalEntry> (model, entry)
+        {}
+
+        std::string getText () const override
+        {
+            return itr->text;
+        }
+
+        Utf8Span timestamp () const override
+        {
+            if (timestamp_buffer.empty ())
+                timestamp_buffer = itr->date.empty () ? std::string ("---") : itr->date;
+
+            return toUtf8Span (timestamp_buffer);
+        }
+    };
+    /*
+        End of AMP addition (X048)
+    */
 
     template <typename iterator_t>
     struct JournalEntryImpl : BaseEntry <iterator_t, JournalEntry>
@@ -301,6 +408,24 @@ struct JournalViewModelImpl : JournalViewModel
             for(MWBase::Journal::TEntryIter i = journal->begin(); i != journal->end (); ++i)
                 visitor (JournalEntryImpl <MWBase::Journal::TEntryIter> (this, i));
         }
+
+        /*
+            Start of AMP addition (X048)
+
+            Server quest entries for the requested quest name, or all of them when the
+            caller asked for the flat "all entries" view.
+        */
+        for (const mwmp::ServerQuestState& state : mwmp::ServerQuestRegistry::get ().getQuestStates ())
+        {
+            if (!questName.empty () && !Misc::StringUtils::ciEqual (serverQuestDisplayName (state), questName))
+                continue;
+
+            for (const mwmp::ServerQuestJournalEntry& entry : state.journal)
+                visitor (ServerJournalEntryImpl (this, &entry));
+        }
+        /*
+            End of AMP addition (X048)
+        */
     }
 
     void visitTopicName (TopicId topicId, std::function <void (Utf8Span)> visitor) const override
