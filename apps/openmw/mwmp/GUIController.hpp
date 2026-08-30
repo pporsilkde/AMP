@@ -20,6 +20,7 @@ namespace mwmp
 {
     class GUIDialogList;
     class GUIChat;
+    class ServerQuestEditorWindow;
     class GUIController
     {
     public:
@@ -27,7 +28,8 @@ namespace mwmp
         {
             GM_VR_MetaMenu = MWGui::GM_PlayerAnimationMenu + 1, // Put this dummy GuiMode here because it's used in VR
             GM_TES3MP_InputBox,
-            GM_TES3MP_ListBox
+            GM_TES3MP_ListBox,
+            GM_ARENAMP_QuestEditor
 
         };
         GUIController();
@@ -46,6 +48,10 @@ namespace mwmp
         void showInputBox(const BasePlayer::GUIMessageBox &guiMessageBox);
 
         void showDialogList(const BasePlayer::GUIMessageBox &guiMessageBox);
+
+        // X039: real MyGUI server quest editor, opened by the hidden quest transport.
+        void showServerQuestEditor();
+        void refreshServerQuestEditor();
 
         /// Returns 0 if there was no events
         bool pressedKey(int key);
@@ -80,6 +86,7 @@ namespace mwmp
         TextInputDialog *mInputBox;
         GUILogin *mAccountLoginBox;
         GUIDialogList *mListBox;
+        ServerQuestEditorWindow *mServerQuestEditor;
         bool mPreLoginPasswordAutoSubmitted;
         void onInputBoxDone(MWGui::WindowBase* parWindow);
         void onAccountLoginDone(MWGui::WindowBase* parWindow);

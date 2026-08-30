@@ -100,10 +100,10 @@ add_openmw_dir (mwbase
     )
 
 add_openmw_dir (mwmp Main Networking LocalSystem LocalPlayer DedicatedPlayer PlayerList LocalActor DedicatedActor ActorList
-    ObjectList QuestItemIndex Worldstate Cell CellController GUIController MechanicsHelper RecordHelper ScriptController InteractionAnimationSync
+    ObjectList QuestItemIndex ServerQuestRegistry Worldstate Cell CellController GUIController MechanicsHelper RecordHelper ScriptController InteractionAnimationSync
     )
 
-add_openmw_dir (mwmp/GUI GUIChat GUILogin PlayerMarkerCollection GUIDialogList TextInputDialog
+add_openmw_dir (mwmp/GUI GUIChat GUILogin PlayerMarkerCollection GUIDialogList TextInputDialog ServerQuestEditor
     )
 
 add_openmw_dir(mwmp/processors BaseClientPacketProcessor SystemProcessor PlayerProcessor ObjectProcessor ActorProcessor

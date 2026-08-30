@@ -40,6 +40,8 @@ menuHelper = require("menuHelper")
 require("defaultCommands")
 coreChat = require("coreChat")
 require("customScripts")
+-- X035: server-authoritative custom quest definitions/editor/runtime.
+serverQuestSystem = require("serverQuestSystem")
 local configHotReload = require("configHotReload")
 local questIndexStore = require("questIndexStore")
 -- ArenaMP C19: core cell reset helper now lives in the main scripts folder.

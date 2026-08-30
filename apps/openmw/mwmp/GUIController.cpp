@@ -30,6 +30,7 @@
 #include "GUI/PlayerMarkerCollection.hpp"
 #include "GUI/GUIDialogList.hpp"
 #include "GUI/GUIChat.hpp"
+#include "GUI/ServerQuestEditor.hpp"
 #include "LocalPlayer.hpp"
 #include "DedicatedPlayer.hpp"
 #include "PlayerList.hpp"
@@ -39,6 +40,7 @@ mwmp::GUIController::GUIController()
     : mInputBox(nullptr)
     , mAccountLoginBox(nullptr)
     , mListBox(nullptr)
+    , mServerQuestEditor(nullptr)
     , mPreLoginPasswordAutoSubmitted(false)
 {
     mChat = nullptr;
@@ -57,6 +59,9 @@ void mwmp::GUIController::cleanUp()
     if (mChat != nullptr)
         delete mChat;
     mChat = nullptr;
+    if (mServerQuestEditor != nullptr)
+        delete mServerQuestEditor;
+    mServerQuestEditor = nullptr;
 
     // A fresh connection gets one automatic submission from the credentials
     // collected by the account card, even if the previous connection ended
@@ -140,6 +145,28 @@ void mwmp::GUIController::showDialogList(const mwmp::BasePlayer::GUIMessageBox &
 
     mListBox = new GUIDialogList(guiMessageBox.label, list);
     windowManager->pushGuiMode((MWGui::GuiMode)GM_TES3MP_ListBox);
+}
+
+
+void mwmp::GUIController::showServerQuestEditor()
+{
+    if (mServerQuestEditor == nullptr)
+        mServerQuestEditor = new ServerQuestEditorWindow();
+    else
+        mServerQuestEditor->refreshFromRegistry();
+
+    MWBase::WindowManager* windowManager = MWBase::Environment::get().getWindowManager();
+    const MWGui::GuiMode mode = static_cast<MWGui::GuiMode>(GM_ARENAMP_QuestEditor);
+    if (!windowManager->containsMode(mode))
+        windowManager->pushGuiMode(mode);
+    else
+        mServerQuestEditor->setVisible(true);
+}
+
+void mwmp::GUIController::refreshServerQuestEditor()
+{
+    if (mServerQuestEditor != nullptr)
+        mServerQuestEditor->refreshFromRegistry();
 }
 
 void mwmp::GUIController::showMessageBox(const BasePlayer::GUIMessageBox &guiMessageBox)
@@ -417,6 +444,15 @@ void mwmp::GUIController::WM_UpdateVisible(MWGui::GuiMode mode)
         {
             if (mListBox != 0)
                 mListBox->setVisible(true);
+            break;
+        }
+        case GM_ARENAMP_QuestEditor:
+        {
+            if (mServerQuestEditor != nullptr)
+            {
+                mServerQuestEditor->refreshFromRegistry();
+                mServerQuestEditor->setVisible(true);
+            }
             break;
         }
         default:

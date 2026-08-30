@@ -1,0 +1,737 @@
+--- a/server/scripts/config.lua
++++ b/server/scripts/config.lua
+@@ -904,9 +904,15 @@
+ -- Which numerical IDs should be used by custom menus implemented in the Lua scripts,
+ -- to prevent other menu inputs from being taken into account for them
+ config.customMenuIds = { menuHelper = 9001, confiscate = 9002, recordPrint = 9003,
+-    -- X035 server quest editor/runtime GUI ids. Keep these separate from menuHelper.
++    -- X035-X038 server quest editor/runtime GUI ids. Keep these separate from menuHelper.
+     questEditorMain = 9010, questEditorList = 9011, questEditorDetail = 9012, questEditorInput = 9013,
+-    questPlayerList = 9014, questPlayerJournal = 9015 }
++    questPlayerList = 9014, questPlayerJournal = 9015,
++    questEditorTopics = 9016, questEditorTopicList = 9017, questEditorTopicDetail = 9018,
++    questEditorOffer = 9019, questEditorChoices = 9020, questEditorChoiceList = 9021, questEditorChoiceDetail = 9022,
++    questEditorStages = 9023, questEditorStageList = 9024, questEditorStageDetail = 9025,
++    questEditorRequirements = 9026, questEditorRequirementList = 9027, questEditorRewards = 9028,
++    questEditorRewardList = 9029, questEditorTransitions = 9030, questEditorTransitionList = 9031,
++    questEditorConfirm = 9032, questEditorStageFlags = 9033, questEditorGiver = 9034 }
+ 
+ -- The menu files that should be loaded for menuHelper, from the scripts/menu subfolder
+ config.menuHelperFiles = { "help", "defaultCrafting", "advancedExample" }
+--- a/server/scripts/serverQuestSystem.lua
++++ b/server/scripts/serverQuestSystem.lua
+@@ -1,4 +1,4 @@
+--- ArenaMP X037: server-authoritative quest extension core + green dialogue, choices and journal sync.
++-- ArenaMP X038: server-authoritative quest extension core + visual editor v2.
+ --
+ -- Definitions, requirements, progression and rewards stay on the server. X036
+ -- exposes the published/player-visible subset through a hidden reliable GUI transport
+@@ -1022,19 +1022,267 @@
+     return serverQuestSystem.quests[state.questId]
+ end
+ 
++local function editorState(pid)
++    serverQuestSystem.editor[pid] = serverQuestSystem.editor[pid] or {}
++    return serverQuestSystem.editor[pid]
++end
++
++local function getSortedStages(quest)
++    local stages = {}
++    for _, stage in ipairs(quest.stages or {}) do table.insert(stages, stage) end
++    table.sort(stages, function(a, b) return (tonumber(a.index) or 0) < (tonumber(b.index) or 0) end)
++    return stages
++end
++
++local function getEditorStage(pid, quest)
++    local state = editorState(pid)
++    return findStage(quest, state.stageIndex)
++end
++
++local function getChoiceListForEditor(pid, quest)
++    local state = editorState(pid)
++    if state.choiceSource == "offer" then
++        quest.offer = quest.offer or { dialogue = "", choices = {} }
++        quest.offer.choices = quest.offer.choices or {}
++        return quest.offer.choices, "offer"
++    end
++    local stage = findStage(quest, state.choiceSource)
++    if stage == nil then return nil, nil end
++    stage.choices = stage.choices or {}
++    return stage.choices, tostring(stage.index)
++end
++
++local function getEditorChoice(pid, quest)
++    local choices = getChoiceListForEditor(pid, quest)
++    local state = editorState(pid)
++    if choices == nil or state.choiceIndex == nil then return nil end
++    return choices[tonumber(state.choiceIndex)]
++end
++
++local function formatRequirement(requirement)
++    if type(requirement) ~= "table" then return "<invalid requirement>" end
++    if requirement.type == "item" then
++        return string.format("item %s %s %s", tostring(requirement.refId), tostring(requirement.operator), tostring(requirement.count or requirement.value))
++    elseif requirement.type == "questStage" or requirement.type == "questState" then
++        return string.format("%s %s %s %s", tostring(requirement.type), tostring(requirement.questId), tostring(requirement.operator), tostring(requirement.value))
++    elseif requirement.type == "playerVariable" or requirement.type == "serverVariable" then
++        return string.format("%s %s %s %s", tostring(requirement.type), tostring(requirement.key), tostring(requirement.operator), tostring(requirement.value))
++    end
++    return string.format("%s %s %s", tostring(requirement.type), tostring(requirement.operator), tostring(requirement.value))
++end
++
++local function formatReward(reward)
++    if type(reward) ~= "table" then return "<invalid reward>" end
++    if reward.type == "item" or reward.type == "takeItem" then
++        return string.format("%s %s x%s", tostring(reward.type), tostring(reward.refId), tostring(reward.count or 1))
++    elseif reward.type == "message" then
++        return "message: " .. tostring(reward.text or "")
++    end
++    return string.format("%s %s", tostring(reward.type), tostring(reward.amount or ""))
++end
++
++local function formatChoice(choice)
++    local target = choice.targetStage ~= nil and (" -> " .. tostring(choice.targetStage)) or ""
++    return string.format("[%s%s] %s", tostring(choice.action or "none"), target, tostring(choice.text or choice.id or ""))
++end
++
++local function showGiverEditor(pid, quest)
++    local text = "Quest giver\n\nRefId: " .. (quest.giver.refId ~= "" and quest.giver.refId or "<not set>") ..
++        "\nCell: " .. (quest.giver.cell ~= "" and quest.giver.cell or "<any>") ..
++        "\nUnique index: " .. tostring(quest.giver.uniqueIndex or "<not pinned>") ..
++        "\n\nPick in game captures the next object/NPC you activate."
++    tes3mp.CustomMessageBox(pid, config.customMenuIds.questEditorGiver, text, "Manual;Pick in game;Clear uniqueIndex;Back")
++end
++
++local function showStageFlags(pid, quest)
++    local stage = getEditorStage(pid, quest)
++    if stage == nil then send(pid, "No stage selected") return end
++    local text = "Stage flags #" .. tostring(stage.index) ..
++        "\nInitial stage: " .. tostring(tonumber(quest.initialStage) == tonumber(stage.index)) ..
++        "\nComplete: " .. tostring(stage.complete == true) ..
++        "\nFail: " .. tostring(stage.fail == true)
++    tes3mp.CustomMessageBox(pid, config.customMenuIds.questEditorStageFlags, text, "Set initial;Toggle complete;Toggle fail;Back")
++end
++
+ local function showQuestDetails(pid, quest)
+     if quest == nil then send(pid, "No quest selected") return end
+     local errors, warnings = serverQuestSystem.ValidateQuest(quest)
+     local label = quest.name .. "\n" .. quest.id .. "\n\nStatus: " .. quest.status .. "  v" .. quest.version ..
+         "\nGiver: " .. (quest.giver.refId ~= "" and quest.giver.refId or "<not set>") ..
+         (quest.giver.cell ~= "" and (" @ " .. quest.giver.cell) or "") ..
++        (quest.giver.uniqueIndex ~= nil and (" [" .. tostring(quest.giver.uniqueIndex) .. "]") or "") ..
+         "\nTopics: " .. #quest.topics .. "   Stages: " .. #quest.stages ..
+         "\nValidation: " .. #errors .. " error(s), " .. #warnings .. " warning(s)"
+-    local buttons = "Giver;Add topic;Add stage;Requirement;Reward;Validate;" ..
++    local buttons = "Name;Giver;Topics;Offer;Stages;Validate;" ..
+         (quest.status == "published" and "Disable" or "Publish") .. ";Test me;Back"
+     tes3mp.CustomMessageBox(pid, config.customMenuIds.questEditorDetail, label, buttons)
+ end
+ 
++local function showTopicsMenu(pid, quest)
++    local lines = { "Green dialogue topics", "Count: " .. tostring(#(quest.topics or {})) }
++    for index, topic in ipairs(quest.topics or {}) do
++        table.insert(lines, string.format("%d. %s%s", index, topic.enabled == false and "[off] " or "", topic.text or topic.id))
++        if index >= 8 and #quest.topics > 8 then table.insert(lines, "..."); break end
++    end
++    tes3mp.CustomMessageBox(pid, config.customMenuIds.questEditorTopics, table.concat(lines, "\n"), "Add;Select/Edit;Back")
++end
++
++local function showTopicList(pid, quest)
++    local state = editorState(pid)
++    state.topicList = {}
++    local lines = {}
++    for index, topic in ipairs(quest.topics or {}) do
++        state.topicList[#state.topicList + 1] = index
++        lines[#lines + 1] = string.format("%s%s (%s)", topic.enabled == false and "[off] " or "", topic.text or "", topic.id or "")
++    end
++    if #lines == 0 then send(pid, "Quest has no topics") showTopicsMenu(pid, quest) return end
++    tes3mp.ListBox(pid, config.customMenuIds.questEditorTopicList, "Select green topic", table.concat(lines, "\n"))
++end
++
++local function showTopicDetail(pid, quest)
++    local state = editorState(pid)
++    local topic = quest.topics and quest.topics[tonumber(state.topicIndex or -1)] or nil
++    if topic == nil then showTopicsMenu(pid, quest) return end
++    local text = string.format("%s\nID: %s\nEnabled: %s\nColor: green", tostring(topic.text), tostring(topic.id), tostring(topic.enabled ~= false))
++    tes3mp.CustomMessageBox(pid, config.customMenuIds.questEditorTopicDetail, text, "Edit text;Toggle enabled;Delete;Back")
++end
++
++local function showOfferEditor(pid, quest)
++    quest.offer = quest.offer or { dialogue = "", choices = {} }
++    local text = "Quest offer\n\nNPC text:\n" .. (quest.offer.dialogue ~= "" and quest.offer.dialogue or "<not set>") ..
++        "\n\nChoices: " .. tostring(#(quest.offer.choices or {}))
++    tes3mp.CustomMessageBox(pid, config.customMenuIds.questEditorOffer, text, "Edit dialogue;Choices;Back")
++end
++
++local function showChoicesMenu(pid, quest)
++    local choices, source = getChoiceListForEditor(pid, quest)
++    if choices == nil then showQuestDetails(pid, quest) return end
++    local text = "Choices for " .. tostring(source) .. "\nCount: " .. tostring(#choices) ..
++        "\n\nOnly choices whose requirements pass are sent to the client."
++    tes3mp.CustomMessageBox(pid, config.customMenuIds.questEditorChoices, text, "Add;Select/Edit;Back")
++end
++
++local function showChoiceList(pid, quest)
++    local choices = getChoiceListForEditor(pid, quest)
++    if choices == nil or #choices == 0 then send(pid, "No choices yet") showChoicesMenu(pid, quest) return end
++    local lines = {}
++    for index, choice in ipairs(choices) do lines[index] = formatChoice(choice) end
++    tes3mp.ListBox(pid, config.customMenuIds.questEditorChoiceList, "Select choice", table.concat(lines, "\n"))
++end
++
++local function showChoiceDetail(pid, quest)
++    local choice = getEditorChoice(pid, quest)
++    if choice == nil then showChoicesMenu(pid, quest) return end
++    local text = string.format("%s\n\nID: %s\nAction: %s\nTarget stage: %s\nRequirements: %d",
++        tostring(choice.text), tostring(choice.id), tostring(choice.action), tostring(choice.targetStage or "-"), #(choice.requirements or {}))
++    tes3mp.CustomMessageBox(pid, config.customMenuIds.questEditorChoiceDetail, text, "Edit;Requirements;Delete;Back")
++end
++
++local function showStagesMenu(pid, quest)
++    local stages = getSortedStages(quest)
++    local text = "Quest stages\nCount: " .. tostring(#stages) .. "\nInitial stage: " .. tostring(quest.initialStage or "<not set>")
++    tes3mp.CustomMessageBox(pid, config.customMenuIds.questEditorStages, text, "Add;Select/Edit;Back")
++end
++
++local function showStageList(pid, quest)
++    local state = editorState(pid)
++    state.stageList = {}
++    local lines = {}
++    for _, stage in ipairs(getSortedStages(quest)) do
++        state.stageList[#state.stageList + 1] = tonumber(stage.index)
++        local flags = stage.complete and " [complete]" or (stage.fail and " [failed]" or "")
++        lines[#lines + 1] = "#" .. tostring(stage.index) .. flags .. " - " .. tostring(stage.journal or "")
++    end
++    if #lines == 0 then send(pid, "Quest has no stages") showStagesMenu(pid, quest) return end
++    tes3mp.ListBox(pid, config.customMenuIds.questEditorStageList, "Select quest stage", table.concat(lines, "\n"))
++end
++
++local function showStageDetail(pid, quest)
++    local stage = getEditorStage(pid, quest)
++    if stage == nil then showStagesMenu(pid, quest) return end
++    local text = "Stage #" .. tostring(stage.index) ..
++        "\n\nJournal:\n" .. tostring(stage.journal or "") ..
++        "\n\nNPC dialogue:\n" .. tostring(stage.dialogue or "") ..
++        "\n\nRequirements: " .. tostring(#(stage.requirements or {})) ..
++        "  Choices: " .. tostring(#(stage.choices or {})) ..
++        "\nRewards: " .. tostring(#(stage.rewards or {})) .. "  Next: " .. tostring(#(stage.next or {})) ..
++        "\nComplete: " .. tostring(stage.complete == true) .. "  Fail: " .. tostring(stage.fail == true)
++    tes3mp.CustomMessageBox(pid, config.customMenuIds.questEditorStageDetail, text,
++        "Journal;Dialogue;Requirements;Choices;Rewards;Transitions;Flags;Delete;Back")
++end
++
++local function getRequirementListForEditor(pid, quest)
++    local state = editorState(pid)
++    if state.requirementOwner == "choice" then
++        local choice = getEditorChoice(pid, quest)
++        if choice == nil then return nil end
++        choice.requirements = choice.requirements or {}
++        return choice.requirements
++    end
++    local stage = getEditorStage(pid, quest)
++    if stage == nil then return nil end
++    stage.requirements = stage.requirements or {}
++    return stage.requirements
++end
++
++local function showRequirementsMenu(pid, quest)
++    local requirements = getRequirementListForEditor(pid, quest)
++    if requirements == nil then showQuestDetails(pid, quest) return end
++    local text = "Requirements\nCount: " .. tostring(#requirements)
++    for i, requirement in ipairs(requirements) do
++        if i <= 6 then text = text .. "\n" .. tostring(i) .. ". " .. formatRequirement(requirement) end
++    end
++    tes3mp.CustomMessageBox(pid, config.customMenuIds.questEditorRequirements, text, "Add;Delete selected;Back")
++end
++
++local function showRequirementList(pid, quest)
++    local requirements = getRequirementListForEditor(pid, quest)
++    if requirements == nil or #requirements == 0 then send(pid, "No requirements") showRequirementsMenu(pid, quest) return end
++    local lines = {}
++    for i, requirement in ipairs(requirements) do lines[i] = formatRequirement(requirement) end
++    tes3mp.ListBox(pid, config.customMenuIds.questEditorRequirementList, "Select requirement to delete", table.concat(lines, "\n"))
++end
++
++local function showRewardsMenu(pid, quest)
++    local stage = getEditorStage(pid, quest)
++    if stage == nil then showStagesMenu(pid, quest) return end
++    local text = "Rewards / actions for stage #" .. tostring(stage.index) .. "\nCount: " .. tostring(#(stage.rewards or {}))
++    for i, reward in ipairs(stage.rewards or {}) do if i <= 6 then text = text .. "\n" .. tostring(i) .. ". " .. formatReward(reward) end end
++    tes3mp.CustomMessageBox(pid, config.customMenuIds.questEditorRewards, text, "Add;Delete selected;Back")
++end
++
++local function showRewardList(pid, quest)
++    local stage = getEditorStage(pid, quest)
++    if stage == nil or #(stage.rewards or {}) == 0 then send(pid, "No rewards") showRewardsMenu(pid, quest) return end
++    local lines = {}
++    for i, reward in ipairs(stage.rewards) do lines[i] = formatReward(reward) end
++    tes3mp.ListBox(pid, config.customMenuIds.questEditorRewardList, "Select reward to delete", table.concat(lines, "\n"))
++end
++
++local function showTransitionsMenu(pid, quest)
++    local stage = getEditorStage(pid, quest)
++    if stage == nil then showStagesMenu(pid, quest) return end
++    local nextList = stage.next or {}
++    local text = "Transitions from stage #" .. tostring(stage.index) .. "\n"
++    if #nextList == 0 then
++        text = text .. "<none>"
++    else
++        local labels = {}
++        for _, target in ipairs(nextList) do labels[#labels + 1] = tostring(target) end
++        text = text .. table.concat(labels, ", ")
++    end
++    tes3mp.CustomMessageBox(pid, config.customMenuIds.questEditorTransitions, text, "Add;Delete selected;Back")
++end
++
++local function showTransitionList(pid, quest)
++    local stage = getEditorStage(pid, quest)
++    if stage == nil or #(stage.next or {}) == 0 then send(pid, "No transitions") showTransitionsMenu(pid, quest) return end
++    local lines = {}
++    for i, target in ipairs(stage.next) do lines[i] = "Stage #" .. tostring(target) end
++    tes3mp.ListBox(pid, config.customMenuIds.questEditorTransitionList, "Select transition to delete", table.concat(lines, "\n"))
++end
++
++
+ local function showQuestList(pid)
+     local ids = sortedQuestIds()
+     if #ids == 0 then send(pid, "No server quests yet") return end
+@@ -1092,7 +1340,7 @@
+     end
+ end
+ 
+-local HELP_TEXT = [[ArenaMP X035 Server Quest Core
++local HELP_TEXT = [[ArenaMP X038 Server Quest Editor v2
+ 
+ Moderator/Admin editor:
+ /quest                    - open Quest Editor
+@@ -1370,6 +1618,38 @@
+     end
+ end
+ 
++local function parseRequirementParts(parts)
++    local kind = tostring(parts[1] or "")
++    if kind == "level" or kind == "gold" or kind == "staffRank" then
++        return { type = kind, operator = parts[2], value = parseValue(parts[3]) }
++    elseif kind == "item" then
++        return { type = kind, refId = parts[2], operator = parts[3], count = tonumber(parts[4]), value = tonumber(parts[4]) }
++    elseif kind == "questStage" or kind == "questState" then
++        return { type = kind, questId = normalizeId(parts[2]), operator = parts[3], value = parseValue(parts[4]) }
++    elseif kind == "playerVariable" or kind == "serverVariable" then
++        return { type = kind, key = parts[2], operator = parts[3], value = parseValue(parts[4]) }
++    end
++    return nil
++end
++
++local function parseRewardParts(parts)
++    local kind = tostring(parts[1] or "")
++    if kind == "gold" or kind == "xp" then return { type = kind, amount = tonumber(parts[2]) }
++    elseif kind == "item" or kind == "takeItem" then return { type = kind, refId = parts[2], count = tonumber(parts[3]) or 1 }
++    elseif kind == "message" then return { type = kind, text = parts[2] or "" } end
++    return nil
++end
++
++local function returnFromRequirements(pid, quest)
++    local state = editorState(pid)
++    if state.requirementOwner == "choice" then showChoiceDetail(pid, quest) else showStageDetail(pid, quest) end
++end
++
++local function returnFromChoices(pid, quest)
++    local state = editorState(pid)
++    if state.choiceSource == "offer" then showOfferEditor(pid, quest) else showStageDetail(pid, quest) end
++end
++
+ local function onGuiAction(eventStatus, pid, idGui, data)
+     if not enabled() or Players[pid] == nil or not Players[pid]:IsLoggedIn() then return end
+     local menu = config.customMenuIds
+@@ -1388,126 +1668,286 @@
+             if index == 0 then showPlayerQuests(pid)
+             elseif index == 1 then showJournal(pid) end
+         end
++
+     elseif idGui == menu.questEditorList then
+-        local state = serverQuestSystem.editor[pid]
+-        local id = state ~= nil and state.list ~= nil and state.list[(index or -1) + 1] or nil
+-        if id ~= nil then
+-            serverQuestSystem.editor[pid].questId = id
+-            showQuestDetails(pid, serverQuestSystem.quests[id])
+-        end
++        local state = editorState(pid)
++        local id = state.list ~= nil and state.list[(index or -1) + 1] or nil
++        if id ~= nil then state.questId = id; showQuestDetails(pid, serverQuestSystem.quests[id]) end
++
+     elseif idGui == menu.questEditorDetail and isModerator(pid) then
+         local q = getCurrentQuest(pid)
+         if q == nil then showMain(pid) return end
++        local state = editorState(pid)
+         if index == 0 then
+-            serverQuestSystem.editor[pid].input = "giver"
+-            tes3mp.InputDialog(pid, menu.questEditorInput, "Quest giver", "Enter: refId | Cell (cell may be empty)")
+-        elseif index == 1 then
+-            serverQuestSystem.editor[pid].input = "topic"
+-            tes3mp.InputDialog(pid, menu.questEditorInput, "Green topic", "Enter: topic_id | Display text")
+-        elseif index == 2 then
+-            serverQuestSystem.editor[pid].input = "stage"
+-            tes3mp.InputDialog(pid, menu.questEditorInput, "Quest stage", "Enter: index | Journal text | Dialogue text")
+-        elseif index == 3 then
+-            serverQuestSystem.editor[pid].input = "requirement"
+-            tes3mp.InputDialog(pid, menu.questEditorInput, "Stage requirement",
+-                "Examples: 20 | level | >= | 5   OR   20 | item | ring_ref | >= | 1")
+-        elseif index == 4 then
+-            serverQuestSystem.editor[pid].input = "reward"
+-            tes3mp.InputDialog(pid, menu.questEditorInput, "Stage reward/action",
+-                "Examples: 20 | gold | 250   OR   20 | item | potion_ref | 1   OR   20 | xp | 125")
++            state.input = "quest_name"
++            tes3mp.InputDialog(pid, menu.questEditorInput, "Quest display name", "Enter new display name")
++        elseif index == 1 then showGiverEditor(pid, q)
++        elseif index == 2 then showTopicsMenu(pid, q)
++        elseif index == 3 then showOfferEditor(pid, q)
++        elseif index == 4 then showStagesMenu(pid, q)
+         elseif index == 5 then
+             local errors, warnings = serverQuestSystem.ValidateQuest(q)
+-            local lines = { "Errors: " .. #errors, "Warnings: " .. #warnings }
++            local lines = { "Validation for " .. q.id, "Errors: " .. #errors, "Warnings: " .. #warnings }
+             for _, e in ipairs(errors) do table.insert(lines, "ERROR: " .. e) end
+             for _, w in ipairs(warnings) do table.insert(lines, "WARN: " .. w) end
+             tes3mp.CustomMessageBox(pid, menu.questPlayerJournal, table.concat(lines, "\n"), "Ok")
+         elseif index == 6 then
+             if q.status == "published" then
+                 q.status = "disabled"; q.version = q.version + 1
+-                serverQuestSystem.SaveQuest(q, getAccountName(pid), "disabled from editor")
++                serverQuestSystem.SaveQuest(q, getAccountName(pid), "disabled from editor v2")
+             else
+-                local errors = serverQuestSystem.ValidateQuest(q)
++                local errors, warnings = serverQuestSystem.ValidateQuest(q)
+                 if #errors > 0 then send(pid, "Fix validation errors before publishing")
+                 elseif not isAdmin(pid) and config.serverQuests ~= nil and config.serverQuests.moderatorsCanPublish == false then send(pid, "Admin approval required")
+-                else q.status = "published"; q.version = q.version + 1; serverQuestSystem.SaveQuest(q, getAccountName(pid), "published from editor") end
++                else q.status = "published"; q.version = q.version + 1; serverQuestSystem.SaveQuest(q, getAccountName(pid), "published from editor v2")
++                    send(pid, "Published " .. q.name .. (#warnings > 0 and (" with " .. #warnings .. " warning(s)") or "")) end
+             end
+-            showQuestDetails(pid, q)
++            serverQuestSystem.SyncAll(); showQuestDetails(pid, q)
+         elseif index == 7 then
++            local cv = ensurePlayerData(pid); cv.serverQuests[q.id] = nil; Players[pid]:QuicksaveToDrive()
+             local ok, why = serverQuestSystem.StartQuest(pid, q.id, true)
+-            if not ok then send(pid, why) end
+-            showQuestDetails(pid, q)
++            if not ok then send(pid, why) else send(pid, "Test state reset and quest started") end
++            serverQuestSystem.SyncPlayer(pid); showQuestDetails(pid, q)
+         elseif index == 8 then showMain(pid) end
++
++    elseif idGui == menu.questEditorGiver and isModerator(pid) then
++        local q = getCurrentQuest(pid); if q == nil then return end
++        local state = editorState(pid)
++        if index == 0 then
++            state.input = "giver"
++            tes3mp.InputDialog(pid, menu.questEditorInput, "Quest giver", "Enter: refId | Cell (cell may be empty)")
++        elseif index == 1 then
++            state.pickGiver = true
++            send(pid, "Giver picker armed. Close the editor and activate the NPC you want to use as quest giver.")
++            tes3mp.CustomMessageBox(pid, menu.questPlayerJournal,
++                "Pick giver in game\n\nActivate the desired NPC once. ArenaMP will capture its refId, current cell and uniqueIndex for this quest.\n\nIf you activate the wrong object, use Pick giver again.", "Ok")
++        elseif index == 2 then
++            q.giver.uniqueIndex = nil
++            markEdited(pid, q, "giver uniqueIndex cleared")
++            showGiverEditor(pid, q)
++        elseif index == 3 then showQuestDetails(pid, q) end
++
++    elseif idGui == menu.questEditorTopics and isModerator(pid) then
++        local q = getCurrentQuest(pid); if q == nil then showMain(pid) return end
++        local state = editorState(pid)
++        if index == 0 then state.input = "topic_add"; tes3mp.InputDialog(pid, menu.questEditorInput, "Add green topic", "Enter: topic_id | Display text")
++        elseif index == 1 then showTopicList(pid, q)
++        elseif index == 2 then showQuestDetails(pid, q) end
++
++    elseif idGui == menu.questEditorTopicList and isModerator(pid) then
++        local q = getCurrentQuest(pid); if q == nil then return end
++        local state = editorState(pid); local topicIndex = state.topicList ~= nil and state.topicList[(index or -1)+1] or nil
++        if topicIndex ~= nil then state.topicIndex = topicIndex; showTopicDetail(pid, q) end
++
++    elseif idGui == menu.questEditorTopicDetail and isModerator(pid) then
++        local q = getCurrentQuest(pid); if q == nil then return end
++        local state = editorState(pid); local topic = q.topics[tonumber(state.topicIndex or -1)]
++        if topic == nil then showTopicsMenu(pid, q) return end
++        if index == 0 then state.input = "topic_edit"; tes3mp.InputDialog(pid, menu.questEditorInput, "Edit green topic", "Enter new display text")
++        elseif index == 1 then topic.enabled = not (topic.enabled ~= false); markEdited(pid, q, "topic enabled toggled"); serverQuestSystem.SyncAll(); showTopicDetail(pid, q)
++        elseif index == 2 then table.remove(q.topics, state.topicIndex); state.topicIndex = nil; markEdited(pid, q, "topic deleted"); serverQuestSystem.SyncAll(); showTopicsMenu(pid, q)
++        elseif index == 3 then showTopicsMenu(pid, q) end
++
++    elseif idGui == menu.questEditorOffer and isModerator(pid) then
++        local q = getCurrentQuest(pid); if q == nil then return end
++        local state = editorState(pid)
++        if index == 0 then state.input = "offer_dialogue"; tes3mp.InputDialog(pid, menu.questEditorInput, "Quest offer dialogue", "Enter NPC offer text")
++        elseif index == 1 then state.choiceSource = "offer"; state.choiceIndex = nil; showChoicesMenu(pid, q)
++        elseif index == 2 then showQuestDetails(pid, q) end
++
++    elseif idGui == menu.questEditorChoices and isModerator(pid) then
++        local q = getCurrentQuest(pid); if q == nil then return end
++        local state = editorState(pid)
++        if index == 0 then state.input = "choice_add"; tes3mp.InputDialog(pid, menu.questEditorInput, "Add dialogue choice", "Enter: choice_id | start/advance/none | targetStage/- | Text")
++        elseif index == 1 then showChoiceList(pid, q)
++        elseif index == 2 then returnFromChoices(pid, q) end
++
++    elseif idGui == menu.questEditorChoiceList and isModerator(pid) then
++        local q = getCurrentQuest(pid); if q == nil then return end
++        local choices = getChoiceListForEditor(pid, q)
++        if choices ~= nil and choices[(index or -1)+1] ~= nil then editorState(pid).choiceIndex = (index or -1)+1; showChoiceDetail(pid, q) end
++
++    elseif idGui == menu.questEditorChoiceDetail and isModerator(pid) then
++        local q = getCurrentQuest(pid); if q == nil then return end
++        local state = editorState(pid); local choice = getEditorChoice(pid, q)
++        if choice == nil then showChoicesMenu(pid, q) return end
++        if index == 0 then state.input = "choice_edit"; tes3mp.InputDialog(pid, menu.questEditorInput, "Edit dialogue choice", "Enter: choice_id | start/advance/none | targetStage/- | Text")
++        elseif index == 1 then state.requirementOwner = "choice"; showRequirementsMenu(pid, q)
++        elseif index == 2 then local choices = getChoiceListForEditor(pid, q); table.remove(choices, state.choiceIndex); state.choiceIndex=nil; markEdited(pid,q,"choice deleted"); serverQuestSystem.SyncAll(); showChoicesMenu(pid,q)
++        elseif index == 3 then showChoicesMenu(pid, q) end
++
++    elseif idGui == menu.questEditorStages and isModerator(pid) then
++        local q = getCurrentQuest(pid); if q == nil then return end
++        local state = editorState(pid)
++        if index == 0 then state.input = "stage_add"; tes3mp.InputDialog(pid, menu.questEditorInput, "Add quest stage", "Enter: index | Journal text | NPC dialogue")
++        elseif index == 1 then showStageList(pid, q)
++        elseif index == 2 then showQuestDetails(pid, q) end
++
++    elseif idGui == menu.questEditorStageList and isModerator(pid) then
++        local q = getCurrentQuest(pid); if q == nil then return end
++        local state = editorState(pid); local stageIndex = state.stageList ~= nil and state.stageList[(index or -1)+1] or nil
++        if stageIndex ~= nil then state.stageIndex = stageIndex; showStageDetail(pid, q) end
++
++    elseif idGui == menu.questEditorStageDetail and isModerator(pid) then
++        local q = getCurrentQuest(pid); if q == nil then return end
++        local state = editorState(pid); local stage = getEditorStage(pid, q)
++        if stage == nil then showStagesMenu(pid,q) return end
++        if index == 0 then state.input = "stage_journal"; tes3mp.InputDialog(pid, menu.questEditorInput, "Stage journal entry", "Enter journal text")
++        elseif index == 1 then state.input = "stage_dialogue"; tes3mp.InputDialog(pid, menu.questEditorInput, "Stage NPC dialogue", "Enter NPC response text")
++        elseif index == 2 then state.requirementOwner = "stage"; showRequirementsMenu(pid, q)
++        elseif index == 3 then state.choiceSource = tonumber(stage.index); state.choiceIndex=nil; showChoicesMenu(pid, q)
++        elseif index == 4 then showRewardsMenu(pid, q)
++        elseif index == 5 then showTransitionsMenu(pid, q)
++        elseif index == 6 then showStageFlags(pid, q)
++        elseif index == 7 then
++            local removedIndex = tonumber(stage.index)
++            for i, candidate in ipairs(q.stages) do if tonumber(candidate.index)==removedIndex then table.remove(q.stages,i); break end end
++            for _, candidate in ipairs(q.stages) do
++                local kept = {}; for _, target in ipairs(candidate.next or {}) do if tonumber(target) ~= removedIndex then kept[#kept+1]=target end end; candidate.next=kept
++            end
++            normalizeQuest(q)
++            if tonumber(q.initialStage)==removedIndex then local sorted=getSortedStages(q); q.initialStage=#sorted>0 and sorted[1].index or nil end
++            state.stageIndex=nil; markEdited(pid,q,"stage deleted"); serverQuestSystem.SyncAll(); showStagesMenu(pid,q)
++        elseif index == 8 then showStagesMenu(pid, q) end
++
++    elseif idGui == menu.questEditorStageFlags and isModerator(pid) then
++        local q=getCurrentQuest(pid); if q==nil then return end
++        local stage=getEditorStage(pid,q); if stage==nil then showStagesMenu(pid,q) return end
++        if index==0 then q.initialStage=tonumber(stage.index); markEdited(pid,q,"initial stage changed"); showStageFlags(pid,q)
++        elseif index==1 then stage.complete=not(stage.complete==true); if stage.complete then stage.fail=false end; markEdited(pid,q,"stage complete toggled"); showStageFlags(pid,q)
++        elseif index==2 then stage.fail=not(stage.fail==true); if stage.fail then stage.complete=false end; markEdited(pid,q,"stage fail toggled"); showStageFlags(pid,q)
++        elseif index==3 then showStageDetail(pid,q) end
++
++    elseif idGui == menu.questEditorRequirements and isModerator(pid) then
++        local q=getCurrentQuest(pid); if q==nil then return end
++        local state=editorState(pid)
++        if index==0 then state.input="requirement_add"; tes3mp.InputDialog(pid,menu.questEditorInput,"Add requirement","Examples: level | >= | 5   OR   item | ring_ref | >= | 1")
++        elseif index==1 then showRequirementList(pid,q)
++        elseif index==2 then returnFromRequirements(pid,q) end
++
++    elseif idGui == menu.questEditorRequirementList and isModerator(pid) then
++        local q=getCurrentQuest(pid); if q==nil then return end
++        local requirements=getRequirementListForEditor(pid,q); local removeIndex=(index or -1)+1
++        if requirements~=nil and requirements[removeIndex]~=nil then table.remove(requirements,removeIndex); markEdited(pid,q,"requirement deleted"); serverQuestSystem.SyncAll() end
++        showRequirementsMenu(pid,q)
++
++    elseif idGui == menu.questEditorRewards and isModerator(pid) then
++        local q=getCurrentQuest(pid); if q==nil then return end
++        local state=editorState(pid)
++        if index==0 then state.input="reward_add"; tes3mp.InputDialog(pid,menu.questEditorInput,"Add reward/action","Examples: gold | 250   OR   xp | 125   OR   item | potion_ref | 1")
++        elseif index==1 then showRewardList(pid,q)
++        elseif index==2 then showStageDetail(pid,q) end
++
++    elseif idGui == menu.questEditorRewardList and isModerator(pid) then
++        local q=getCurrentQuest(pid); if q==nil then return end
++        local stage=getEditorStage(pid,q); local removeIndex=(index or -1)+1
++        if stage~=nil and stage.rewards[removeIndex]~=nil then table.remove(stage.rewards,removeIndex); markEdited(pid,q,"reward deleted"); serverQuestSystem.SyncAll() end
++        showRewardsMenu(pid,q)
++
++    elseif idGui == menu.questEditorTransitions and isModerator(pid) then
++        local q=getCurrentQuest(pid); if q==nil then return end
++        local state=editorState(pid)
++        if index==0 then state.input="transition_add"; tes3mp.InputDialog(pid,menu.questEditorInput,"Add stage transition","Enter target stage index")
++        elseif index==1 then showTransitionList(pid,q)
++        elseif index==2 then showStageDetail(pid,q) end
++
++    elseif idGui == menu.questEditorTransitionList and isModerator(pid) then
++        local q=getCurrentQuest(pid); if q==nil then return end
++        local stage=getEditorStage(pid,q); local removeIndex=(index or -1)+1
++        if stage~=nil and stage.next[removeIndex]~=nil then table.remove(stage.next,removeIndex); markEdited(pid,q,"transition deleted") end
++        showTransitionsMenu(pid,q)
++
+     elseif idGui == menu.questEditorInput and isModerator(pid) then
+-        local state = serverQuestSystem.editor[pid] or {}
+-        local action = state.input
+-        state.input = nil
++        local state = editorState(pid); local action = state.input; state.input = nil
+         if action == "new" then
+-            local ok, why = newQuest(pid, data)
+-            if not ok then send(pid, why) else showQuestDetails(pid, getCurrentQuest(pid)) end
+-            return
++            local ok, why = newQuest(pid, data); if not ok then send(pid, why) else showQuestDetails(pid, getCurrentQuest(pid)) end; return
+         end
+-        local q = getCurrentQuest(pid)
+-        if q == nil then showMain(pid) return end
++        local q = getCurrentQuest(pid); if q == nil then showMain(pid) return end
+         local parts = splitPipe(data)
+-        if action == "giver" then
+-            q.giver.refId, q.giver.cell = parts[1] or "", parts[2] or ""
+-            markEdited(pid, q, "giver changed from editor")
+-        elseif action == "topic" then
+-            local id, text = normalizeId(parts[1]), parts[2] or ""
+-            if not validId(id) or text == "" then send(pid, "Invalid topic input")
+-            else
+-                local topic = findTopic(q, id)
+-                if topic == nil then table.insert(q.topics, { id = id, text = text, enabled = true, green = true }) else topic.text = text end
+-                markEdited(pid, q, "topic changed from editor")
++        if action == "quest_name" then
++            if trim(data) == "" then send(pid, "Quest name cannot be empty") else q.name=trim(data); markEdited(pid,q,"quest name changed") end
++            showQuestDetails(pid,q)
++        elseif action == "giver" then
++            q.giver.refId, q.giver.cell, q.giver.uniqueIndex = parts[1] or "", parts[2] or "", nil
++            markEdited(pid,q,"giver manually changed")
++            showQuestDetails(pid,q)
++        elseif action == "topic_add" then
++            local id,text=normalizeId(parts[1]),parts[2] or ""
++            if not validId(id) or text=="" then send(pid,"Invalid topic input") else
++                local topic=findTopic(q,id); if topic==nil then table.insert(q.topics,{id=id,text=text,enabled=true,green=true}) else topic.text=text end
++                markEdited(pid,q,"topic added from editor v2"); serverQuestSystem.SyncAll()
+             end
+-        elseif action == "stage" then
+-            local stageIndex = tonumber(parts[1])
+-            if stageIndex == nil then send(pid, "Invalid stage index")
+-            else
+-                local stage = findStage(q, stageIndex)
+-                if stage == nil then
+-                    stage = { index = stageIndex, journal = parts[2] or "", dialogue = parts[3] or "", requirements = {}, rewards = {}, next = {}, complete = false, fail = false }
+-                    table.insert(q.stages, stage)
+-                    if #q.stages == 1 then q.initialStage = stageIndex end
+-                else
+-                    stage.journal = parts[2] or stage.journal
+-                    stage.dialogue = parts[3] or stage.dialogue
+-                end
+-                normalizeQuest(q)
+-                markEdited(pid, q, "stage changed from editor")
+-            end
+-        elseif action == "requirement" then
+-            local stage = findStage(q, parts[1])
+-            local kind = parts[2]
+-            if stage == nil or kind == nil then send(pid, "Invalid requirement input")
+-            else
+-                local requirement
+-                if kind == "level" or kind == "gold" or kind == "staffRank" then
+-                    requirement = { type=kind, operator=parts[3], value=parseValue(parts[4]) }
+-                elseif kind == "item" then
+-                    requirement = { type=kind, refId=parts[3], operator=parts[4], count=tonumber(parts[5]), value=tonumber(parts[5]) }
+-                elseif kind == "questStage" or kind == "questState" then
+-                    requirement = { type=kind, questId=normalizeId(parts[3]), operator=parts[4], value=parseValue(parts[5]) }
+-                elseif kind == "playerVariable" or kind == "serverVariable" then
+-                    requirement = { type=kind, key=parts[3], operator=parts[4], value=parseValue(parts[5]) }
+-                end
+-                if requirement == nil or requirement.operator == nil or requirement.value == nil then send(pid, "Invalid requirement format")
+-                else table.insert(stage.requirements, requirement); markEdited(pid, q, "requirement added from editor") end
++            showTopicsMenu(pid,q)
++        elseif action == "topic_edit" then
++            local topic=q.topics[tonumber(state.topicIndex or -1)]
++            if topic~=nil and trim(data)~="" then topic.text=trim(data); markEdited(pid,q,"topic text edited"); serverQuestSystem.SyncAll() end
++            showTopicDetail(pid,q)
++        elseif action == "offer_dialogue" then
++            q.offer=q.offer or {dialogue="",choices={}}; q.offer.dialogue=trim(data); markEdited(pid,q,"offer dialogue edited"); serverQuestSystem.SyncAll(); showOfferEditor(pid,q)
++        elseif action == "stage_add" then
++            local stageIndex=tonumber(parts[1])
++            if stageIndex==nil then send(pid,"Invalid stage index") else
++                local stage=findStage(q,stageIndex)
++                if stage==nil then stage={index=stageIndex,journal=parts[2] or "",dialogue=parts[3] or "",requirements={},choices={},rewards={},next={},complete=false,fail=false}; table.insert(q.stages,stage)
++                    if #q.stages==1 or q.initialStage==nil then q.initialStage=stageIndex end
++                else stage.journal=parts[2] or stage.journal; stage.dialogue=parts[3] or stage.dialogue end
++                normalizeQuest(q); state.stageIndex=stageIndex; markEdited(pid,q,"stage added/edited from editor v2")
+             end
+-        elseif action == "reward" then
+-            local stage = findStage(q, parts[1])
+-            local kind = parts[2]
+-            if stage == nil or kind == nil then send(pid, "Invalid reward input")
++            showStageDetail(pid,q)
++        elseif action == "stage_journal" then
++            local stage=getEditorStage(pid,q); if stage~=nil then stage.journal=trim(data); markEdited(pid,q,"stage journal edited") end; showStageDetail(pid,q)
++        elseif action == "stage_dialogue" then
++            local stage=getEditorStage(pid,q); if stage~=nil then stage.dialogue=trim(data); markEdited(pid,q,"stage dialogue edited"); serverQuestSystem.SyncAll() end; showStageDetail(pid,q)
++        elseif action == "choice_add" or action == "choice_edit" then
++            local choices=getChoiceListForEditor(pid,q); local choiceId=normalizeId(parts[1]); local actionName=tostring(parts[2] or "none"):lower(); local targetRaw=tostring(parts[3] or "-"); local text=parts[4] or ""
++            if choices==nil or not validId(choiceId) or text=="" or not (actionName=="start" or actionName=="advance" or actionName=="none") then send(pid,"Invalid choice format")
+             else
+-                local reward
+-                if kind == "gold" or kind == "xp" then reward = {type=kind, amount=tonumber(parts[3])}
+-                elseif kind == "item" or kind == "takeItem" then reward = {type=kind, refId=parts[3], count=tonumber(parts[4]) or 1}
+-                elseif kind == "message" then reward = {type=kind, text=parts[3] or ""} end
+-                if reward == nil then send(pid, "Reward types: gold, xp, item, takeItem, message")
+-                else table.insert(stage.rewards, reward); markEdited(pid, q, "reward added from editor") end
++                local target=targetRaw~="-" and tonumber(targetRaw) or nil
++                local replacement=normalizeChoice({id=choiceId,text=text,action=actionName,targetStage=target,requirements={}})
++                if action=="choice_edit" then
++                    local old=choices[tonumber(state.choiceIndex or -1)]; if old~=nil then replacement.requirements=old.requirements or {}; choices[state.choiceIndex]=replacement end
++                else table.insert(choices,replacement); state.choiceIndex=#choices end
++                markEdited(pid,q,"choice added/edited from editor v2"); serverQuestSystem.SyncAll()
+             end
++            showChoiceDetail(pid,q)
++        elseif action == "requirement_add" then
++            local requirements=getRequirementListForEditor(pid,q); local requirement=parseRequirementParts(parts)
++            if requirements==nil or requirement==nil or requirement.operator==nil or requirement.value==nil then send(pid,"Invalid requirement format")
++            else table.insert(requirements,requirement); markEdited(pid,q,"requirement added from editor v2") end
++            showRequirementsMenu(pid,q)
++        elseif action == "reward_add" then
++            local stage=getEditorStage(pid,q); local reward=parseRewardParts(parts)
++            if stage==nil or reward==nil then send(pid,"Invalid reward format") else table.insert(stage.rewards,reward); markEdited(pid,q,"reward added from editor v2") end
++            showRewardsMenu(pid,q)
++        elseif action == "transition_add" then
++            local stage=getEditorStage(pid,q); local target=tonumber(parts[1])
++            if stage==nil or target==nil or findStage(q,target)==nil then send(pid,"Target stage does not exist")
++            else stage.next=stage.next or {}; if not tableHelper.containsValue(stage.next,target) then table.insert(stage.next,target); markEdited(pid,q,"transition added from editor v2") end end
++            showTransitionsMenu(pid,q)
++        else
++            showQuestDetails(pid,q)
++        end
++    end
++end
++
++
++local function onObjectActivateQuestPicker(eventStatus, pid, cellDescription, objects, targetPlayers)
++    if not enabled() or not isModerator(pid) then return end
++    local state = serverQuestSystem.editor[pid]
++    if state == nil or state.pickGiver ~= true then return end
++    local q = getCurrentQuest(pid)
++    if q == nil then state.pickGiver = false; return end
++
++    for uniqueIndex, object in pairs(objects or {}) do
++        if type(object) == "table" and trim(object.refId) ~= "" then
++            q.giver.refId = trim(object.refId)
++            q.giver.cell = trim(cellDescription)
++            q.giver.uniqueIndex = tostring(uniqueIndex)
++            state.pickGiver = false
++            markEdited(pid, q, "giver picked in game")
++            send(pid, "Quest giver selected: " .. q.giver.refId .. " @ " .. q.giver.cell .. " [" .. q.giver.uniqueIndex .. "]")
++            return
+         end
+-        showQuestDetails(pid, q)
+     end
+ end
+ 
+@@ -1528,11 +1968,12 @@
+     customCommandHooks.registerCommand("quest", processCommand)
+     customCommandHooks.registerCommand("quests", processCommand)
+     customEventHooks.registerHandler("OnGUIAction", onGuiAction)
++    customEventHooks.registerHandler("OnObjectActivate", onObjectActivateQuestPicker)
+     customEventHooks.registerHandler("OnPlayerAuthentified", onPlayerAuthentified)
+     customEventHooks.registerHandler("OnPlayerFinishLogin", onPlayerFinishLogin)
+     customEventHooks.registerValidator("OnObjectDialogueChoice", validateServerQuestDialogue)
+     customEventHooks.registerHandler("OnObjectDialogueChoice", handleServerQuestDialogue)
+-    log(enumerations.log.INFO, "X037 Server Quest Choices + Journal Sync initialized")
++    log(enumerations.log.INFO, "X038 Server Quest Editor v2 + Choices + Journal Sync initialized")
+ end
+ 
+ serverQuestSystem.Initialize()

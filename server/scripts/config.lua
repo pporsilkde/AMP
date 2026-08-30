@@ -511,6 +511,18 @@ config.startupMessage = {
     }
 }
 
+
+-- X035: server-authored quest extension layer. Definitions live in
+-- server/data/custom/quests and player progress lives in player customVariables.
+-- Moderators can always create/edit drafts. Set moderatorsCanPublish=false if
+-- an administrator must approve every publish operation.
+config.serverQuests = {
+    enabled = true,
+    moderatorsCanPublish = true,
+    greenTopicColor = "#61D879",
+    maxSyncedTopicsPerNpc = 64
+}
+
 -- Exactly as in the old server: keep this effectively empty so no second startup banner is printed.
 config.startupScriptsInstructions = color.SkyBlue .. " \n"
 
@@ -891,7 +903,16 @@ config.rankColors = { serverOwner = color.Orange, admin = color.Red, moderator =
 
 -- Which numerical IDs should be used by custom menus implemented in the Lua scripts,
 -- to prevent other menu inputs from being taken into account for them
-config.customMenuIds = { menuHelper = 9001, confiscate = 9002, recordPrint = 9003 }
+config.customMenuIds = { menuHelper = 9001, confiscate = 9002, recordPrint = 9003,
+    -- X035-X038 server quest editor/runtime GUI ids. Keep these separate from menuHelper.
+    questEditorMain = 9010, questEditorList = 9011, questEditorDetail = 9012, questEditorInput = 9013,
+    questPlayerList = 9014, questPlayerJournal = 9015,
+    questEditorTopics = 9016, questEditorTopicList = 9017, questEditorTopicDetail = 9018,
+    questEditorOffer = 9019, questEditorChoices = 9020, questEditorChoiceList = 9021, questEditorChoiceDetail = 9022,
+    questEditorStages = 9023, questEditorStageList = 9024, questEditorStageDetail = 9025,
+    questEditorRequirements = 9026, questEditorRequirementList = 9027, questEditorRewards = 9028,
+    questEditorRewardList = 9029, questEditorTransitions = 9030, questEditorTransitionList = 9031,
+    questEditorConfirm = 9032, questEditorStageFlags = 9033, questEditorGiver = 9034 }
 
 -- The menu files that should be loaded for menuHelper, from the scripts/menu subfolder
 config.menuHelperFiles = { "help", "defaultCrafting", "advancedExample" }

@@ -39,6 +39,7 @@
 #include "../mwmp/CellController.hpp"
 #include "../mwmp/LocalActor.hpp"
 #include "../mwmp/InteractionAnimationSync.hpp"
+#include "../mwmp/ServerQuestRegistry.hpp"
 #include <components/openmw-mp/TimedLog.hpp>
 /*
     End of tes3mp addition
@@ -1225,6 +1226,23 @@ namespace MWGui
             return;
         }
 
+        if (!mServerQuestChoices.empty())
+        {
+            if (id < 0 || static_cast<std::size_t>(id) >= mServerQuestChoices.size())
+                return;
+            const std::pair<std::string, std::string> selected
+                = mServerQuestChoices[static_cast<std::size_t>(id)];
+            const std::string token = "@ArenaQuestChoice:" + mServerQuestChoiceQuestId
+                + ":" + mServerQuestChoiceTopicId + ":" + selected.first;
+
+            // Disable the list immediately. The next server RESPONSE rebuilds it;
+            // this prevents a double click from submitting the same reward choice twice.
+            mServerQuestChoices.clear();
+            updateChoicePane();
+            sendDialogueChoicePacket(token);
+            return;
+        }
+
         if (id < 0 || static_cast<std::size_t>(id) >= mChoices.size())
             return;
         onChoiceActivated(mChoices[static_cast<std::size_t>(id)].second);
@@ -1349,13 +1367,21 @@ namespace MWGui
         }
         else
         {
-            for (const auto& choice : mChoices)
-                mChoicesList->addItem(choice.first);
+            if (!mServerQuestChoices.empty())
+            {
+                for (const auto& choice : mServerQuestChoices)
+                    mChoicesList->addItem(choice.second);
+            }
+            else
+            {
+                for (const auto& choice : mChoices)
+                    mChoicesList->addItem(choice.first);
+            }
             mChoicesLabel->setCaption(MyGUI::UString());
         }
         mChoicesList->adjustSize();
 
-        const bool hasChoices = mPersuasionMode || !mChoices.empty();
+        const bool hasChoices = mPersuasionMode || !mServerQuestChoices.empty() || !mChoices.empty();
         mChoicesLabel->setVisible(mPersuasionMode);
         mChoicesList->setVisible(hasChoices);
         mChoicesList->setEnabled(hasChoices);
@@ -1475,6 +1501,19 @@ namespace MWGui
         const std::string sEnchanting = gameSettingString("sEnchanting", "Enchanting");
         const std::string sServiceTrainingTitle = gameSettingString("sServiceTrainingTitle", "Training");
         const std::string sRepair = gameSettingString("sRepair", "Repair");
+
+        const auto serverQuestTopic = mServerQuestTopicTokens.find(topic);
+        if (serverQuestTopic != mServerQuestTopicTokens.end())
+        {
+            // X036/X037: never execute a server quest as a local vanilla DIAL topic.
+            // The opaque token is validated and resolved entirely server-side.
+            mServerQuestChoices.clear();
+            mServerQuestChoiceQuestId.clear();
+            mServerQuestChoiceTopicId.clear();
+            updateChoicePane();
+            sendDialogueChoicePacket(serverQuestTopic->second);
+            return;
+        }
 
         const bool regularTopic = topic != sPersuasion && topic != sCompanionShare
             && topic != sBarter && topic != sSpells && topic != sTravel
@@ -1605,6 +1644,11 @@ namespace MWGui
             // The history is not reset here
             mKeywords.clear();
             mTopicsList->clear();
+            mServerQuestTopicTokens.clear();
+            mServerQuestTopicLabels.clear();
+            mServerQuestChoices.clear();
+            mServerQuestChoiceQuestId.clear();
+            mServerQuestChoiceTopicId.clear();
             for (Link* link : mLinks)
                 mDeleteLater.push_back(link); // Links are not deleted right away to prevent issues with event handlers
             mLinks.clear();
@@ -1709,6 +1753,8 @@ namespace MWGui
     void DialogueWindow::updateTopicsPane()
     {
         mTopicsList->clear();
+        mServerQuestTopicTokens.clear();
+        mServerQuestTopicLabels.clear();
         for (auto& linkPair : mTopicLinks)
             mDeleteLater.push_back(linkPair.second);
         mTopicLinks.clear();
@@ -1772,11 +1818,59 @@ namespace MWGui
 
             mKeywordSearch.seed(topicId, intptr_t(t));
         }
+
+        appendServerQuestTopics();
         mTopicsList->adjustSize();
 
         updateHistory();
         // The topics list has been regenerated so topic formatting needs to be updated
         updateTopicFormat();
+        selectInitialItem();
+    }
+
+    void DialogueWindow::appendServerQuestTopics()
+    {
+        if (mPtr.isEmpty() || !mPtr.getCell())
+            return;
+
+        const std::string actorRefId = mPtr.getCellRef().getRefId();
+        const std::string cell = mPtr.getCell()->getCell()->getDescription();
+        const std::vector<mwmp::ServerQuestTopic> topics
+            = mwmp::ServerQuestRegistry::get().getTopics(actorRefId, cell);
+        if (topics.empty())
+            return;
+
+        if (mTopicsList->getItemCount() > 0)
+            mTopicsList->addSeparator();
+
+        for (const mwmp::ServerQuestTopic& topic : topics)
+        {
+            if (topic.text.empty())
+                continue;
+            mTopicsList->addItem(topic.text);
+            mServerQuestTopicTokens[topic.text] = topic.token();
+            mServerQuestTopicLabels.push_back(topic.text);
+        }
+    }
+
+    void DialogueWindow::refreshServerQuestTopics()
+    {
+        if (!mPtr.isEmpty())
+            updateTopicsPane();
+    }
+
+    void DialogueWindow::addServerQuestResponse(const std::string& questId, const std::string& topicId,
+        const std::string& text, const std::vector<std::pair<std::string, std::string>>& choices)
+    {
+        if (mPtr.isEmpty() || text.empty())
+            return;
+
+        mChoices.clear();
+        mServerQuestChoiceQuestId = questId;
+        mServerQuestChoiceTopicId = topicId;
+        mServerQuestChoices = choices;
+        addResponse(mPtr.getClass().getName(mPtr), text, true);
+        updateChoicePane();
         selectInitialItem();
     }
 
@@ -1973,23 +2067,36 @@ namespace MWGui
 
     void DialogueWindow::updateTopicFormat()
     {
-        if (!Settings::Manager::getBool("color topic enable", "GUI"))
-            return;
-
-        std::string specialColour = Settings::Manager::getString("color topic specific", "GUI");
-        std::string oldColour = Settings::Manager::getString("color topic exhausted", "GUI");
-
-        for (const std::string& keyword : mKeywords)
+        if (Settings::Manager::getBool("color topic enable", "GUI"))
         {
-            int flag = MWBase::Environment::get().getDialogueManager()->getTopicFlag(keyword);
-            MyGUI::Button* button = mTopicsList->getItemWidget(keyword);
-            if (!button)
-                continue;
+            std::string specialColour = Settings::Manager::getString("color topic specific", "GUI");
+            std::string oldColour = Settings::Manager::getString("color topic exhausted", "GUI");
 
-            if (!specialColour.empty() && flag & MWBase::DialogueManager::TopicType::Specific)
-                button->getSubWidgetText()->setTextColour(MyGUI::Colour::parse(specialColour));
-            else if (!oldColour.empty() && flag & MWBase::DialogueManager::TopicType::Exhausted)
-                button->getSubWidgetText()->setTextColour(MyGUI::Colour::parse(oldColour));
+            for (const std::string& keyword : mKeywords)
+            {
+                int flag = MWBase::Environment::get().getDialogueManager()->getTopicFlag(keyword);
+                MyGUI::Button* button = mTopicsList->getItemWidget(keyword);
+                if (!button)
+                    continue;
+
+                if (!specialColour.empty() && flag & MWBase::DialogueManager::TopicType::Specific)
+                    button->getSubWidgetText()->setTextColour(MyGUI::Colour::parse(specialColour));
+                else if (!oldColour.empty() && flag & MWBase::DialogueManager::TopicType::Exhausted)
+                    button->getSubWidgetText()->setTextColour(MyGUI::Colour::parse(oldColour));
+            }
+        }
+
+        // Server quest topics remain green even when vanilla topic colouring is disabled.
+        const std::string serverQuestColour
+            = Settings::Manager::getString("color topic server quest", "GUI");
+        if (!serverQuestColour.empty())
+        {
+            for (const std::string& label : mServerQuestTopicLabels)
+            {
+                MyGUI::Button* button = mTopicsList->getItemWidget(label);
+                if (button)
+                    button->getSubWidgetText()->setTextColour(MyGUI::Colour::parse(serverQuestColour));
+            }
         }
 
         const int selected = mTopicsList->getSelectedIndex();

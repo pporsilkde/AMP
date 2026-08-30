@@ -136,10 +136,27 @@ namespace MWGui
 
         void addResponse (const std::string& title, const std::string& text, bool needMargin = true);
 
+        // X036: server-authored quest responses are rendered inside the normal
+        // dialogue history rather than in a modal GUI box.
+        void addServerQuestResponse(const std::string& questId, const std::string& topicId,
+            const std::string& text, const std::vector<std::pair<std::string, std::string>>& choices);
+
+        // Called by the hidden quest-sync transport when the server registry changes.
+        void refreshServerQuestTopics();
+
         void addMessageBox(const std::string& text);
 
         void onFrame(float dt) override;
-        void clear() override { mPersuasionMode = false; stopDynamicDialogueActor(); stopDialogueCamera(); resetReference(); }
+        void clear() override
+        {
+            mPersuasionMode = false;
+            mServerQuestChoices.clear();
+            mServerQuestChoiceQuestId.clear();
+            mServerQuestChoiceTopicId.clear();
+            stopDynamicDialogueActor();
+            stopDialogueCamera();
+            resetReference();
+        }
 
         void updateTopics();
 
@@ -202,6 +219,7 @@ namespace MWGui
         void updateDynamicDialogueActor(float dt);
         void stopDynamicDialogueActor();
         void playDynamicDialogueAnimation(bool speaking, bool force = false);
+        void appendServerQuestTopics();
 
         bool mIsCompanion;
         std::list<std::string> mKeywords;
@@ -221,6 +239,17 @@ namespace MWGui
 
         std::vector<Link*> mLinks;
         std::map<std::string, Link*> mTopicLinks;
+
+        // Display text -> opaque server token. The token, not the visible text,
+        // is sent back to the server so custom topics cannot collide with vanilla DIAL ids.
+        std::map<std::string, std::string> mServerQuestTopicTokens;
+        std::vector<std::string> mServerQuestTopicLabels;
+        // X037: server-authoritative answer choices. They deliberately live beside,
+        // not inside, DialogueManager::mChoices so client scripts can never execute
+        // them as vanilla choice result scripts.
+        std::vector<std::pair<std::string, std::string>> mServerQuestChoices; // id, visible text
+        std::string mServerQuestChoiceQuestId;
+        std::string mServerQuestChoiceTopicId;
 
         std::vector<Link*> mDeleteLater;
 

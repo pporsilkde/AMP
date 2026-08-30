@@ -4,6 +4,16 @@
 
 #include "../PlayerProcessor.hpp"
 
+#include "../../ServerQuestRegistry.hpp"
+#include "../../GUIController.hpp"
+#include "../../../mwbase/environment.hpp"
+#include "../../../mwbase/windowmanager.hpp"
+#include "../../../mwgui/dialogue.hpp"
+#include <components/misc/stringops.hpp>
+
+#include <utility>
+#include <vector>
+
 namespace mwmp
 {
     class ProcessorGUIMessageBox final: public PlayerProcessor
@@ -18,6 +28,42 @@ namespace mwmp
         {
             if (isLocal())
             {
+                // X036: reuse the already reliable GUI packet as a hidden server-quest
+                // transport. This avoids another wire-format change while keeping quest
+                // definitions and dialogue responses server-authoritative.
+                if (player->guiMessageBox.id == ServerQuestRegistry::TransportGuiId)
+                {
+                    ServerQuestResponse response;
+                    const ServerQuestRegistry::TransportEvent event
+                        = ServerQuestRegistry::get().handleTransport(player->guiMessageBox.label, &response);
+
+                    MWGui::DialogueWindow* dialogueWindow
+                        = MWBase::Environment::get().getWindowManager()->getDialogueWindow();
+                    if (dialogueWindow != nullptr)
+                    {
+                        if (event == ServerQuestRegistry::TransportEvent::Response && response.valid)
+                        {
+                            const MWWorld::Ptr actor = dialogueWindow->getPtr();
+                            if (!actor.isEmpty() && actor.getCell() != nullptr
+                                && Misc::StringUtils::ciEqual(actor.getCellRef().getRefId(), response.giverRefId)
+                                && (response.cell.empty() || actor.getCell()->getCell()->getDescription() == response.cell))
+                            {
+                                std::vector<std::pair<std::string, std::string>> choices;
+                                choices.reserve(response.choices.size());
+                                for (const ServerQuestChoice& choice : response.choices)
+                                    choices.push_back(std::make_pair(choice.id, choice.text));
+                                dialogueWindow->addServerQuestResponse(
+                                    response.questId, response.topicId, response.text, choices);
+                            }
+                        }
+                        else if (event == ServerQuestRegistry::TransportEvent::SyncComplete)
+                            dialogueWindow->refreshServerQuestTopics();
+                    }
+                    if (event == ServerQuestRegistry::TransportEvent::EditorSyncComplete)
+                        Main::get().getGUIController()->showServerQuestEditor();
+                    return;
+                }
+
                 LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "ID_GUI_MESSAGEBOX, Type %d, MSG %s", player->guiMessageBox.type,
                                    player->guiMessageBox.label.c_str());
 

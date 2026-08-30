@@ -37,6 +37,7 @@
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwworld/class.hpp"
 #include "../mwworld/esmstore.hpp"
+#include "../mwmp/ServerQuestRegistry.hpp"
 
 namespace
 {
@@ -968,6 +969,48 @@ namespace MWGui
             mQuests.push_back(quest);
         }
 
+        // X037: merge server-authoritative quests into the same Quest Manager
+        // used for vanilla JOUR quests. They remain separate from the ESM Journal
+        // storage/save format; the server is authoritative and re-syncs them on login.
+        const std::vector<mwmp::ServerQuestState>& serverStates
+            = mwmp::ServerQuestRegistry::get().getQuestStates();
+        const MWWorld::ESMStore& esmStore = MWBase::Environment::get().getWorld()->getStore();
+        int serverOrder = 1000000;
+        for (const mwmp::ServerQuestState& state : serverStates)
+        {
+            if (state.questId.empty() || state.questName.empty())
+                continue;
+
+            QuestData quest;
+            quest.mId = "server:" + state.questId;
+            quest.mIds.push_back(quest.mId);
+            quest.mName = state.questName;
+            quest.mStage = state.stage;
+            quest.mCompleted = state.state == "completed" || state.state == "failed";
+            quest.mAddon = "server";
+            quest.mCategory = "server";
+            quest.mIcon = "icons/questman/cat_misc.dds";
+            const std::string key = lower(quest.mId);
+            quest.mPinned = mPinned.count(key) != 0;
+            quest.mHidden = mHidden.count(key) != 0;
+
+            const ESM::NPC* giver = esmStore.get<ESM::NPC>().search(state.giverRefId);
+            quest.mGiver = giver && !giver->mName.empty() ? giver->mName : state.giverRefId;
+
+            for (const mwmp::ServerQuestJournalEntry& serverEntry : state.journal)
+            {
+                EntryData entry;
+                entry.mInfoId = "server:" + state.questId + ":" + std::to_string(serverEntry.stage);
+                entry.mText = serverEntry.text;
+                entry.mActor = quest.mGiver;
+                entry.mDate = serverEntry.date;
+                entry.mOrder = serverOrder++;
+                quest.mEntries.push_back(entry);
+                quest.mLastOrder = entry.mOrder;
+            }
+            mQuests.push_back(quest);
+        }
+
         std::stable_sort(mQuests.begin(), mQuests.end(), [](const QuestData& a, const QuestData& b)
         {
             if (a.mPinned != b.mPinned) return a.mPinned > b.mPinned;
@@ -1045,6 +1088,7 @@ namespace MWGui
             if (value == "morrowind") return 0;
             if (value == "tribunal") return 1;
             if (value == "bloodmoon") return 2;
+            if (value == "server") return 3;
             if (value == "unknown") return 1000;
             return 10;
         };
@@ -1057,6 +1101,7 @@ namespace MWGui
         const auto categoryRank = [](const std::string& value)
         {
             if (value == "main") return 0;
+            if (value == "server") return 5;
             if (value == "misc") return 1000;
             if (value == "unknown") return 999;
             return 10;
@@ -1301,6 +1346,16 @@ namespace MWGui
             ++totalCategories[row.second.category];
             if (!row.second.faction.empty()) ++totalFactions[row.second.faction];
         }
+        std::size_t serverCatalogCount = 0;
+        for (const QuestData& quest : mQuests)
+        {
+            if (quest.mAddon != "server")
+                continue;
+            ++serverCatalogCount;
+            ++totalCategories[quest.mCategory];
+            if (!quest.mFaction.empty())
+                ++totalFactions[quest.mFaction];
+        }
 
         const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
         const MWMechanics::NpcStats& playerStats = player.getClass().getNpcStats(player);
@@ -1345,7 +1400,7 @@ namespace MWGui
         std::ostringstream text;
         text << tr("questman.stats.overview") << "\n";
         text << "  " << tr("questman.stats.active") << ": " << active << "\n";
-        text << "  " << tr("questman.stats.completed") << ": " << completed << " / " << catalog.size() << "\n";
+        text << "  " << tr("questman.stats.completed") << ": " << completed << " / " << (catalog.size() + serverCatalogCount) << "\n";
         text << "  " << tr("questman.stats.pinned") << ": " << pinned << "\n";
         text << "  " << tr("questman.stats.hidden") << ": " << hidden << "\n";
         text << "  " << tr("questman.stats.topics") << ": " << mTopics.size() << "\n";
@@ -1356,6 +1411,7 @@ namespace MWGui
         const auto categoryRank = [](const std::string& value)
         {
             if (value == "main") return 0;
+            if (value == "server") return 5;
             if (value == "misc") return 1000;
             if (value == "unknown") return 999;
             return 10;
