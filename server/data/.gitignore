@@ -7,6 +7,8 @@
 !cell/.gitkeep
 !custom/
 !custom/.gitkeep
+!custom/quests/
+!custom/quests/*.json
 !map/
 !map/.gitkeep
 !player/

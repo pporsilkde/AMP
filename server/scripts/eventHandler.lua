@@ -974,6 +974,15 @@ eventHandler.OnPlayerCellChange = function(pid)
         local playerPacket = packetReader.GetPlayerPacketTables(pid, "PlayerCellChange")
         local currentCellDescription = playerPacket.location.cell
 
+        -- X043: reconnecting from a personal dynamic interior can produce one
+        -- stale start-location PlayerCellChange before the instance is ready.
+        -- Consume that packet and reassert the saved instance transform instead
+        -- of allowing it to overwrite player.data.location.
+        if privateCellInstances.HandleLoginCellChange(pid, Players[pid], playerPacket) then
+            return
+        end
+        currentCellDescription = playerPacket.location.cell
+
         -- Normal doors are already redirected client-side through a per-player
         -- DestinationOverride. This fallback catches coc, scripts, admin moves,
         -- old saves and attempts to enter another player's personal instance.

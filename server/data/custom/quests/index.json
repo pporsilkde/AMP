@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "quests": [
+    {
+      "id": "arena_example_missing_ring",
+      "name": "Пропавшее кольцо (пример)",
+      "status": "draft",
+      "version": 1,
+      "author": "ArenaMP X035"
+    },
+    {
+      "id": "arena_caius_drink",
+      "name": "Выпивка для Кая",
+      "status": "published",
+      "version": 2,
+      "author": "ArenaMP X037 built-in example"
+    }
+  ]
+}

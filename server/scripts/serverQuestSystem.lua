@@ -1,4 +1,4 @@
--- ArenaMP X039: server-authoritative quest extension core + real MyGUI Quest Studio.
+-- ArenaMP X043: server-authoritative quest extension core + instance-aware MyGUI Quest Studio.
 --
 -- Definitions, requirements, progression and rewards stay on the server. X036
 -- exposes the published/player-visible subset through a hidden reliable GUI transport
@@ -6,6 +6,7 @@
 -- changing the existing packet wire format.
 
 local serverQuestSystem = {}
+local privateCellInstances = require("privateCellInstances")
 local unpackValues = table.unpack or unpack
 
 local INDEX_PATH = "custom/quests/index.json"
@@ -105,6 +106,21 @@ end
 local function trim(value)
     if value == nil then return "" end
     return tostring(value):match("^%s*(.-)%s*$")
+end
+
+local function normalizeQuestCell(cellDescription)
+    cellDescription = trim(cellDescription)
+    if cellDescription == "" then return "" end
+    if privateCellInstances ~= nil and type(privateCellInstances.GetBaseCellDescription) == "function" then
+        cellDescription = privateCellInstances.GetBaseCellDescription(cellDescription) or cellDescription
+    end
+    return string.lower(trim(cellDescription))
+end
+
+local function questCellMatches(expectedCell, actualCell)
+    expectedCell = trim(expectedCell)
+    if expectedCell == "" then return true end
+    return normalizeQuestCell(expectedCell) == normalizeQuestCell(actualCell)
 end
 
 local function splitPipe(value)
@@ -1046,7 +1062,7 @@ function serverQuestSystem.GetAvailableTopics(pid, actorRefId, cellDescription)
     for _, id in ipairs(sortedQuestIds("published")) do
         local quest = serverQuestSystem.quests[id]
         local giverMatches = tostring(quest.giver.refId or ""):lower() == actorRefId
-        local cellMatches = quest.giver.cell == "" or quest.giver.cell == cellDescription
+        local cellMatches = questCellMatches(quest.giver.cell, cellDescription)
         local validation = serverQuestSystem.validation[id]
         if giverMatches and cellMatches and (validation == nil or #validation.errors == 0) then
             local state = serverQuestSystem.GetPlayerState(pid, id)
@@ -1320,7 +1336,7 @@ local function handleServerQuestDialogue(eventStatus, pid, cellDescription, obje
                 local topic = quest ~= nil and findTopic(quest, topicId) or nil
                 local validation = quest ~= nil and serverQuestSystem.validation[questId] or nil
                 local giverMatches = quest ~= nil and tostring(quest.giver.refId or ""):lower() == tostring(object.refId or ""):lower()
-                local cellMatches = quest ~= nil and (quest.giver.cell == "" or quest.giver.cell == cellDescription)
+                local cellMatches = quest ~= nil and questCellMatches(quest.giver.cell, cellDescription)
 
                 if quest == nil or quest.status ~= "published" or topic == nil or topic.enabled == false or
                     not giverMatches or not cellMatches or (validation ~= nil and #validation.errors > 0) then
@@ -1756,7 +1772,7 @@ end
 local HELP_TEXT = [[ArenaMP X039 MyGUI Server Quest Studio
 
 Moderator/Admin editor:
-/quest                    - open the real MyGUI Quest Studio
+/quest | /quest studio    - open the real MyGUI Quest Studio (staffRank >= 1)
 /quest legacy             - open the old message-box editor (fallback)
 /quest list               - list definitions
 /quest new ID Name        - create draft
@@ -1838,8 +1854,20 @@ end
 
 local function processCommand(pid, cmd)
     local sub = tostring(cmd[2] or ""):lower()
-    if sub == "" then
-        if isModerator(pid) then serverQuestSystem.SyncEditor(pid) else showMain(pid) end
+    if sub == "" or sub == "studio" or sub == "editor" then
+        if isModerator(pid) then
+            local rank = tonumber(Players[pid].data.settings.staffRank) or 0
+            log(enumerations.log.INFO, "Opening MyGUI Quest Studio for pid " .. tostring(pid) ..
+                " (staffRank=" .. tostring(rank) .. ")")
+            send(pid, "Opening Quest Studio...")
+            serverQuestSystem.SyncEditor(pid)
+        else
+            local rank = Players[pid] ~= nil and Players[pid].data ~= nil and Players[pid].data.settings ~= nil
+                and tonumber(Players[pid].data.settings.staffRank) or 0
+            send(pid, "Quest Studio requires Moderator/Admin (staffRank >= 1). Your staffRank=" ..
+                tostring(rank) .. ". Server owner can use /addmoderator " .. tostring(pid) ..
+                ". Use /quests to view your player quests.")
+        end
         return
     end
     if sub == "legacy" and isModerator(pid) then showMain(pid) return end
@@ -2740,14 +2768,19 @@ function serverQuestSystem.Initialize()
     end
     serverQuestSystem.LoadAll()
     customCommandHooks.registerCommand("quest", processCommand)
-    customCommandHooks.registerCommand("quests", processCommand)
+    customCommandHooks.registerCommand("quests", function(pid, cmd)
+        showPlayerQuests(pid)
+    end)
+    customCommandHooks.registerCommand("queststudio", function(pid, cmd)
+        processCommand(pid, { "quest", "studio" })
+    end)
     customEventHooks.registerHandler("OnGUIAction", onGuiAction)
     customEventHooks.registerHandler("OnObjectActivate", onObjectActivateQuestPicker)
     customEventHooks.registerHandler("OnPlayerAuthentified", onPlayerAuthentified)
     customEventHooks.registerHandler("OnPlayerFinishLogin", onPlayerFinishLogin)
     customEventHooks.registerValidator("OnObjectDialogueChoice", validateServerQuestDialogue)
     customEventHooks.registerHandler("OnObjectDialogueChoice", handleServerQuestDialogue)
-    log(enumerations.log.INFO, "X039 MyGUI Quest Studio + Choices + Journal Sync initialized")
+    log(enumerations.log.INFO, "X043 MyGUI Quest Studio + instance-aware topics + Journal Sync initialized")
 end
 
 serverQuestSystem.Initialize()

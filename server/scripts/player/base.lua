@@ -345,6 +345,11 @@ function BasePlayer:FinishLogin()
         privateCellInstances.ApplyDestinationOverrides(self.pid, self)
 
         self:LoadAllies()
+
+        -- X043: if this save lives inside a personal dynamic interior, refresh
+        -- the CELL definition immediately before teleporting and protect the
+        -- saved transform until the client confirms the instance.
+        privateCellInstances.PrepareLoginRestore(self)
         self:LoadCell()
 
         if privateOverridesChanged or privateLocationChanged then

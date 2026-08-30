@@ -47,7 +47,8 @@ namespace mwmp
                             const MWWorld::Ptr actor = dialogueWindow->getPtr();
                             if (!actor.isEmpty() && actor.getCell() != nullptr
                                 && Misc::StringUtils::ciEqual(actor.getCellRef().getRefId(), response.giverRefId)
-                                && (response.cell.empty() || actor.getCell()->getCell()->getDescription() == response.cell))
+                                && ServerQuestRegistry::cellsMatch(
+                                    response.cell, actor.getCell()->getCell()->getDescription()))
                             {
                                 std::vector<std::pair<std::string, std::string>> choices;
                                 choices.reserve(response.choices.size());

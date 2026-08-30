@@ -111,6 +111,7 @@ set(MYGUI_FILES
     tes3mp_chat.layout
     tes3mp_chat.skin.xml
     tes3mp_text_input.layout
+    arenamp_serverquesteditor.layout
     RussoOne-Regular.ttf
 )
 

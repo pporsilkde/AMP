@@ -251,6 +251,132 @@ function privateCellInstances.NotifyIfInside(player, cellDescription)
     return false
 end
 
+
+-- X043: normalize a generated personal instance back to its vanilla/template
+-- cell. Server quests use this so a giver authored for the base interior also
+-- exists in every player's private copy without making progress shared.
+function privateCellInstances.GetBaseCellDescription(cellDescription)
+    local _, definition = privateCellInstances.GetDefinitionForCell(cellDescription)
+    if definition ~= nil then
+        return definition.baseCellDescription
+    end
+    return cellDescription
+end
+
+local function copyLocation(location)
+    if type(location) ~= "table" then return nil end
+    return {
+        cell = location.cell,
+        posX = location.posX,
+        posY = location.posY,
+        posZ = location.posZ,
+        rotX = location.rotX,
+        rotZ = location.rotZ,
+        regionName = location.regionName
+    }
+end
+
+local function sendAuthoritativeLocation(pid, location)
+    if type(location) ~= "table" or type(location.cell) ~= "string" or location.cell == "" then
+        return false
+    end
+
+    tes3mp.SetCell(pid, location.cell)
+    if location.posX ~= nil and location.posY ~= nil and location.posZ ~= nil then
+        tes3mp.SetPos(pid, location.posX, location.posY, location.posZ)
+    end
+    if location.rotX ~= nil and location.rotZ ~= nil then
+        tes3mp.SetRot(pid, location.rotX, location.rotZ)
+    end
+    tes3mp.SendCell(pid)
+    if location.posX ~= nil and location.posY ~= nil and location.posZ ~= nil then
+        tes3mp.SendPos(pid)
+    end
+    return true
+end
+
+-- X043: dynamic CELL records sent on OnPlayerConnect can arrive too early to be
+-- useful during a reconnect. Re-send them immediately before LoadCell and keep
+-- the saved transform authoritative until the client confirms that exact
+-- instance. This prevents the login/start-location packet from overwriting the
+-- instance save and prevents spawning below an unresolved dynamic interior.
+function privateCellInstances.PrepareLoginRestore(player)
+    if type(player) ~= "table" or player.pid == nil or type(player.data) ~= "table"
+        or type(player.data.location) ~= "table" then
+        return false
+    end
+
+    local cellDescription = player.data.location.cell
+    if not privateCellInstances.IsOwnPrivateCell(player, cellDescription) then
+        player.privateCellLoginRestore = nil
+        return false
+    end
+
+    privateCellInstances.SendCellRecords(player.pid, player)
+    player.privateCellLoginRestore = copyLocation(player.data.location)
+    player.privateCellLoginRestore.startedAt = os.time()
+    player.privateCellLoginRestore.redirects = 0
+
+    tes3mp.LogAppend(enumerations.log.INFO,
+        "[PRIVATE CELL] Prepared login restore for " ..
+        tostring(player.accountName or player.name or player.pid) .. " in " .. tostring(cellDescription))
+    return true
+end
+
+-- Returns true when the incoming PlayerCellChange was a stale login packet and
+-- has been consumed. When the expected instance arrives, the packet's transform
+-- is replaced with the saved server transform before normal SaveCell handling.
+function privateCellInstances.HandleLoginCellChange(pid, player, playerPacket)
+    if type(player) ~= "table" or type(player.privateCellLoginRestore) ~= "table"
+        or type(playerPacket) ~= "table" or type(playerPacket.location) ~= "table" then
+        return false
+    end
+
+    local restore = player.privateCellLoginRestore
+    if os.time() - (restore.startedAt or os.time()) > 15 then
+        tes3mp.LogAppend(enumerations.log.WARN,
+            "[PRIVATE CELL] Login restore timed out for " ..
+            tostring(player.accountName or player.name or pid))
+        player.privateCellLoginRestore = nil
+        return false
+    end
+
+    local incomingCell = tostring(playerPacket.location.cell or "")
+    if incomingCell ~= tostring(restore.cell or "") then
+        restore.redirects = (restore.redirects or 0) + 1
+        privateCellInstances.SendCellRecords(pid, player)
+        sendAuthoritativeLocation(pid, restore)
+        tes3mp.LogAppend(enumerations.log.INFO,
+            "[PRIVATE CELL] Ignored stale login cell " .. incomingCell ..
+            "; restoring " .. tostring(restore.cell))
+        return true
+    end
+
+    playerPacket.location.posX = restore.posX
+    playerPacket.location.posY = restore.posY
+    playerPacket.location.posZ = restore.posZ
+    playerPacket.location.rotX = restore.rotX
+    playerPacket.location.rotZ = restore.rotZ
+    if restore.regionName ~= nil then playerPacket.location.regionName = restore.regionName end
+
+    -- Apply position once more after the client has confirmed the dynamic cell;
+    -- SendCell before the CELL record is resolved is exactly the race that used
+    -- to leave reconnecting players falling in empty space.
+    if restore.posX ~= nil and restore.posY ~= nil and restore.posZ ~= nil then
+        tes3mp.SetPos(pid, restore.posX, restore.posY, restore.posZ)
+        if restore.rotX ~= nil and restore.rotZ ~= nil then
+            tes3mp.SetRot(pid, restore.rotX, restore.rotZ)
+        end
+        tes3mp.SendPos(pid)
+    end
+
+    tes3mp.LogAppend(enumerations.log.INFO,
+        "[PRIVATE CELL] Login restore confirmed in " .. tostring(restore.cell) ..
+        " after " .. tostring(restore.redirects or 0) .. " stale packet(s)")
+    player.privateCellLoginRestore = nil
+    return false
+end
+
 function privateCellInstances.IsNeverResetCell(cellDescription)
     local _, definition = privateCellInstances.GetDefinitionForCell(cellDescription)
     if definition == nil or definition.neverReset ~= true then

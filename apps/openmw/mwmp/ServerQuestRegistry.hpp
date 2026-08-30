@@ -164,6 +164,7 @@ namespace mwmp
         static constexpr int TransportGuiId = -35036;
 
         static ServerQuestRegistry& get();
+        static bool cellsMatch(const std::string& expectedCell, const std::string& actualCell);
 
         TransportEvent handleTransport(const std::string& payload, ServerQuestResponse* response = nullptr);
         std::vector<ServerQuestTopic> getTopics(const std::string& giverRefId, const std::string& cell) const;

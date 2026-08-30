@@ -63,6 +63,24 @@ namespace
     {
         return value == "1" || lowerAscii(value) == "true" || lowerAscii(value) == "yes";
     }
+
+    std::string normalizeQuestCell(std::string value)
+    {
+        value = lowerAscii(value);
+        static const std::string instanceMarker = " - instance for ";
+        const std::size_t marker = value.find(instanceMarker);
+        if (marker != std::string::npos)
+            value.resize(marker);
+
+        while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())))
+            value.pop_back();
+        std::size_t begin = 0;
+        while (begin < value.size() && std::isspace(static_cast<unsigned char>(value[begin])))
+            ++begin;
+        if (begin != 0)
+            value.erase(0, begin);
+        return value;
+    }
 }
 
 namespace mwmp
@@ -76,6 +94,13 @@ namespace mwmp
     {
         static ServerQuestRegistry registry;
         return registry;
+    }
+
+    bool ServerQuestRegistry::cellsMatch(const std::string& expectedCell, const std::string& actualCell)
+    {
+        if (expectedCell.empty())
+            return true;
+        return normalizeQuestCell(expectedCell) == normalizeQuestCell(actualCell);
     }
 
     void ServerQuestRegistry::clear()
@@ -396,7 +421,7 @@ namespace mwmp
         {
             if (lowerAscii(topic.giverRefId) != giver)
                 continue;
-            if (!topic.cell.empty() && topic.cell != cell)
+            if (!cellsMatch(topic.cell, cell))
                 continue;
             result.push_back(topic);
         }

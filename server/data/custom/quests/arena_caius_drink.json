@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "id": "arena_caius_drink",
+  "version": 2,
+  "name": "Выпивка для Кая",
+  "author": "ArenaMP X037 built-in example",
+  "status": "published",
+  "progressMode": "personal",
+  "giver": {
+    "refId": "caius cosades",
+    "cell": "Balmora, Caius Cosades' House"
+  },
+  "initialStage": 10,
+  "topics": [
+    {
+      "id": "arena_caius_drink_topic",
+      "text": "немного выпивки",
+      "enabled": true,
+      "green": true
+    }
+  ],
+  "stages": [
+    {
+      "index": 10,
+      "journal": "Кай Косадес попросил меня принести ему бутылку мацта.",
+      "dialogue": "Ну что, с выпивкой получилось? Мне нужна всего одна бутылка мацта.",
+      "requirements": [],
+      "rewards": [],
+      "next": [
+        20
+      ],
+      "complete": false,
+      "fail": false,
+      "choices": [
+        {
+          "id": "hand_over",
+          "text": "Вот бутылка мацта.",
+          "action": "advance",
+          "targetStage": 20,
+          "requirements": [
+            {
+              "type": "item",
+              "refId": "potion_mazte_01",
+              "operator": ">=",
+              "count": 1,
+              "value": 1
+            }
+          ]
+        },
+        {
+          "id": "not_yet",
+          "text": "Пока нет. Я ещё поищу.",
+          "action": "none",
+          "requirements": []
+        }
+      ]
+    },
+    {
+      "index": 20,
+      "journal": "Я принёс Каю Косадесу бутылку мацта. Он забрал её и расплатился со мной.",
+      "dialogue": "Вот это другое дело. Оставляй бутылку здесь. За услугу — немного золота. И считай, что я запомнил твою расторопность.",
+      "requirements": [
+        {
+          "type": "item",
+          "refId": "potion_mazte_01",
+          "operator": ">=",
+          "count": 1,
+          "value": 1
+        }
+      ],
+      "rewards": [
+        {
+          "type": "takeItem",
+          "refId": "potion_mazte_01",
+          "count": 1
+        },
+        {
+          "type": "gold",
+          "amount": 75
+        },
+        {
+          "type": "xp",
+          "amount": 40
+        }
+      ],
+      "next": [],
+      "complete": true,
+      "fail": false,
+      "choices": []
+    }
+  ],
+  "audit": [
+    {
+      "time": 0,
+      "by": "ArenaMP X036",
+      "action": "built-in example"
+    },
+    {
+      "time": 0,
+      "by": "ArenaMP X037",
+      "action": "added server-authoritative offer and choices"
+    }
+  ],
+  "offer": {
+    "dialogue": "Слушай, прежде чем вернёмся к делам, не принесёшь мне бутылку мацта? Ничего редкого, обычную бутылку.",
+    "choices": [
+      {
+        "id": "accept",
+        "text": "Хорошо, принесу тебе мацт.",
+        "action": "start",
+        "requirements": []
+      },
+      {
+        "id": "decline",
+        "text": "Не сейчас.",
+        "action": "none",
+        "requirements": []
+      }
+    ]
+  }
+}

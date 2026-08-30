@@ -217,6 +217,10 @@ jobs:
             "install\server\scripts\config.lua",
             "install\server\data\banlist.json",
             "install\server\data\requiredDataFiles.json",
+            "install\server\data\custom\quests\index.json",
+            "install\server\data\custom\quests\_TEMPLATE.json",
+            "install\server\data\custom\quests\arena_caius_drink.json",
+            "install\resources\mygui\arenamp_serverquesteditor.layout",
             "install\server\ARENAMP_CORE_VERSION.txt",
             "install\server\lib\cjson.dll",
             "install\server\lib\io2.dll"
@@ -393,6 +397,9 @@ jobs:
           test -f "$GITHUB_WORKSPACE/package/server/scripts/config.lua"
           test -f "$GITHUB_WORKSPACE/package/server/data/banlist.json"
           test -f "$GITHUB_WORKSPACE/package/server/data/requiredDataFiles.json"
+          test -f "$GITHUB_WORKSPACE/package/server/data/custom/quests/index.json"
+          test -f "$GITHUB_WORKSPACE/package/server/data/custom/quests/arena_caius_drink.json"
+          test -f "$GITHUB_WORKSPACE/package/resources/mygui/arenamp_serverquesteditor.layout"
           test -f "$GITHUB_WORKSPACE/package/server/ARENAMP_CORE_VERSION.txt"
           if find "$GITHUB_WORKSPACE/package/server" -type f -iname '*.dll' -print -quit | grep -q .; then
             echo "Windows-only Lua modules were packaged into Linux artifact" >&2

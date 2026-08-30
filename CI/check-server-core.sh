@@ -10,6 +10,9 @@ required=(
   "$root/server/data/.gitignore"
   "$root/server/data/banlist.json"
   "$root/server/data/requiredDataFiles.json"
+  "$root/server/data/custom/quests/index.json"
+  "$root/server/data/custom/quests/_TEMPLATE.json"
+  "$root/server/data/custom/quests/arena_caius_drink.json"
   "$root/server/lib/lua/dkjson.lua"
   "$root/server/ARENAMP_CORE_VERSION.txt"
   "$root/server/ARENAMP_CONFIG.md"
@@ -37,6 +40,10 @@ if command -v git >/dev/null 2>&1 && git -C "$root" rev-parse --is-inside-work-t
     server/data/requiredDataFiles.json
     server/data/cell/.gitkeep
     server/data/custom/.gitkeep
+    server/data/custom/quests/index.json
+    server/data/custom/quests/_TEMPLATE.json
+    server/data/custom/quests/arena_caius_drink.json
+    server/data/custom/quests/arena_example_missing_ring.json
     server/data/map/.gitkeep
     server/data/player/.gitkeep
     server/data/recordstore/.gitkeep
@@ -59,6 +66,9 @@ fi
 grep -q '"Morrowind.esm"' "$root/server/data/requiredDataFiles.json"
 grep -q '"Tribunal.esm"' "$root/server/data/requiredDataFiles.json"
 grep -q '"Bloodmoon.esm"' "$root/server/data/requiredDataFiles.json"
+grep -q '"arena_caius_drink"' "$root/server/data/custom/quests/index.json"
+grep -q '"status": "published"' "$root/server/data/custom/quests/arena_caius_drink.json"
+grep -q '"potion_mazte_01"' "$root/server/data/custom/quests/arena_caius_drink.json"
 grep -q '"playerNames"' "$root/server/data/banlist.json"
 grep -q '"ipAddresses"' "$root/server/data/banlist.json"
 
