@@ -1151,7 +1151,7 @@ void Launcher::GraphicsPage::applyQualityLevel(int requestedLevel)
     Settings::Manager::setBool("idle actor ripples", "Water", level >= 2);
     Settings::Manager::setInt("max shader ripples", "Water", level == 0 ? 1 : (level == 1 ? 2 : (level <= 3 ? 4 : (level == 4 ? 6 : 8))));
     Settings::Manager::setFloat("small feature culling pixel size", "Water",
-        level == 0 ? 32.f : (level == 1 ? 28.f : (level == 2 ? 20.f : (level == 3 ? 18.f : (level == 4 ? 14.f : 10.f))));
+        level == 0 ? 32.f : (level == 1 ? 28.f : (level == 2 ? 20.f : (level == 3 ? 18.f : (level == 4 ? 14.f : 10.f)))));
     Settings::Manager::setFloat("refraction scale", "Water",
         level <= 1 ? 4.f : (level <= 3 ? 3.f : (level == 4 ? 2.f : 1.f)));
 

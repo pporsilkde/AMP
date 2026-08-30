@@ -92,7 +92,7 @@ namespace
     void appendUniqueTarget(std::vector<mwmp::Target>& targets, const MWWorld::Ptr& ptr)
     {
         if (ptr.isEmpty()) return;
-        const mwmp::Target target = mwmp::MechanicsHelper::getTarget(ptr);
+        const mwmp::Target target = MechanicsHelper::getTarget(ptr);
         for (const mwmp::Target& existing : targets)
         {
             if (existing.isPlayer == target.isPlayer
