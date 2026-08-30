@@ -284,6 +284,14 @@ void DedicatedActor::setAi()
     if (ptr.isEmpty())
         return;
 
+    // X044: never act on AI state that was never actually received. aiAction
+    // defaults to CANCEL(0), and CANCEL clears the whole AiSequence, so an
+    // unconditional setAi() (for example from prepareDedicatedActorsForAuthority)
+    // silently deleted the Wander/Travel packages of every NPC in the cell and
+    // left them standing still forever.
+    if (!hasReceivedAi)
+        return;
+
     MWMechanics::CreatureStats& creatureStats = ptr.getClass().getCreatureStats(ptr);
     MWMechanics::AiSequence& sequence = creatureStats.getAiSequence();
     creatureStats.setAiSetting(MWMechanics::CreatureStats::AI_Fight, 0);

@@ -48,6 +48,14 @@ namespace mwmp
         void updateNotice();
         void clearEditorFields();
 
+        /// X045: localisation. All Quest Studio captions live in
+        /// l10n/arenamp/<lang>.ini under the questeditor.* prefix, exactly like
+        /// the quest manager window, so English and Russian come from the same
+        /// mechanism as the rest of the ArenaMP interface.
+        static std::string tr(const std::string& key);
+        void applyLocalization();
+        void localizeLabel(const char* widgetName, const char* key);
+
         void selectQuestById(const std::string& id, bool requestDetails);
         void selectStageByIndex(int stage);
         void setComboValue(MyGUI::ComboBox* combo, const std::string& value);
@@ -183,6 +191,9 @@ namespace mwmp
         MyGUI::Button* mAddRewardButton = nullptr;
         MyGUI::Button* mDeleteRewardButton = nullptr;
 
+        MyGUI::EditBox* mOverviewHint = nullptr;
+        MyGUI::EditBox* mLogicHint = nullptr;
+        MyGUI::EditBox* mHelpText = nullptr;
         MyGUI::EditBox* mValidationText = nullptr;
         MyGUI::Button* mValidateButton = nullptr;
         MyGUI::Button* mPublishButton = nullptr;

@@ -1519,8 +1519,17 @@ void ObjectList::addObjectDialogueChoice(const MWWorld::Ptr& ptr, std::string di
     {
         baseObject.dialogueChoiceType = DialogueChoiceType::TOPIC;
 
-        // For translated versions of the game, make sure we translate the topic back into English first
-        if (MWBase::Environment::get().getWindowManager()->getTranslationDataStorage().hasTranslation())
+        // X043a: ArenaMP server-quest topics are opaque transport tokens, not
+        // localizable Morrowind DIAL topic labels. Passing them through the
+        // translation storage produced "@ArenaQuest:...|@ArenaQuest:...",
+        // which the server correctly rejected as an invalid token.
+        const bool isServerQuestToken = dialogueChoice.compare(0, 12, "@ArenaQuest:") == 0
+            || dialogueChoice.compare(0, 18, "@ArenaQuestChoice:") == 0;
+
+        // For translated versions of the game, translate only genuine vanilla
+        // topic labels back into their canonical topic id.
+        if (!isServerQuestToken
+            && MWBase::Environment::get().getWindowManager()->getTranslationDataStorage().hasTranslation())
             baseObject.topicId = dialogueChoice + "|" + MWBase::Environment::get().getWindowManager()->getTranslationDataStorage().topicID(dialogueChoice);
         else
             baseObject.topicId = dialogueChoice;

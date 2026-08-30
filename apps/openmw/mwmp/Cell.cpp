@@ -1,6 +1,8 @@
 #include <limits>
 
 #include <components/esm/cellid.hpp>
+#include <components/esm/loadcrea.hpp>
+#include <components/esm/loadnpc.hpp>
 #include <components/openmw-mp/TimedLog.hpp>
 
 #include "../mwbase/environment.hpp"
@@ -26,6 +28,65 @@ using namespace mwmp;
 
 namespace
 {
+    /// X044: repair the AI state of an actor that is becoming ours.
+    ///
+    /// 1. DedicatedActor::setAi() forces AI_Fight to 0 so a puppet copy never
+    ///    starts its own fights. That setting stays on the reference, so an actor
+    ///    that later came under our authority remained permanently pacified and
+    ///    only ever reacted to being hit. The rating is restored from the actor's
+    ///    own record, but only if it is still the zero we wrote ourselves - a
+    ///    script that legitimately set Fight to 0 is preserved.
+    /// 2. If the AiSequence is completely empty (see the recovery note below),
+    ///    the record's own AI packages are refilled so the NPC resumes wandering.
+    void restoreOwnedActorAi(const MWWorld::Ptr& ptr)
+    {
+        if (ptr.isEmpty() || !ptr.getClass().isActor())
+            return;
+
+        MWMechanics::CreatureStats& stats = ptr.getClass().getCreatureStats(ptr);
+
+        int recordFight = 0;
+        const ESM::AIPackageList* recordPackages = nullptr;
+
+        if (ptr.getTypeName() == typeid(ESM::NPC).name())
+        {
+            const MWWorld::LiveCellRef<ESM::NPC>* ref = ptr.get<ESM::NPC>();
+            if (ref != nullptr && ref->mBase != nullptr)
+            {
+                recordFight = ref->mBase->mAiData.mFight;
+                recordPackages = &ref->mBase->mAiPackage;
+            }
+        }
+        else if (ptr.getTypeName() == typeid(ESM::Creature).name())
+        {
+            const MWWorld::LiveCellRef<ESM::Creature>* ref = ptr.get<ESM::Creature>();
+            if (ref != nullptr && ref->mBase != nullptr)
+            {
+                recordFight = ref->mBase->mAiData.mFight;
+                recordPackages = &ref->mBase->mAiPackage;
+            }
+        }
+
+        if (recordFight > 0
+            && stats.getAiSetting(MWMechanics::CreatureStats::AI_Fight).getBase() == 0)
+        {
+            LOG_APPEND(TimedLog::LOG_VERBOSE, "- Restoring natural fight rating %i", recordFight);
+            stats.setAiSetting(MWMechanics::CreatureStats::AI_Fight, recordFight);
+        }
+
+        // X044 recovery: an actor whose AiSequence was wiped by the old
+        // unconditional setAi() has lost the Wander/Travel packages that came
+        // from its own record, and nothing rebuilds them while the cell stays
+        // loaded - the NPC simply stands still. Refill from the record when we
+        // take ownership of an actor that has no AI package left at all.
+        if (recordPackages != nullptr && !recordPackages->mList.empty()
+            && stats.getAiSequence().isEmpty() && !stats.isDead())
+        {
+            LOG_APPEND(TimedLog::LOG_VERBOSE, "%s", "- Refilling an empty AI sequence from the actor's record");
+            stats.getAiSequence().fill(*recordPackages);
+        }
+    }
+
     /// X024: an actor handed over to us may already be locked into a fight whose
     /// target this client cannot resolve at all - the other player has left, or is
     /// in a coordinate space we do not share. AiCombat is non-cancellable and its
@@ -460,6 +521,7 @@ void Cell::readAi(ActorList& actorList)
             actor->aiHomeCell = baseActor.aiHomeCell;
             actor->aiHomePosition = baseActor.aiHomePosition;
             actor->aiDoorBreadcrumbs = baseActor.aiDoorBreadcrumbs;
+            actor->hasReceivedAi = true;
             actor->setAi();
         }
     }
@@ -627,6 +689,7 @@ void Cell::readCellChange(ActorList& actorList)
                     LocalActor *localActor = new LocalActor();
                     localActor->cell = dedicatedActor->cell;
                     dropUnresolvableCombat(dedicatedActor->getPtr());
+                    restoreOwnedActorAi(dedicatedActor->getPtr());
                     localActor->setPtr(dedicatedActor->getPtr());
                     localActor->position = dedicatedActor->position;
                     localActor->direction = dedicatedActor->direction;
@@ -656,6 +719,7 @@ void Cell::initializeLocalActor(const MWWorld::Ptr& ptr)
     LOG_APPEND(TimedLog::LOG_VERBOSE, "- Initializing LocalActor %s in %s", mapIndex.c_str(), getShortDescription().c_str());
 
     dropUnresolvableCombat(ptr);
+    restoreOwnedActorAi(ptr);
 
     LocalActor *actor = new LocalActor();
     actor->cell = *store->getCell();
@@ -815,7 +879,15 @@ void Cell::prepareDedicatedActorsForAuthority()
         // Re-resolve AI targets immediately before converting to LocalActor.
         // This closes the door-arrival race where the target did not exist when
         // the cached snapshot first arrived.
-        actor->setAi();
+        //
+        // X044: setAi() is a no-op for an actor that never received an AI packet,
+        // so a plain idle NPC keeps the Wander package it was loaded with instead
+        // of having its whole AiSequence cancelled by the default CANCEL action.
+        if (actor->hasReceivedAi)
+            actor->setAi();
+
+        // We are about to own this actor, so undo the puppet-only pacification.
+        restoreOwnedActorAi(actor->getPtr());
     }
 }
 

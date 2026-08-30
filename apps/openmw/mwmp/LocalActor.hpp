@@ -62,6 +62,7 @@ namespace mwmp
         MWMechanics::DynamicStat<float> oldMagicka;
         MWMechanics::DynamicStat<float> oldFatigue;
 
+        bool mAiStateInitialized = false;
         bool mLastAiWasCombat = false;
         int mLastAiTargetActorId = -1;
         std::size_t mLastAiTargetSignature = 0;

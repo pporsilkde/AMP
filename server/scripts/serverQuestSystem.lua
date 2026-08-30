@@ -1250,7 +1250,28 @@ function serverQuestSystem.SyncEditor(pid, selectedId, notice)
     sendTransport(pid, "EDITOR_END")
 end
 
+local function normalizeQuestWireToken(value)
+    if type(value) ~= "string" then return value end
+
+    -- X043 clients running with translated Morrowind data could accidentally
+    -- serialize opaque quest tokens through the vanilla "label|topicId" path,
+    -- yielding token|token. Accept the first server-token component so a server
+    -- update remains compatible while clients are being upgraded to X043a.
+    local separator = value:find("|", 1, true)
+    if separator ~= nil then
+        local first = value:sub(1, separator - 1)
+        local second = value:sub(separator + 1)
+        local firstIsQuest = first:sub(1, #QUEST_TOPIC_PREFIX) == QUEST_TOPIC_PREFIX
+            or first:sub(1, #QUEST_CHOICE_PREFIX) == QUEST_CHOICE_PREFIX
+        local secondIsQuest = second:sub(1, #QUEST_TOPIC_PREFIX) == QUEST_TOPIC_PREFIX
+            or second:sub(1, #QUEST_CHOICE_PREFIX) == QUEST_CHOICE_PREFIX
+        if firstIsQuest and secondIsQuest then return first end
+    end
+    return value
+end
+
 local function parseQuestTopicToken(value)
+    value = normalizeQuestWireToken(value)
     if type(value) ~= "string" or value:sub(1, #QUEST_TOPIC_PREFIX) ~= QUEST_TOPIC_PREFIX then
         return nil, nil
     end
@@ -1261,6 +1282,7 @@ local function parseQuestTopicToken(value)
 end
 
 local function parseQuestChoiceToken(value)
+    value = normalizeQuestWireToken(value)
     if type(value) ~= "string" or value:sub(1, #QUEST_CHOICE_PREFIX) ~= QUEST_CHOICE_PREFIX then
         return nil, nil, nil
     end

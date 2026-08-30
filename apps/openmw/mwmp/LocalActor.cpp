@@ -114,21 +114,51 @@ void LocalActor::updateAiState(bool forceUpdate)
     MWMechanics::AiReturnHomeState homeState;
     const bool hasHome = sequence.getReturnHomeState(homeState);
 
+    // X044: the very first update of a freshly created LocalActor has no previous
+    // state to compare against. Take a silent baseline instead of announcing
+    // COMBAT_END for every idle NPC in the cell the moment we gain authority.
+    if (!mAiStateInitialized)
+    {
+        mAiStateInitialized = true;
+        mLastAiWasCombat = inCombat;
+        mLastAiTargetActorId = targetActorId;
+        mLastAiTargetSignature = targetSignature;
+        mLastAiDoorCount = doorCount;
+        mLastAiHadHome = hasHome;
+        mAiHeartbeatTimer = 0.f;
+
+        if (!inCombat && !hasHome)
+            return;
+    }
+
     // update() has no dt, so use the networking frame cadence as a cheap heartbeat
     // counter: send every 30 authority updates in combat, plus every semantic change.
     mAiHeartbeatTimer += 1.f;
-    const bool heartbeatDue = mAiHeartbeatTimer >= (inCombat ? 30.f : 90.f);
+
+    // X044: an idle NPC with no fight and no suspended return route has no AI
+    // state worth repeating. Heartbeats are only useful while something can
+    // actually be resumed by another authority.
+    const bool heartbeatDue = (inCombat || hasHome)
+        && mAiHeartbeatTimer >= (inCombat ? 30.f : 90.f);
     const bool changed = inCombat != mLastAiWasCombat || targetActorId != mLastAiTargetActorId
         || targetSignature != mLastAiTargetSignature
         || doorCount != mLastAiDoorCount || hasHome != mLastAiHadHome;
 
-    if (forceUpdate || changed || heartbeatDue)
+    // A forced update is only worth a packet when there is AI state to carry;
+    // otherwise every authority change would broadcast COMBAT_END for every
+    // idle NPC in the cell.
+    if ((forceUpdate && (inCombat || hasHome)) || changed || heartbeatDue)
     {
-        ActorList* actorList = Main::get().getNetworking()->getActorList();
-        actorList->reset();
-        actorList->cell = *ptr.getCell()->getCell();
-        actorList->addAiStateActor(ptr, inCombat ? BaseActorList::COMBAT : BaseActorList::COMBAT_END);
-        actorList->sendAiActors();
+        // X044: this used to reset() and send the *shared* networking ActorList
+        // in the middle of Cell::updateLocal's batching loop. reset() clears the
+        // queued position/animFlags/stats entries of every actor processed
+        // earlier in the same tick, so those packets were silently dropped and
+        // remote clients saw NPCs standing still or teleporting. Use a private
+        // list, exactly like sendEquipment()/sendDeath() already do.
+        ActorList aiList;
+        aiList.cell = *ptr.getCell()->getCell();
+        aiList.addAiStateActor(ptr, inCombat ? BaseActorList::COMBAT : BaseActorList::COMBAT_END);
+        aiList.sendAiActors();
         mAiHeartbeatTimer = 0.f;
     }
 

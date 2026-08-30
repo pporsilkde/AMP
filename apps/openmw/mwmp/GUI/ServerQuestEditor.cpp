@@ -7,6 +7,8 @@
 #include <sstream>
 
 #include <MyGUI_InputManager.h>
+#include <MyGUI_LanguageManager.h>
+#include <MyGUI_TabItem.h>
 #include <MyGUI_RenderManager.h>
 #include <MyGUI_UString.h>
 
@@ -173,6 +175,9 @@ namespace mwmp
         getWidget(mAddRewardButton, "AddRewardButton");
         getWidget(mDeleteRewardButton, "DeleteRewardButton");
 
+        getWidget(mOverviewHint, "OverviewHint");
+        getWidget(mLogicHint, "LogicHint");
+        getWidget(mHelpText, "HelpText");
         getWidget(mValidationText, "ValidationText");
         getWidget(mValidateButton, "ValidateButton");
         getWidget(mPublishButton, "PublishButton");
@@ -191,9 +196,9 @@ namespace mwmp
             mOfferChoiceAction->addItem(action);
             mStageChoiceAction->addItem(action);
         }
-        mLogicTarget->addItem("Stage requirements");
-        mLogicTarget->addItem("Selected stage choice");
-        mLogicTarget->addItem("Selected offer choice");
+        mLogicTarget->addItem(tr("questeditor.logic.target_stage"));
+        mLogicTarget->addItem(tr("questeditor.logic.target_stage_choice"));
+        mLogicTarget->addItem(tr("questeditor.logic.target_offer_choice"));
         // X042: expose the expanded server vocabulary in Quest Studio. Nested
         // all/any/not groups remain an advanced JSON feature until the graph
         // editor gets a dedicated boolean-tree widget.
@@ -226,10 +231,13 @@ namespace mwmp
         mStageDialogue->setEditWordWrap(true);
         mStageChoiceText->setEditMultiLine(true);
         mStageChoiceText->setEditWordWrap(true);
-        mValidationText->setEditStatic(true);
-        mValidationText->setEditReadOnly(true);
-        mValidationText->setEditMultiLine(true);
-        mValidationText->setEditWordWrap(true);
+        for (MyGUI::EditBox* box : { mValidationText, mOverviewHint, mLogicHint, mHelpText })
+        {
+            box->setEditStatic(true);
+            box->setEditReadOnly(true);
+            box->setEditMultiLine(true);
+            box->setEditWordWrap(true);
+        }
 
         mCloseButton->eventMouseButtonClick += MyGUI::newDelegate(this, &ServerQuestEditorWindow::notifyClose);
         mQuestSearch->eventEditTextChange += MyGUI::newDelegate(this, &ServerQuestEditorWindow::notifySearchChanged);
@@ -278,7 +286,95 @@ namespace mwmp
         mDisableButton->eventMouseButtonClick += MyGUI::newDelegate(this, &ServerQuestEditorWindow::notifyDisable);
         mRefreshButton->eventMouseButtonClick += MyGUI::newDelegate(this, &ServerQuestEditorWindow::notifyRefresh);
 
+        applyLocalization();
         center();
+    }
+
+    std::string ServerQuestEditorWindow::tr(const std::string& key)
+    {
+        return MyGUI::LanguageManager::getInstance().replaceTags("#{arenamp=" + key + "}");
+    }
+
+    void ServerQuestEditorWindow::localizeLabel(const char* widgetName, const char* key)
+    {
+        MyGUI::TextBox* label = nullptr;
+        getWidget(label, widgetName);
+        if (label != nullptr)
+            label->setCaption(tr(key));
+    }
+
+    void ServerQuestEditorWindow::applyLocalization()
+    {
+        mTitle->setCaption(tr("questeditor.title"));
+
+        static const char* tabKeys[] = { "questeditor.tab.overview", "questeditor.tab.dialogue",
+            "questeditor.tab.stages", "questeditor.tab.logic", "questeditor.tab.validation",
+            "questeditor.tab.help" };
+        const std::size_t tabKeyCount = sizeof(tabKeys) / sizeof(tabKeys[0]);
+        for (std::size_t i = 0; i < mTabs->getItemCount() && i < tabKeyCount; ++i)
+            mTabs->getItemAt(i)->setCaption(tr(tabKeys[i]));
+
+        mNewQuestButton->setCaption(tr("questeditor.btn.new"));
+        mCloneQuestButton->setCaption(tr("questeditor.btn.clone"));
+        mDeleteQuestButton->setCaption(tr("questeditor.btn.delete"));
+
+        localizeLabel("LblQuestId", "questeditor.lbl.quest_id");
+        localizeLabel("LblStatus", "questeditor.lbl.status");
+        localizeLabel("LblName", "questeditor.lbl.name");
+        localizeLabel("LblProgress", "questeditor.lbl.progress");
+        localizeLabel("LblVersion", "questeditor.lbl.version");
+        localizeLabel("LblAuthor", "questeditor.lbl.author");
+        localizeLabel("LblGiverSection", "questeditor.lbl.giver");
+        localizeLabel("LblRefId", "questeditor.lbl.refid");
+        localizeLabel("LblCell", "questeditor.lbl.cell");
+        localizeLabel("LblUnique", "questeditor.lbl.unique");
+        localizeLabel("LblInitialStage", "questeditor.lbl.initial_stage");
+        mPickGiverButton->setCaption(tr("questeditor.btn.pick_giver"));
+        mClearUniqueButton->setCaption(tr("questeditor.btn.any_instance"));
+        mSaveOverviewButton->setCaption(tr("questeditor.btn.save_overview"));
+        mOverviewHint->setCaption(tr("questeditor.hint.overview"));
+
+        localizeLabel("LblTopics", "questeditor.lbl.topics");
+        localizeLabel("LblOffer", "questeditor.lbl.offer");
+        localizeLabel("LblOfferChoices", "questeditor.lbl.offer_choices");
+        mNewTopicButton->setCaption(tr("questeditor.btn.new"));
+        mSaveTopicButton->setCaption(tr("questeditor.btn.save"));
+        mDeleteTopicButton->setCaption(tr("questeditor.btn.delete"));
+        mSaveOfferButton->setCaption(tr("questeditor.btn.save_offer"));
+        mNewOfferChoiceButton->setCaption(tr("questeditor.btn.new"));
+        mSaveOfferChoiceButton->setCaption(tr("questeditor.btn.save"));
+        mDeleteOfferChoiceButton->setCaption(tr("questeditor.btn.delete"));
+
+        localizeLabel("LblStageIndex", "questeditor.lbl.stage_index");
+        localizeLabel("LblStageJournal", "questeditor.lbl.journal");
+        localizeLabel("LblStageDialogue", "questeditor.lbl.dialogue");
+        localizeLabel("LblStageChoices", "questeditor.lbl.stage_choices");
+        localizeLabel("LblNextStage", "questeditor.lbl.next");
+        mNewStageButton->setCaption(tr("questeditor.btn.new_stage"));
+        mSaveStageButton->setCaption(tr("questeditor.btn.save_stage"));
+        mDeleteStageButton->setCaption(tr("questeditor.btn.delete_stage"));
+        mNewStageChoiceButton->setCaption(tr("questeditor.btn.new"));
+        mSaveStageChoiceButton->setCaption(tr("questeditor.btn.save"));
+        mDeleteStageChoiceButton->setCaption(tr("questeditor.btn.delete"));
+        mAddNextButton->setCaption(tr("questeditor.btn.add_next"));
+        mDeleteNextButton->setCaption(tr("questeditor.btn.remove_next"));
+
+        localizeLabel("LblLogicTarget", "questeditor.lbl.logic_target");
+        localizeLabel("LblRequirements", "questeditor.lbl.requirements");
+        localizeLabel("LblRewards", "questeditor.lbl.rewards");
+        mAddRequirementButton->setCaption(tr("questeditor.btn.add"));
+        mDeleteRequirementButton->setCaption(tr("questeditor.btn.delete"));
+        mAddRewardButton->setCaption(tr("questeditor.btn.add"));
+        mDeleteRewardButton->setCaption(tr("questeditor.btn.delete"));
+        mLogicHint->setCaption(tr("questeditor.hint.logic"));
+
+        mValidateButton->setCaption(tr("questeditor.btn.validate"));
+        mPublishButton->setCaption(tr("questeditor.btn.publish"));
+        mDisableButton->setCaption(tr("questeditor.btn.disable"));
+        mRefreshButton->setCaption(tr("questeditor.btn.refresh"));
+
+        mHelpText->setCaption(tr("questeditor.help.text"));
+        mCloseButton->setCaption(tr("questeditor.btn.close"));
     }
 
     void ServerQuestEditorWindow::onOpen()
@@ -313,7 +409,10 @@ namespace mwmp
         playerPacket->Send();
     }
 
-    std::string ServerQuestEditorWindow::boolText(bool value) { return value ? "yes" : "no"; }
+    std::string ServerQuestEditorWindow::boolText(bool value)
+    {
+        return value ? tr("questeditor.value.yes") : tr("questeditor.value.no");
+    }
 
     int ServerQuestEditorWindow::parseInt(const std::string& value, int fallback)
     {
@@ -407,13 +506,15 @@ namespace mwmp
             const std::string searchable = lowerAscii(quest.id + " " + quest.name + " " + quest.status);
             if (!filter.empty() && searchable.find(filter) == std::string::npos)
                 continue;
-            std::string prefix = quest.status == "published" ? "[PUB] " : quest.status == "disabled" ? "[OFF] " : "[DRAFT] ";
+            const std::string prefix = (quest.status == "published" ? tr("questeditor.status.published")
+                : quest.status == "disabled" ? tr("questeditor.status.disabled")
+                : tr("questeditor.status.draft")) + " ";
             mQuestList->addItem(prefix + (quest.name.empty() ? quest.id : quest.name));
             if (quest.id == mSelectedQuestId)
                 selected = mVisibleQuestIds.size();
             mVisibleQuestIds.push_back(quest.id);
         }
-        mQuestCounter->setCaption(std::to_string(mVisibleQuestIds.size()) + " quest(s)");
+        mQuestCounter->setCaption(std::to_string(mVisibleQuestIds.size()) + " " + tr("questeditor.counter"));
         if (selected != MyGUI::ITEM_NONE)
             mQuestList->setIndexSelected(selected);
     }
@@ -553,9 +654,9 @@ namespace mwmp
             mStageInitial = selectedStagePtr->index == quest->initialStage;
             mStageComplete = selectedStagePtr->complete;
             mStageFail = selectedStagePtr->fail;
-            mStageInitialButton->setCaption("Initial: " + boolText(mStageInitial));
-            mStageCompleteButton->setCaption("Complete: " + boolText(mStageComplete));
-            mStageFailButton->setCaption("Fail: " + boolText(mStageFail));
+            mStageInitialButton->setCaption(tr("questeditor.stage.initial") + " " + boolText(mStageInitial));
+            mStageCompleteButton->setCaption(tr("questeditor.stage.complete") + " " + boolText(mStageComplete));
+            mStageFailButton->setCaption(tr("questeditor.stage.fail") + " " + boolText(mStageFail));
         }
         else
         {
@@ -564,9 +665,9 @@ namespace mwmp
             mStageJournal->setCaption("");
             mStageDialogue->setCaption("");
             mStageInitial = mStageComplete = mStageFail = false;
-            mStageInitialButton->setCaption("Initial: no");
-            mStageCompleteButton->setCaption("Complete: no");
-            mStageFailButton->setCaption("Fail: no");
+            mStageInitialButton->setCaption(tr("questeditor.stage.initial") + " " + boolText(false));
+            mStageCompleteButton->setCaption(tr("questeditor.stage.complete") + " " + boolText(false));
+            mStageFailButton->setCaption(tr("questeditor.stage.fail") + " " + boolText(false));
         }
         rebuildStageChoices();
     }
@@ -612,7 +713,7 @@ namespace mwmp
         const ServerQuestEditorStage* stage = selectedStage();
         if (stage == nullptr)
         {
-            mLogicContext->setCaption("Select a stage first");
+            mLogicContext->setCaption(tr("questeditor.logic.select_stage"));
             return;
         }
 
@@ -624,9 +725,10 @@ namespace mwmp
             if (choice != nullptr)
             {
                 requirements = &choice->requirements;
-                mLogicContext->setCaption("Stage #" + std::to_string(stage->index) + " choice: " + choice->id);
+                mLogicContext->setCaption(tr("questeditor.logic.stage_prefix") + std::to_string(stage->index)
+                    + " " + tr("questeditor.logic.choice_suffix") + " " + choice->id);
             }
-            else mLogicContext->setCaption("Select a stage choice");
+            else mLogicContext->setCaption(tr("questeditor.logic.select_stage_choice"));
         }
         else if (mode == 2)
         {
@@ -634,14 +736,15 @@ namespace mwmp
             if (choice != nullptr)
             {
                 requirements = &choice->requirements;
-                mLogicContext->setCaption("Offer choice: " + choice->id);
+                mLogicContext->setCaption(tr("questeditor.logic.offer_choice_prefix") + " " + choice->id);
             }
-            else mLogicContext->setCaption("Select an offer choice");
+            else mLogicContext->setCaption(tr("questeditor.logic.select_offer_choice"));
         }
         else
         {
             requirements = &stage->requirements;
-            mLogicContext->setCaption("Stage #" + std::to_string(stage->index) + " requirements");
+            mLogicContext->setCaption(tr("questeditor.logic.stage_prefix") + std::to_string(stage->index)
+                + " " + tr("questeditor.logic.requirements_suffix"));
         }
 
         if (requirements != nullptr)
@@ -660,13 +763,16 @@ namespace mwmp
             return;
         }
         std::ostringstream stream;
-        stream << "Quest: " << quest->id << "\nStatus: " << quest->status << "\n\n";
-        stream << "Errors: " << quest->validationErrors.size() << "\n";
-        for (const std::string& error : quest->validationErrors) stream << "ERROR: " << error << "\n";
-        stream << "\nWarnings: " << quest->validationWarnings.size() << "\n";
-        for (const std::string& warning : quest->validationWarnings) stream << "WARN: " << warning << "\n";
+        stream << tr("questeditor.valid.quest") << " " << quest->id << "\n"
+               << tr("questeditor.valid.status") << " " << quest->status << "\n\n";
+        stream << tr("questeditor.valid.errors") << " " << quest->validationErrors.size() << "\n";
+        for (const std::string& error : quest->validationErrors)
+            stream << tr("questeditor.valid.error_prefix") << " " << error << "\n";
+        stream << "\n" << tr("questeditor.valid.warnings") << " " << quest->validationWarnings.size() << "\n";
+        for (const std::string& warning : quest->validationWarnings)
+            stream << tr("questeditor.valid.warning_prefix") << " " << warning << "\n";
         if (quest->validationErrors.empty() && quest->validationWarnings.empty())
-            stream << "No validation issues reported.\n";
+            stream << tr("questeditor.valid.clean") << "\n";
         mValidationText->setCaption(stream.str());
     }
 
@@ -674,7 +780,7 @@ namespace mwmp
     {
         const ServerQuestEditorModel& model = ServerQuestRegistry::get().getEditorModel();
         std::string text = model.notice;
-        if (text.empty()) text = "Server-authoritative editor. Every edit returns Published quests to Draft.";
+        if (text.empty()) text = tr("questeditor.notice.default");
         mNotice->setCaption(text);
     }
 
@@ -839,23 +945,23 @@ namespace mwmp
     void ServerQuestEditorWindow::notifyToggleInitial(MyGUI::Widget*)
     {
         mStageInitial = !mStageInitial;
-        mStageInitialButton->setCaption("Initial: " + boolText(mStageInitial));
+        mStageInitialButton->setCaption(tr("questeditor.stage.initial") + " " + boolText(mStageInitial));
     }
 
     void ServerQuestEditorWindow::notifyToggleComplete(MyGUI::Widget*)
     {
         mStageComplete = !mStageComplete;
         if (mStageComplete) mStageFail = false;
-        mStageCompleteButton->setCaption("Complete: " + boolText(mStageComplete));
-        mStageFailButton->setCaption("Fail: " + boolText(mStageFail));
+        mStageCompleteButton->setCaption(tr("questeditor.stage.complete") + " " + boolText(mStageComplete));
+        mStageFailButton->setCaption(tr("questeditor.stage.fail") + " " + boolText(mStageFail));
     }
 
     void ServerQuestEditorWindow::notifyToggleFail(MyGUI::Widget*)
     {
         mStageFail = !mStageFail;
         if (mStageFail) mStageComplete = false;
-        mStageCompleteButton->setCaption("Complete: " + boolText(mStageComplete));
-        mStageFailButton->setCaption("Fail: " + boolText(mStageFail));
+        mStageCompleteButton->setCaption(tr("questeditor.stage.complete") + " " + boolText(mStageComplete));
+        mStageFailButton->setCaption(tr("questeditor.stage.fail") + " " + boolText(mStageFail));
     }
 
     void ServerQuestEditorWindow::notifyNewStage(MyGUI::Widget*)
@@ -867,9 +973,9 @@ namespace mwmp
         mStageJournal->setCaption("");
         mStageDialogue->setCaption("");
         mStageInitial = mStageComplete = mStageFail = false;
-        mStageInitialButton->setCaption("Initial: no");
-        mStageCompleteButton->setCaption("Complete: no");
-        mStageFailButton->setCaption("Fail: no");
+        mStageInitialButton->setCaption(tr("questeditor.stage.initial") + " " + boolText(false));
+        mStageCompleteButton->setCaption(tr("questeditor.stage.complete") + " " + boolText(false));
+        mStageFailButton->setCaption(tr("questeditor.stage.fail") + " " + boolText(false));
         rebuildStageChoices();
         rebuildLogic();
     }
