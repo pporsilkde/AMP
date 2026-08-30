@@ -9,6 +9,7 @@
 #include "../../../mwbase/environment.hpp"
 #include "../../../mwbase/windowmanager.hpp"
 #include "../../../mwgui/dialogue.hpp"
+#include "../../../mwworld/cellstore.hpp"
 #include <components/misc/stringops.hpp>
 
 #include <utility>
