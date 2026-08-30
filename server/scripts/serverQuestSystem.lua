@@ -1795,6 +1795,8 @@ local HELP_TEXT = [[ArenaMP X039 MyGUI Server Quest Studio
 
 Moderator/Admin editor:
 /quest | /quest studio    - open the real MyGUI Quest Studio (staffRank >= 1)
+/quests resync             - force a client topic/journal resync
+/quests caius              - show built-in Caius test quest state and resync
 /quest legacy             - open the old message-box editor (fallback)
 /quest list               - list definitions
 /quest new ID Name        - create draft
@@ -2775,6 +2777,40 @@ local function onObjectActivateQuestPicker(eventStatus, pid, cellDescription, ob
     end
 end
 
+-- X047: dialogue topic sync is intentionally repeated just-in-time when a
+-- player activates an NPC that is the giver of a published server quest.  The
+-- login sync can race with private-instance CELL changes / CharGen teardown;
+-- resending here is cheap and makes the dialogue registry self-healing.
+local function onObjectActivateQuestResync(eventStatus, pid, cellDescription, objects, targetPlayers)
+    if not enabled() or Players[pid] == nil or not Players[pid]:IsLoggedIn() then return end
+
+    local shouldSync = false
+    for _, object in pairs(objects or {}) do
+        if type(object) == "table" then
+            local refId = tostring(object.refId or ""):lower()
+            if refId ~= "" then
+                for _, questId in ipairs(sortedQuestIds("published")) do
+                    local quest = serverQuestSystem.quests[questId]
+                    local validation = serverQuestSystem.validation[questId]
+                    if quest ~= nil and (validation == nil or #validation.errors == 0)
+                        and tostring(quest.giver.refId or ""):lower() == refId
+                        and questCellMatches(quest.giver.cell, cellDescription) then
+                        shouldSync = true
+                        break
+                    end
+                end
+            end
+        end
+        if shouldSync then break end
+    end
+
+    if shouldSync then
+        log(enumerations.log.INFO, "[ServerQuest] X047 JIT topic sync for pid " .. tostring(pid)
+            .. " in " .. tostring(cellDescription))
+        serverQuestSystem.SyncPlayer(pid)
+    end
+end
+
 local function onPlayerAuthentified(eventStatus, pid)
     if enabled() then ensurePlayerData(pid) end
 end
@@ -2791,6 +2827,33 @@ function serverQuestSystem.Initialize()
     serverQuestSystem.LoadAll()
     customCommandHooks.registerCommand("quest", processCommand)
     customCommandHooks.registerCommand("quests", function(pid, cmd)
+        local sub = tostring(cmd[2] or ""):lower()
+        if sub == "sync" or sub == "resync" then
+            serverQuestSystem.SyncPlayer(pid)
+            send(pid, "Server quest topics resynced. Reopen the NPC dialogue if it was already closed.")
+            return
+        elseif sub == "studio" or sub == "editor" then
+            processCommand(pid, { "quest", "studio" })
+            return
+        elseif sub == "caius" or sub == "caiusdebug" then
+            local questId = "arena_caius_drink"
+            local quest = serverQuestSystem.quests[questId]
+            if quest == nil then
+                send(pid, "Caius test quest definition is not loaded")
+                return
+            end
+            local state = serverQuestSystem.GetPlayerState(pid, questId)
+            local stateText = state == nil and "not_started"
+                or (tostring(state.state) .. " stage=" .. tostring(state.stage))
+            local validation = serverQuestSystem.validation[questId]
+            local validationText = validation ~= nil and #validation.errors > 0
+                and ("invalid: " .. table.concat(validation.errors, "; ")) or "valid"
+            send(pid, "Caius test quest: status=" .. tostring(quest.status)
+                .. ", state=" .. stateText .. ", definition=" .. validationText
+                .. ". If completed/failed, staff can use /quest reset arena_caius_drink " .. tostring(pid))
+            serverQuestSystem.SyncPlayer(pid)
+            return
+        end
         showPlayerQuests(pid)
     end)
     customCommandHooks.registerCommand("queststudio", function(pid, cmd)
@@ -2798,11 +2861,12 @@ function serverQuestSystem.Initialize()
     end)
     customEventHooks.registerHandler("OnGUIAction", onGuiAction)
     customEventHooks.registerHandler("OnObjectActivate", onObjectActivateQuestPicker)
+    customEventHooks.registerHandler("OnObjectActivate", onObjectActivateQuestResync)
     customEventHooks.registerHandler("OnPlayerAuthentified", onPlayerAuthentified)
     customEventHooks.registerHandler("OnPlayerFinishLogin", onPlayerFinishLogin)
     customEventHooks.registerValidator("OnObjectDialogueChoice", validateServerQuestDialogue)
     customEventHooks.registerHandler("OnObjectDialogueChoice", handleServerQuestDialogue)
-    log(enumerations.log.INFO, "X043 MyGUI Quest Studio + instance-aware topics + Journal Sync initialized")
+    log(enumerations.log.INFO, "X047 persistent QuestIndex + JIT quest-topic sync + MyGUI Quest Studio initialized")
 end
 
 serverQuestSystem.Initialize()

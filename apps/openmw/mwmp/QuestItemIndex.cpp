@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <functional>
 #include <iomanip>
-#include <map>
 #include <set>
 #include <sstream>
 #include <unordered_map>
@@ -14,7 +13,6 @@
 
 #include <components/debug/debuglog.hpp>
 #include <components/esm/defs.hpp>
-#include <components/esm/esmreader.hpp>
 #include <components/esm/loadcell.hpp>
 #include <components/esm/loadcont.hpp>
 #include <components/esm/loadcrea.hpp>
@@ -396,8 +394,21 @@ namespace mwmp
         if (mCandidates.empty())
             return;
 
-        // Map base container/NPC/creature ids to the candidate quest records they
-        // carry. We count a placed carrier as one physical source per candidate.
+        // X046 stability: never reopen raw CELL contexts from the live client
+        // just to build the server quest-item database. Large/merged content
+        // sets can contain context metadata that OpenMW loads tolerantly during
+        // normal startup but that is unsafe to replay here with ESMReader. The
+        // old X031 path could therefore crash the first client after every
+        // server restart.
+        //
+        // We only use data that is already materialized in ESMStore:
+        //   * candidate references in base container/NPC/creature inventories;
+        //   * item leveled lists (always treated as common/repeatable sources).
+        // Direct world placements are deliberately not reopened. This makes a
+        // freshly generated index more conservative: a directly placed item
+        // with only one weak quest reference may remain shared rather than risk
+        // a false positive or a client crash.
+
         std::unordered_map<std::string, std::vector<std::string>> carrierItems;
 
         auto collectInventory = [&](const std::string& carrierId, const ESM::InventoryList& inventory)
@@ -420,9 +431,21 @@ namespace mwmp
         for (auto it = store.get<ESM::Creature>().begin(); it != store.get<ESM::Creature>().end(); ++it)
             collectInventory(it->mId, it->mInventory);
 
+        // Count each unique base carrier definition once. This is intentionally
+        // a lower bound, not a physical placement count, but it is stable and
+        // sufficient for the conservative rarity thresholds used by build().
+        for (const auto& carrier : carrierItems)
+        {
+            for (const std::string& itemId : carrier.second)
+            {
+                auto candidate = mCandidates.find(itemId);
+                if (candidate != mCandidates.end())
+                    candidate->second.sources = std::min(100000, candidate->second.sources + 1);
+            }
+        }
+
         // Anything reachable from an item leveled list is repeatable/random
-        // content, not a unique authored quest source. Mark those candidates as
-        // common even if there are no direct placed references in cells.
+        // content and must never be treated as a unique quest source.
         std::unordered_map<std::string, std::vector<std::string>> leveledEntries;
         for (auto it = store.get<ESM::ItemLevList>().begin(); it != store.get<ESM::ItemLevList>().end(); ++it)
         {
@@ -452,66 +475,9 @@ namespace mwmp
             markLeveledCandidates(entry.first, visiting);
         }
 
-        auto countRef = [&](const std::string& rawId)
-        {
-            const std::string id = lower(rawId);
-            auto candidate = mCandidates.find(id);
-            if (candidate != mCandidates.end())
-                candidate->second.sources = std::min(100000, candidate->second.sources + 1);
-
-            auto carrier = carrierItems.find(id);
-            if (carrier != carrierItems.end())
-            {
-                for (const std::string& itemId : carrier->second)
-                {
-                    auto item = mCandidates.find(itemId);
-                    if (item != mCandidates.end())
-                        item->second.sources = std::min(100000, item->second.sources + 1);
-                }
-            }
-        };
-
-        ESM::ESMReader reader;
-        auto scanCell = [&](const ESM::Cell& cell)
-        {
-            std::map<ESM::RefNum, std::string> liveRefs;
-            for (std::size_t contextIndex = 0; contextIndex < cell.mContextList.size(); ++contextIndex)
-            {
-                try
-                {
-                    cell.restore(reader, static_cast<int>(contextIndex));
-                    ESM::CellRef ref;
-                    ref.mRefNum.mContentFile = ESM::RefNum::RefNum_NoContentFile;
-                    bool deleted = false;
-                    while (cell.getNextRef(reader, ref, deleted))
-                    {
-                        if (std::find(cell.mMovedRefs.begin(), cell.mMovedRefs.end(), ref.mRefNum) != cell.mMovedRefs.end())
-                            continue;
-                        if (deleted)
-                            liveRefs.erase(ref.mRefNum);
-                        else
-                            liveRefs[ref.mRefNum] = ref.mRefID;
-                    }
-                }
-                catch (const std::exception& e)
-                {
-                    Log(Debug::Warning) << "Quest Item Index skipped refs in " << cell.getShortDescription()
-                                        << ": " << e.what();
-                }
-            }
-
-            for (const auto& [refNum, id] : liveRefs)
-                countRef(id);
-            for (const auto& leased : cell.mLeasedRefs)
-                if (!leased.second)
-                    countRef(leased.first.mRefID);
-        };
-
-        const MWWorld::Store<ESM::Cell>& cells = store.get<ESM::Cell>();
-        for (auto it = cells.intBegin(); it != cells.intEnd(); ++it)
-            scanCell(*it);
-        for (auto it = cells.extBegin(); it != cells.extEnd(); ++it)
-            scanCell(*it);
+        Log(Debug::Info) << "ArenaMP Quest Item Index: X046 safe source scan used "
+                         << carrierItems.size()
+                         << " base carrier definitions; raw CELL context replay is disabled";
     }
 
     bool QuestItemIndex::isQuestItem(const std::string& refId)

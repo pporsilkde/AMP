@@ -96,7 +96,7 @@ config.rawConfigReloadInterval = 2
 -- X031: re-verify/regenerate custom/questIndex.json once for every server process
 -- start. The stored file remains on disk as a diagnostic/fallback copy, but quest
 -- phasing stays fail-closed until the first fresh verified client upload replaces it.
-config.questIndexRefreshOnServerStart = true
+config.questIndexRefreshOnServerStart = false -- X046: deprecated; valid questIndex.json is always reused
 
 -- Server-authoritative ArenaMP XP progression. These values overwrite the
 -- client [XP Leveling] category when a player connects.

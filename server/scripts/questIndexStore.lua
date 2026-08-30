@@ -151,38 +151,29 @@ local function load()
         return
     end
 
-    if configBool("questIndexRefreshOnServerStart", true) then
-        -- X031: never carry an authoritative quest classification across a process
-        -- restart without a fresh client-side scan. Keep the verified old metadata
-        -- only for diagnostics; the first valid requested upload will overwrite the
-        -- same JSON file and then re-enable phasing.
-        state.trusted = false
-        state.contentKey = nil
-        state.indexHash = nil
-        state.entries = {}
-        state.entryCount = 0
-        state.startupRefreshPending = true
-        state.storedContentKey = data.contentKey
-        state.storedIndexHash = data.indexHash
-        -- Update the on-disk file immediately so a restart is visible even before
-        -- the first client finishes the fresh scan. Old entries are preserved only
-        -- as diagnostics; state.trusted remains false until commit() overwrites them.
-        data.refreshPending = true
-        data.refreshRequestedAt = os.time()
-        data.generatedBy = "ArenaMP X031 server restart"
-        data.generationMode = "startup-refresh-pending"
-        jsonInterface.save(STORE_PATH, data)
-
-        tes3mp.LogMessage(enumerations.log.INFO,
-            "[QuestIndex] X031 startup refresh: questIndex.json marked for refresh; stored index " .. data.indexHash ..
-            " for content " .. data.contentKey ..
-            " is valid, but a fresh verified upload is required after this server restart")
-    else
-        applyIndex(data.contentKey, data.indexHash, data.entries)
-        tes3mp.LogMessage(enumerations.log.INFO,
-            "[QuestIndex] Loaded " .. state.entryCount .. " phaseable records for content key " ..
-            state.contentKey .. " (hash " .. state.indexHash .. ")")
+    -- X046: a valid persisted index is authoritative across ordinary server
+    -- restarts. Do NOT force every first client after a restart to rescan all
+    -- ESM/ESP CELL contexts. Apart from making login needlessly expensive, that
+    -- raw scan proved unsafe with some large content sets (TR/Cyr/Sky) and could
+    -- terminate the client while logging in.
+    --
+    -- If the file is absent/unreadable/hash-invalid, state.trusted remains false
+    -- and OnPlayerReady() requests a fresh MODE_UPLOAD, which recreates this same
+    -- file. Manual Reset() remains the explicit admin rebuild path.
+    if configBool("questIndexRefreshOnServerStart", false) then
+        tes3mp.LogMessage(enumerations.log.WARN,
+            "[QuestIndex] questIndexRefreshOnServerStart is deprecated and ignored by X046; the valid stored questIndex.json will be reused. Use the explicit quest index reset/rebuild command when the content set intentionally changes.")
     end
+
+    applyIndex(data.contentKey, data.indexHash, data.entries)
+    state.startupRefreshPending = false
+    state.storedContentKey = nil
+    state.storedIndexHash = nil
+
+    tes3mp.LogMessage(enumerations.log.INFO,
+        "[QuestIndex] Reusing persistent index: loaded " .. state.entryCount ..
+        " phaseable records for content key " .. state.contentKey ..
+        " (hash " .. state.indexHash .. "); no startup client scan required")
 end
 
 local function commit(contentKey, indexHash, entries, reason, generatedBy, generationMode)
@@ -290,9 +281,9 @@ function questIndexStore.RequestFrom(pid, mode)
     return true
 end
 
---- X031: force lazy store validation during server startup, before any player
---- can interact with quest sources. When startup refresh is enabled this leaves
---- phasing fail-closed and primes the first logged-in player for MODE_UPLOAD.
+--- X046: validate/load the persistent store during server startup. A valid
+--- questIndex.json is reused as-is. Only a missing/invalid store leaves the
+--- system untrusted and causes the first fully logged-in client to create one.
 function questIndexStore.OnServerStart()
     load()
 end
