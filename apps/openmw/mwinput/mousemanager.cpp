@@ -141,6 +141,22 @@ namespace MWInput
         if (arg.direction == SDL_MOUSEWHEEL_FLIPPED)
             wheelDirection = -wheelDirection;
 
+        // X048 placement owns the wheel before QuickLoot/camera zoom. While an
+        // object is grabbed, wheel-up brings it closer and wheel-down moves it
+        // farther away. The event is consumed so a hidden/stale QuickLoot overlay
+        // or the normal camera zoom can never react to the same wheel tick.
+        if (!mBindingsManager->isDetectingBindingState() && wheelDirection != 0)
+        {
+            MWBase::World* world = MWBase::Environment::get().getWorld();
+            if (world && world->isPhysicsGrabActive())
+            {
+                world->adjustPhysicsGrabDistance(static_cast<float>(wheelDirection));
+                input->setJoystickLastUsed(false);
+                input->resetIdleTime();
+                return;
+            }
+        }
+
         // The Z animation menu owns the wheel anywhere on screen. It uses the
         // same one-event/one-row cyclic navigation as QuickLoot.
         if (!mBindingsManager->isDetectingBindingState() && wheelDirection != 0

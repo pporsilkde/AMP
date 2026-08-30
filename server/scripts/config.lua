@@ -520,7 +520,14 @@ config.serverQuests = {
     enabled = true,
     moderatorsCanPublish = true,
     greenTopicColor = "#61D879",
-    maxSyncedTopicsPerNpc = 64
+    maxSyncedTopicsPerNpc = 64,
+
+    -- X048: quest progression is already visible in Dialogue/Quest Manager, so
+    -- automatic chat echoes are disabled by default. These switches affect only
+    -- runtime quest notifications; explicit /quest editor command feedback stays visible.
+    chatProgressMessages = false,
+    chatRewardMessages = false,
+    chatRuntimeErrors = false
 }
 
 -- X042: modifying original Morrowind journal stages is disabled by default.

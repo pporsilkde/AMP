@@ -434,14 +434,28 @@ namespace MWInput
             toggleWalking();
             break;
         case A_ToggleWeapon:
-            if (!MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
+            if (MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
+            {
+                // X048: Ready Weapon belongs to placement while an item is held.
+                // A tap gives an immediate 15-degree yaw step; keeping the action
+                // held continues smooth rotation in update(). Run only reverses it.
+                const float direction = mBindingsManager->actionIsActive(A_Run) ? -1.f : 1.f;
+                MWBase::Environment::get().getWorld()->stepPhysicsGrabRotation(direction, 0.f);
+            }
+            else
                 toggleWeapon();
             break;
         case A_Rest:
             rest();
             break;
         case A_ToggleSpell:
-            if (!MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
+            if (MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
+            {
+                // Ready Magic is the matching vertical rotation channel.
+                const float direction = mBindingsManager->actionIsActive(A_Run) ? -1.f : 1.f;
+                MWBase::Environment::get().getWorld()->stepPhysicsGrabRotation(0.f, direction);
+            }
+            else
                 toggleSpell();
             break;
         case A_QuickKey1:

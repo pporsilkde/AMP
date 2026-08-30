@@ -513,6 +513,7 @@ namespace MWWorld
             bool finishPhysicsGrab() override;
             void rotatePhysicsGrab(float horizontalInput, float verticalInput, float duration) override;
             void translatePhysicsGrab(float firstAxisInput, float secondAxisInput, float duration) override;
+            void adjustPhysicsGrabDistance(float wheelSteps) override;
             int cyclePhysicsGrabMoveMode() override;
             int getPhysicsGrabMoveMode() const override;
             bool togglePhysicsGrabPhysics() override;

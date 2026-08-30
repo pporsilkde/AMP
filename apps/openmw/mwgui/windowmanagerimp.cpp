@@ -1196,7 +1196,14 @@ namespace MWGui
     void WindowManager::setFocusObject(const MWWorld::Ptr& focus)
     {
         mToolTips->setFocusObject(focus);
-        mQuickLoot->setFocusObject(focus);
+        if (mQuickLoot)
+        {
+            MWBase::World* world = MWBase::Environment::get().getWorld();
+            if (world && world->isPhysicsGrabActive())
+                mQuickLoot->clear();
+            else
+                mQuickLoot->setFocusObject(focus);
+        }
         if (mHud)
             mHud->setFocusObject(focus);
 
@@ -1210,13 +1217,23 @@ namespace MWGui
     void WindowManager::setFocusObjectScreenCoords(float min_x, float min_y, float max_x, float max_y)
     {
         mToolTips->setFocusObjectScreenCoords(min_x, min_y, max_x, max_y);
-        mQuickLoot->setFocusObjectScreenCoords(min_x, min_y, max_x, max_y);
+        if (mQuickLoot)
+        {
+            MWBase::World* world = MWBase::Environment::get().getWorld();
+            if (world && world->isPhysicsGrabActive())
+                mQuickLoot->clear();
+            else
+                mQuickLoot->setFocusObjectScreenCoords(min_x, min_y, max_x, max_y);
+        }
         if (mHud)
             mHud->setFocusObjectScreenCoords(min_x, min_y, max_x, max_y);
     }
 
     bool WindowManager::activateQuickLoot()
     {
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        if (world && world->isPhysicsGrabActive())
+            return false;
         return mQuickLoot && mQuickLoot->activateSelected();
     }
 
@@ -1228,16 +1245,25 @@ namespace MWGui
 
     bool WindowManager::handleQuickLootMouseWheel(int rel)
     {
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        if (world && world->isPhysicsGrabActive())
+            return false;
         return mQuickLoot && mQuickLoot->handleMouseWheel(rel);
     }
 
     bool WindowManager::handleQuickLootKeyPress(MyGUI::KeyCode key)
     {
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        if (world && world->isPhysicsGrabActive())
+            return false;
         return mQuickLoot && mQuickLoot->handleKeyPress(key);
     }
 
     bool WindowManager::isQuickLootVisible() const
     {
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        if (world && world->isPhysicsGrabActive())
+            return false;
         return mQuickLoot && mQuickLoot->isVisible();
     }
 
@@ -2640,6 +2666,12 @@ namespace MWGui
 
     void WindowManager::setPhysicsGrabHint(bool visible, int moveMode, bool physicsEnabled)
     {
+        // X048: placement owns interaction focus. QuickLoot is intentionally
+        // non-modal, so a container grabbed while its overlay is open could leave
+        // that overlay hanging over the placement UI unless we explicitly clear it.
+        if (visible && mQuickLoot)
+            mQuickLoot->clear();
+
         if (!mPhysicsGrabHint || !mPhysicsGrabHintText)
             return;
 
@@ -2663,6 +2695,7 @@ namespace MWGui
         std::string caption = arenaText("placement.release") + "\n"
             + arenaText("placement.rotate") + "\n"
             + arenaText("placement.rotate_reverse") + "\n"
+            + arenaText("placement.distance") + "\n"
             + arenaText("placement.reset") + "\n"
             + arenaText("placement.cancel") + "\n"
             + arenaText("placement.surface_auto") + "\n"

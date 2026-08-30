@@ -2279,6 +2279,35 @@ namespace MWWorld
         }
     }
 
+    void World::adjustPhysicsGrabDistance(float wheelSteps)
+    {
+        wheelSteps = std::max(-8.f, std::min(8.f, wheelSteps));
+        if (std::abs(wheelSteps) < 0.001f)
+            return;
+
+        for (PhysicsObjectState& state : mPhysicsObjects)
+        {
+            if (!state.mGrabbed || state.mPtr.isEmpty())
+                continue;
+
+            // X048: wheel-up behaves like camera zoom-in and brings the held object
+            // closer; wheel-down moves it away. Scale the legal range with the
+            // object's radius so furniture cannot be pulled through the camera and
+            // large props are still allowed to sit far enough in front of the player.
+            const float radius = std::max(4.f, state.mRadius);
+            const float minDistance = std::max(45.f, radius * 0.85f);
+            const float maxDistance = std::max(340.f, radius * 6.f);
+            constexpr float distancePerWheelStep = 18.f;
+            state.mHoldDistance = std::max(minDistance, std::min(maxDistance,
+                state.mHoldDistance - wheelSteps * distancePerWheelStep));
+
+            state.mVelocity.set(0.f, 0.f, 0.f);
+            state.mAngularVelocity.set(0.f, 0.f, 0.f);
+            state.mSleepTimer = 0.f;
+            return;
+        }
+    }
+
     int World::cyclePhysicsGrabMoveMode()
     {
         for (PhysicsObjectState& state : mPhysicsObjects)

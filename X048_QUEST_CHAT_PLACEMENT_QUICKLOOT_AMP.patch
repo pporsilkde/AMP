@@ -1,0 +1,352 @@
+diff -ruN '--exclude=SHA256_MANIFEST.txt' '--exclude=X048_*' x048_base/apps/openmw/mwbase/world.hpp x048_final/apps/openmw/mwbase/world.hpp
+--- x048_base/apps/openmw/mwbase/world.hpp	2026-08-30 06:14:12.000000000 +0000
++++ x048_final/apps/openmw/mwbase/world.hpp	2026-08-30 23:09:41.587691592 +0000
+@@ -403,6 +403,8 @@
+             virtual void rotatePhysicsGrab(float horizontalInput, float verticalInput, float duration) = 0;
+             /// Move the held target along the currently selected world-axis pair.
+             virtual void translatePhysicsGrab(float firstAxisInput, float secondAxisInput, float duration) = 0;
++            /// Mouse-wheel distance control while an object is held. Positive steps move it closer.
++            virtual void adjustPhysicsGrabDistance(float wheelSteps) = 0;
+             /// Cycle Walk -> X-Y -> X-Z -> Z-Y -> Walk. Returns the new mode (0..3).
+             virtual int cyclePhysicsGrabMoveMode() = 0;
+             virtual int getPhysicsGrabMoveMode() const = 0;
+diff -ruN '--exclude=SHA256_MANIFEST.txt' '--exclude=X048_*' x048_base/apps/openmw/mwgui/windowmanagerimp.cpp x048_final/apps/openmw/mwgui/windowmanagerimp.cpp
+--- x048_base/apps/openmw/mwgui/windowmanagerimp.cpp	2026-08-30 06:14:12.000000000 +0000
++++ x048_final/apps/openmw/mwgui/windowmanagerimp.cpp	2026-08-30 23:09:41.590129508 +0000
+@@ -1196,7 +1196,14 @@
+     void WindowManager::setFocusObject(const MWWorld::Ptr& focus)
+     {
+         mToolTips->setFocusObject(focus);
+-        mQuickLoot->setFocusObject(focus);
++        if (mQuickLoot)
++        {
++            MWBase::World* world = MWBase::Environment::get().getWorld();
++            if (world && world->isPhysicsGrabActive())
++                mQuickLoot->clear();
++            else
++                mQuickLoot->setFocusObject(focus);
++        }
+         if (mHud)
+             mHud->setFocusObject(focus);
+ 
+@@ -1210,13 +1217,23 @@
+     void WindowManager::setFocusObjectScreenCoords(float min_x, float min_y, float max_x, float max_y)
+     {
+         mToolTips->setFocusObjectScreenCoords(min_x, min_y, max_x, max_y);
+-        mQuickLoot->setFocusObjectScreenCoords(min_x, min_y, max_x, max_y);
++        if (mQuickLoot)
++        {
++            MWBase::World* world = MWBase::Environment::get().getWorld();
++            if (world && world->isPhysicsGrabActive())
++                mQuickLoot->clear();
++            else
++                mQuickLoot->setFocusObjectScreenCoords(min_x, min_y, max_x, max_y);
++        }
+         if (mHud)
+             mHud->setFocusObjectScreenCoords(min_x, min_y, max_x, max_y);
+     }
+ 
+     bool WindowManager::activateQuickLoot()
+     {
++        MWBase::World* world = MWBase::Environment::get().getWorld();
++        if (world && world->isPhysicsGrabActive())
++            return false;
+         return mQuickLoot && mQuickLoot->activateSelected();
+     }
+ 
+@@ -1228,16 +1245,25 @@
+ 
+     bool WindowManager::handleQuickLootMouseWheel(int rel)
+     {
++        MWBase::World* world = MWBase::Environment::get().getWorld();
++        if (world && world->isPhysicsGrabActive())
++            return false;
+         return mQuickLoot && mQuickLoot->handleMouseWheel(rel);
+     }
+ 
+     bool WindowManager::handleQuickLootKeyPress(MyGUI::KeyCode key)
+     {
++        MWBase::World* world = MWBase::Environment::get().getWorld();
++        if (world && world->isPhysicsGrabActive())
++            return false;
+         return mQuickLoot && mQuickLoot->handleKeyPress(key);
+     }
+ 
+     bool WindowManager::isQuickLootVisible() const
+     {
++        MWBase::World* world = MWBase::Environment::get().getWorld();
++        if (world && world->isPhysicsGrabActive())
++            return false;
+         return mQuickLoot && mQuickLoot->isVisible();
+     }
+ 
+@@ -2640,6 +2666,12 @@
+ 
+     void WindowManager::setPhysicsGrabHint(bool visible, int moveMode, bool physicsEnabled)
+     {
++        // X048: placement owns interaction focus. QuickLoot is intentionally
++        // non-modal, so a container grabbed while its overlay is open could leave
++        // that overlay hanging over the placement UI unless we explicitly clear it.
++        if (visible && mQuickLoot)
++            mQuickLoot->clear();
++
+         if (!mPhysicsGrabHint || !mPhysicsGrabHintText)
+             return;
+ 
+@@ -2663,6 +2695,7 @@
+         std::string caption = arenaText("placement.release") + "\n"
+             + arenaText("placement.rotate") + "\n"
+             + arenaText("placement.rotate_reverse") + "\n"
++            + arenaText("placement.distance") + "\n"
+             + arenaText("placement.reset") + "\n"
+             + arenaText("placement.cancel") + "\n"
+             + arenaText("placement.surface_auto") + "\n"
+diff -ruN '--exclude=SHA256_MANIFEST.txt' '--exclude=X048_*' x048_base/apps/openmw/mwinput/actionmanager.cpp x048_final/apps/openmw/mwinput/actionmanager.cpp
+--- x048_base/apps/openmw/mwinput/actionmanager.cpp	2026-08-30 06:14:12.000000000 +0000
++++ x048_final/apps/openmw/mwinput/actionmanager.cpp	2026-08-30 23:05:25.000000000 +0000
+@@ -434,14 +434,28 @@
+             toggleWalking();
+             break;
+         case A_ToggleWeapon:
+-            if (!MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
++            if (MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
++            {
++                // X048: Ready Weapon belongs to placement while an item is held.
++                // A tap gives an immediate 15-degree yaw step; keeping the action
++                // held continues smooth rotation in update(). Run only reverses it.
++                const float direction = mBindingsManager->actionIsActive(A_Run) ? -1.f : 1.f;
++                MWBase::Environment::get().getWorld()->stepPhysicsGrabRotation(direction, 0.f);
++            }
++            else
+                 toggleWeapon();
+             break;
+         case A_Rest:
+             rest();
+             break;
+         case A_ToggleSpell:
+-            if (!MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
++            if (MWBase::Environment::get().getWorld()->isPhysicsGrabActive())
++            {
++                // Ready Magic is the matching vertical rotation channel.
++                const float direction = mBindingsManager->actionIsActive(A_Run) ? -1.f : 1.f;
++                MWBase::Environment::get().getWorld()->stepPhysicsGrabRotation(0.f, direction);
++            }
++            else
+                 toggleSpell();
+             break;
+         case A_QuickKey1:
+diff -ruN '--exclude=SHA256_MANIFEST.txt' '--exclude=X048_*' x048_base/apps/openmw/mwinput/keyboardmanager.cpp x048_final/apps/openmw/mwinput/keyboardmanager.cpp
+--- x048_base/apps/openmw/mwinput/keyboardmanager.cpp	2026-08-30 06:14:12.000000000 +0000
++++ x048_final/apps/openmw/mwinput/keyboardmanager.cpp	2026-08-30 23:05:48.000000000 +0000
+@@ -69,9 +69,9 @@
+             else if (arg.keysym.scancode == SDL_SCANCODE_F4)
+                 consumed = togglePostProcessSetting("bloom enabled", "#{arenamp=hotkey.bloom_on}", "#{arenamp=hotkey.bloom_off}");
+ 
+-            // Placement mode owns these literal keys while a prop is grabbed.
+-            // Consume them before the binding system so the keys cannot also
+-            // trigger jump, sneak, journal, ready weapon/spell, presets, etc.
++            // Placement mode owns only its dedicated literal helper keys.
++            // Ready Weapon / Ready Magic intentionally continue through the
++            // binding system because ActionManager repurposes those actions for rotation.
+             MWBase::World* world = MWBase::Environment::get().getWorld();
+             const bool placementActive = world && world->isPhysicsGrabActive()
+                 && !MWBase::Environment::get().getWindowManager()->isGuiMode();
+@@ -92,11 +92,9 @@
+                         world->resetPhysicsGrabTransform();
+                         consumed = true;
+                         break;
+-                    case SDL_SCANCODE_R:
+-                    case SDL_SCANCODE_F:
+-                        // Continuous rotation is sampled by ActionManager::update().
+-                        consumed = true;
+-                        break;
++                    // Do not hard-code R/F here. Ready Weapon / Ready Magic may
++                    // be rebound, and ActionManager owns those actions while placement
++                    // is active. Let the binding system receive the real key press.
+                     default:
+                         break;
+                 }
+diff -ruN '--exclude=SHA256_MANIFEST.txt' '--exclude=X048_*' x048_base/apps/openmw/mwinput/mousemanager.cpp x048_final/apps/openmw/mwinput/mousemanager.cpp
+--- x048_base/apps/openmw/mwinput/mousemanager.cpp	2026-08-30 06:14:12.000000000 +0000
++++ x048_final/apps/openmw/mwinput/mousemanager.cpp	2026-08-30 23:09:41.588635794 +0000
+@@ -141,6 +141,22 @@
+         if (arg.direction == SDL_MOUSEWHEEL_FLIPPED)
+             wheelDirection = -wheelDirection;
+ 
++        // X048 placement owns the wheel before QuickLoot/camera zoom. While an
++        // object is grabbed, wheel-up brings it closer and wheel-down moves it
++        // farther away. The event is consumed so a hidden/stale QuickLoot overlay
++        // or the normal camera zoom can never react to the same wheel tick.
++        if (!mBindingsManager->isDetectingBindingState() && wheelDirection != 0)
++        {
++            MWBase::World* world = MWBase::Environment::get().getWorld();
++            if (world && world->isPhysicsGrabActive())
++            {
++                world->adjustPhysicsGrabDistance(static_cast<float>(wheelDirection));
++                input->setJoystickLastUsed(false);
++                input->resetIdleTime();
++                return;
++            }
++        }
++
+         // The Z animation menu owns the wheel anywhere on screen. It uses the
+         // same one-event/one-row cyclic navigation as QuickLoot.
+         if (!mBindingsManager->isDetectingBindingState() && wheelDirection != 0
+diff -ruN '--exclude=SHA256_MANIFEST.txt' '--exclude=X048_*' x048_base/apps/openmw/mwworld/worldimp.cpp x048_final/apps/openmw/mwworld/worldimp.cpp
+--- x048_base/apps/openmw/mwworld/worldimp.cpp	2026-08-30 06:14:12.000000000 +0000
++++ x048_final/apps/openmw/mwworld/worldimp.cpp	2026-08-30 23:09:41.588484536 +0000
+@@ -2279,6 +2279,35 @@
+         }
+     }
+ 
++    void World::adjustPhysicsGrabDistance(float wheelSteps)
++    {
++        wheelSteps = std::max(-8.f, std::min(8.f, wheelSteps));
++        if (std::abs(wheelSteps) < 0.001f)
++            return;
++
++        for (PhysicsObjectState& state : mPhysicsObjects)
++        {
++            if (!state.mGrabbed || state.mPtr.isEmpty())
++                continue;
++
++            // X048: wheel-up behaves like camera zoom-in and brings the held object
++            // closer; wheel-down moves it away. Scale the legal range with the
++            // object's radius so furniture cannot be pulled through the camera and
++            // large props are still allowed to sit far enough in front of the player.
++            const float radius = std::max(4.f, state.mRadius);
++            const float minDistance = std::max(45.f, radius * 0.85f);
++            const float maxDistance = std::max(340.f, radius * 6.f);
++            constexpr float distancePerWheelStep = 18.f;
++            state.mHoldDistance = std::max(minDistance, std::min(maxDistance,
++                state.mHoldDistance - wheelSteps * distancePerWheelStep));
++
++            state.mVelocity.set(0.f, 0.f, 0.f);
++            state.mAngularVelocity.set(0.f, 0.f, 0.f);
++            state.mSleepTimer = 0.f;
++            return;
++        }
++    }
++
+     int World::cyclePhysicsGrabMoveMode()
+     {
+         for (PhysicsObjectState& state : mPhysicsObjects)
+diff -ruN '--exclude=SHA256_MANIFEST.txt' '--exclude=X048_*' x048_base/apps/openmw/mwworld/worldimp.hpp x048_final/apps/openmw/mwworld/worldimp.hpp
+--- x048_base/apps/openmw/mwworld/worldimp.hpp	2026-08-30 06:14:12.000000000 +0000
++++ x048_final/apps/openmw/mwworld/worldimp.hpp	2026-08-30 23:09:41.587870001 +0000
+@@ -513,6 +513,7 @@
+             bool finishPhysicsGrab() override;
+             void rotatePhysicsGrab(float horizontalInput, float verticalInput, float duration) override;
+             void translatePhysicsGrab(float firstAxisInput, float secondAxisInput, float duration) override;
++            void adjustPhysicsGrabDistance(float wheelSteps) override;
+             int cyclePhysicsGrabMoveMode() override;
+             int getPhysicsGrabMoveMode() const override;
+             bool togglePhysicsGrabPhysics() override;
+diff -ruN '--exclude=SHA256_MANIFEST.txt' '--exclude=X048_*' x048_base/files/vfs/l10n/arenamp/en.ini x048_final/files/vfs/l10n/arenamp/en.ini
+--- x048_base/files/vfs/l10n/arenamp/en.ini	2026-08-30 12:06:01.000000000 +0000
++++ x048_final/files/vfs/l10n/arenamp/en.ini	2026-08-30 23:09:41.589360525 +0000
+@@ -354,9 +354,10 @@
+ ; Object placement mode
+ placement.title = Placement mode
+ placement.release = Activate — release object
+-placement.rotate = Mouse / right stick or Weapon / Magic - horizontal / vertical rotation
++placement.rotate = Mouse / right stick or Weapon / Magic — horizontal / vertical turn; hold to rotate
+ placement.rotate_step = Weapon / Magic - rotate
+ placement.rotate_reverse = Run + Weapon / Magic - reverse rotation
++placement.distance = Mouse wheel — move object closer / farther
+ placement.cancel = Inventory - cancel placement
+ placement.reset = Ctrl - align upright and place in front
+ placement.mode = Tab — mode
+diff -ruN '--exclude=SHA256_MANIFEST.txt' '--exclude=X048_*' x048_base/files/vfs/l10n/arenamp/ru.ini x048_final/files/vfs/l10n/arenamp/ru.ini
+--- x048_base/files/vfs/l10n/arenamp/ru.ini	2026-08-30 12:06:01.000000000 +0000
++++ x048_final/files/vfs/l10n/arenamp/ru.ini	2026-08-30 23:09:41.589060834 +0000
+@@ -354,9 +354,10 @@
+ ; Object placement mode
+ placement.title = Режим размещения
+ placement.release = Взять — отпустить предмет
+-placement.rotate = Мышь / правый стик или Оружие / Магия - вращение по горизонтали / вертикали
++placement.rotate = Мышь / правый стик или Оружие / Магия — поворот по горизонтали / вертикали; удерживать — вращать
+ placement.rotate_step = Оружие / Магия - вращение
+ placement.rotate_reverse = Бег + Оружие / Магия - вращение в обратную сторону
++placement.distance = Колесо мыши — приблизить / отдалить предмет
+ placement.cancel = Инвентарь - отменить размещение
+ placement.reset = Ctrl - выровнять и поставить перед игроком
+ placement.mode = Tab — режим
+diff -ruN '--exclude=SHA256_MANIFEST.txt' '--exclude=X048_*' x048_base/server/scripts/config.lua x048_final/server/scripts/config.lua
+--- x048_base/server/scripts/config.lua	2026-08-30 16:01:08.000000000 +0000
++++ x048_final/server/scripts/config.lua	2026-08-30 23:05:25.000000000 +0000
+@@ -520,7 +520,14 @@
+     enabled = true,
+     moderatorsCanPublish = true,
+     greenTopicColor = "#61D879",
+-    maxSyncedTopicsPerNpc = 64
++    maxSyncedTopicsPerNpc = 64,
++
++    -- X048: quest progression is already visible in Dialogue/Quest Manager, so
++    -- automatic chat echoes are disabled by default. These switches affect only
++    -- runtime quest notifications; explicit /quest editor command feedback stays visible.
++    chatProgressMessages = false,
++    chatRewardMessages = false,
++    chatRuntimeErrors = false
+ }
+ 
+ -- X042: modifying original Morrowind journal stages is disabled by default.
+diff -ruN '--exclude=SHA256_MANIFEST.txt' '--exclude=X048_*' x048_base/server/scripts/serverQuestSystem.lua x048_final/server/scripts/serverQuestSystem.lua
+--- x048_base/server/scripts/serverQuestSystem.lua	2026-08-30 16:15:29.000000000 +0000
++++ x048_final/server/scripts/serverQuestSystem.lua	2026-08-30 23:05:25.000000000 +0000
+@@ -66,6 +66,16 @@
+     end
+ end
+ 
++-- X048: player-facing quest state is already represented in the normal dialogue
++-- window and Quest Manager. Keep automatic chat echoes opt-in so they do not
++-- duplicate those surfaces. Editor/command replies continue to use send().
++local function runtimeNotify(pid, message, settingName)
++    local questConfig = config.serverQuests
++    if type(questConfig) == "table" and questConfig[settingName] == true then
++        send(pid, message)
++    end
++end
++
+ local function percentEncode(value)
+     value = tostring(value or "")
+     return (value:gsub("([^%w%-%._~ ])", function(c)
+@@ -855,7 +865,7 @@
+         cv.serverQuestVariables[tostring(reward.key)] = reward.value
+         return true
+     elseif kind == "message" then
+-        send(pid, tostring(reward.text or reward.value or ""))
++        runtimeNotify(pid, tostring(reward.text or reward.value or ""), "chatRewardMessages")
+         return true
+ 
+     -- X042: additional server-authoritative effects.
+@@ -1012,7 +1022,9 @@
+     if state.state == "completed" or state.state == "failed" then state.completedAt = os.time() end
+     Players[pid]:QuicksaveToDrive()
+     if serverQuestSystem.SyncPlayer ~= nil then serverQuestSystem.SyncPlayer(pid) end
+-    if not silent then send(pid, "Started: " .. quest.name .. " (stage " .. stage.index .. ")") end
++    if not silent then
++        runtimeNotify(pid, "Started: " .. quest.name .. " (stage " .. stage.index .. ")", "chatProgressMessages")
++    end
+     return true, state
+ end
+ 
+@@ -1050,7 +1062,8 @@
+     Players[pid]:QuicksaveToDrive()
+     if serverQuestSystem.SyncPlayer ~= nil then serverQuestSystem.SyncPlayer(pid) end
+     if not silent then
+-        send(pid, quest.name .. " -> stage " .. target.index .. (state.state ~= "active" and (" [" .. state.state .. "]") or ""))
++        runtimeNotify(pid, quest.name .. " -> stage " .. target.index
++            .. (state.state ~= "active" and (" [" .. state.state .. "]") or ""), "chatProgressMessages")
+     end
+     return true, state
+ end
+@@ -1420,7 +1433,7 @@
+                 if state == nil then
+                     local ok, why = serverQuestSystem.StartQuest(pid, questId, false, true)
+                     if not ok then
+-                        send(pid, "Cannot start " .. quest.name .. ": " .. tostring(why))
++                        runtimeNotify(pid, "Cannot start " .. quest.name .. ": " .. tostring(why), "chatRuntimeErrors")
+                         serverQuestSystem.SyncPlayer(pid)
+                         return
+                     end

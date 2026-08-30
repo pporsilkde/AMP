@@ -403,6 +403,8 @@ namespace MWBase
             virtual void rotatePhysicsGrab(float horizontalInput, float verticalInput, float duration) = 0;
             /// Move the held target along the currently selected world-axis pair.
             virtual void translatePhysicsGrab(float firstAxisInput, float secondAxisInput, float duration) = 0;
+            /// Mouse-wheel distance control while an object is held. Positive steps move it closer.
+            virtual void adjustPhysicsGrabDistance(float wheelSteps) = 0;
             /// Cycle Walk -> X-Y -> X-Z -> Z-Y -> Walk. Returns the new mode (0..3).
             virtual int cyclePhysicsGrabMoveMode() = 0;
             virtual int getPhysicsGrabMoveMode() const = 0;

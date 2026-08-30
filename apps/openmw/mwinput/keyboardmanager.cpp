@@ -69,9 +69,9 @@ namespace MWInput
             else if (arg.keysym.scancode == SDL_SCANCODE_F4)
                 consumed = togglePostProcessSetting("bloom enabled", "#{arenamp=hotkey.bloom_on}", "#{arenamp=hotkey.bloom_off}");
 
-            // Placement mode owns these literal keys while a prop is grabbed.
-            // Consume them before the binding system so the keys cannot also
-            // trigger jump, sneak, journal, ready weapon/spell, presets, etc.
+            // Placement mode owns only its dedicated literal helper keys.
+            // Ready Weapon / Ready Magic intentionally continue through the
+            // binding system because ActionManager repurposes those actions for rotation.
             MWBase::World* world = MWBase::Environment::get().getWorld();
             const bool placementActive = world && world->isPhysicsGrabActive()
                 && !MWBase::Environment::get().getWindowManager()->isGuiMode();
@@ -92,11 +92,9 @@ namespace MWInput
                         world->resetPhysicsGrabTransform();
                         consumed = true;
                         break;
-                    case SDL_SCANCODE_R:
-                    case SDL_SCANCODE_F:
-                        // Continuous rotation is sampled by ActionManager::update().
-                        consumed = true;
-                        break;
+                    // Do not hard-code R/F here. Ready Weapon / Ready Magic may
+                    // be rebound, and ActionManager owns those actions while placement
+                    // is active. Let the binding system receive the real key press.
                     default:
                         break;
                 }
