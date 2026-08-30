@@ -81,6 +81,7 @@ namespace
         if (!reward.amount.empty()) stream << " " << reward.amount;
         else if (!reward.count.empty()) stream << " x" << reward.count;
         else if (!reward.key.empty()) stream << " " << reward.key << "=" << reward.value;
+        else if (!reward.value.empty()) stream << " " << reward.value;
         else if (!reward.message.empty()) stream << " " << reward.message;
         return stream.str();
     }
@@ -193,12 +194,19 @@ namespace mwmp
         mLogicTarget->addItem("Stage requirements");
         mLogicTarget->addItem("Selected stage choice");
         mLogicTarget->addItem("Selected offer choice");
+        // X042: expose the expanded server vocabulary in Quest Studio. Nested
+        // all/any/not groups remain an advanced JSON feature until the graph
+        // editor gets a dedicated boolean-tree widget.
         for (const char* type : { "level", "item", "gold", "questStage", "questState",
-                 "playerVariable", "serverVariable", "staffRank" })
+                 "questCompleted", "questNotStarted", "playerVariable", "serverVariable", "staffRank",
+                 "skill", "attribute", "faction", "factionRank", "reputation", "bounty", "race",
+                 "class", "cell", "global", "vanillaJournal", "realTime", "cooldown" })
             mRequirementType->addItem(type);
         for (const char* op : { ">=", "<=", "=", "!=", ">", "<" })
             mRequirementOp->addItem(op);
-        for (const char* type : { "gold", "xp", "item", "giveItem", "takeItem", "setPlayerVariable", "message" })
+        for (const char* type : { "gold", "xp", "item", "giveItem", "takeItem", "setPlayerVariable",
+                 "message", "setServerVariable", "addSpell", "removeSpell", "setReputation", "setBounty",
+                 "teleport", "playSound", "messageBox", "setVanillaJournal" })
             mRewardType->addItem(type);
 
         mProgressMode->setIndexSelected(0);

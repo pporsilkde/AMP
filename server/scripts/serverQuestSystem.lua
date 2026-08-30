@@ -16,6 +16,11 @@ local MAX_TOPICS = 64
 local MAX_STAGES = 256
 local MAX_TARGETS = 8
 
+-- X042 safe merge: destructive world/vanilla actions require an explicit
+-- Administrator publish. A moderator may inspect/edit them in a draft, but the
+-- definition cannot become runtime-active until an administrator approves it.
+local ADMIN_ONLY_REWARD_TYPES = { setVanillaJournal = true, setServerVariable = true }
+
 -- X036: hidden transport over the existing reliable GUI packet. Matching X036
 -- clients consume this id before any modal GUI is created.
 local QUEST_TRANSPORT_GUI_ID = -35036
@@ -365,24 +370,74 @@ function serverQuestSystem.ValidateQuest(quest)
     end
 
     local stageIds = {}
+    -- X042: the vocabulary grew, so validation grew with it. Anything not
+    -- listed here is rejected at Publish rather than failing silently at
+    -- runtime.
     local validRequirementTypes = { level = true, item = true, gold = true, questStage = true,
-        questState = true, playerVariable = true, serverVariable = true, staffRank = true }
+        questState = true, questCompleted = true, questNotStarted = true,
+        playerVariable = true, serverVariable = true, staffRank = true,
+        skill = true, attribute = true, faction = true, factionRank = true,
+        reputation = true, bounty = true, race = true, class = true, cell = true,
+        global = true, vanillaJournal = true, realTime = true, cooldown = true }
     local validRewardTypes = { gold = true, xp = true, item = true, giveItem = true, takeItem = true,
-        setPlayerVariable = true, message = true }
+        setPlayerVariable = true, message = true,
+        setServerVariable = true, addSpell = true, removeSpell = true,
+        setReputation = true, setBounty = true, teleport = true,
+        playSound = true, messageBox = true, setVanillaJournal = true }
     local validChoiceActions = { none = true, start = true, advance = true }
 
-    local function validateRequirements(list, context)
-        for _, requirement in ipairs(list or {}) do
-            local kind = tostring(requirement.type or "")
-            if not validRequirementTypes[kind] then
-                table.insert(errors, context .. " has unknown requirement type " .. kind)
-            elseif kind == "item" and trim(requirement.refId) == "" then
-                table.insert(errors, context .. " item requirement has no refId")
-            elseif (kind == "questStage" or kind == "questState") and trim(requirement.questId) == "" then
-                table.insert(errors, context .. " quest requirement has no questId")
-            elseif (kind == "playerVariable" or kind == "serverVariable") and trim(requirement.key) == "" then
-                table.insert(errors, context .. " variable requirement has no key")
+    local validateRequirements
+
+    local function validateRequirementNode(requirement, context, depth)
+        if type(requirement) ~= "table" then
+            table.insert(errors, context .. " has a non-table requirement")
+            return
+        end
+        if depth > 8 then
+            table.insert(errors, context .. " nests requirements more than 8 levels deep")
+            return
+        end
+
+        if requirement.all ~= nil then
+            validateRequirements(requirement.all, context .. " all", depth + 1)
+            return
+        end
+        if requirement.any ~= nil then
+            if type(requirement.any) ~= "table" or #requirement.any == 0 then
+                table.insert(errors, context .. " has an empty any group")
+            else
+                validateRequirements(requirement.any, context .. " any", depth + 1)
             end
+            return
+        end
+        if requirement["not"] ~= nil then
+            validateRequirementNode(requirement["not"], context .. " not", depth + 1)
+            return
+        end
+
+        local kind = tostring(requirement.type or "")
+        if not validRequirementTypes[kind] then
+            table.insert(errors, context .. " has unknown requirement type " .. kind)
+        elseif kind == "item" and trim(requirement.refId) == "" then
+            table.insert(errors, context .. " item requirement has no refId")
+        elseif (kind == "questStage" or kind == "questState" or kind == "questCompleted"
+                or kind == "questNotStarted" or kind == "cooldown") and trim(requirement.questId) == "" then
+            table.insert(errors, context .. " quest requirement has no questId")
+        elseif (kind == "playerVariable" or kind == "serverVariable" or kind == "global")
+                and trim(requirement.key) == "" then
+            table.insert(errors, context .. " variable requirement has no key")
+        elseif (kind == "skill" or kind == "attribute" or kind == "faction" or kind == "factionRank")
+                and trim(requirement.key) == "" and trim(requirement.refId) == "" then
+            table.insert(errors, context .. " " .. kind .. " requirement has no key")
+        elseif kind == "vanillaJournal" and trim(requirement.questId) == "" and trim(requirement.key) == "" then
+            table.insert(errors, context .. " vanillaJournal requirement has no questId")
+        end
+    end
+
+    validateRequirements = function(list, context, depth)
+        depth = depth or 0
+        for _, requirement in ipairs(list or {}) do
+            validateRequirementNode(requirement, context, depth)
         end
     end
 
@@ -444,6 +499,31 @@ function serverQuestSystem.ValidateQuest(quest)
                 table.insert(errors, "Stage " .. tostring(index) .. " " .. kind .. " reward has no numeric amount")
             elseif kind == "setPlayerVariable" and trim(reward.key) == "" then
                 table.insert(errors, "Stage " .. tostring(index) .. " setPlayerVariable has no key")
+            elseif (kind == "addSpell" or kind == "removeSpell") and trim(reward.refId) == "" then
+                table.insert(errors, "Stage " .. tostring(index) .. " " .. kind .. " has no refId")
+            elseif kind == "setServerVariable" and trim(reward.key) == "" then
+                table.insert(errors, "Stage " .. tostring(index) .. " setServerVariable has no key")
+            elseif kind == "teleport" and trim(reward.cell) == "" and trim(reward.value) == "" then
+                table.insert(errors, "Stage " .. tostring(index) .. " teleport has no cell")
+            elseif kind == "setVanillaJournal" then
+                local targetQuest = trim(reward.questId) ~= "" and trim(reward.questId) or trim(reward.key)
+                local whitelist = config.serverQuestVanillaJournalWhitelist
+                if targetQuest == "" or tonumber(reward.index or reward.value) == nil then
+                    table.insert(errors, "Stage " .. tostring(index) .. " setVanillaJournal needs questId and index")
+                elseif type(whitelist) ~= "table" or not tableHelper.containsCaseInsensitiveString(whitelist, targetQuest) then
+                    table.insert(errors, "Stage " .. tostring(index) ..
+                        " setVanillaJournal target " .. targetQuest ..
+                        " is not in config.serverQuestVanillaJournalWhitelist")
+                end
+            end
+
+            if ADMIN_ONLY_REWARD_TYPES[kind] then
+                if quest.adminApprovedDangerousRewards == true then
+                    table.insert(warnings, "Stage " .. tostring(index) .. " uses Administrator-approved reward " .. kind)
+                else
+                    table.insert(errors, "Stage " .. tostring(index) .. " uses Administrator-only reward " .. kind
+                        .. "; an administrator must publish this draft")
+                end
             end
         end
     end
@@ -507,6 +587,73 @@ local function inventoryCount(pid, refId)
     return total
 end
 
+-- X042: helpers for the vanilla-facing requirement types. Every accessor is
+-- defensive: a missing table must fail the check, never raise.
+local function playerData(pid)
+    if Players[pid] == nil then return nil end
+    return Players[pid].data
+end
+
+local function lookupCaseInsensitive(input, key)
+    if type(input) ~= "table" or key == nil then return nil end
+    if input[key] ~= nil then return input[key] end
+    local wanted = tostring(key):lower()
+    for candidate, value in pairs(input) do
+        if tostring(candidate):lower() == wanted then return value end
+    end
+    return nil
+end
+
+local function skillValue(pid, name)
+    local data = playerData(pid)
+    if data == nil or data.skills == nil or name == nil then return nil end
+    local entry = lookupCaseInsensitive(data.skills, name)
+    if entry == nil then return nil end
+    return tonumber(entry.base) or tonumber(entry)
+end
+
+local function attributeValue(pid, name)
+    local data = playerData(pid)
+    if data == nil or data.attributes == nil or name == nil then return nil end
+    local entry = lookupCaseInsensitive(data.attributes, name)
+    if entry == nil then return nil end
+    return tonumber(entry.base) or tonumber(entry)
+end
+
+local function factionRank(pid, factionId)
+    local data = playerData(pid)
+    if data == nil or data.factionRanks == nil or factionId == nil then return nil end
+    return tonumber(lookupCaseInsensitive(data.factionRanks, factionId))
+end
+
+local function worldVariables()
+    if WorldInstance == nil or WorldInstance.data == nil then return {} end
+    return WorldInstance.data.customVariables or {}
+end
+
+local function vanillaGlobal(key)
+    if WorldInstance == nil or WorldInstance.data == nil then return nil end
+    local globals = WorldInstance.data.clientVariables
+    if globals == nil or globals.globals == nil or key == nil then return nil end
+    local entry = lookupCaseInsensitive(globals.globals, key)
+    if type(entry) == "table" then return entry.intValue or entry.floatValue end
+    return entry
+end
+
+local function vanillaJournalIndex(pid, questId)
+    local data = playerData(pid)
+    if data == nil or data.journal == nil or questId == nil then return nil end
+    local best = nil
+    local wanted = tostring(questId):lower()
+    for _, entry in pairs(data.journal) do
+        if entry.quest ~= nil and tostring(entry.quest):lower() == wanted then
+            local index = tonumber(entry.index)
+            if index ~= nil and (best == nil or index > best) then best = index end
+        end
+    end
+    return best
+end
+
 function serverQuestSystem.CheckRequirement(pid, state, requirement)
     if type(requirement) ~= "table" then return false, "invalid requirement" end
     local kind = tostring(requirement.type or "")
@@ -526,21 +673,108 @@ function serverQuestSystem.CheckRequirement(pid, state, requirement)
     elseif kind == "questState" then
         local other = serverQuestSystem.GetPlayerState(pid, requirement.questId)
         return compareValues(other ~= nil and other.state or "not_started", op, value), "questState"
+    elseif kind == "questCompleted" then
+        local other = serverQuestSystem.GetPlayerState(pid, requirement.questId)
+        return other ~= nil and other.state == "completed", "questCompleted"
+    elseif kind == "questNotStarted" then
+        return serverQuestSystem.GetPlayerState(pid, requirement.questId) == nil, "questNotStarted"
     elseif kind == "playerVariable" then
         local cv = ensurePlayerData(pid)
         return compareValues(cv.serverQuestVariables[requirement.key], op, value), "playerVariable"
     elseif kind == "serverVariable" then
-        local vars = WorldInstance ~= nil and WorldInstance.data ~= nil and WorldInstance.data.customVariables or {}
-        return compareValues(vars ~= nil and vars[requirement.key] or nil, op, value), "serverVariable"
+        return compareValues(worldVariables()[requirement.key], op, value), "serverVariable"
     elseif kind == "staffRank" then
         return compareValues(Players[pid].data.settings.staffRank or 0, op, value), "staffRank"
+
+    -- X042: vanilla-facing conditions.
+    elseif kind == "skill" then
+        local current = skillValue(pid, requirement.key or requirement.refId)
+        if current == nil then return false, "skill (unknown)" end
+        return compareValues(current, op, value), "skill"
+    elseif kind == "attribute" then
+        local current = attributeValue(pid, requirement.key or requirement.refId)
+        if current == nil then return false, "attribute (unknown)" end
+        return compareValues(current, op, value), "attribute"
+    elseif kind == "faction" then
+        return factionRank(pid, requirement.key or requirement.refId) ~= nil, "faction"
+    elseif kind == "factionRank" then
+        local rank = factionRank(pid, requirement.key or requirement.refId)
+        if rank == nil then return false, "factionRank (not a member)" end
+        return compareValues(rank, op, value), "factionRank"
+    elseif kind == "reputation" then
+        local fame = Players[pid].data.fame or {}
+        return compareValues(fame.reputation or 0, op, value), "reputation"
+    elseif kind == "bounty" then
+        local fame = Players[pid].data.fame or {}
+        return compareValues(fame.bounty or 0, op, value), "bounty"
+    elseif kind == "race" then
+        local character = Players[pid].data.character or {}
+        return compareValues(tostring(character.race or ""):lower(), op == ">=" and "==" or op,
+            tostring(value or ""):lower()), "race"
+    elseif kind == "class" then
+        local character = Players[pid].data.character or {}
+        return compareValues(tostring(character.class or ""):lower(), op == ">=" and "==" or op,
+            tostring(value or ""):lower()), "class"
+    elseif kind == "cell" then
+        local location = Players[pid].data.location or {}
+        return compareValues(tostring(location.cell or ""):lower(), op == ">=" and "==" or op,
+            tostring(value or ""):lower()), "cell"
+    elseif kind == "global" then
+        local current = vanillaGlobal(requirement.key)
+        if current == nil then return false, "global (unset)" end
+        return compareValues(current, op, value), "global"
+    elseif kind == "vanillaJournal" then
+        local index = vanillaJournalIndex(pid, requirement.questId or requirement.key)
+        if index == nil then return compareValues(-1, op, value), "vanillaJournal" end
+        return compareValues(index, op, value), "vanillaJournal"
+    elseif kind == "realTime" then
+        return compareValues(os.time(), op, tonumber(value) or 0), "realTime"
+    elseif kind == "cooldown" then
+        -- True once the quest may be taken again.
+        local other = serverQuestSystem.GetPlayerState(pid, requirement.questId)
+        if other == nil or other.completedAt == nil then return true, "cooldown" end
+        local seconds = tonumber(requirement.value or requirement.count) or 0
+        return os.time() >= (tonumber(other.completedAt) or 0) + seconds, "cooldown"
     end
     return false, "unknown requirement type " .. kind
 end
 
-local function checkRequirementList(pid, state, requirements)
+-- X042: requirement lists are now a boolean tree. A plain array stays an AND,
+-- so every existing quest keeps working untouched; an entry carrying "all",
+-- "any" or "not" nests instead.
+local checkRequirementList
+
+local function checkRequirementNode(pid, state, node, depth)
+    if type(node) ~= "table" then return false, "invalid requirement" end
+    if depth > 8 then return false, "requirement nesting too deep" end
+
+    if node.all ~= nil then
+        return checkRequirementList(pid, state, node.all, depth + 1)
+    end
+    if node.any ~= nil then
+        local list = node.any
+        if type(list) ~= "table" or #list == 0 then return false, "empty any" end
+        local lastWhy = "any"
+        for _, child in ipairs(list) do
+            local ok, why = checkRequirementNode(pid, state, child, depth + 1)
+            if ok then return true, why end
+            lastWhy = why
+        end
+        return false, lastWhy
+    end
+    if node["not"] ~= nil then
+        local ok, why = checkRequirementNode(pid, state, node["not"], depth + 1)
+        return not ok, "not " .. tostring(why)
+    end
+
+    return serverQuestSystem.CheckRequirement(pid, state, node)
+end
+
+checkRequirementList = function(pid, state, requirements, depth)
+    depth = depth or 0
+    if depth > 8 then return false, "requirement nesting too deep" end
     for _, requirement in ipairs(requirements or {}) do
-        local ok, why = serverQuestSystem.CheckRequirement(pid, state, requirement)
+        local ok, why = checkRequirementNode(pid, state, requirement, depth)
         if not ok then return false, why end
     end
     return true
@@ -568,6 +802,14 @@ local function takeInventory(pid, refId, count)
     tableHelper.cleanNils(Players[pid].data.inventory)
     Players[pid]:LoadItemChanges({ { refId = refId, count = count } }, enumerations.inventory.REMOVE)
     return true
+end
+
+local function callIfPresent(name, ...)
+    if type(tes3mp) == "table" and type(tes3mp[name]) == "function" then
+        tes3mp[name](...)
+        return true
+    end
+    return false
 end
 
 local function applyReward(pid, state, reward)
@@ -598,6 +840,80 @@ local function applyReward(pid, state, reward)
         return true
     elseif kind == "message" then
         send(pid, tostring(reward.text or reward.value or ""))
+        return true
+
+    -- X042: additional server-authoritative effects.
+    elseif kind == "setServerVariable" then
+        if WorldInstance == nil or WorldInstance.data == nil then return false, "no world instance" end
+        WorldInstance.data.customVariables = WorldInstance.data.customVariables or {}
+        WorldInstance.data.customVariables[tostring(reward.key)] = reward.value
+        if type(WorldInstance.QuicksaveToDrive) == "function" then WorldInstance:QuicksaveToDrive() end
+        return true
+    elseif kind == "addSpell" then
+        local refId = tostring(reward.refId or "")
+        if refId == "" then return false, "addSpell has no refId" end
+        local spellbook = Players[pid].data.spellbook
+        if spellbook ~= nil and not tableHelper.containsValue(spellbook, refId) then
+            table.insert(spellbook, refId)
+        end
+        callIfPresent("ClearSpellbookChanges", pid)
+        callIfPresent("SetSpellbookChangesAction", pid, enumerations.spellbook.ADD)
+        callIfPresent("AddSpell", pid, refId)
+        callIfPresent("SendSpellbookChanges", pid)
+        return true
+    elseif kind == "removeSpell" then
+        local refId = tostring(reward.refId or "")
+        if refId == "" then return false, "removeSpell has no refId" end
+        local spellbook = Players[pid].data.spellbook
+        if spellbook ~= nil then tableHelper.removeValue(spellbook, refId) end
+        callIfPresent("ClearSpellbookChanges", pid)
+        callIfPresent("SetSpellbookChangesAction", pid, enumerations.spellbook.REMOVE)
+        callIfPresent("AddSpell", pid, refId)
+        callIfPresent("SendSpellbookChanges", pid)
+        return true
+    elseif kind == "setReputation" then
+        Players[pid].data.fame = Players[pid].data.fame or { bounty = 0, reputation = 0 }
+        Players[pid].data.fame.reputation = tonumber(reward.value or reward.amount) or 0
+        callIfPresent("SetReputation", pid, Players[pid].data.fame.reputation)
+        callIfPresent("SendReputation", pid)
+        return true
+    elseif kind == "setBounty" then
+        Players[pid].data.fame = Players[pid].data.fame or { bounty = 0, reputation = 0 }
+        Players[pid].data.fame.bounty = math.max(0, tonumber(reward.value or reward.amount) or 0)
+        callIfPresent("SetBounty", pid, Players[pid].data.fame.bounty)
+        callIfPresent("SendBounty", pid)
+        return true
+    elseif kind == "teleport" then
+        local cell = tostring(reward.cell or reward.value or "")
+        if cell == "" then return false, "teleport has no cell" end
+        local x = tonumber(reward.posX) or 0
+        local y = tonumber(reward.posY) or 0
+        local z = tonumber(reward.posZ) or 0
+        if logicHandler ~= nil and type(logicHandler.TeleportToCell) == "function" then
+            logicHandler.TeleportToCell(pid, cell, x, y, z, tonumber(reward.rotX) or 0, tonumber(reward.rotZ) or 0)
+            return true
+        end
+        return false, "teleport unsupported on this server build"
+    elseif kind == "playSound" then
+        return callIfPresent("PlaySpeech", pid, tostring(reward.refId or reward.value or "")), "playSound"
+    elseif kind == "messageBox" then
+        callIfPresent("CustomMessageBox", pid, -1, tostring(reward.text or reward.value or ""), "Ok")
+        return true
+    elseif kind == "setVanillaJournal" then
+        -- Deliberately the most restricted action in the vocabulary: rewriting
+        -- the original journal can break the main quest for everyone. Gated by
+        -- an explicit whitelist in config.lua, checked at apply time as well as
+        -- at validation time.
+        local questId = tostring(reward.questId or reward.key or "")
+        local index = tonumber(reward.index or reward.value)
+        if questId == "" or index == nil then return false, "setVanillaJournal needs questId and index" end
+        local whitelist = config.serverQuestVanillaJournalWhitelist
+        if type(whitelist) ~= "table" or not tableHelper.containsCaseInsensitiveString(whitelist, questId) then
+            return false, "setVanillaJournal target " .. questId .. " is not whitelisted"
+        end
+        callIfPresent("ClearJournalChanges", pid)
+        callIfPresent("AddJournalEntry", pid, questId, index, "")
+        callIfPresent("SendJournalChanges", pid)
         return true
     end
     return false, "unknown reward type " .. kind
@@ -675,6 +991,9 @@ function serverQuestSystem.StartQuest(pid, questId, force, silent)
     local rewardsOk, rewardError = applyStageRewardsAtMostOnce(pid, quest, state, stage)
     if not rewardsOk then return false, "Reward error: " .. tostring(rewardError) end
     if stage.complete then state.state = "completed" elseif stage.fail then state.state = "failed" end
+    -- X042: stamp the completion time so the "cooldown" requirement and
+    -- repeatable quests have something authoritative to compare against.
+    if state.state == "completed" or state.state == "failed" then state.completedAt = os.time() end
     Players[pid]:QuicksaveToDrive()
     if serverQuestSystem.SyncPlayer ~= nil then serverQuestSystem.SyncPlayer(pid) end
     if not silent then send(pid, "Started: " .. quest.name .. " (stage " .. stage.index .. ")") end
@@ -711,6 +1030,7 @@ function serverQuestSystem.AdvanceQuest(pid, questId, targetStage, force, silent
     local rewardsOk, rewardError = applyStageRewardsAtMostOnce(pid, quest, state, target)
     if not rewardsOk then return false, "Reward error: " .. tostring(rewardError) end
     if target.complete then state.state = "completed" elseif target.fail then state.state = "failed" else state.state = "active" end
+    if state.state == "completed" or state.state == "failed" then state.completedAt = os.time() end
     Players[pid]:QuicksaveToDrive()
     if serverQuestSystem.SyncPlayer ~= nil then serverQuestSystem.SyncPlayer(pid) end
     if not silent then
@@ -1470,6 +1790,28 @@ Player:
 
 Only moderator/admin accounts can create or edit definitions.]]
 
+local function questUsesAdminOnlyRewards(quest)
+    for _, stage in ipairs((quest and quest.stages) or {}) do
+        for _, reward in ipairs(stage.rewards or {}) do
+            if ADMIN_ONLY_REWARD_TYPES[tostring(reward.type or "")] then return true end
+        end
+    end
+    return false
+end
+
+local function prepareQuestForPublish(pid, quest)
+    if questUsesAdminOnlyRewards(quest) then
+        if not isAdmin(pid) then
+            quest.adminApprovedDangerousRewards = nil
+            return false, "Administrator approval is required for setServerVariable/setVanillaJournal rewards"
+        end
+        quest.adminApprovedDangerousRewards = true
+    else
+        quest.adminApprovedDangerousRewards = nil
+    end
+    return true
+end
+
 local function parseValue(value)
     if value == nil then return nil end
     if tostring(value) == "true" then return true end
@@ -1488,6 +1830,9 @@ end
 local function markEdited(pid, q, action)
     q.version = (tonumber(q.version) or 1) + 1
     if q.status == "published" then q.status = "draft" end
+    -- Any edit invalidates a previous administrator approval of dangerous
+    -- rewards. The modified definition must be reviewed again.
+    q.adminApprovedDangerousRewards = nil
     return serverQuestSystem.SaveQuest(q, getAccountName(pid), action)
 end
 
@@ -1598,18 +1943,27 @@ local function processCommand(pid, cmd)
         if stage == nil then send(pid, "Stage not found") return end
         local kind = tostring(cmd[5] or "")
         local requirement
-        if kind == "level" or kind == "gold" or kind == "staffRank" then
+        if kind == "level" or kind == "gold" or kind == "staffRank"
+                or kind == "reputation" or kind == "bounty" or kind == "realTime" then
             requirement = { type = kind, operator = cmd[6], value = parseValue(cmd[7]) }
         elseif kind == "item" then
             requirement = { type = kind, refId = cmd[6], operator = cmd[7], count = tonumber(cmd[8]), value = tonumber(cmd[8]) }
-        elseif kind == "questStage" or kind == "questState" then
+        elseif kind == "questStage" or kind == "questState" or kind == "cooldown" then
             requirement = { type = kind, questId = normalizeId(cmd[6]), operator = cmd[7], value = parseValue(cmd[8]) }
-        elseif kind == "playerVariable" or kind == "serverVariable" then
+        elseif kind == "questCompleted" or kind == "questNotStarted" then
+            requirement = { type = kind, questId = normalizeId(cmd[6]) }
+        elseif kind == "playerVariable" or kind == "serverVariable" or kind == "global"
+                or kind == "skill" or kind == "attribute" or kind == "faction" or kind == "factionRank" then
             requirement = { type = kind, key = cmd[6], operator = cmd[7], value = parseValue(cmd[8]) }
+        elseif kind == "vanillaJournal" then
+            requirement = { type = kind, questId = cmd[6], operator = cmd[7], value = parseValue(cmd[8]) }
+        elseif kind == "race" or kind == "class" or kind == "cell" then
+            requirement = { type = kind, operator = "==", value = tableHelper.concatenateFromIndex(cmd, 6) }
         else
-            send(pid, "Requirement types: level, gold, item, questStage, questState, playerVariable, serverVariable, staffRank") return
+            send(pid, "Unknown requirement type; use Quest Studio or /quest help") return
         end
-        if requirement.operator == nil or requirement.value == nil then
+        if requirement.type ~= "questCompleted" and requirement.type ~= "questNotStarted"
+                and (requirement.operator == nil or requirement.value == nil) then
             send(pid, "Invalid requirement. Use /quest help for examples") return
         end
         table.insert(stage.requirements, requirement)
@@ -1622,12 +1976,22 @@ local function processCommand(pid, cmd)
         local reward
         if kind == "gold" or kind == "xp" then
             reward = { type = kind, amount = tonumber(cmd[6]) }
-        elseif kind == "item" or kind == "takeItem" then
+        elseif kind == "item" or kind == "giveItem" or kind == "takeItem" then
             reward = { type = kind, refId = cmd[6], count = tonumber(cmd[7]) or 1 }
-        elseif kind == "message" then
-            reward = { type = "message", text = tableHelper.concatenateFromIndex(cmd, 6) }
+        elseif kind == "message" or kind == "messageBox" then
+            reward = { type = kind, text = tableHelper.concatenateFromIndex(cmd, 6) }
+        elseif kind == "setPlayerVariable" or kind == "setServerVariable" then
+            reward = { type = kind, key = cmd[6], value = parseValue(cmd[7]) }
+        elseif kind == "addSpell" or kind == "removeSpell" or kind == "playSound" then
+            reward = { type = kind, refId = cmd[6] }
+        elseif kind == "setReputation" or kind == "setBounty" then
+            reward = { type = kind, value = tonumber(cmd[6]) }
+        elseif kind == "teleport" then
+            reward = { type = kind, cell = tableHelper.concatenateFromIndex(cmd, 6) }
+        elseif kind == "setVanillaJournal" then
+            reward = { type = kind, questId = cmd[6], index = tonumber(cmd[7]) }
         else
-            send(pid, "Reward types: gold, xp, item, takeItem, message") return
+            send(pid, "Unknown reward type; use Quest Studio or /quest help") return
         end
         table.insert(stage.rewards, reward)
         markEdited(pid, q, "reward added at stage " .. stage.index)
@@ -1645,6 +2009,8 @@ local function processCommand(pid, cmd)
         for _, w in ipairs(warnings) do table.insert(lines, "WARN: " .. w) end
         tes3mp.CustomMessageBox(pid, config.customMenuIds.questPlayerJournal, table.concat(lines, "\n"), "Ok")
     elseif sub == "publish" then
+        local approvalOk, approvalWhy = prepareQuestForPublish(pid, q)
+        if not approvalOk then send(pid, approvalWhy) return end
         local errors, warnings = serverQuestSystem.ValidateQuest(q)
         if #errors > 0 then send(pid, "Cannot publish: " .. #errors .. " validation error(s)") return end
         if not isAdmin(pid) and config.serverQuests ~= nil and config.serverQuests.moderatorsCanPublish == false then
@@ -1789,14 +2155,23 @@ end
 local function editorRequirement(kind, op, value, reference)
     kind = tostring(kind or "")
     op = tostring(op or ">=")
-    if kind == "level" or kind == "gold" or kind == "staffRank" then
+    if kind == "level" or kind == "gold" or kind == "staffRank"
+            or kind == "reputation" or kind == "bounty" or kind == "realTime" then
         return { type = kind, operator = op, value = parseValue(value) }
     elseif kind == "item" then
         return { type = kind, refId = trim(reference), operator = op, count = tonumber(value), value = tonumber(value) }
-    elseif kind == "questStage" or kind == "questState" then
+    elseif kind == "questStage" or kind == "questState" or kind == "cooldown" then
         return { type = kind, questId = normalizeId(reference), operator = op, value = parseValue(value) }
-    elseif kind == "playerVariable" or kind == "serverVariable" then
+    elseif kind == "questCompleted" or kind == "questNotStarted" then
+        return { type = kind, questId = normalizeId(reference) }
+    elseif kind == "playerVariable" or kind == "serverVariable" or kind == "global"
+            or kind == "skill" or kind == "attribute" or kind == "faction" or kind == "factionRank" then
         return { type = kind, key = trim(reference), operator = op, value = parseValue(value) }
+    elseif kind == "vanillaJournal" then
+        return { type = kind, questId = trim(reference), operator = op, value = parseValue(value) }
+    elseif kind == "race" or kind == "class" or kind == "cell" then
+        local expected = trim(value) ~= "" and trim(value) or trim(reference)
+        return { type = kind, operator = "==", value = expected }
     end
     return nil
 end
@@ -1807,10 +2182,20 @@ local function editorReward(kind, valueA, valueB)
         return { type = kind, amount = tonumber(valueA) }
     elseif kind == "item" or kind == "giveItem" or kind == "takeItem" then
         return { type = kind, refId = trim(valueA), count = tonumber(valueB) or 1 }
-    elseif kind == "setPlayerVariable" then
+    elseif kind == "setPlayerVariable" or kind == "setServerVariable" then
         return { type = kind, key = trim(valueA), value = parseValue(valueB) }
-    elseif kind == "message" then
+    elseif kind == "message" or kind == "messageBox" then
         return { type = kind, text = tostring(valueA or "") }
+    elseif kind == "addSpell" or kind == "removeSpell" or kind == "playSound" then
+        return { type = kind, refId = trim(valueA) }
+    elseif kind == "setReputation" or kind == "setBounty" then
+        return { type = kind, value = tonumber(valueA) }
+    elseif kind == "teleport" then
+        -- MyGUI v1 exposes two generic value fields; for teleport the first is
+        -- the destination cell and optional coordinates remain JSON-advanced.
+        return { type = kind, value = trim(valueA) }
+    elseif kind == "setVanillaJournal" then
+        return { type = kind, key = trim(valueA), value = tonumber(valueB) }
     end
     return nil
 end
@@ -2013,6 +2398,8 @@ local function handleMyGuiEditorCommand(pid, data)
         sync(q.id, string.format("Validation: %d error(s), %d warning(s)", #errors, #warnings))
 
     elseif action == "publish" then
+        local approvalOk, approvalWhy = prepareQuestForPublish(pid, q)
+        if not approvalOk then sync(q.id, approvalWhy) return true end
         local errors, warnings = serverQuestSystem.ValidateQuest(q)
         if #errors > 0 then serverQuestSystem.validation[q.id] = { errors = errors, warnings = warnings }; sync(q.id, "Fix validation errors before publishing")
         elseif not isAdmin(pid) and config.serverQuests ~= nil and config.serverQuests.moderatorsCanPublish == false then sync(q.id, "Admin approval required")
@@ -2078,11 +2465,15 @@ local function onGuiAction(eventStatus, pid, idGui, data)
                 q.status = "disabled"; q.version = q.version + 1
                 serverQuestSystem.SaveQuest(q, getAccountName(pid), "disabled from editor v2")
             else
-                local errors, warnings = serverQuestSystem.ValidateQuest(q)
-                if #errors > 0 then send(pid, "Fix validation errors before publishing")
-                elseif not isAdmin(pid) and config.serverQuests ~= nil and config.serverQuests.moderatorsCanPublish == false then send(pid, "Admin approval required")
-                else q.status = "published"; q.version = q.version + 1; serverQuestSystem.SaveQuest(q, getAccountName(pid), "published from editor v2")
-                    send(pid, "Published " .. q.name .. (#warnings > 0 and (" with " .. #warnings .. " warning(s)") or "")) end
+                local approvalOk, approvalWhy = prepareQuestForPublish(pid, q)
+                if not approvalOk then send(pid, approvalWhy)
+                else
+                    local errors, warnings = serverQuestSystem.ValidateQuest(q)
+                    if #errors > 0 then send(pid, "Fix validation errors before publishing")
+                    elseif not isAdmin(pid) and config.serverQuests ~= nil and config.serverQuests.moderatorsCanPublish == false then send(pid, "Admin approval required")
+                    else q.status = "published"; q.version = q.version + 1; serverQuestSystem.SaveQuest(q, getAccountName(pid), "published from editor v2")
+                        send(pid, "Published " .. q.name .. (#warnings > 0 and (" with " .. #warnings .. " warning(s)") or "")) end
+                end
             end
             serverQuestSystem.SyncAll(); showQuestDetails(pid, q)
         elseif index == 7 then

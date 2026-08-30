@@ -212,6 +212,14 @@ void Networking::processPlayerPacket(RakNet::Packet *packet)
         // ordered snapshot once the appearance becomes authoritative.
         if (player->isVisibleToOthers())
             player->sendToLoaded(myPacket);
+
+        // X042: ID_PLAYER_BASEINFO is handled inline here; there is no
+        // ProcessorPlayerBaseInfo registered on the server side. Falling
+        // through to PlayerProcessor::Process() below therefore logged
+        // "Unhandled PlayerPacket with identifier 142" on every login, which
+        // is pure noise. The packet is fully processed at this point.
+        if (player->getLoadState() == Player::POSTLOADED)
+            return;
     }
 
     if (player->getLoadState() == Player::NOTLOADED)

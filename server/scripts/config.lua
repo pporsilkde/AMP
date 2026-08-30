@@ -523,6 +523,11 @@ config.serverQuests = {
     maxSyncedTopicsPerNpc = 64
 }
 
+-- X042: modifying original Morrowind journal stages is disabled by default.
+-- Add exact vanilla quest IDs here only when an administrator intentionally
+-- wants a server quest to advance those original quests.
+config.serverQuestVanillaJournalWhitelist = {}
+
 -- Exactly as in the old server: keep this effectively empty so no second startup banner is printed.
 config.startupScriptsInstructions = color.SkyBlue .. " \n"
 
