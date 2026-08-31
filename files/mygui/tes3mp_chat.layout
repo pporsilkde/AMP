@@ -32,9 +32,8 @@
       </Widget>
       <Widget type="Button" skin="MW_Button" position="190 4 110 24" name="TabChat"/>
       <Widget type="Button" skin="MW_Button" position="304 4 110 24" name="TabGroup"/>
-      <Widget type="Button" skin="MW_Button" position="418 4 110 24" name="TabHome"/>
-      <Widget type="Button" skin="MW_Button" position="532 4 110 24" name="TabPlayers"/>
-      <Widget type="Button" skin="MW_Button" position="646 4 54 24" name="ReturnButton"/>
+      <Widget type="Button" skin="MW_Button" position="418 4 110 24" name="TabPlayers"/>
+      <Widget type="Button" skin="MW_Button" position="532 4 168 24" name="ReturnButton"/>
     </Widget>
 
     <Widget type="Widget" skin="" position="10 44 700 30" align="HStretch Top" name="ChatToolbar">
@@ -197,13 +196,5 @@
       </Widget>
     </Widget>
 
-    <Widget type="Widget" skin="MW_Box" position="10 46 700 416" align="Stretch" name="HomePane">
-      <Property key="Visible" value="false"/>
-      <Widget type="TextBox" skin="SandBrightText" position="18 18 664 28" name="HomeTitle"/>
-      <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="18 58 664 330" name="HomeInfo">
-        <Property key="EditStatic" value="true"/><Property key="ReadOnly" value="true"/>
-        <Property key="MultiLine" value="true"/><Property key="WordWrap" value="true"/>
-      </Widget>
-    </Widget>
   </Widget>
 </MyGUI>

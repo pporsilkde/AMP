@@ -111,12 +111,6 @@ config.groupSystem = {
     ["xp signal lifetime seconds"] = 8,
     ["summon protection"] = true,
     ["summon check interval ms"] = 2000,
-
-    -- Legacy periodic StopCombat sweep. Keep this OFF on X057+ clients: the
-    -- engine blocks friendly summon aggression before combat begins and the
-    -- OnObjectHit validator below is enough as a compatibility backstop. Turn
-    -- it on only when intentionally supporting old clients without X057.
-    ["summon legacy stopcombat tick"] = false,
     ["max client kill xp signal"] = 25000,
     ["max client quest xp signal"] = 25000,
 

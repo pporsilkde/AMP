@@ -499,8 +499,7 @@ jobs:
           grep -q 'config.arenaCombatPursuitThroughDoors = true' server/scripts/config.lua
           grep -q 'config.arenaCombatPursuitMinimumChance = 0.10' server/scripts/config.lua
           grep -q 'Contents/Resources/server' CMakeLists.txt
-          grep -q 'Contents/Resources/server' cmake/CMakeLists.txt
-          if grep -F 'Contents/MacOS/server' CMakeLists.txt cmake/CMakeLists.txt; then
+          if grep -F 'Contents/MacOS/server' CMakeLists.txt; then
             echo 'ArenaMP server data must not be installed inside Contents/MacOS.' >&2
             exit 1
           fi
@@ -508,7 +507,7 @@ jobs:
           grep -Fq 'serverBaseDir.filePath(QStringLiteral("server"))' apps/launcher/serverdialog.cpp
           grep -q 'set(OSG_PLUGIN_PREFIX_DIR "osgPlugins")' CMakeLists.txt
           grep -q 'OSG_LIBRARY_PATH' apps/openmw/main.cpp
-          if grep -R -F 'osgPlugins-${OPENSCENEGRAPH_VERSION}' CMakeLists.txt cmake/CMakeLists.txt; then
+          if grep -F 'osgPlugins-${OPENSCENEGRAPH_VERSION}' CMakeLists.txt; then
             echo 'Versioned OSG plugin directories with periods are not code-signing safe.' >&2
             exit 1
           fi
@@ -611,7 +610,7 @@ jobs:
           grep -q 'openmw-launcher openmw-wizard tes3mp' CI/macos-arm64/validate-bundle.sh
           grep -q 'set(OSG_PLUGIN_PREFIX_DIR "osgPlugins")' CMakeLists.txt
           grep -q 'OSG_LIBRARY_PATH' apps/openmw/main.cpp
-          if grep -R -F 'osgPlugins-${OPENSCENEGRAPH_VERSION}' CMakeLists.txt cmake/CMakeLists.txt; then
+          if grep -F 'osgPlugins-${OPENSCENEGRAPH_VERSION}' CMakeLists.txt; then
             echo 'Versioned OSG plugin directories with periods are not code-signing safe.' >&2
             exit 1
           fi

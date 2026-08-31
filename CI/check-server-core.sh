@@ -68,7 +68,7 @@ grep -q '"Tribunal.esm"' "$root/server/data/requiredDataFiles.json"
 grep -q '"Bloodmoon.esm"' "$root/server/data/requiredDataFiles.json"
 grep -q '"arena_caius_drink"' "$root/server/data/custom/quests/index.json"
 grep -q '"status": "published"' "$root/server/data/custom/quests/arena_caius_drink.json"
-grep -q '"potion_mazte_01"' "$root/server/data/custom/quests/arena_caius_drink.json"
+grep -q '"potion_local_brew_01"' "$root/server/data/custom/quests/arena_caius_drink.json"
 grep -q '"playerNames"' "$root/server/data/banlist.json"
 grep -q '"ipAddresses"' "$root/server/data/banlist.json"
 
@@ -158,13 +158,10 @@ if grep -R -E 'git clone .*CoreScripts|github.com/TES3MP/CoreScripts' \
 fi
 
 grep -q 'OpenMW_SOURCE_DIR}/server/' "$root/CMakeLists.txt"
-grep -q 'OpenMW_SOURCE_DIR}/server/' "$root/cmake/CMakeLists.txt"
 grep -q 'PATTERN "\*.dll" EXCLUDE' "$root/CMakeLists.txt"
-grep -q 'PATTERN "\*.dll" EXCLUDE' "$root/cmake/CMakeLists.txt"
 grep -Fq 'Contents/Resources/server' "$root/CMakeLists.txt"
-grep -Fq 'Contents/Resources/server' "$root/cmake/CMakeLists.txt"
 if grep -Fq 'DESTINATION "${APP_BUNDLE_NAME}/Contents/MacOS/server"' \
-    "$root/CMakeLists.txt" "$root/cmake/CMakeLists.txt"; then
+    "$root/CMakeLists.txt"; then
   echo "ERROR: macOS server resources are installed inside Contents/MacOS" >&2
   exit 1
 fi

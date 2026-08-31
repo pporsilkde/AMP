@@ -59,7 +59,6 @@ namespace
     constexpr int sHudHeight = 400;
     constexpr const char* sHudFont = "Russo";
     constexpr const char* sMenuFont = "DejaVuLGCSansMono";
-    constexpr const char* sColorChatFont = "ArenaMPChatColor";
     constexpr const char* sChatFontResource = "ArenaMPChatColor.xml";
 
     std::string localizeArena(const std::string& key)
@@ -241,7 +240,6 @@ namespace mwmp
         , mEmojiBar(nullptr)
         , mColorBar(nullptr)
         , mGroupPane(nullptr)
-        , mHomePane(nullptr)
         , mPlayersPane(nullptr)
         , mPlayersActionRow(nullptr)
         , mGroupActionRow1(nullptr)
@@ -259,7 +257,6 @@ namespace mwmp
         , mGroupTargetEdit(nullptr)
         , mTabChat(nullptr)
         , mTabGroup(nullptr)
-        , mTabHome(nullptr)
         , mTabPlayers(nullptr)
         , mPlayersRefreshButton(nullptr)
         , mPlayersOpenListButton(nullptr)
@@ -406,7 +403,6 @@ namespace mwmp
         getWidget(mColorBar, "ColorBar");
         getWidget(mColorBarLabel, "ColorBarLabel");
         getWidget(mGroupPane, "GroupPane");
-        getWidget(mHomePane, "HomePane");
         getWidget(mPlayersPane, "PlayersPane");
         getWidget(mPlayersActionRow, "PlayersActionRow");
         getWidget(mPlayersList, "PlayersList");
@@ -422,7 +418,6 @@ namespace mwmp
 
         getWidget(mTabChat, "TabChat");
         getWidget(mTabGroup, "TabGroup");
-        getWidget(mTabHome, "TabHome");
         getWidget(mTabPlayers, "TabPlayers");
         getWidget(mModeOoc, "ModeOoc");
         getWidget(mModeRp, "ModeRp");
@@ -485,19 +480,14 @@ namespace mwmp
 
         MyGUI::TextBox* title = nullptr;
         MyGUI::TextBox* groupTitle = nullptr;
-        MyGUI::TextBox* homeTitle = nullptr;
         MyGUI::TextBox* playersTitle = nullptr;
-        MyGUI::EditBox* homeInfo = nullptr;
         getWidget(title, "PlayerMenuTitle");
         getWidget(groupTitle, "GroupTitle");
-        getWidget(homeTitle, "HomeTitle");
         getWidget(playersTitle, "PlayersTitle");
-        getWidget(homeInfo, "HomeInfo");
 
         title->setCaption(localizeArena("chat.menu.title"));
         setMenuCaption(mTabChat, localizeArena("chat.tab.chat"));
         setMenuCaption(mTabGroup, localizeArena("chat.tab.group"));
-        setMenuCaption(mTabHome, localizeArena("chat.tab.home"));
         setMenuCaption(mTabPlayers, localizeArena("chat.tab.players"));
         setMenuCaption(mReturnButton, localizeArena("chat.return_game"));
         setMenuCaption(mModeOoc, "OOC");
@@ -531,8 +521,6 @@ namespace mwmp
         setMenuCaption(mGroupLeaderButton, localizeArena("chat.group.leader"));
         setMenuCaption(mGroupAcceptButton, localizeArena("chat.group.accept"));
         setMenuCaption(mGroupDeclineButton, localizeArena("chat.group.decline"));
-        homeTitle->setCaption(localizeArena("chat.home.title"));
-        homeInfo->setCaption(localizeArena("chat.home.placeholder"));
         playersTitle->setCaption(localizeArena("chat.players.title"));
         mPlayersInfo->setCaption(localizeArena("chat.players.loading"));
         setMenuCaption(mPlayersRefreshButton, localizeArena("chat.group.refresh"));
@@ -541,18 +529,8 @@ namespace mwmp
 
         emojiFontName = Settings::Manager::getString("emoji font", "Chat");
         menuFontName = Settings::Manager::getString("menu font", "Chat");
-
-        // X058: X053 shipped the RGBA ArenaMPChatColor atlas but left both
-        // settings blank, which deliberately forced the ASCII fallback (:),
-        // xD, <3). Existing user configs therefore kept showing text smileys
-        // even after the PNG atlas was installed. Treat blank as the bundled
-        // colour font; a genuinely missing/malformed resource still falls back
-        // safely to DejaVu/ASCII below. The compact HUD remains Russo.
-        if (emojiFontName.empty())
-            emojiFontName = sColorChatFont;
         if (menuFontName.empty())
-            menuFontName = sColorChatFont;
-
+            menuFontName = sMenuFont;
         ensureChatFontLoaded();
         if (MyGUI::FontManager::getInstance().getByName(menuFontName) == nullptr)
             menuFontName = sMenuFont;
@@ -560,7 +538,6 @@ namespace mwmp
 
         mTabChat->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onTabClicked);
         mTabGroup->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onTabClicked);
-        mTabHome->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onTabClicked);
         mTabPlayers->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onTabClicked);
         mModeOoc->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onModeClicked);
         mModeRp->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onModeClicked);
@@ -612,7 +589,6 @@ namespace mwmp
         // Keep the title bar draggable even though its label occupies part of it.
         title->setNeedMouseFocus(false);
         mGroupInfo->setEditReadOnly(true);
-        homeInfo->setEditReadOnly(true);
         updateGroupControls();
     }
 
@@ -1343,7 +1319,6 @@ namespace mwmp
         mEmojiBar->setVisible(chatVisible && activeDrawer == DRAWER_EMOJI);
         mColorBar->setVisible(chatVisible && activeDrawer == DRAWER_COLOR);
         mGroupPane->setVisible(menuVisible && activeTab == TAB_GROUP);
-        mHomePane->setVisible(menuVisible && activeTab == TAB_HOME);
         mPlayersPane->setVisible(menuVisible && activeTab == TAB_PLAYERS);
 
         mCommandLine->setVisible(editorVisible);
@@ -1395,7 +1370,6 @@ namespace mwmp
     {
         mTabChat->setStateSelected(activeTab == TAB_CHAT);
         mTabGroup->setStateSelected(activeTab == TAB_GROUP);
-        mTabHome->setStateSelected(activeTab == TAB_HOME);
         mTabPlayers->setStateSelected(activeTab == TAB_PLAYERS);
         mModeOoc->setStateSelected(!rpMode);
         mModeRp->setStateSelected(rpMode);
@@ -1605,8 +1579,6 @@ namespace mwmp
         setMenuState(true);
         if (sender == mTabGroup)
             selectTab(TAB_GROUP);
-        else if (sender == mTabHome)
-            selectTab(TAB_HOME);
         else if (sender == mTabPlayers)
             selectTab(TAB_PLAYERS);
         else
@@ -1931,7 +1903,6 @@ namespace mwmp
             mDragHandle->setAlpha(1.f);
             mChatToolbar->setAlpha(1.f);
             mGroupPane->setAlpha(1.f);
-            mHomePane->setAlpha(1.f);
         }
         else
         {
@@ -2224,7 +2195,6 @@ namespace mwmp
         tabs.push_back(mTabChat);
         tabs.push_back(mTabGroup);
         tabs.push_back(mTabPlayers);
-        tabs.push_back(mTabHome);
         tabs.push_back(mReturnButton);
         layoutRow(tabs, titleWidth, 4, std::max(120, mDragHandle->getWidth() - titleWidth - 10), 24, sRowGap);
 
@@ -2276,7 +2246,6 @@ namespace mwmp
         const int paneTop = 46;
         const int paneHeight = std::max(200, mainHeight - paneTop - sSideMargin);
         mGroupPane->setCoord(sSideMargin, paneTop, inner, paneHeight);
-        mHomePane->setCoord(sSideMargin, paneTop, inner, paneHeight);
         mPlayersPane->setCoord(sSideMargin, paneTop, inner, paneHeight);
 
         // Group page: info on the left, live roster on the right, three
@@ -2342,10 +2311,6 @@ namespace mwmp
         playerActions.push_back(mPlayersInviteButton);
         layoutRow(playerActions, 0, 2, paneInner, 26, sRowGap);
 
-        if (MyGUI::Widget* homeTitle = mHomePane->findWidget("HomeTitle"))
-            homeTitle->setCoord(18, 18, paneInner, 28);
-        if (MyGUI::Widget* homeInfo = mHomePane->findWidget("HomeInfo"))
-            homeInfo->setCoord(18, 58, paneInner, std::max(80, paneHeight - 80));
     }
 
     // ------------------------------------------------------------------

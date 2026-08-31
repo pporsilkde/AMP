@@ -1106,7 +1106,7 @@ local function stopSummonCombat(cellDescription, uid, targetPid)
 end
 
 function GroupHelper_SummonTick()
-    -- X058: this sweep is legacy compatibility only. The X057 client-side
+    -- X057: this sweep is legacy compatibility only. The client-side
     -- MechanicsHelper protection rejects friendly summon combat before aggro is
     -- created, while OnObjectHit below remains a reactive server backstop for
     -- mismatched/older clients. Running this unconditionally caused an endless

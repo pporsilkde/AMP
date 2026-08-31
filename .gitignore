@@ -28,7 +28,6 @@ Doxygen
 .idea
 cmake-build-*
 files/windows/*.aps
-cmake-build-*
 ## qt-creator
 CMakeLists.txt.user*
 .vs
@@ -85,6 +84,11 @@ moc_*.cxx
 *.[ao]
 *.so
 venv/
+/.cache/
+/artifacts/
+/actions-artifacts/
+/install/
+/*.zip
 
 # ArenaMP bundled server core
 # The generic `data` rule above also matches server/data. Re-include this

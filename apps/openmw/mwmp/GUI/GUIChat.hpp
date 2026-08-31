@@ -61,7 +61,6 @@ namespace mwmp
         {
             TAB_CHAT = 0,
             TAB_GROUP,
-            TAB_HOME,
             TAB_PLAYERS
         };
 
@@ -232,7 +231,6 @@ namespace mwmp
         MyGUI::Widget* mEmojiBar;
         MyGUI::Widget* mColorBar;
         MyGUI::Widget* mGroupPane;
-        MyGUI::Widget* mHomePane;
         MyGUI::Widget* mPlayersPane;
         MyGUI::Widget* mPlayersActionRow;
         MyGUI::Widget* mGroupActionRow1;
@@ -251,7 +249,6 @@ namespace mwmp
 
         MyGUI::Button* mTabChat;
         MyGUI::Button* mTabGroup;
-        MyGUI::Button* mTabHome;
         MyGUI::Button* mTabPlayers;
         MyGUI::Button* mPlayersRefreshButton;
         MyGUI::Button* mPlayersOpenListButton;
