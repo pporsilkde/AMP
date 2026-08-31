@@ -63,6 +63,7 @@ Launcher::GraphicsPage::GraphicsPage(Config::LauncherSettings& launcherSettings,
     , mRecommendedQuality(2)
     , mInitializingQuality(false)
     , mInitializingOcclusion(false)
+    , mGraphicsBaselineValid(false)
 {
     setObjectName ("GraphicsPage");
     setupUi(this);
@@ -205,7 +206,8 @@ void Launcher::GraphicsPage::slotOcclusionSettingChanged()
         return;
 
     applyOcclusionSettingsToManager();
-    saveUserSettingsToDisk();
+    if (saveUserSettingsToDisk())
+        Settings::Manager::resetPendingChanges();
 }
 
 void Launcher::GraphicsPage::syncGraphicsControls()
@@ -333,10 +335,26 @@ void Launcher::GraphicsPage::syncGraphicsControls()
     slotStandardToggled(standardRadioButton->isChecked());
     slotFramerateLimitToggled(framerateLimitCheckBox->isChecked());
     updateShadowControls();
+
+    // Y001: keep the settings snapshot that actually populated these controls.
+    // Other launcher groups are allowed to reload Settings::Manager later; this
+    // baseline prevents such reloads from making untouched graphics controls look
+    // like user edits.
+    mGraphicsBaselineSettings = Settings::Manager::mUserSettings;
+    mGraphicsBaselineValid = true;
 }
 
-void Launcher::GraphicsPage::saveSettings()
+bool Launcher::GraphicsPage::saveSettings()
 {
+    // Y001: detect values actually edited in the Launcher against the snapshot
+    // that populated the controls. Settings::Manager may have been reloaded later
+    // by another launcher group (for example the live occlusion controls), so use
+    // our own stable baseline instead of whatever map happens to be current now.
+    const Settings::CategorySettingValueMap currentManagerSettings = Settings::Manager::mUserSettings;
+    if (mGraphicsBaselineValid)
+        Settings::Manager::mUserSettings = mGraphicsBaselineSettings;
+    Settings::Manager::resetPendingChanges();
+
     // Visuals
 
     // Ensure we only set the new settings if they changed. This is to avoid cluttering the
@@ -501,6 +519,49 @@ void Launcher::GraphicsPage::saveSettings()
         autoSelectQualityCheckBox->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
     storeLauncherValue(QStringLiteral("General/Graphics/vendorOptimizations"),
         vendorOptimizationsCheckBox->isChecked() ? QStringLiteral("true") : QStringLiteral("false"));
+
+    const Settings::CategorySettingVector changedKeys = Settings::Manager::getPendingChanges();
+    Settings::CategorySettingValueMap desiredValues;
+    for (const Settings::CategorySetting& key : changedKeys)
+    {
+        const auto value = Settings::Manager::mUserSettings.find(key);
+        if (value != Settings::Manager::mUserSettings.end())
+            desiredValues.emplace(key, value->second);
+    }
+    const Settings::CategorySettingValueMap nextGraphicsBaseline = Settings::Manager::mUserSettings;
+
+    // Nothing on the graphics page changed. Keep the current on-disk settings
+    // untouched and restore the manager state used by the other launcher pages.
+    if (desiredValues.empty())
+    {
+        Settings::Manager::mUserSettings = currentManagerSettings;
+        Settings::Manager::resetPendingChanges();
+        return true;
+    }
+
+    if (!reloadUserSettingsFromDisk())
+    {
+        Settings::Manager::mUserSettings = currentManagerSettings;
+        Settings::Manager::resetPendingChanges();
+        return false;
+    }
+
+    for (const auto& entry : desiredValues)
+        Settings::Manager::setString(entry.first.second, entry.first.first, entry.second);
+
+    if (!saveUserSettingsToDisk())
+    {
+        Settings::Manager::mUserSettings = currentManagerSettings;
+        Settings::Manager::resetPendingChanges();
+        return false;
+    }
+
+    // Advance only our baseline. The global manager intentionally stays on the
+    // fresh on-disk map plus the just-applied graphics edits.
+    mGraphicsBaselineSettings = nextGraphicsBaseline;
+    mGraphicsBaselineValid = true;
+    Settings::Manager::resetPendingChanges();
+    return true;
 }
 
 int Launcher::GraphicsPage::terrainDetailIndexFromSettings() const
@@ -605,7 +666,7 @@ bool Launcher::GraphicsPage::reloadUserSettingsFromDisk()
     catch (const std::exception& e)
     {
         QMessageBox::critical(this, tr("Error reading settings.cfg"),
-            tr("Could not reload the current game settings before applying the preset:\n\n%1")
+            tr("Could not reload the current game settings before applying graphics changes:\n\n%1")
                 .arg(QString::fromUtf8(e.what())));
         return false;
     }
@@ -625,7 +686,7 @@ bool Launcher::GraphicsPage::saveUserSettingsToDisk()
     catch (const std::exception& e)
     {
         QMessageBox::critical(this, tr("Error writing settings.cfg"),
-            tr("Could not save the selected graphics preset:\n\n%1")
+            tr("Could not save the selected graphics settings:\n\n%1")
                 .arg(QString::fromUtf8(e.what())));
         return false;
     }
@@ -1042,6 +1103,7 @@ void Launcher::GraphicsPage::slotApplyQualityPreset()
 
     if (!saveUserSettingsToDisk())
         return;
+    Settings::Manager::resetPendingChanges();
 
     storeLauncherValue(QStringLiteral("General/Graphics/qualityMode"),
         index == 0 ? QStringLiteral("auto") : QString::number(level));

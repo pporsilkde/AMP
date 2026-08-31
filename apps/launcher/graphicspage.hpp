@@ -21,7 +21,7 @@ namespace Launcher
     public:
         explicit GraphicsPage(Config::LauncherSettings& launcherSettings, QWidget *parent = nullptr);
 
-        void saveSettings();
+        bool saveSettings();
         bool loadSettings();
 
     public slots:
@@ -59,6 +59,8 @@ namespace Launcher
         int mRecommendedQuality;
         bool mInitializingQuality;
         bool mInitializingOcclusion;
+        Settings::CategorySettingValueMap mGraphicsBaselineSettings;
+        bool mGraphicsBaselineValid;
 
         static QStringList getAvailableResolutions(int screen);
         static QRect getMaximumResolution();

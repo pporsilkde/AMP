@@ -1,6 +1,6 @@
 # ArenaMP feature overview
 
-This page describes the features present in the X057 source snapshot. Availability can depend on server settings, game data, GPU capabilities, and build options.
+This page describes the features present in the Y001 source snapshot. Availability can depend on server settings, game data, GPU capabilities, and build options.
 
 ## Multiplayer and server core
 

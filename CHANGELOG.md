@@ -28,6 +28,16 @@ This changelog consolidates the ArenaMP development notes that previously existe
 - The unfinished Home tab placeholder from the Player Menu.
 - Uncompiled KTX2 loader/converter files that were not referenced by CMake or runtime code. KTX2 is therefore not advertised as a current ArenaMP feature.
 
+## Y001 — launcher quality persistence and HUD FPS counter
+
+### Fixed
+
+- Restored manual Graphics/Quality-page persistence for Water, Terrain, PBR, lighting, shadows, display and FPS-limit controls.
+- Graphics changes are merged into the latest on-disk `settings.cfg` instead of blindly rewriting the launcher's stale in-memory copy, preserving unrelated settings changed by the running game.
+- Prevented the later XP/server-settings save pass from discarding graphics changes made immediately before launching the client.
+- Made the dedicated HUD FPS counter explicit (`FPS: N`), enabled it once for upgrades through a Y001 migration, and kept subsequent HUD on/off choices persistent.
+- Kept F3 assigned to ArenaMP HDR; stale EN/RU text that described F3 as an FPS hotkey was corrected.
+
 ## X057 — core logging, data bootstrap, summons, and parties
 
 ### Added

@@ -4,13 +4,13 @@ ArenaMP inherits its multiplayer foundation from TES3MP 0.8.1 and its engine fou
 
 ## Compatibility first
 
-Official TES3MP 0.8.1 identifies its protocol as `10`. ArenaMP X057 identifies its custom protocol as `806` and extends packet layouts and native script APIs. The shared `0.8.1` version string records ancestry; it does not make the binaries network-compatible.
+Official TES3MP 0.8.1 identifies its protocol as `10`. ArenaMP Y001 identifies its custom protocol as `806` and extends packet layouts and native script APIs. The shared `0.8.1` version string records ancestry; it does not make the binaries network-compatible.
 
 Use the same ArenaMP source revision for the client and server. A server administrator should treat a client/server mix as unsupported even if both display `0.8.1`.
 
 ## Major differences
 
-| Area | TES3MP 0.8.1 | ArenaMP X057 |
+| Area | TES3MP 0.8.1 | ArenaMP Y001 |
 |---|---|---|
 | Network identity | Protocol 10 | Custom protocol 806; matching build required |
 | Server scripts | CoreScripts normally selected/deployed separately | ArenaMP core is bundled and packaged with the engine |

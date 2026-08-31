@@ -875,6 +875,20 @@ std::string OMW::Engine::loadSettings (Settings::Manager & settings)
         Settings::Manager::resetPendingChanges();
     }
 
+    // Y001: the FPS display is a dedicated HUD widget; F3 remains reserved for
+    // ArenaMP HDR. Older user settings may contain an explicit "show fps = false"
+    // from the pre-HUD counter era, so enable the new widget once on upgrade.
+    // The migration marker means any later user choice is preserved normally.
+    const Settings::CategorySettingValueMap::key_type fpsMigrationKey
+        = std::make_pair(std::string("HUD"), std::string("fps counter default y001"));
+    if (Settings::Manager::mUserSettings.find(fpsMigrationKey) == Settings::Manager::mUserSettings.end())
+    {
+        Settings::Manager::setBool("show fps", "HUD", true);
+        Settings::Manager::setBool("fps counter default y001", "HUD", true);
+        settings.saveUser(settingspath);
+        Settings::Manager::resetPendingChanges();
+    }
+
     return settingspath;
 }
 

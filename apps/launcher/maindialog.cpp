@@ -1092,10 +1092,13 @@ bool Launcher::MainDialog::writeSettings()
     saveSettings();
     mDataFilesPage->saveSettings();
 
-    // Do not copy the Launcher's in-memory graphics/advanced controls back to
-    // settings.cfg here. The game may have changed that file while the
-    // Launcher remained open. Graphics quality is written only by the
-    // explicit Apply preset button; the Wizard performs its one initial pass.
+    // Y001: GraphicsPage performs a merge-safe save: it first captures only
+    // controls changed relative to the page snapshot, then reloads settings.cfg
+    // and replays just those keys. This makes manual Water/Terrain/PBR/shadow
+    // changes apply on Play without overwriting unrelated in-game settings.
+    if (!mGraphicsPage->saveSettings())
+        return false;
+
     mSettingsPage->saveSettings();
     if (!mPlayPage->saveServerSettings())
         return false;
