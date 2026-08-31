@@ -1,0 +1,16 @@
+OpenMoji attribution for ArenaMP X053a
+=====================================
+
+The colour emoji artwork baked into files/mygui/ArenaMPChatColor.png is derived
+from OpenMoji.
+
+All emojis designed by OpenMoji – the open-source emoji and icon project.
+License: Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0).
+Project: https://openmoji.org/
+
+ArenaMP transformation: selected OpenMoji glyph bitmaps are packed into a
+MyGUI ResourceManualFont atlas together with text glyphs for use in the ArenaMP
+chat interface. The OpenMoji-derived atlas material is distributed under
+CC BY-SA 4.0.
+
+No endorsement by the OpenMoji Project is implied.

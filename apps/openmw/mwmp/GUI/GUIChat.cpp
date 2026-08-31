@@ -121,6 +121,25 @@ namespace
         return text != nullptr ? text->getTextSize().width : 0;
     }
 
+    void setWidgetCaption(MyGUI::Widget* widget, const std::string& caption)
+    {
+        if (widget == nullptr)
+            return;
+
+        if (MyGUI::Button* button = widget->castType<MyGUI::Button>(false))
+        {
+            button->setCaption(caption);
+            return;
+        }
+        if (MyGUI::TextBox* text = widget->castType<MyGUI::TextBox>(false))
+        {
+            text->setCaption(caption);
+            return;
+        }
+        if (MyGUI::EditBox* edit = widget->castType<MyGUI::EditBox>(false))
+            edit->setCaption(caption);
+    }
+
     // "#RRGGBB" as used by the server's color table.
     bool parseHexColour(const std::string& value, unsigned int& out)
     {
@@ -484,7 +503,7 @@ namespace mwmp
         if (menuFontName.empty())
             menuFontName = sMenuFont;
         ensureChatFontLoaded();
-        if (!MyGUI::FontManager::getInstance().isExist(menuFontName))
+        if (MyGUI::FontManager::getInstance().getByName(menuFontName) == nullptr)
             menuFontName = sMenuFont;
         applyEmojiPalette();
 
@@ -1811,7 +1830,7 @@ namespace mwmp
         if (widget == nullptr)
             return;
         menuCaptions[widget] = caption;
-        widget->setCaption(caption);
+        setWidgetCaption(widget, caption);
     }
 
     void GUIChat::refitCaption(MyGUI::Widget* widget)
@@ -1824,7 +1843,7 @@ namespace mwmp
             return;
 
         const std::string& full = entry->second;
-        widget->setCaption(full);
+        setWidgetCaption(widget, full);
 
         const int available = widget->getWidth() - 10;
         if (available <= 0 || measuredCaptionWidth(widget) <= available)
@@ -1837,7 +1856,7 @@ namespace mwmp
         while (length > 1)
         {
             --length;
-            widget->setCaption(utf8Truncate(full, length) + "...");
+            setWidgetCaption(widget, utf8Truncate(full, length) + "...");
             if (measuredCaptionWidth(widget) <= available)
                 return;
         }
@@ -1862,7 +1881,7 @@ namespace mwmp
         {
             const std::map<MyGUI::Widget*, std::string>::const_iterator entry = menuCaptions.find(visible[i]);
             if (entry != menuCaptions.end())
-                visible[i]->setCaption(entry->second);
+                setWidgetCaption(visible[i], entry->second);
 
             int wanted = measuredCaptionWidth(visible[i]) + sButtonPadding;
             if (wanted < sMinimumButtonWidth)
@@ -2082,7 +2101,7 @@ namespace mwmp
         // missing or malformed atlas degrades to the stock font instead of
         // taking the whole UI down at startup.
         const std::string wanted = !emojiFontName.empty() ? emojiFontName : menuFontName;
-        if (wanted.empty() || MyGUI::FontManager::getInstance().isExist(wanted))
+        if (wanted.empty() || MyGUI::FontManager::getInstance().getByName(wanted) != nullptr)
             return;
 
         std::string resource = Settings::Manager::getString("chat font resource", "Chat");
@@ -2108,7 +2127,7 @@ namespace mwmp
         // [Chat] emoji font and gets the Unicode palette instead.
         if (emojiFontName.empty())
             return false;
-        return MyGUI::FontManager::getInstance().isExist(emojiFontName);
+        return MyGUI::FontManager::getInstance().getByName(emojiFontName) != nullptr;
     }
 
     const char* GUIChat::emojiSymbol(int index) const
