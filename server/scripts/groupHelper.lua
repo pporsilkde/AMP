@@ -28,6 +28,7 @@ local cfg = {
     protectSummons = true,
     summonCheckInterval = 2000,
     summonStopCombatCooldown = 2,
+    summonLegacyStopCombatTick = false,
     debugMode = false,
     invitePopups = true,
     nativeAllies = true,
@@ -43,6 +44,9 @@ if type(config.groupSystem) == "table" then
     cfg.maxQuestXpSignal = tonumber(config.groupSystem["max client quest xp signal"]) or cfg.maxQuestXpSignal
     if config.groupSystem["summon protection"] ~= nil then cfg.protectSummons = config.groupSystem["summon protection"] end
     cfg.summonCheckInterval = tonumber(config.groupSystem["summon check interval ms"]) or cfg.summonCheckInterval
+    if config.groupSystem["summon legacy stopcombat tick"] ~= nil then
+        cfg.summonLegacyStopCombatTick = config.groupSystem["summon legacy stopcombat tick"]
+    end
     if config.groupSystem["invite popups"] ~= nil then cfg.invitePopups = config.groupSystem["invite popups"] end
     if config.groupSystem["native allies"] ~= nil then cfg.nativeAllies = config.groupSystem["native allies"] end
     if config.groupSystem["summon kill xp"] ~= nil then cfg.summonKillXp = config.groupSystem["summon kill xp"] end
@@ -1102,6 +1106,15 @@ local function stopSummonCombat(cellDescription, uid, targetPid)
 end
 
 function GroupHelper_SummonTick()
+    -- X058: this sweep is legacy compatibility only. The X057 client-side
+    -- MechanicsHelper protection rejects friendly summon combat before aggro is
+    -- created, while OnObjectHit below remains a reactive server backstop for
+    -- mismatched/older clients. Running this unconditionally caused an endless
+    -- StopCombat command every scan interval even when the summon was idle.
+    if not cfg.protectSummons or not cfg.summonLegacyStopCombatTick then
+        return
+    end
+
     if cfg.protectSummons then
         for cellDescription, cell in pairs(LoadedCells) do
             if cell ~= nil and cell.data ~= nil and type(cell.data.objectData) == "table" then
@@ -1193,7 +1206,7 @@ customCommandHooks.registerCommand("group", processCommand)
 
 customEventHooks.registerHandler("OnServerPostInit", function(eventStatus)
     loadData()
-    if cfg.protectSummons then
+    if cfg.protectSummons and cfg.summonLegacyStopCombatTick then
         tes3mp.StartTimer(tes3mp.CreateTimerEx("GroupHelper_SummonTick", cfg.summonCheckInterval, "i", 0))
     end
     log(enumerations.log.INFO, "loaded: groups, journal/topics sync, shared XP, summon protection")

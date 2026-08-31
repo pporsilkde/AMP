@@ -1,0 +1,576 @@
+diff --git b/X058_SUMMON_EMOJI_LAUNCHER_THEME_RU.md a/X058_SUMMON_EMOJI_LAUNCHER_THEME_RU.md
+deleted file mode 100644
+index 21593359c1db89ddfddc933000701a68877bae4e..0000000000000000000000000000000000000000
+--- b/X058_SUMMON_EMOJI_LAUNCHER_THEME_RU.md
++++ /dev/null
+@@ -1,93 +0,0 @@
+-# ArenaMP X058 — summon StopCombat, цветные emoji, единая тема launcher
+-
+-База: X057 `CORE_LOG_JSON_SUMMON_PARTY_QUESTCHOICE` поверх X056.
+-
+-## 1. StopCombat больше не спамит у summon
+-
+-Причина была в `GroupHelper_SummonTick`: каждые 2 секунды сервер проходил все
+-summon в загруженных ячейках и без проверки текущего combat state отправлял
+-`StopCombat` хозяину и каждому сопартийцу в той же ячейке.
+-
+-После X057 это устаревший backstop: клиентский `MechanicsHelper` запрещает
+-friendly summon aggression до `startCombat`, а `OnObjectHit` остаётся
+-реактивной серверной защитой для старого/несовпадающего клиента.
+-
+-X058 добавляет:
+-
+-```lua
+-["summon legacy stopcombat tick"] = false
+-```
+-
+-По умолчанию периодический sweep вообще не запускается. `StopCombat` остаётся
+-только реакцией на реально полученный forbidden `OnObjectHit`. Для очень старых
+-клиентов sweep можно явно вернуть флагом `true`.
+-
+-## 2. Цветные emoji из ArenaMPChatColor.png включены по умолчанию
+-
+-Причина текстовых `:)`, `xD`, `<3` была не в PNG. В X053 ресурс
+-`ArenaMPChatColor.png/.xml` был установлен, но `menu font` и `emoji font`
+-оставались пустыми специально для ASCII fallback.
+-
+-Теперь дефолт:
+-
+-```ini
+-[Chat]
+-menu font = ArenaMPChatColor
+-emoji font = ArenaMPChatColor
+-chat font resource = ArenaMPChatColor.xml
+-```
+-
+-Кроме того, `GUIChat` трактует старые пустые значения из уже существующего
+-`settings.cfg` как `ArenaMPChatColor`, поэтому удалять пользовательский cfg не
+-нужно. Если ресурс реально отсутствует или повреждён, остаётся безопасный
+-fallback DejaVu + ASCII. HUD по-прежнему рисуется `Russo`.
+-
+-Проверено: все 20 Unicode codepoint из quick palette присутствуют в
+-`ArenaMPChatColor.xml`, PNG читается корректно.
+-
+-## 3. `textures.zip` — приоритетная тема всего launcher
+-
+-Qt launcher не умеет использовать Morrowind DDS как QSS-картинки напрямую.
+-X058 берёт визуальные элементы из предоставленного `textures.zip`, конвертирует
+-нужные фрагменты в Qt-совместимый PNG и встраивает их в `launcher.qrc`.
+-
+-Добавлены:
+-
+-- `files/launcher/theme/arenamp-bg.png`
+-- `files/launcher/theme/arenamp-panel.png`
+-- `files/launcher/theme/arenamp-button-up.png`
+-- `files/launcher/theme/arenamp-button-down.png`
+-- `files/launcher/theme/arenamp-divider.png`
+-- `files/launcher/theme/arenamp-launcher.qss`
+-
+-Источники — `tx_menu_8x8black.dds`, `tx_menu_8x8grad.dds`,
+-`menu_rightbuttonup_center.dds`, `menu_rightbuttondown_center.dds`,
+-`menu_divider.dds` из пользовательского `textures.zip`.
+-
+-`apps/launcher/main.cpp` до создания `MainDialog` устанавливает Qt `Fusion` и
+-глобальный stylesheet из resource system. Поэтому тема наследуется главным
+-окном, страницами, диалогами, кнопками, вкладками, списками, таблицами,
+-редакторами, меню, progress bar и scrollbar. Это приложение-level theme, а не
+-стилизация одной страницы.
+-
+-## Изменённые файлы X058
+-
+-- `server/scripts/groupHelper.lua`
+-- `server/scripts/config.lua`
+-- `apps/openmw/mwmp/GUI/GUIChat.cpp`
+-- `files/settings-default.cfg`
+-- `apps/launcher/main.cpp`
+-- `files/launcher/launcher.qrc`
+-- `files/launcher/theme/*`
+-
+-## Проверка
+-
+-- `texluac -p` groupHelper/config — OK.
+-- В `[Chat]` нет повторяющихся ключей — OK.
+-- Все 20 emoji quick-palette glyphs присутствуют в manual font — OK.
+-- `ArenaMPChatColor.png` читается как валидный PNG — OK.
+-- `launcher.qrc` валиден как XML, все старые + новые resource paths существуют
+-  при наложении на AMP tree — OK.
+-- Forward patch X057 -> X058 проверяется через `git apply --check`.
+-
+-Полная MSVC/Qt runtime сборка остаётся проверкой на пользовательском CI.
+diff --git b/X058_regression_harness.py a/X058_regression_harness.py
+deleted file mode 100644
+index 18bfe2ed4e64d4c25b4838f6526a0e3cc60e9f7b..0000000000000000000000000000000000000000
+--- b/X058_regression_harness.py
++++ /dev/null
+@@ -1,58 +0,0 @@
+-from pathlib import Path
+-from PIL import Image
+-import xml.etree.ElementTree as ET
+-
+-ROOT = Path(__file__).resolve().parent
+-failures = []
+-
+-def check(name, cond):
+-    print(('ok   ' if cond else 'FAIL ') + name)
+-    if not cond:
+-        failures.append(name)
+-
+-# StopCombat periodic spam is opt-in only.
+-group = (ROOT / 'server/scripts/groupHelper.lua').read_text(encoding='utf-8')
+-cfg = (ROOT / 'server/scripts/config.lua').read_text(encoding='utf-8')
+-check('legacy summon sweep defaults off', '["summon legacy stopcombat tick"] = false' in cfg)
+-check('post-init starts sweep only when opted in', 'cfg.protectSummons and cfg.summonLegacyStopCombatTick' in group)
+-check('reactive OnObjectHit backstop remains', 'registerValidator("OnObjectHit"' in group and 'stopSummonCombat' in group)
+-
+-# Emoji atlas is now the default and has every glyph used by GUIChat.
+-settings = (ROOT / 'files/settings-default.cfg').read_text(encoding='utf-8')
+-check('menu color font default', 'menu font = ArenaMPChatColor' in settings)
+-check('emoji color font default', 'emoji font = ArenaMPChatColor' in settings)
+-check('blank legacy settings upgraded in C++', 'emojiFontName = sColorChatFont' in (ROOT / 'apps/openmw/mwmp/GUI/GUIChat.cpp').read_text(encoding='utf-8'))
+-
+-atlas = ROOT / 'files/mygui/ArenaMPChatColor.png'
+-try:
+-    im = Image.open(atlas)
+-    im.verify()
+-    png_ok = True
+-except Exception:
+-    png_ok = False
+-check('emoji atlas png valid', png_ok)
+-
+-tree = ET.parse(ROOT / 'files/mygui/ArenaMPChatColor.xml')
+-indices = set()
+-for code in tree.findall('.//Code'):
+-    try:
+-        indices.add(int(code.attrib['index']))
+-    except (ValueError, KeyError):
+-        pass
+-palette = [0x263A,0x2639,0x1F60A,0x1F609,0x1F60B,0x1F602,0x1F622,0x1F621,
+-           0x2665,0x1F494,0x1F44D,0x1F44E,0x2714,0x274C,0x2B50,0x2694,
+-           0x1F37A,0x1F525,0x1F3B5,0x1F4A4]
+-check('all 20 emoji glyphs present', all(cp in indices for cp in palette))
+-
+-# Theme resources.
+-qrc = ET.parse(ROOT / 'files/launcher/launcher.qrc')
+-theme_files = {f.text for f in qrc.findall('.//qresource[@prefix="theme"]/file')}
+-expected = {'theme/arenamp-launcher.qss','theme/arenamp-bg.png','theme/arenamp-panel.png',
+-            'theme/arenamp-button-up.png','theme/arenamp-button-down.png','theme/arenamp-divider.png'}
+-check('launcher theme resources registered', expected.issubset(theme_files))
+-main = (ROOT / 'apps/launcher/main.cpp').read_text(encoding='utf-8')
+-check('launcher forces deterministic Fusion base', 'QStyleFactory::create(QStringLiteral("Fusion"))' in main)
+-check('launcher applies global QApplication stylesheet', 'app.setStyleSheet(QString::fromUtf8(arenaTheme.readAll()))' in main)
+-
+-print(f'\n{len(failures)} failures')
+-raise SystemExit(1 if failures else 0)
+diff --git b/apps/launcher/main.cpp a/apps/launcher/main.cpp
+index 53c26f2009101395e0bf320083416c533658f312..aec265f2e6b24b86aac9b252f96167fbfc6a594c 100644
+--- b/apps/launcher/main.cpp
++++ a/apps/launcher/main.cpp
+@@ -3,8 +3,6 @@
+ #include <QTranslator>
+ #include <QTextCodec>
+ #include <QDir>
+-#include <QFile>
+-#include <QStyleFactory>
+ 
+ #include <components/misc/arenarussiantranslator.hpp>
+ 
+@@ -22,18 +20,6 @@ int main(int argc, char *argv[])
+     {
+         QApplication app(argc, argv);
+ 
+-        // ArenaMP X058: make the project-supplied Morrowind texture theme the
+-        // launcher-wide base style instead of letting each platform/native
+-        // widget style win independently. Fusion gives the stylesheet one
+-        // deterministic widget model on Windows/Linux, while the QSS and its
+-        // texture fragments are embedded in launcher.qrc.
+-        if (QStyle* arenaStyle = QStyleFactory::create(QStringLiteral("Fusion")))
+-            app.setStyle(arenaStyle);
+-
+-        QFile arenaTheme(QStringLiteral(":/theme/arenamp-launcher.qss"));
+-        if (arenaTheme.open(QIODevice::ReadOnly | QIODevice::Text))
+-            app.setStyleSheet(QString::fromUtf8(arenaTheme.readAll()));
+-
+         // ArenaMW UI language follows the Windows system language. Russian
+         // Windows gets the built-in Russian UI; every other locale uses English.
+         ArenaUi::RussianTranslator arenaTranslator;
+diff --git b/apps/openmw/mwmp/GUI/GUIChat.cpp a/apps/openmw/mwmp/GUI/GUIChat.cpp
+index a922b63a20741db8f0d796e595abd6030ea3cfae..deb8109d3dbf990c9e785c70a7547c3efc951255 100644
+--- b/apps/openmw/mwmp/GUI/GUIChat.cpp
++++ a/apps/openmw/mwmp/GUI/GUIChat.cpp
+@@ -59,7 +59,6 @@ namespace
+     constexpr int sHudHeight = 400;
+     constexpr const char* sHudFont = "Russo";
+     constexpr const char* sMenuFont = "DejaVuLGCSansMono";
+-    constexpr const char* sColorChatFont = "ArenaMPChatColor";
+     constexpr const char* sChatFontResource = "ArenaMPChatColor.xml";
+ 
+     std::string localizeArena(const std::string& key)
+@@ -541,18 +540,8 @@ namespace mwmp
+ 
+         emojiFontName = Settings::Manager::getString("emoji font", "Chat");
+         menuFontName = Settings::Manager::getString("menu font", "Chat");
+-
+-        // X058: X053 shipped the RGBA ArenaMPChatColor atlas but left both
+-        // settings blank, which deliberately forced the ASCII fallback (:),
+-        // xD, <3). Existing user configs therefore kept showing text smileys
+-        // even after the PNG atlas was installed. Treat blank as the bundled
+-        // colour font; a genuinely missing/malformed resource still falls back
+-        // safely to DejaVu/ASCII below. The compact HUD remains Russo.
+-        if (emojiFontName.empty())
+-            emojiFontName = sColorChatFont;
+         if (menuFontName.empty())
+-            menuFontName = sColorChatFont;
+-
++            menuFontName = sMenuFont;
+         ensureChatFontLoaded();
+         if (MyGUI::FontManager::getInstance().getByName(menuFontName) == nullptr)
+             menuFontName = sMenuFont;
+diff --git b/files/launcher/launcher.qrc a/files/launcher/launcher.qrc
+index 6ee699c059ccb33601936a1d8e8eea0c32a50294..da687855a2201004e601471f896f9ae6f937b941 100644
+--- b/files/launcher/launcher.qrc
++++ a/files/launcher/launcher.qrc
+@@ -23,13 +23,4 @@
+     <file alias="16x16/go-top.png">icons/tango/16x16/go-top.png</file>
+     <file alias="16x16/go-up.png">icons/tango/16x16/go-up.png</file>
+ </qresource>
+-
+-<qresource prefix="theme">
+-    <file alias="arenamp-launcher.qss">theme/arenamp-launcher.qss</file>
+-    <file alias="arenamp-bg.png">theme/arenamp-bg.png</file>
+-    <file alias="arenamp-panel.png">theme/arenamp-panel.png</file>
+-    <file alias="arenamp-button-up.png">theme/arenamp-button-up.png</file>
+-    <file alias="arenamp-button-down.png">theme/arenamp-button-down.png</file>
+-    <file alias="arenamp-divider.png">theme/arenamp-divider.png</file>
+-</qresource>
+ </RCC>
+diff --git b/files/launcher/theme/arenamp-bg.png a/files/launcher/theme/arenamp-bg.png
+deleted file mode 100644
+index 346956d9ad338846962420feb4fdc37479965282..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 122
+zcmeAS@N?(olHy`uVBq!ia0vp^0wB!61|;P_|4#%`j-D=#Ar*7pPB7$SP~c$p{@?w7
+zepk1ITO_ZKtp~@PpPvqBwmK+B&0#zsTQ);-)6LXtxm*iRud%;sJik(=r`cX6$1>)e
+Vpa1=nZ9u~qJYD@<);T3K0RSNeC>j6&
+
+diff --git b/files/launcher/theme/arenamp-button-down.png a/files/launcher/theme/arenamp-button-down.png
+deleted file mode 100644
+index 0ebf038ba848412867bd75da9cc8d8bb308b7722..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 490
+zcmV<G0Tup<P)<h;3K|Lk000e1NJLTq000mG000mO1^@s6AM^iV00058Nkl<Zc$|%r
+z!D<vi6h+VUR96~G3Hbv9)wmabK}h={ZlvQvze0Cu$kH!RaFgj-xD?#FbJ2~8D^X+|
+zGtVijrZX;5J?V+Tc%h(pynE~3_iA+V{2>EaRun)9<l;PIbOTf~S=26s)}1;49zT5v
+zfEthwfLfeKoNr8~Yk;Nq7C4GM1uz}H*b5xUFJH^jH?j;BPy?;WG%k1>iDj(c16~gW
+zEYOqh11;NVfhtRN4NM&F1#k!W0FVHsh(~^gif}>JN)c9Punwdtboe$+IYzOI;!)q1
+z0ELKeqP^?z3TR@ajX)l4UbcP}KE=L#I0FETNdXWaFqvlIJX(!0Hw}76Zxp_LKiyJH
+zSka)cauzHK(sYc@#xOef*R2AXqCa-u-nDMwnqh?6?C8ADb;D>bV>XxmTD*VvCTB3O
+z1gHRvPD{>L`WN<g4S@al`D+<V)li_7-@X8H@nPb9_XOA<@a=3a<!mmKA9LxQZU(Nh
+zy<2o&-cErcgA-ZuOyB{~20EN`mN@lHWrf3SedT0up8~gm!#*z;`#y{!TV#OIdcD3X
+g_J1R}zUANe1F^}kp5K_zlK=n!07*qoM6N<$f{w=4(*OVf
+
+diff --git b/files/launcher/theme/arenamp-button-up.png a/files/launcher/theme/arenamp-button-up.png
+deleted file mode 100644
+index d8d6dbe1b8b99dae5e7ce9ce58d53c2c04e85ca1..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 605
+zcmV-j0;2tiP)<h;3K|Lk000e1NJLTq000mG000mO1^@s6AM^iV0006cNkl<Zc$|%r
+z&ubG=5XV1>jcl@MOhKW6G=e74o@`HE^eU!D!IS<23aJM#f)~As&`W#hA5ityn>GdU
+zAOu=Hh=NdXgK0y{mNc^4&2BPglhi|BehT6j2Hw1x@4T7syugPyk8#{40I_H|?MU+u
+zkOz_g{%_v^3ZB<m@fv=~t_uK9U#<f%!2q`%w^?vRsJrqB_za+*4TXV4WjSDTh;v#X
+z77d@0T`}q+&nKhWK`)`(>S#bgbyWav0q=(kr2Ax77G|#|t^;em5k$l&?^-K*B($JM
+zLK}8n)`2<TCqU4X<^vJI7g<du<MSfC5+Nx9B2eD7GBwLv-aD}8y@tPfIh&nqy5=Jg
+zKnMbNJy*8$sJ5*~!%M^SS;tQQ{A0Je1Z)F_(gJ`WFazu>e`c6$A3M}6kFi(@$c%^x
+z;JLy$**>oG%We%fm1GP-I=-PtLUVc~bdI(dcFiW>cM-3PWq0t~r)IlSaq7~5SQ@4b
+z&;X5~T1^JXRIBcydE{UoIheJ<{FOtS)O7sC#l%!f<raoDSOM@FeqPOY&#XE70A|gh
+za%fjl)A5Hl=Pwn3C*Qvm>2Z1*l$5Fkui<YbF2tSz_W=^;W3<|xsCxPBo@u32ZmC~D
+zk7ucxTbnBIu3SERJ$vm&zeNIP0CGEDKLX^!n)dfsR@elt0QsG7#T<iG8Njk?yTlj*
+rCnqPPH*Fd9C$w?S2!j8N{s;a5Do+Wdy0Vo600000NkvXXu0mjfK!pt-
+
+diff --git b/files/launcher/theme/arenamp-divider.png a/files/launcher/theme/arenamp-divider.png
+deleted file mode 100644
+index 97e9c0e9f5c050b5f087d634ff4bc950ab2f2c7d..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 80
+zcmeAS@N?(olHy`uVBq!ia0vp^3P8-n!3HEP<?fvXQsSO2jv*CulJ8jQ|F%EOz;x{Y
+efA%YNYz&qYSodCg81)mVgu&C*&t;ucLK6VhxE87a
+
+diff --git b/files/launcher/theme/arenamp-launcher.qss a/files/launcher/theme/arenamp-launcher.qss
+deleted file mode 100644
+index 9aed0cb302e34f8709b2080c2b2eb8760c246775..0000000000000000000000000000000000000000
+--- b/files/launcher/theme/arenamp-launcher.qss
++++ /dev/null
+@@ -1,149 +0,0 @@
+-/* ArenaMP X058 launcher theme.
+-   Source artwork: textures.zip supplied by the project owner.
+-   Applied globally from QApplication so every launcher page/dialog inherits it. */
+-
+-QMainWindow, QDialog {
+-    background-color: #6c6d6c;
+-    background-image: url(:/theme/arenamp-bg.png);
+-    color: #efe5bf;
+-}
+-
+-QWidget {
+-    color: #efe5bf;
+-    selection-background-color: #9a8350;
+-    selection-color: #fff8dc;
+-}
+-
+-QWidget#centralwidget, QStackedWidget, QGroupBox, QFrame,
+-QTabWidget::pane, QScrollArea, QAbstractScrollArea {
+-    background-color: rgba(37, 35, 29, 218);
+-}
+-
+-QLabel {
+-    background: transparent;
+-    color: #efe5bf;
+-}
+-
+-QPushButton, QToolButton {
+-    min-height: 24px;
+-    padding: 4px 10px;
+-    color: #f5e9bd;
+-    background-color: #8d7a4f;
+-    background-image: url(:/theme/arenamp-button-up.png);
+-    border: 1px solid #b59e6b;
+-    border-radius: 2px;
+-}
+-
+-QPushButton:hover, QToolButton:hover {
+-    border-color: #d8c78f;
+-    color: #fff7d6;
+-}
+-
+-QPushButton:pressed, QToolButton:pressed,
+-QPushButton:checked, QToolButton:checked {
+-    background-color: #6d5e3f;
+-    background-image: url(:/theme/arenamp-button-down.png);
+-    border-color: #8f794e;
+-}
+-
+-QPushButton:disabled, QToolButton:disabled {
+-    color: #8f8873;
+-    border-color: #6b6250;
+-    background-color: #4d493f;
+-    background-image: none;
+-}
+-
+-QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox,
+-QComboBox, QListView, QListWidget, QTreeView, QTreeWidget, QTableView,
+-QTableWidget {
+-    background-color: rgba(28, 27, 23, 235);
+-    color: #f1e6c1;
+-    border: 1px solid #8f7a51;
+-    border-radius: 2px;
+-    padding: 3px;
+-}
+-
+-QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus,
+-QComboBox:focus, QListView:focus, QTreeView:focus, QTableView:focus {
+-    border-color: #d1bd7f;
+-}
+-
+-QComboBox::drop-down {
+-    border-left: 1px solid #8f7a51;
+-    width: 22px;
+-}
+-
+-QMenuBar, QMenu, QStatusBar {
+-    background-color: #34322b;
+-    color: #efe5bf;
+-    border-color: #6f6043;
+-}
+-
+-QMenuBar::item:selected, QMenu::item:selected {
+-    background-color: #88764c;
+-    color: #fff8dc;
+-}
+-
+-QTabBar::tab {
+-    padding: 6px 12px;
+-    margin-right: 2px;
+-    color: #d9cfac;
+-    background-color: #554d3c;
+-    border: 1px solid #75684b;
+-}
+-
+-QTabBar::tab:selected {
+-    color: #fff3c9;
+-    background-color: #88764c;
+-    border-color: #c2ad74;
+-}
+-
+-QHeaderView::section {
+-    padding: 4px;
+-    color: #f1e6c1;
+-    background-color: #4b4538;
+-    border: 1px solid #75684b;
+-}
+-
+-QGroupBox {
+-    border: 1px solid #75684b;
+-    border-radius: 3px;
+-    margin-top: 8px;
+-    padding-top: 6px;
+-}
+-
+-QGroupBox::title {
+-    subcontrol-origin: margin;
+-    left: 8px;
+-    padding: 0 4px;
+-    color: #e7d8a8;
+-}
+-
+-QProgressBar {
+-    border: 1px solid #75684b;
+-    background-color: #292720;
+-    color: #fff3c9;
+-    text-align: center;
+-}
+-
+-QProgressBar::chunk {
+-    background-color: #8e7746;
+-}
+-
+-QScrollBar:vertical, QScrollBar:horizontal {
+-    background-color: #292720;
+-    border: 1px solid #5f543e;
+-}
+-
+-QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+-    background-color: #8d7a4f;
+-    border: 1px solid #b59e6b;
+-    min-height: 18px;
+-    min-width: 18px;
+-}
+-
+-QToolTip {
+-    color: #fff3c9;
+-    background-color: #2c2a24;
+-    border: 1px solid #b59e6b;
+-}
+diff --git b/files/launcher/theme/arenamp-panel.png a/files/launcher/theme/arenamp-panel.png
+deleted file mode 100644
+index 796d9007c33a58908f83201d0232ab870c6c0dcb..0000000000000000000000000000000000000000
+GIT binary patch
+literal 0
+HcmV?d00001
+
+literal 239
+zcmeAS@N?(olHy`uVBq!ia0vp^0wB!61|;P_|4#%`+dN$yLn`LXo$M%dNP)+7e#?<B
+z|DL}%cKYN6qg?^Z#7cc?wPz^KKksjGcKXj}t9EEkmVCk)>KbZjY-63(HJ8`g{+p({
+z3iqVeBiz@cI+Y?B%o>BHw>K-~=2kPB^NN?V=jO&bFfcE3=CeyF;JtsZ^5g=8$TN=h
+z|NRb}bv~;6^83VzOgaZHuv$zycx~fc2b<=nu?wyUX~~_e73AIcK!a1DWxo^4Uo-Z=
+nX<HK?rx$%L5I5oeYUxwnRbZ-EncRN^=mQ2%S3j3^P6<r_$g5m{
+
+diff --git b/files/settings-default.cfg a/files/settings-default.cfg
+index e3b079d9620f0e548d69e0b5173882fdd0e7e536..b2c1c0fac6fc45f67149415adccbaa7db18c26d3 100644
+--- b/files/settings-default.cfg
++++ a/files/settings-default.cfg
+@@ -1113,14 +1113,22 @@ player menu hold = 0.35
+ # X052/X053: font used by the interactive player menu, and font used for the
+ # emoji quick-insert palette.
+ #
+-# X058: the bundled RGBA ArenaMPChatColor/OpenMoji atlas is the default for the
+-# interactive menu and emoji palette. The compact HUD still uses Russo.
+-# Existing configs that contain blank values are also upgraded in GUIChat at
+-# runtime, so they no longer remain stuck on ASCII smileys (:), xD, <3).
+-# If the atlas cannot be loaded, GUIChat safely falls back to DejaVu and the
+-# ASCII palette rather than failing the UI.
+-menu font = ArenaMPChatColor
+-emoji font = ArenaMPChatColor
++# Empty "emoji font" keeps the always-renderable ASCII palette (:) <3 xD), which
++# is what stops the quick-insert buttons from showing empty boxes with OpenMW's
++# stock DejaVu LGC face.
++#
++# Set BOTH to ArenaMPChatColor to get full-colour OpenMoji in chat. That font is
++# the generated atlas produced by tools/arenamp_make_emoji_font.py; it carries
++# Latin, Greek and Cyrillic as white glyphs (so #RRGGBB colour tags keep
++# working) plus the emoji with their own colours baked in.
++#
++#   menu font = ArenaMPChatColor
++#   emoji font = ArenaMPChatColor
++#
++# If the named font is not registered, the chat silently falls back to
++# DejaVuLGCSansMono and the ASCII palette, so a missing atlas is never fatal.
++menu font =
++emoji font =
+ chat font resource = ArenaMPChatColor.xml
+ 
+ [Equipment Requirements]
+diff --git b/server/scripts/config.lua a/server/scripts/config.lua
+index f0a56eebf98ab8ef034012217dc87b399ffdaf1c..977c766c0ac36564a6708c1806deb3bf038a8a56 100644
+--- b/server/scripts/config.lua
++++ a/server/scripts/config.lua
+@@ -111,12 +111,6 @@ config.groupSystem = {
+     ["xp signal lifetime seconds"] = 8,
+     ["summon protection"] = true,
+     ["summon check interval ms"] = 2000,
+-
+-    -- Legacy periodic StopCombat sweep. Keep this OFF on X057+ clients: the
+-    -- engine blocks friendly summon aggression before combat begins and the
+-    -- OnObjectHit validator below is enough as a compatibility backstop. Turn
+-    -- it on only when intentionally supporting old clients without X057.
+-    ["summon legacy stopcombat tick"] = false,
+     ["max client kill xp signal"] = 25000,
+     ["max client quest xp signal"] = 25000,
+ 
+diff --git b/server/scripts/groupHelper.lua a/server/scripts/groupHelper.lua
+index c927e697e23b4000a3fc10f11161b850cb0c21ce..120364e539dd4cfe58d137b6c6600e6da0909fef 100644
+--- b/server/scripts/groupHelper.lua
++++ a/server/scripts/groupHelper.lua
+@@ -28,7 +28,6 @@ local cfg = {
+     protectSummons = true,
+     summonCheckInterval = 2000,
+     summonStopCombatCooldown = 2,
+-    summonLegacyStopCombatTick = false,
+     debugMode = false,
+     invitePopups = true,
+     nativeAllies = true,
+@@ -44,9 +43,6 @@ if type(config.groupSystem) == "table" then
+     cfg.maxQuestXpSignal = tonumber(config.groupSystem["max client quest xp signal"]) or cfg.maxQuestXpSignal
+     if config.groupSystem["summon protection"] ~= nil then cfg.protectSummons = config.groupSystem["summon protection"] end
+     cfg.summonCheckInterval = tonumber(config.groupSystem["summon check interval ms"]) or cfg.summonCheckInterval
+-    if config.groupSystem["summon legacy stopcombat tick"] ~= nil then
+-        cfg.summonLegacyStopCombatTick = config.groupSystem["summon legacy stopcombat tick"]
+-    end
+     if config.groupSystem["invite popups"] ~= nil then cfg.invitePopups = config.groupSystem["invite popups"] end
+     if config.groupSystem["native allies"] ~= nil then cfg.nativeAllies = config.groupSystem["native allies"] end
+     if config.groupSystem["summon kill xp"] ~= nil then cfg.summonKillXp = config.groupSystem["summon kill xp"] end
+@@ -1106,15 +1102,6 @@ local function stopSummonCombat(cellDescription, uid, targetPid)
+ end
+ 
+ function GroupHelper_SummonTick()
+-    -- X058: this sweep is legacy compatibility only. The X057 client-side
+-    -- MechanicsHelper protection rejects friendly summon combat before aggro is
+-    -- created, while OnObjectHit below remains a reactive server backstop for
+-    -- mismatched/older clients. Running this unconditionally caused an endless
+-    -- StopCombat command every scan interval even when the summon was idle.
+-    if not cfg.protectSummons or not cfg.summonLegacyStopCombatTick then
+-        return
+-    end
+-
+     if cfg.protectSummons then
+         for cellDescription, cell in pairs(LoadedCells) do
+             if cell ~= nil and cell.data ~= nil and type(cell.data.objectData) == "table" then
+@@ -1206,7 +1193,7 @@ customCommandHooks.registerCommand("group", processCommand)
+ 
+ customEventHooks.registerHandler("OnServerPostInit", function(eventStatus)
+     loadData()
+-    if cfg.protectSummons and cfg.summonLegacyStopCombatTick then
++    if cfg.protectSummons then
+         tes3mp.StartTimer(tes3mp.CreateTimerEx("GroupHelper_SummonTick", cfg.summonCheckInterval, "i", 0))
+     end
+     log(enumerations.log.INFO, "loaded: groups, journal/topics sync, shared XP, summon protection")

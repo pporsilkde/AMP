@@ -31,6 +31,7 @@ file(GLOB_RECURSE BUILTIN_VFS_FILES
     sound/*.wav
     sound/*.mp3
     textures/vfx/*.dds
+    textures/*.dds
     textures/vfx/*.tga
     textures/exploot/food/*.tga
     textures/ui/arenamw/*.png

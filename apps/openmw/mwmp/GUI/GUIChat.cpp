@@ -59,6 +59,7 @@ namespace
     constexpr int sHudHeight = 400;
     constexpr const char* sHudFont = "Russo";
     constexpr const char* sMenuFont = "DejaVuLGCSansMono";
+    constexpr const char* sColorChatFont = "ArenaMPChatColor";
     constexpr const char* sChatFontResource = "ArenaMPChatColor.xml";
 
     std::string localizeArena(const std::string& key)
@@ -540,8 +541,18 @@ namespace mwmp
 
         emojiFontName = Settings::Manager::getString("emoji font", "Chat");
         menuFontName = Settings::Manager::getString("menu font", "Chat");
+
+        // X058: X053 shipped the RGBA ArenaMPChatColor atlas but left both
+        // settings blank, which deliberately forced the ASCII fallback (:),
+        // xD, <3). Existing user configs therefore kept showing text smileys
+        // even after the PNG atlas was installed. Treat blank as the bundled
+        // colour font; a genuinely missing/malformed resource still falls back
+        // safely to DejaVu/ASCII below. The compact HUD remains Russo.
+        if (emojiFontName.empty())
+            emojiFontName = sColorChatFont;
         if (menuFontName.empty())
-            menuFontName = sMenuFont;
+            menuFontName = sColorChatFont;
+
         ensureChatFontLoaded();
         if (MyGUI::FontManager::getInstance().getByName(menuFontName) == nullptr)
             menuFontName = sMenuFont;

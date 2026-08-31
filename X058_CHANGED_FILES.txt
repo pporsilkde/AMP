@@ -1,0 +1,14 @@
+X058_SUMMON_EMOJI_LAUNCHER_THEME_RU.md
+X058_regression_harness.py
+apps/launcher/main.cpp
+apps/openmw/mwmp/GUI/GUIChat.cpp
+files/launcher/launcher.qrc
+files/launcher/theme/arenamp-bg.png
+files/launcher/theme/arenamp-button-down.png
+files/launcher/theme/arenamp-button-up.png
+files/launcher/theme/arenamp-divider.png
+files/launcher/theme/arenamp-launcher.qss
+files/launcher/theme/arenamp-panel.png
+files/settings-default.cfg
+server/scripts/config.lua
+server/scripts/groupHelper.lua

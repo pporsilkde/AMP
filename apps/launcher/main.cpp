@@ -3,6 +3,8 @@
 #include <QTranslator>
 #include <QTextCodec>
 #include <QDir>
+#include <QFile>
+#include <QStyleFactory>
 
 #include <components/misc/arenarussiantranslator.hpp>
 
@@ -19,6 +21,18 @@ int main(int argc, char *argv[])
     try
     {
         QApplication app(argc, argv);
+
+        // ArenaMP X058: make the project-supplied Morrowind texture theme the
+        // launcher-wide base style instead of letting each platform/native
+        // widget style win independently. Fusion gives the stylesheet one
+        // deterministic widget model on Windows/Linux, while the QSS and its
+        // texture fragments are embedded in launcher.qrc.
+        if (QStyle* arenaStyle = QStyleFactory::create(QStringLiteral("Fusion")))
+            app.setStyle(arenaStyle);
+
+        QFile arenaTheme(QStringLiteral(":/theme/arenamp-launcher.qss"));
+        if (arenaTheme.open(QIODevice::ReadOnly | QIODevice::Text))
+            app.setStyleSheet(QString::fromUtf8(arenaTheme.readAll()));
 
         // ArenaMW UI language follows the Windows system language. Russian
         // Windows gets the built-in Russian UI; every other locale uses English.

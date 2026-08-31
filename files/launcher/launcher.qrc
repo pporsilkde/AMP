@@ -23,4 +23,13 @@
     <file alias="16x16/go-top.png">icons/tango/16x16/go-top.png</file>
     <file alias="16x16/go-up.png">icons/tango/16x16/go-up.png</file>
 </qresource>
+
+<qresource prefix="theme">
+    <file alias="arenamp-launcher.qss">theme/arenamp-launcher.qss</file>
+    <file alias="arenamp-bg.png">theme/arenamp-bg.png</file>
+    <file alias="arenamp-panel.png">theme/arenamp-panel.png</file>
+    <file alias="arenamp-button-up.png">theme/arenamp-button-up.png</file>
+    <file alias="arenamp-button-down.png">theme/arenamp-button-down.png</file>
+    <file alias="arenamp-divider.png">theme/arenamp-divider.png</file>
+</qresource>
 </RCC>
