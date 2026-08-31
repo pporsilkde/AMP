@@ -1,0 +1,2063 @@
+--- a/apps/openmw/mwmp/GUI/GUIChat.cpp
++++ b/apps/openmw/mwmp/GUI/GUIChat.cpp
+@@ -7,11 +7,14 @@
+ 
+ #include <MyGUI_Button.h>
+ #include <MyGUI_EditBox.h>
++#include <MyGUI_FontManager.h>
+ #include <MyGUI_InputManager.h>
+ #include <MyGUI_LanguageManager.h>
++#include <MyGUI_ListBox.h>
+ #include <MyGUI_RenderManager.h>
+ #include <MyGUI_ScrollBar.h>
+ #include <MyGUI_TextBox.h>
++#include <MyGUI_UString.h>
+ #include <MyGUI_Widget.h>
+ 
+ #include "apps/openmw/mwbase/environment.hpp"
+@@ -34,8 +37,14 @@
+     constexpr float sFadeSpeed = 4.f;
+     constexpr float sGeometrySaveDebounce = 0.45f;
+     constexpr float sMenuBackgroundAlpha = 0.92f;
+-    constexpr int sMinimumPanelWidth = 620;
+-    constexpr int sMinimumPanelHeight = 380;
++    constexpr int sMinimumPanelWidth = 700;
++    constexpr int sMinimumPanelHeight = 460;
++    constexpr int sButtonPadding = 22;
++    constexpr int sMinimumButtonWidth = 34;
++    constexpr int sRowGap = 6;
++    constexpr int sToolbarHeight = 30;
++    constexpr int sDrawerHeight = 68;
++    constexpr int sSideMargin = 10;
+     constexpr int sHudX = 1;
+     constexpr int sHudY = 25;
+     constexpr int sHudWidth = 260;
+@@ -48,6 +57,97 @@
+         return MyGUI::LanguageManager::getInstance().replaceTags("#{arenamp=" + key + "}");
+     }
+ 
++    // X052: quick-insert palettes.
++    //
++    // The Unicode column only ever reaches the screen when the player opted in
++    // to a font that actually carries those glyphs (see [Chat] emoji font).
++    // The ASCII column is the default and is guaranteed to render in every
++    // font OpenMW ships, which is what removes the empty "tofu" boxes.
++    struct EmojiSlot
++    {
++        const char* unicode;
++        const char* ascii;
++    };
++
++    const EmojiSlot sEmojiPalette[] = {
++        { "\xE2\x98\xBA", ":)"   }, { "\xE2\x98\xB9", ":("   },
++        { "\xE2\x98\xBB", ":D"   }, { "\xF0\x9F\x98\x89", ";)" },
++        { "\xF0\x9F\x98\x8B", ":P" }, { "\xF0\x9F\x98\x82", "xD" },
++        { "\xF0\x9F\x98\xA2", ":'(" }, { "\xF0\x9F\x98\xA1", ">:(" },
++        { "\xE2\x99\xA5", "<3"   }, { "\xF0\x9F\x92\x94", "</3" },
++        { "\xF0\x9F\x91\x8D", "(y)" }, { "\xF0\x9F\x91\x8E", "(n)" },
++        { "\xE2\x9C\x93", "(v)"  }, { "\xE2\x9C\x97", "(x)"  },
++        { "\xE2\x98\x85", "*"    }, { "\xE2\x9A\x94", "><>"  },
++        { "\xF0\x9F\x8D\xBA", "[o]" }, { "\xF0\x9F\x94\xA5", "(f)" },
++        { "\xF0\x9F\x8E\xB5", "(m)" }, { "\xF0\x9F\x92\xA4", "zZz" }
++    };
++
++    std::size_t utf8Length(const std::string& text)
++    {
++        std::size_t count = 0;
++        for (std::size_t i = 0; i < text.size(); ++i)
++        {
++            const unsigned char c = static_cast<unsigned char>(text[i]);
++            if (c < 0x80 || c >= 0xC0)
++                ++count;
++        }
++        return count;
++    }
++
++    std::string utf8Truncate(const std::string& text, std::size_t codePoints)
++    {
++        std::size_t count = 0;
++        std::size_t i = 0;
++        while (i < text.size() && count < codePoints)
++        {
++            const unsigned char c = static_cast<unsigned char>(text[i]);
++            std::size_t length = 1;
++            if (c >= 0xF0) length = 4;
++            else if (c >= 0xE0) length = 3;
++            else if (c >= 0xC0) length = 2;
++            i += length;
++            ++count;
++        }
++        return text.substr(0, std::min(i, text.size()));
++    }
++
++    int measuredCaptionWidth(MyGUI::Widget* widget)
++    {
++        if (widget == nullptr)
++            return 0;
++        MyGUI::TextBox* text = widget->castType<MyGUI::TextBox>(false);
++        return text != nullptr ? text->getTextSize().width : 0;
++    }
++
++    // "#RRGGBB" as used by the server's color table.
++    bool parseHexColour(const std::string& value, unsigned int& out)
++    {
++        const std::size_t offset = (!value.empty() && value[0] == '#') ? 1u : 0u;
++        if (value.size() < offset + 6)
++            return false;
++        unsigned int result = 0;
++        for (std::size_t i = 0; i < 6; ++i)
++        {
++            const char c = value[offset + i];
++            unsigned int digit = 0;
++            if (c >= '0' && c <= '9') digit = static_cast<unsigned int>(c - '0');
++            else if (c >= 'a' && c <= 'f') digit = static_cast<unsigned int>(c - 'a') + 10u;
++            else if (c >= 'A' && c <= 'F') digit = static_cast<unsigned int>(c - 'A') + 10u;
++            else return false;
++            result = (result << 4) | digit;
++        }
++        out = result;
++        return true;
++    }
++
++    MyGUI::Colour toMyGuiColour(unsigned int rgb)
++    {
++        return MyGUI::Colour(
++            static_cast<float>((rgb >> 16) & 0xFF) / 255.f,
++            static_cast<float>((rgb >> 8) & 0xFF) / 255.f,
++            static_cast<float>(rgb & 0xFF) / 255.f);
++    }
++
+     std::vector<std::string> splitControlFields(const std::string& value, char delimiter)
+     {
+         std::vector<std::string> result;
+@@ -110,16 +210,31 @@
+         , mDragHandle(nullptr)
+         , mChatToolbar(nullptr)
+         , mEmojiBar(nullptr)
++        , mColorBar(nullptr)
+         , mGroupPane(nullptr)
+         , mHomePane(nullptr)
++        , mPlayersPane(nullptr)
++        , mPlayersActionRow(nullptr)
++        , mGroupActionRow1(nullptr)
++        , mGroupActionRow2(nullptr)
++        , mGroupActionRow3(nullptr)
+         , mGroupInfo(nullptr)
++        , mPlayersInfo(nullptr)
++        , mGroupRoster(nullptr)
++        , mPlayersList(nullptr)
++        , mGroupRosterLabel(nullptr)
+         , mGroupNameLabel(nullptr)
+         , mGroupTargetLabel(nullptr)
++        , mColorBarLabel(nullptr)
+         , mGroupNameEdit(nullptr)
+         , mGroupTargetEdit(nullptr)
+         , mTabChat(nullptr)
+         , mTabGroup(nullptr)
+         , mTabHome(nullptr)
++        , mTabPlayers(nullptr)
++        , mPlayersRefreshButton(nullptr)
++        , mPlayersOpenListButton(nullptr)
++        , mPlayersInviteButton(nullptr)
+         , mModeOoc(nullptr)
+         , mModeRp(nullptr)
+         , mChannelDefault(nullptr)
+@@ -132,7 +247,9 @@
+         , mSendButton(nullptr)
+         , mReturnButton(nullptr)
+         , mEmojiToggleButton(nullptr)
++        , mColorToggleButton(nullptr)
+         , mEmojiButtons{}
++        , mColorButtons{}
+         , mGroupCreateButton(nullptr)
+         , mGroupRefreshButton(nullptr)
+         , mGroupInviteButton(nullptr)
+@@ -150,7 +267,14 @@
+         , activeTab(TAB_CHAT)
+         , rpMode(false)
+         , stayOpenAfterSend(false)
+-        , emojiBarVisible(false)
++        , activeDrawer(DRAWER_NONE)
++        , emojiFontName()
++        , groupRosterNames()
++        , playerListNames()
++        , playerListDetails()
++        , colorPalette()
++        , selectedColorIndex(-1)
++        , menuCaptions()
+         , groupInGroup(false)
+         , groupIsLeader(false)
+         , groupJournalSync(true)
+@@ -243,12 +367,27 @@
+         getWidget(mDragHandle, "DragHandle");
+         getWidget(mChatToolbar, "ChatToolbar");
+         getWidget(mEmojiBar, "EmojiBar");
++        getWidget(mColorBar, "ColorBar");
++        getWidget(mColorBarLabel, "ColorBarLabel");
+         getWidget(mGroupPane, "GroupPane");
+         getWidget(mHomePane, "HomePane");
++        getWidget(mPlayersPane, "PlayersPane");
++        getWidget(mPlayersActionRow, "PlayersActionRow");
++        getWidget(mPlayersList, "PlayersList");
++        getWidget(mPlayersInfo, "PlayersInfo");
++        getWidget(mPlayersRefreshButton, "PlayersRefreshButton");
++        getWidget(mPlayersOpenListButton, "PlayersOpenListButton");
++        getWidget(mPlayersInviteButton, "PlayersInviteButton");
++        getWidget(mGroupActionRow1, "GroupActionRow1");
++        getWidget(mGroupActionRow2, "GroupActionRow2");
++        getWidget(mGroupActionRow3, "GroupActionRow3");
++        getWidget(mGroupRoster, "GroupRoster");
++        getWidget(mGroupRosterLabel, "GroupRosterLabel");
+ 
+         getWidget(mTabChat, "TabChat");
+         getWidget(mTabGroup, "TabGroup");
+         getWidget(mTabHome, "TabHome");
++        getWidget(mTabPlayers, "TabPlayers");
+         getWidget(mModeOoc, "ModeOoc");
+         getWidget(mModeRp, "ModeRp");
+         getWidget(mChannelDefault, "ChannelDefault");
+@@ -261,12 +400,11 @@
+         getWidget(mSendButton, "SendButton");
+         getWidget(mReturnButton, "ReturnButton");
+         getWidget(mEmojiToggleButton, "EmojiToggle");
+-        getWidget(mEmojiButtons[0], "Emoji1");
+-        getWidget(mEmojiButtons[1], "Emoji2");
+-        getWidget(mEmojiButtons[2], "Emoji3");
+-        getWidget(mEmojiButtons[3], "Emoji4");
+-        getWidget(mEmojiButtons[4], "Emoji5");
+-        getWidget(mEmojiButtons[5], "Emoji6");
++        getWidget(mColorToggleButton, "ColorToggle");
++        for (int i = 0; i < sEmojiSlotCount; ++i)
++            getWidget(mEmojiButtons[i], "Emoji" + std::to_string(i + 1));
++        for (int i = 0; i < sColorSlotCount; ++i)
++            getWidget(mColorButtons[i], "Color" + std::to_string(i + 1));
+ 
+         getWidget(mGroupInfo, "GroupInfo");
+         getWidget(mGroupNameLabel, "GroupNameLabel");
+@@ -288,52 +426,63 @@
+         MyGUI::TextBox* title = nullptr;
+         MyGUI::TextBox* groupTitle = nullptr;
+         MyGUI::TextBox* homeTitle = nullptr;
++        MyGUI::TextBox* playersTitle = nullptr;
+         MyGUI::EditBox* homeInfo = nullptr;
+         getWidget(title, "PlayerMenuTitle");
+         getWidget(groupTitle, "GroupTitle");
+         getWidget(homeTitle, "HomeTitle");
++        getWidget(playersTitle, "PlayersTitle");
+         getWidget(homeInfo, "HomeInfo");
+ 
+         title->setCaption(localizeArena("chat.menu.title"));
+-        mTabChat->setCaption(localizeArena("chat.tab.chat"));
+-        mTabGroup->setCaption(localizeArena("chat.tab.group"));
+-        mTabHome->setCaption(localizeArena("chat.tab.home"));
+-        mReturnButton->setCaption(localizeArena("chat.return_game"));
+-        mModeOoc->setCaption("OOC");
+-        mModeRp->setCaption("RP");
+-        mChannelDefault->setCaption(localizeArena("chat.channel.default"));
+-        mChannelLocal->setCaption(localizeArena("chat.channel.local"));
+-        mChannelGlobal->setCaption(localizeArena("chat.channel.global"));
+-        mStylePlain->setCaption(localizeArena("chat.style.plain"));
+-        mStyleMe->setCaption("/me");
+-        mStyleDo->setCaption("/do");
+-        mEmojiToggleButton->setCaption(localizeArena("chat.emoji"));
+-        mStayOpenButton->setCaption(localizeArena("chat.stay_after_send"));
+-        mSendButton->setCaption(localizeArena("chat.send"));
++        setMenuCaption(mTabChat, localizeArena("chat.tab.chat"));
++        setMenuCaption(mTabGroup, localizeArena("chat.tab.group"));
++        setMenuCaption(mTabHome, localizeArena("chat.tab.home"));
++        setMenuCaption(mTabPlayers, localizeArena("chat.tab.players"));
++        setMenuCaption(mReturnButton, localizeArena("chat.return_game"));
++        setMenuCaption(mModeOoc, "OOC");
++        setMenuCaption(mModeRp, "RP");
++        setMenuCaption(mChannelDefault, localizeArena("chat.channel.default"));
++        setMenuCaption(mChannelLocal, localizeArena("chat.channel.local"));
++        setMenuCaption(mChannelGlobal, localizeArena("chat.channel.global"));
++        setMenuCaption(mStylePlain, localizeArena("chat.style.plain"));
++        setMenuCaption(mStyleMe, "/me");
++        setMenuCaption(mStyleDo, "/do");
++        setMenuCaption(mEmojiToggleButton, localizeArena("chat.emoji"));
++        setMenuCaption(mColorToggleButton, localizeArena("chat.color.button"));
++        setMenuCaption(mStayOpenButton, localizeArena("chat.stay_after_send"));
++        setMenuCaption(mSendButton, localizeArena("chat.send"));
++        mColorBarLabel->setCaption(localizeArena("chat.color.hint"));
+ 
+         groupTitle->setCaption(localizeArena("chat.group.title"));
+         mGroupInfo->setCaption(localizeArena("chat.group.loading"));
++        mGroupRosterLabel->setCaption(localizeArena("chat.group.roster"));
+         mGroupNameLabel->setCaption(localizeArena("chat.group.name"));
+         mGroupTargetLabel->setCaption(localizeArena("chat.group.target"));
+-        mGroupCreateButton->setCaption(localizeArena("chat.group.create"));
+-        mGroupRefreshButton->setCaption(localizeArena("chat.group.refresh"));
+-        mGroupInviteButton->setCaption(localizeArena("chat.group.invite"));
+-        mGroupLeaveButton->setCaption(localizeArena("chat.group.leave"));
+-        mGroupDisbandButton->setCaption(localizeArena("chat.group.disband"));
+-        mGroupKickButton->setCaption(localizeArena("chat.group.kick"));
+-        mGroupLeaderButton->setCaption(localizeArena("chat.group.leader"));
+-        mGroupAcceptButton->setCaption(localizeArena("chat.group.accept"));
+-        mGroupDeclineButton->setCaption(localizeArena("chat.group.decline"));
++        setMenuCaption(mGroupCreateButton, localizeArena("chat.group.create"));
++        setMenuCaption(mGroupRefreshButton, localizeArena("chat.group.refresh"));
++        setMenuCaption(mGroupInviteButton, localizeArena("chat.group.invite"));
++        setMenuCaption(mGroupLeaveButton, localizeArena("chat.group.leave"));
++        setMenuCaption(mGroupDisbandButton, localizeArena("chat.group.disband"));
++        setMenuCaption(mGroupKickButton, localizeArena("chat.group.kick"));
++        setMenuCaption(mGroupLeaderButton, localizeArena("chat.group.leader"));
++        setMenuCaption(mGroupAcceptButton, localizeArena("chat.group.accept"));
++        setMenuCaption(mGroupDeclineButton, localizeArena("chat.group.decline"));
+         homeTitle->setCaption(localizeArena("chat.home.title"));
+         homeInfo->setCaption(localizeArena("chat.home.placeholder"));
++        playersTitle->setCaption(localizeArena("chat.players.title"));
++        mPlayersInfo->setCaption(localizeArena("chat.players.loading"));
++        setMenuCaption(mPlayersRefreshButton, localizeArena("chat.group.refresh"));
++        setMenuCaption(mPlayersOpenListButton, localizeArena("chat.players.open_list"));
++        setMenuCaption(mPlayersInviteButton, localizeArena("chat.group.invite"));
+ 
+-        const char* symbols[6] = { "\xE2\x98\xBA", "\xE2\x99\xA5", "\xE2\x98\x85", "\xE2\x98\x80", "\xE2\x98\x95", "\xE2\x9C\x93" };
+-        for (int i = 0; i < 6; ++i)
+-            mEmojiButtons[i]->setCaption(symbols[i]);
++        emojiFontName = Settings::Manager::getString("emoji font", "Chat");
++        applyEmojiPalette();
+ 
+         mTabChat->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onTabClicked);
+         mTabGroup->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onTabClicked);
+         mTabHome->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onTabClicked);
++        mTabPlayers->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onTabClicked);
+         mModeOoc->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onModeClicked);
+         mModeRp->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onModeClicked);
+         mChannelDefault->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onChannelClicked);
+@@ -346,8 +495,20 @@
+         mSendButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onSendClicked);
+         mReturnButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onReturnClicked);
+         mEmojiToggleButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onEmojiToggleClicked);
+-        for (int i = 0; i < 6; ++i)
++        mColorToggleButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onColorToggleClicked);
++        for (int i = 0; i < sEmojiSlotCount; ++i)
+             mEmojiButtons[i]->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onEmojiClicked);
++        for (int i = 0; i < sColorSlotCount; ++i)
++        {
++            mColorButtons[i]->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onColorClicked);
++            mColorButtons[i]->setVisible(false);
++        }
++        mGroupRoster->eventListChangePosition += MyGUI::newDelegate(this, &GUIChat::onRosterSelected);
++        mGroupRoster->eventListSelectAccept += MyGUI::newDelegate(this, &GUIChat::onRosterAccepted);
++        mPlayersList->eventListChangePosition += MyGUI::newDelegate(this, &GUIChat::onPlayerListSelected);
++        mPlayersRefreshButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onPlayersButtonClicked);
++        mPlayersOpenListButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onPlayersButtonClicked);
++        mPlayersInviteButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onPlayersButtonClicked);
+ 
+         mGroupCreateButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onGroupButtonClicked);
+         mGroupRefreshButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onGroupButtonClicked);
+@@ -488,6 +649,8 @@
+     {
+         static const std::string groupPrefix = "@@AMP_GROUP@@";
+         static const std::string xpPrefix = "@@AMP_XP@@";
++        static const std::string colorPrefix = "@@AMP_COLOR@@";
++        static const std::string playersPrefix = "@@AMP_PLAYERS@@";
+ 
+         if (msg.compare(0, groupPrefix.size(), groupPrefix) == 0)
+         {
+@@ -499,6 +662,26 @@
+             return true;
+         }
+ 
++        if (msg.compare(0, colorPrefix.size(), colorPrefix) == 0)
++        {
++            std::vector<std::string> fields = splitControlFields(msg.substr(colorPrefix.size()), '\t');
++            for (std::string& field : fields)
++                field = unescapeControlField(field);
++            if (!fields.empty() && fields[0] == "STATE")
++                rebuildColorPalette(fields);
++            return true;
++        }
++
++        if (msg.compare(0, playersPrefix.size(), playersPrefix) == 0)
++        {
++            std::vector<std::string> fields = splitControlFields(msg.substr(playersPrefix.size()), '\t');
++            for (std::string& field : fields)
++                field = unescapeControlField(field);
++            if (!fields.empty() && fields[0] == "STATE")
++                rebuildPlayerList(fields);
++            return true;
++        }
++
+         if (msg.compare(0, xpPrefix.size(), xpPrefix) == 0)
+         {
+             std::vector<std::string> fields = splitControlFields(msg.substr(xpPrefix.size()), '\t');
+@@ -614,7 +797,7 @@
+         }
+ 
+         editState = state;
+-        emojiBarVisible = false;
++        activeDrawer = DRAWER_NONE;
+ 
+         const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
+         if (editState)
+@@ -693,7 +876,7 @@
+         mCommandLine->setEditWordWrap(true);
+         mCommandLine->setOverflowToTheLeft(false);
+ 
+-        const int historyTop = emojiBarVisible ? 114 : 78;
++        const int historyTop = activeDrawer != DRAWER_NONE ? 152 : 78;
+         const int historyHeight = std::max(40, commandTop - gap - historyTop);
+         mHistory->setCoord(sideMargin, historyTop,
+             std::max(32, mainWidth - sideMargin * 2), historyHeight);
+@@ -777,7 +960,7 @@
+                     persistGeometry();
+             }
+             editState = false;
+-            emojiBarVisible = false;
++            activeDrawer = DRAWER_NONE;
+             mCommandLine->setVisible(false);
+             historyReviewState = false;
+             syncInteractiveInputMode();
+@@ -954,9 +1137,11 @@
+         mChatToolbar->setVisible(chatVisible);
+         mStayOpenButton->setVisible(chatVisible);
+         mSendButton->setVisible(chatVisible);
+-        mEmojiBar->setVisible(chatVisible && emojiBarVisible);
++        mEmojiBar->setVisible(chatVisible && activeDrawer == DRAWER_EMOJI);
++        mColorBar->setVisible(chatVisible && activeDrawer == DRAWER_COLOR);
+         mGroupPane->setVisible(menuVisible && activeTab == TAB_GROUP);
+         mHomePane->setVisible(menuVisible && activeTab == TAB_HOME);
++        mPlayersPane->setVisible(menuVisible && activeTab == TAB_PLAYERS);
+ 
+         mCommandLine->setVisible(chatVisible);
+         mHistory->setVisible(historyDisplayEnabled && (!menuVisible || chatVisible));
+@@ -970,6 +1155,9 @@
+ 
+         updateToggleButtons();
+         updateGroupControls();
++        updateColorButtons();
++        if (menuVisible)
++            applyMenuLayout();
+     }
+ 
+     void GUIChat::selectTab(PlayerMenuTab tab, bool persist)
+@@ -981,7 +1169,7 @@
+             Settings::Manager::saveUser();
+         }
+ 
+-        emojiBarVisible = false;
++        activeDrawer = DRAWER_NONE;
+         refreshPlayerMenu();
+         updateCommandLineLayout();
+ 
+@@ -995,6 +1183,8 @@
+             MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(nullptr);
+             if (activeTab == TAB_GROUP)
+                 requestGroupState();
++            else if (activeTab == TAB_PLAYERS)
++                requestPlayerList();
+         }
+     }
+ 
+@@ -1003,6 +1193,7 @@
+         mTabChat->setStateSelected(activeTab == TAB_CHAT);
+         mTabGroup->setStateSelected(activeTab == TAB_GROUP);
+         mTabHome->setStateSelected(activeTab == TAB_HOME);
++        mTabPlayers->setStateSelected(activeTab == TAB_PLAYERS);
+         mModeOoc->setStateSelected(!rpMode);
+         mModeRp->setStateSelected(rpMode);
+         mChannelDefault->setStateSelected(chatChannel == CHANNEL_DEFAULT);
+@@ -1012,7 +1203,8 @@
+         mStyleMe->setStateSelected(chatStyle == STYLE_ME);
+         mStyleDo->setStateSelected(chatStyle == STYLE_DO);
+         mStayOpenButton->setStateSelected(stayOpenAfterSend);
+-        mEmojiToggleButton->setStateSelected(emojiBarVisible);
++        mEmojiToggleButton->setStateSelected(activeDrawer == DRAWER_EMOJI);
++        mColorToggleButton->setStateSelected(activeDrawer == DRAWER_COLOR);
+     }
+ 
+     void GUIChat::setChatChannel(ChatChannel channel)
+@@ -1087,6 +1279,10 @@
+         mGroupAcceptButton->setVisible(!groupInGroup && groupPendingInvite);
+         mGroupDeclineButton->setVisible(!groupInGroup && groupPendingInvite);
+         mGroupRefreshButton->setVisible(true);
++        mGroupRoster->setVisible(true);
++        mGroupRosterLabel->setVisible(true);
++        mGroupTargetLabel->setVisible(leaderTools);
++        mGroupTargetEdit->setVisible(leaderTools);
+ 
+         mGroupJournalButton->setStateSelected(groupJournalSync);
+         mGroupTopicsButton->setStateSelected(groupTopicSync);
+@@ -1147,6 +1343,9 @@
+         }
+ 
+         mGroupInfo->setCaption(info.str());
++        // X052 appends the online roster as field 11. Older servers simply omit
++        // it, in which case the list stays empty instead of breaking the page.
++        rebuildGroupRoster(fields.size() > 11 ? fields[11] : std::string());
+         updateGroupControls();
+     }
+ 
+@@ -1156,6 +1355,8 @@
+             selectTab(TAB_GROUP);
+         else if (sender == mTabHome)
+             selectTab(TAB_HOME);
++        else if (sender == mTabPlayers)
++            selectTab(TAB_PLAYERS);
+         else
+             selectTab(TAB_CHAT);
+     }
+@@ -1202,29 +1403,66 @@
+ 
+     void GUIChat::onEmojiToggleClicked(MyGUI::Widget*)
+     {
+-        emojiBarVisible = !emojiBarVisible;
+-        refreshPlayerMenu();
+-        updateCommandLineLayout();
++        setDrawer(activeDrawer == DRAWER_EMOJI ? DRAWER_NONE : DRAWER_EMOJI);
++    }
++
++    void GUIChat::onColorToggleClicked(MyGUI::Widget*)
++    {
++        setDrawer(activeDrawer == DRAWER_COLOR ? DRAWER_NONE : DRAWER_COLOR);
+     }
+ 
+     void GUIChat::onEmojiClicked(MyGUI::Widget* sender)
+     {
+-        static const char* symbols[6] = { "\xE2\x98\xBA", "\xE2\x99\xA5", "\xE2\x98\x85", "\xE2\x98\x80", "\xE2\x98\x95", "\xE2\x9C\x93" };
+-        for (int i = 0; i < 6; ++i)
++        for (int i = 0; i < sEmojiSlotCount; ++i)
+         {
+             if (sender != mEmojiButtons[i])
+                 continue;
+ 
+-            MyGUI::UString text = mCommandLine->getCaption();
+-            text.insert(text.size(), MyGUI::UString(symbols[i]));
++            // X052: insert at the caret instead of blindly appending, and keep
++            // the caret behind the inserted token so typing continues normally.
++            MyGUI::UString token(emojiSymbol(i));
++            MyGUI::UString text = mCommandLine->getOnlyText();
++            std::size_t caret = mCommandLine->getTextCursor();
++            if (caret > text.size())
++                caret = text.size();
++            text.insert(caret, token);
+             mCommandLine->setCaption(text);
+-            mCommandLine->setTextCursor(text.size());
++            mCommandLine->setTextCursor(caret + token.size());
+             MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
+             updateCommandLineLayout();
+             break;
+         }
+     }
+ 
++    void GUIChat::onColorClicked(MyGUI::Widget* sender)
++    {
++        for (int i = 0; i < sColorSlotCount; ++i)
++        {
++            if (sender != mColorButtons[i] || static_cast<std::size_t>(i) >= colorPalette.size())
++                continue;
++            send("/chatcolor " + std::to_string(i + 1));
++            break;
++        }
++    }
++
++    void GUIChat::onRosterSelected(MyGUI::ListBox*, size_t index)
++    {
++        if (index >= groupRosterNames.size())
++            return;
++        mGroupTargetEdit->setCaption(groupRosterNames[index]);
++    }
++
++    void GUIChat::onRosterAccepted(MyGUI::ListBox*, size_t index)
++    {
++        if (index >= groupRosterNames.size())
++            return;
++        mGroupTargetEdit->setCaption(groupRosterNames[index]);
++        // Double click is the natural "do the obvious thing" shortcut: invite a
++        // stranger, kick a member. Both are leader-only server side anyway.
++        if (groupInGroup && groupIsLeader)
++            sendGroupAction("invite", groupRosterNames[index]);
++    }
++
+     void GUIChat::onGroupButtonClicked(MyGUI::Widget* sender)
+     {
+         if (sender == mGroupRefreshButton)
+@@ -1234,12 +1472,23 @@
+             sendGroupAction("create", mGroupNameEdit->getOnlyText());
+             mGroupNameEdit->setCaption("");
+         }
+-        else if (sender == mGroupInviteButton)
+-            sendGroupAction("invite", mGroupTargetEdit->getOnlyText());
+-        else if (sender == mGroupKickButton)
+-            sendGroupAction("kick", mGroupTargetEdit->getOnlyText());
+-        else if (sender == mGroupLeaderButton)
+-            sendGroupAction("leader", mGroupTargetEdit->getOnlyText());
++        else if (sender == mGroupInviteButton || sender == mGroupKickButton || sender == mGroupLeaderButton)
++        {
++            // The typed name wins; an empty field falls back to whatever is
++            // highlighted in the roster, so invites need no typing at all.
++            std::string target = mGroupTargetEdit->getOnlyText();
++            if (target.empty())
++                target = selectedRosterName();
++            if (target.empty())
++                return;
++
++            if (sender == mGroupInviteButton)
++                sendGroupAction("invite", target);
++            else if (sender == mGroupKickButton)
++                sendGroupAction("kick", target);
++            else
++                sendGroupAction("leader", target);
++        }
+         else if (sender == mGroupJournalButton)
+             sendGroupAction("journal");
+         else if (sender == mGroupTopicsButton)
+@@ -1273,6 +1522,7 @@
+         const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
+         clampToViewport(view.width, view.height);
+         panelCoord = mMainWidget->getCoord();
++        applyMenuLayout();
+         markGeometryDirty();
+     }
+ 
+@@ -1537,6 +1787,500 @@
+         syncSettings();
+     }
+ 
++
++    // ------------------------------------------------------------------
++    // X052: caption-aware layout
++    //
++    // Every hardcoded pixel width in the layout file is only a starting
++    // rectangle. Buttons are re-sized here from the width their localized
++    // caption actually measures, so a long Russian label can never be clipped
++    // and a short English one does not leave a hole in the row.
++    // ------------------------------------------------------------------
++
++    void GUIChat::setMenuCaption(MyGUI::Widget* widget, const std::string& caption)
++    {
++        if (widget == nullptr)
++            return;
++        menuCaptions[widget] = caption;
++        widget->setCaption(caption);
++    }
++
++    void GUIChat::refitCaption(MyGUI::Widget* widget)
++    {
++        if (widget == nullptr)
++            return;
++
++        const std::map<MyGUI::Widget*, std::string>::const_iterator entry = menuCaptions.find(widget);
++        if (entry == menuCaptions.end())
++            return;
++
++        const std::string& full = entry->second;
++        widget->setCaption(full);
++
++        const int available = widget->getWidth() - 10;
++        if (available <= 0 || measuredCaptionWidth(widget) <= available)
++            return;
++
++        // Only reached when even the proportional row pass could not give the
++        // button enough room. Cut on a UTF-8 boundary so a multi-byte Cyrillic
++        // character is never split into an invalid sequence.
++        std::size_t length = utf8Length(full);
++        while (length > 1)
++        {
++            --length;
++            widget->setCaption(utf8Truncate(full, length) + "...");
++            if (measuredCaptionWidth(widget) <= available)
++                return;
++        }
++    }
++
++    void GUIChat::layoutRow(const std::vector<MyGUI::Widget*>& row, int left, int top, int width,
++        int height, int gap)
++    {
++        std::vector<MyGUI::Widget*> visible;
++        for (std::size_t i = 0; i < row.size(); ++i)
++        {
++            if (row[i] != nullptr && row[i]->getVisible())
++                visible.push_back(row[i]);
++        }
++        if (visible.empty())
++            return;
++
++        const int count = static_cast<int>(visible.size());
++        std::vector<int> preferred(visible.size(), 0);
++        int total = 0;
++        for (std::size_t i = 0; i < visible.size(); ++i)
++        {
++            const std::map<MyGUI::Widget*, std::string>::const_iterator entry = menuCaptions.find(visible[i]);
++            if (entry != menuCaptions.end())
++                visible[i]->setCaption(entry->second);
++
++            int wanted = measuredCaptionWidth(visible[i]) + sButtonPadding;
++            if (wanted < sMinimumButtonWidth)
++                wanted = sMinimumButtonWidth;
++            preferred[i] = wanted;
++            total += wanted;
++        }
++
++        const int gaps = (count - 1) * gap;
++        int usable = width - gaps;
++        if (usable < count * sMinimumButtonWidth)
++            usable = count * sMinimumButtonWidth;
++
++        std::vector<int> resolved(visible.size(), 0);
++        int assigned = 0;
++        for (std::size_t i = 0; i < visible.size(); ++i)
++        {
++            const long long scaled = static_cast<long long>(preferred[i]) * usable / std::max(1, total);
++            resolved[i] = std::max(sMinimumButtonWidth, static_cast<int>(scaled));
++            assigned += resolved[i];
++        }
++
++        // Hand the rounding remainder to the widest button so the row ends
++        // exactly on the right margin instead of a pixel short of it.
++        int remainder = usable - assigned;
++        if (remainder != 0)
++        {
++            std::size_t widest = 0;
++            for (std::size_t i = 1; i < resolved.size(); ++i)
++            {
++                if (resolved[i] > resolved[widest])
++                    widest = i;
++            }
++            resolved[widest] = std::max(sMinimumButtonWidth, resolved[widest] + remainder);
++        }
++
++        int x = left;
++        for (std::size_t i = 0; i < visible.size(); ++i)
++        {
++            visible[i]->setCoord(x, top, resolved[i], height);
++            x += resolved[i] + gap;
++            refitCaption(visible[i]);
++        }
++    }
++
++    void GUIChat::layoutGrid(const std::vector<MyGUI::Widget*>& cells, int left, int top, int width,
++        int rowHeight, int columns, int gap)
++    {
++        if (columns <= 0 || cells.empty())
++            return;
++
++        const int cellWidth = std::max(sMinimumButtonWidth,
++            (width - (columns - 1) * gap) / columns);
++        for (std::size_t i = 0; i < cells.size(); ++i)
++        {
++            if (cells[i] == nullptr)
++                continue;
++            const int column = static_cast<int>(i) % columns;
++            const int row = static_cast<int>(i) / columns;
++            cells[i]->setCoord(left + column * (cellWidth + gap), top + row * (rowHeight + gap),
++                cellWidth, rowHeight);
++        }
++    }
++
++    void GUIChat::applyMenuLayout()
++    {
++        if (!mMainWidget || mDragHandle == nullptr)
++            return;
++
++        const int mainWidth = mMainWidget->getWidth();
++        const int mainHeight = mMainWidget->getHeight();
++        const int inner = std::max(120, mainWidth - sSideMargin * 2);
++
++        // Title strip: the label keeps a fixed share, the tabs and the
++        // "back to game" button share the rest.
++        mDragHandle->setCoord(6, 6, std::max(80, mainWidth - 12), 32);
++        const int titleWidth = std::max(90, std::min(190, mainWidth / 5));
++        if (MyGUI::Widget* title = mDragHandle->findWidget("PlayerMenuTitle"))
++            title->setCoord(10, 5, titleWidth - 14, 22);
++
++        std::vector<MyGUI::Widget*> tabs;
++        tabs.push_back(mTabChat);
++        tabs.push_back(mTabGroup);
++        tabs.push_back(mTabPlayers);
++        tabs.push_back(mTabHome);
++        tabs.push_back(mReturnButton);
++        layoutRow(tabs, titleWidth, 4, std::max(120, mDragHandle->getWidth() - titleWidth - 10), 24, sRowGap);
++
++        mChatToolbar->setCoord(sSideMargin, 44, inner, sToolbarHeight);
++        std::vector<MyGUI::Widget*> toolbar;
++        toolbar.push_back(mModeOoc);
++        toolbar.push_back(mModeRp);
++        toolbar.push_back(mChannelDefault);
++        toolbar.push_back(mChannelLocal);
++        toolbar.push_back(mChannelGlobal);
++        toolbar.push_back(mStylePlain);
++        toolbar.push_back(mStyleMe);
++        toolbar.push_back(mStyleDo);
++        toolbar.push_back(mEmojiToggleButton);
++        toolbar.push_back(mColorToggleButton);
++        layoutRow(toolbar, 0, 2, inner, 26, sRowGap);
++
++        mEmojiBar->setCoord(sSideMargin, 78, inner, sDrawerHeight);
++        std::vector<MyGUI::Widget*> emoji;
++        for (int i = 0; i < sEmojiSlotCount; ++i)
++            emoji.push_back(mEmojiButtons[i]);
++        layoutGrid(emoji, 6, 6, inner - 12, 26, 10, 4);
++
++        mColorBar->setCoord(sSideMargin, 78, inner, sDrawerHeight);
++        mColorBarLabel->setCoord(8, 4, inner - 16, 20);
++        std::vector<MyGUI::Widget*> swatches;
++        for (int i = 0; i < sColorSlotCount; ++i)
++            swatches.push_back(mColorButtons[i]);
++        layoutGrid(swatches, 6, 28, inner - 12, 26, 16, 4);
++
++        const int footerTop = std::max(120, mainHeight - 36);
++        const int sendWidth = std::max(90, std::min(160, inner / 5));
++        mStayOpenButton->setCoord(sSideMargin, footerTop, std::max(120, inner - sendWidth - sRowGap), 28);
++        mSendButton->setCoord(sSideMargin + inner - sendWidth, footerTop, sendWidth, 28);
++        refitCaption(mStayOpenButton);
++        refitCaption(mSendButton);
++
++        const int paneTop = 46;
++        const int paneHeight = std::max(200, mainHeight - paneTop - sSideMargin);
++        mGroupPane->setCoord(sSideMargin, paneTop, inner, paneHeight);
++        mHomePane->setCoord(sSideMargin, paneTop, inner, paneHeight);
++        mPlayersPane->setCoord(sSideMargin, paneTop, inner, paneHeight);
++
++        // Group page: info on the left, live roster on the right, three
++        // action rows pinned to the bottom.
++        const int paneInner = std::max(200, inner - 28);
++        const int listWidth = std::max(180, paneInner / 3);
++        const int infoWidth = paneInner - listWidth - 10;
++        const int topBlockHeight = std::max(110, paneHeight - 218);
++
++        if (MyGUI::Widget* groupTitle = mGroupPane->findWidget("GroupTitle"))
++            groupTitle->setCoord(14, 8, infoWidth, 24);
++        mGroupInfo->setCoord(14, 36, infoWidth, topBlockHeight);
++        mGroupRosterLabel->setCoord(24 + infoWidth, 8, listWidth, 24);
++        mGroupRoster->setCoord(24 + infoWidth, 36, listWidth, topBlockHeight);
++
++        int rowTop = 46 + topBlockHeight;
++        const int labelWidth = std::max(80, paneInner / 6);
++        mGroupNameLabel->setCoord(14, rowTop + 4, labelWidth, 24);
++        mGroupNameEdit->setCoord(18 + labelWidth, rowTop, std::max(120, paneInner - labelWidth - 150), 28);
++        mGroupCreateButton->setCoord(paneInner - 118, rowTop, 132, 28);
++        refitCaption(mGroupCreateButton);
++
++        rowTop += 34;
++        mGroupTargetLabel->setCoord(14, rowTop + 4, labelWidth, 24);
++        mGroupTargetEdit->setCoord(18 + labelWidth, rowTop, std::max(120, paneInner - labelWidth - 20), 28);
++
++        rowTop += 36;
++        mGroupActionRow1->setCoord(14, rowTop, paneInner, 30);
++        std::vector<MyGUI::Widget*> actions1;
++        actions1.push_back(mGroupInviteButton);
++        actions1.push_back(mGroupKickButton);
++        actions1.push_back(mGroupLeaderButton);
++        layoutRow(actions1, 0, 2, paneInner, 26, sRowGap);
++
++        rowTop += 34;
++        mGroupActionRow2->setCoord(14, rowTop, paneInner, 30);
++        std::vector<MyGUI::Widget*> actions2;
++        actions2.push_back(mGroupJournalButton);
++        actions2.push_back(mGroupTopicsButton);
++        actions2.push_back(mGroupLeaveButton);
++        actions2.push_back(mGroupDisbandButton);
++        layoutRow(actions2, 0, 2, paneInner, 26, sRowGap);
++
++        rowTop += 34;
++        mGroupActionRow3->setCoord(14, rowTop, paneInner, 30);
++        std::vector<MyGUI::Widget*> actions3;
++        actions3.push_back(mGroupAcceptButton);
++        actions3.push_back(mGroupDeclineButton);
++        actions3.push_back(mGroupRefreshButton);
++        layoutRow(actions3, 0, 2, paneInner, 26, sRowGap);
++
++        // Players page.
++        const int playersListWidth = std::max(180, paneInner * 2 / 5);
++        const int playersBodyHeight = std::max(120, paneHeight - 110);
++        if (MyGUI::Widget* playersTitle = mPlayersPane->findWidget("PlayersTitle"))
++            playersTitle->setCoord(14, 8, paneInner, 24);
++        mPlayersList->setCoord(14, 36, playersListWidth, playersBodyHeight);
++        mPlayersInfo->setCoord(24 + playersListWidth, 36, paneInner - playersListWidth - 10, playersBodyHeight);
++        mPlayersActionRow->setCoord(14, 46 + playersBodyHeight, paneInner, 30);
++        std::vector<MyGUI::Widget*> playerActions;
++        playerActions.push_back(mPlayersRefreshButton);
++        playerActions.push_back(mPlayersOpenListButton);
++        playerActions.push_back(mPlayersInviteButton);
++        layoutRow(playerActions, 0, 2, paneInner, 26, sRowGap);
++
++        if (MyGUI::Widget* homeTitle = mHomePane->findWidget("HomeTitle"))
++            homeTitle->setCoord(18, 18, paneInner, 28);
++        if (MyGUI::Widget* homeInfo = mHomePane->findWidget("HomeInfo"))
++            homeInfo->setCoord(18, 58, paneInner, std::max(80, paneHeight - 80));
++    }
++
++    // ------------------------------------------------------------------
++    // X052: quick-insert strip
++    // ------------------------------------------------------------------
++
++    void GUIChat::setDrawer(ChatDrawer drawer)
++    {
++        activeDrawer = drawer;
++        if (activeDrawer == DRAWER_COLOR)
++            requestColorState();
++        refreshPlayerMenu();
++        updateCommandLineLayout();
++        if (editState && activeTab == TAB_CHAT)
++            MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
++    }
++
++    bool GUIChat::unicodeEmojiEnabled() const
++    {
++        // Opt-in only. OpenMW's bundled DejaVu LGC face carries no dingbat or
++        // emoji glyphs, so asking MyGUI to draw them is what produced the empty
++        // boxes. A server or player who installs a real symbol font names it in
++        // [Chat] emoji font and gets the Unicode palette instead.
++        if (emojiFontName.empty())
++            return false;
++        return MyGUI::FontManager::getInstance().isExist(emojiFontName);
++    }
++
++    const char* GUIChat::emojiSymbol(int index) const
++    {
++        if (index < 0 || index >= sEmojiSlotCount)
++            return "";
++        return unicodeEmojiEnabled() ? sEmojiPalette[index].unicode : sEmojiPalette[index].ascii;
++    }
++
++    void GUIChat::applyEmojiPalette()
++    {
++        const bool unicode = unicodeEmojiEnabled();
++        for (int i = 0; i < sEmojiSlotCount; ++i)
++        {
++            if (mEmojiButtons[i] == nullptr)
++                continue;
++            if (unicode)
++                mEmojiButtons[i]->setFontName(emojiFontName);
++            setMenuCaption(mEmojiButtons[i], emojiSymbol(i));
++        }
++    }
++
++    // ------------------------------------------------------------------
++    // X052: nickname colour
++    // ------------------------------------------------------------------
++
++    void GUIChat::requestColorState()
++    {
++        send("/chatcolor state");
++    }
++
++    void GUIChat::rebuildColorPalette(const std::vector<std::string>& fields)
++    {
++        selectedColorIndex = -1;
++        if (fields.size() > 1)
++        {
++            char* end = nullptr;
++            const long parsed = std::strtol(fields[1].c_str(), &end, 10);
++            if (end != fields[1].c_str())
++                selectedColorIndex = static_cast<int>(parsed) - 1;
++        }
++
++        colorPalette.clear();
++        if (fields.size() > 2)
++        {
++            const std::vector<std::string> entries = splitControlFields(fields[2], ';');
++            for (std::size_t i = 0; i < entries.size(); ++i)
++            {
++                if (entries[i].empty())
++                    continue;
++                unsigned int rgb = 0;
++                if (parseHexColour(entries[i], rgb))
++                    colorPalette.push_back(std::make_pair(rgb, entries[i]));
++            }
++        }
++
++        updateColorButtons();
++    }
++
++    void GUIChat::updateColorButtons()
++    {
++        for (int i = 0; i < sColorSlotCount; ++i)
++        {
++            if (mColorButtons[i] == nullptr)
++                continue;
++
++            const bool used = static_cast<std::size_t>(i) < colorPalette.size();
++            mColorButtons[i]->setVisible(used && activeDrawer == DRAWER_COLOR
++                && editState && activeTab == TAB_CHAT);
++            if (!used)
++                continue;
++
++            // The swatch is drawn with the palette colour itself, which needs
++            // no glyph coverage and therefore cannot end up as a box.
++            setMenuCaption(mColorButtons[i], std::to_string(i + 1));
++            mColorButtons[i]->setTextColour(toMyGuiColour(colorPalette[i].first));
++            mColorButtons[i]->setStateSelected(i == selectedColorIndex);
++        }
++    }
++
++    // ------------------------------------------------------------------
++    // X052: group roster and server player list
++    // ------------------------------------------------------------------
++
++    void GUIChat::rebuildGroupRoster(const std::string& rosterField)
++    {
++        groupRosterNames.clear();
++        mGroupRoster->removeAllItems();
++
++        const std::vector<std::string> entries = splitControlFields(rosterField, ';');
++        for (std::size_t i = 0; i < entries.size(); ++i)
++        {
++            if (entries[i].empty())
++                continue;
++            const std::vector<std::string> parts = splitControlFields(entries[i], '^');
++            if (parts.empty() || parts[0].empty())
++                continue;
++
++            const bool hasGroup = parts.size() > 1 && parts[1] == "1";
++            const bool inMyGroup = parts.size() > 2 && parts[2] == "1";
++            const bool sameCell = parts.size() > 3 && parts[3] == "1";
++
++            std::string label = parts[0];
++            if (inMyGroup)
++                label += " [" + localizeArena("chat.group.tag.member") + "]";
++            else if (hasGroup)
++                label += " [" + localizeArena("chat.group.tag.busy") + "]";
++            if (sameCell)
++                label += " *";
++
++            groupRosterNames.push_back(parts[0]);
++            mGroupRoster->addItem(label);
++        }
++
++        if (groupRosterNames.empty())
++            mGroupRoster->addItem(localizeArena("chat.group.roster_empty"));
++    }
++
++    std::string GUIChat::selectedRosterName() const
++    {
++        const std::size_t index = mGroupRoster->getIndexSelected();
++        if (index == MyGUI::ITEM_NONE || index >= groupRosterNames.size())
++            return std::string();
++        return groupRosterNames[index];
++    }
++
++    void GUIChat::requestPlayerList()
++    {
++        send("/playerlistui state");
++    }
++
++    void GUIChat::rebuildPlayerList(const std::vector<std::string>& fields)
++    {
++        playerListNames.clear();
++        playerListDetails.clear();
++        mPlayersList->removeAllItems();
++
++        const std::string header = fields.size() > 1 ? fields[1] : std::string();
++        const std::string body = fields.size() > 2 ? fields[2] : std::string();
++
++        const std::vector<std::string> entries = splitControlFields(body, ';');
++        for (std::size_t i = 0; i < entries.size(); ++i)
++        {
++            if (entries[i].empty())
++                continue;
++            const std::vector<std::string> parts = splitControlFields(entries[i], '^');
++            if (parts.empty() || parts[0].empty())
++                continue;
++
++            playerListNames.push_back(parts[0]);
++            playerListDetails.push_back(parts.size() > 1 ? parts[1] : std::string());
++            mPlayersList->addItem(parts.size() > 2 && !parts[2].empty() ? parts[2] : parts[0]);
++        }
++
++        if (playerListNames.empty())
++        {
++            mPlayersList->addItem(localizeArena("chat.players.empty"));
++            mPlayersInfo->setCaption(header.empty() ? localizeArena("chat.players.empty") : header);
++            return;
++        }
++
++        mPlayersList->setIndexSelected(0);
++        updatePlayerDetails();
++        if (!header.empty())
++            mPlayersInfo->setCaption(header + "\n\n" + mPlayersInfo->getOnlyText());
++    }
++
++    void GUIChat::updatePlayerDetails()
++    {
++        const std::size_t index = mPlayersList->getIndexSelected();
++        if (index == MyGUI::ITEM_NONE || index >= playerListDetails.size())
++            return;
++        mPlayersInfo->setCaption(playerListDetails[index]);
++    }
++
++    void GUIChat::onPlayerListSelected(MyGUI::ListBox*, size_t)
++    {
++        updatePlayerDetails();
++    }
++
++    void GUIChat::onPlayersButtonClicked(MyGUI::Widget* sender)
++    {
++        if (sender == mPlayersRefreshButton)
++        {
++            requestPlayerList();
++            return;
++        }
++
++        if (sender == mPlayersOpenListButton)
++        {
++            // Exactly what typing /list does: the server answers with its own
++            // native dialog, so both entry points stay in sync by construction.
++            send("/list");
++            return;
++        }
++
++        if (sender == mPlayersInviteButton)
++        {
++            const std::size_t index = mPlayersList->getIndexSelected();
++            if (index == MyGUI::ITEM_NONE || index >= playerListNames.size())
++                return;
++            mGroupTargetEdit->setCaption(playerListNames[index]);
++            sendGroupAction("invite", playerListNames[index]);
++        }
++    }
++
+     void GUIChat::setDelay(float newDelay)
+     {
+         delay = std::max(0.f, newDelay);
+--- a/apps/openmw/mwmp/GUI/GUIChat.hpp
++++ b/apps/openmw/mwmp/GUI/GUIChat.hpp
+@@ -2,7 +2,9 @@
+ #define OPENMW_GUICHAT_HPP
+ 
+ #include <list>
++#include <map>
+ #include <string>
++#include <utility>
+ #include <vector>
+ 
+ #include "apps/openmw/mwgui/windowbase.hpp"
+@@ -10,6 +12,7 @@
+ namespace MyGUI
+ {
+     class Button;
++    class ListBox;
+     class ScrollBar;
+     class TextBox;
+     class Widget;
+@@ -51,9 +54,21 @@
+         {
+             TAB_CHAT = 0,
+             TAB_GROUP,
+-            TAB_HOME
++            TAB_HOME,
++            TAB_PLAYERS
+         };
+ 
++        // X052: only one auxiliary strip may occupy the row under the toolbar.
++        enum ChatDrawer
++        {
++            DRAWER_NONE = 0,
++            DRAWER_EMOJI,
++            DRAWER_COLOR
++        };
++
++        static const int sEmojiSlotCount = 20;
++        static const int sColorSlotCount = 16;
++
+         MyGUI::EditBox* mCommandLine;
+         MyGUI::EditBox* mHistory;
+         MyGUI::ScrollBar* mHistoryScroll;
+@@ -115,6 +130,16 @@
+         void setModeFromSetting(const std::string& mode);
+         void syncSettings();
+ 
++        // X052 caption-aware layout. Buttons are sized from their measured
++        // localized caption instead of from hardcoded pixel widths, so RU and
++        // EN text both fit and neither is clipped.
++        void setMenuCaption(MyGUI::Widget* widget, const std::string& caption);
++        void refitCaption(MyGUI::Widget* widget);
++        void layoutRow(const std::vector<MyGUI::Widget*>& row, int left, int top, int width, int height, int gap);
++        void layoutGrid(const std::vector<MyGUI::Widget*>& cells, int left, int top, int width,
++            int rowHeight, int columns, int gap);
++        void applyMenuLayout();
++
+         // X049 player-menu shell.
+         void setupPlayerMenu();
+         void refreshPlayerMenu();
+@@ -132,6 +157,23 @@
+         void sendGroupAction(const std::string& action, const std::string& argument = std::string());
+         void updateGroupControls();
+         void rebuildGroupInfo(const std::vector<std::string>& fields);
++        void rebuildGroupRoster(const std::string& rosterField);
++        std::string selectedRosterName() const;
++
++        // X052 server player list. Mirrors what /list reports, rendered inside
++        // the player menu instead of a separate server-driven dialog.
++        void requestPlayerList();
++        void rebuildPlayerList(const std::vector<std::string>& fields);
++        void updatePlayerDetails();
++
++        // X052 quick-insert strip and nickname colour picker.
++        void setDrawer(ChatDrawer drawer);
++        bool unicodeEmojiEnabled() const;
++        const char* emojiSymbol(int index) const;
++        void applyEmojiPalette();
++        void rebuildColorPalette(const std::vector<std::string>& fields);
++        void updateColorButtons();
++        void requestColorState();
+ 
+         void onTabClicked(MyGUI::Widget* sender);
+         void onModeClicked(MyGUI::Widget* sender);
+@@ -141,8 +183,14 @@
+         void onSendClicked(MyGUI::Widget* sender);
+         void onReturnClicked(MyGUI::Widget* sender);
+         void onEmojiToggleClicked(MyGUI::Widget* sender);
++        void onColorToggleClicked(MyGUI::Widget* sender);
+         void onEmojiClicked(MyGUI::Widget* sender);
++        void onColorClicked(MyGUI::Widget* sender);
+         void onGroupButtonClicked(MyGUI::Widget* sender);
++        void onRosterSelected(MyGUI::ListBox* sender, size_t index);
++        void onRosterAccepted(MyGUI::ListBox* sender, size_t index);
++        void onPlayersButtonClicked(MyGUI::Widget* sender);
++        void onPlayerListSelected(MyGUI::ListBox* sender, size_t index);
+ 
+         void onDragStart(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
+         void onDrag(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
+@@ -157,17 +205,32 @@
+         MyGUI::Widget* mDragHandle;
+         MyGUI::Widget* mChatToolbar;
+         MyGUI::Widget* mEmojiBar;
++        MyGUI::Widget* mColorBar;
+         MyGUI::Widget* mGroupPane;
+         MyGUI::Widget* mHomePane;
++        MyGUI::Widget* mPlayersPane;
++        MyGUI::Widget* mPlayersActionRow;
++        MyGUI::Widget* mGroupActionRow1;
++        MyGUI::Widget* mGroupActionRow2;
++        MyGUI::Widget* mGroupActionRow3;
+         MyGUI::EditBox* mGroupInfo;
++        MyGUI::EditBox* mPlayersInfo;
++        MyGUI::ListBox* mGroupRoster;
++        MyGUI::ListBox* mPlayersList;
++        MyGUI::TextBox* mGroupRosterLabel;
+         MyGUI::TextBox* mGroupNameLabel;
+         MyGUI::TextBox* mGroupTargetLabel;
++        MyGUI::TextBox* mColorBarLabel;
+         MyGUI::EditBox* mGroupNameEdit;
+         MyGUI::EditBox* mGroupTargetEdit;
+ 
+         MyGUI::Button* mTabChat;
+         MyGUI::Button* mTabGroup;
+         MyGUI::Button* mTabHome;
++        MyGUI::Button* mTabPlayers;
++        MyGUI::Button* mPlayersRefreshButton;
++        MyGUI::Button* mPlayersOpenListButton;
++        MyGUI::Button* mPlayersInviteButton;
+         MyGUI::Button* mModeOoc;
+         MyGUI::Button* mModeRp;
+         MyGUI::Button* mChannelDefault;
+@@ -180,7 +243,9 @@
+         MyGUI::Button* mSendButton;
+         MyGUI::Button* mReturnButton;
+         MyGUI::Button* mEmojiToggleButton;
+-        MyGUI::Button* mEmojiButtons[6];
++        MyGUI::Button* mColorToggleButton;
++        MyGUI::Button* mEmojiButtons[sEmojiSlotCount];
++        MyGUI::Button* mColorButtons[sColorSlotCount];
+         MyGUI::Button* mGroupCreateButton;
+         MyGUI::Button* mGroupRefreshButton;
+         MyGUI::Button* mGroupInviteButton;
+@@ -199,7 +264,14 @@
+         PlayerMenuTab activeTab;
+         bool rpMode;
+         bool stayOpenAfterSend;
+-        bool emojiBarVisible;
++        ChatDrawer activeDrawer;
++        std::string emojiFontName;
++        std::vector<std::string> groupRosterNames;
++        std::vector<std::string> playerListNames;
++        std::vector<std::string> playerListDetails;
++        std::vector<std::pair<unsigned int, std::string>> colorPalette;
++        int selectedColorIndex;
++        std::map<MyGUI::Widget*, std::string> menuCaptions;
+         bool groupInGroup;
+         bool groupIsLeader;
+         bool groupJournalSync;
+--- a/files/mygui/tes3mp_chat.layout
++++ b/files/mygui/tes3mp_chat.layout
+@@ -1,8 +1,11 @@
+ <?xml version="1.0" encoding="UTF-8"?>
+ <MyGUI type="Layout" version="3.2.0">
+   <!-- X049: the chat stays lightweight in HUD mode. When text input is opened,
+-       C++ reveals the framed player-menu shell and mouse-oriented controls. -->
+-  <Widget type="Window" skin="" position="0 0 620 420" layer="Chat" name="_Main">
++       C++ reveals the framed player-menu shell and mouse-oriented controls.
++       X052: every button row below is only a starting rectangle. GUIChat
++       re-measures the captions at runtime and lays the rows out so that
++       localized text always fits, whatever the panel width or language. -->
++  <Widget type="Window" skin="" position="0 0 720 470" layer="Chat" name="_Main">
+     <Property key="Caption" value="ArenaMP"/>
+     <Property key="MinSize" value="40 40"/>
+     <Property key="Visible" value="false"/>
+@@ -10,55 +13,100 @@
+     <Property key="NeedKey" value="false"/>
+ 
+     <!-- Dark framed shell; hidden while the chat is only a HUD overlay. -->
+-    <Widget type="Widget" skin="FullBlackBG" position="0 0 620 420" align="Stretch" name="PanelBackground">
++    <Widget type="Widget" skin="FullBlackBG" position="0 0 720 470" align="Stretch" name="PanelBackground">
+       <Property key="Visible" value="false"/>
+       <Property key="NeedMouse" value="false"/>
+       <Property key="Alpha" value="0.92"/>
+-      <Widget type="Widget" skin="MW_Box" position="0 0 620 420" align="Stretch" name="PanelBorder">
++      <Widget type="Widget" skin="MW_Box" position="0 0 720 470" align="Stretch" name="PanelBorder">
+         <Property key="NeedMouse" value="false"/>
+       </Widget>
+     </Widget>
+ 
+     <!-- Drag strip. It is deliberately separate from buttons, so the player can
+          grab empty title-bar space without accidentally switching tabs. -->
+-    <Widget type="Widget" skin="MW_Box" position="6 6 608 30" align="HStretch Top" name="DragHandle">
++    <Widget type="Widget" skin="MW_Box" position="6 6 708 32" align="HStretch Top" name="DragHandle">
+       <Property key="Visible" value="false"/>
+       <Property key="NeedMouse" value="true"/>
+-      <Widget type="TextBox" skin="SandBrightText" position="8 4 188 22" name="PlayerMenuTitle">
++      <Widget type="TextBox" skin="SandBrightText" position="10 5 170 22" name="PlayerMenuTitle">
+         <Property key="TextAlign" value="Left VCenter"/>
+       </Widget>
+-      <Widget type="Button" skin="MW_Button" position="210 3 92 24" name="TabChat"/>
+-      <Widget type="Button" skin="MW_Button" position="308 3 92 24" name="TabGroup"/>
+-      <Widget type="Button" skin="MW_Button" position="406 3 92 24" name="TabHome"/>
+-      <Widget type="Button" skin="MW_Button" position="520 3 78 24" name="ReturnButton"/>
+-    </Widget>
+-
+-    <Widget type="Widget" skin="" position="10 42 600 30" align="HStretch Top" name="ChatToolbar">
+-      <Property key="Visible" value="false"/>
+-      <Widget type="Button" skin="MW_Button" position="0 2 54 24" name="ModeOoc"/>
+-      <Widget type="Button" skin="MW_Button" position="58 2 54 24" name="ModeRp"/>
+-      <Widget type="Button" skin="MW_Button" position="122 2 72 24" name="ChannelDefault"/>
+-      <Widget type="Button" skin="MW_Button" position="198 2 72 24" name="ChannelLocal"/>
+-      <Widget type="Button" skin="MW_Button" position="274 2 78 24" name="ChannelGlobal"/>
+-      <Widget type="Button" skin="MW_Button" position="362 2 64 24" name="StylePlain"/>
+-      <Widget type="Button" skin="MW_Button" position="430 2 52 24" name="StyleMe"/>
+-      <Widget type="Button" skin="MW_Button" position="486 2 52 24" name="StyleDo"/>
+-      <Widget type="Button" skin="MW_Button" position="544 2 54 24" name="EmojiToggle"/>
+-    </Widget>
+-
+-    <Widget type="Widget" skin="MW_Box" position="320 76 288 34" align="Right Top" name="EmojiBar">
++      <Widget type="Button" skin="MW_Button" position="190 4 110 24" name="TabChat"/>
++      <Widget type="Button" skin="MW_Button" position="304 4 110 24" name="TabGroup"/>
++      <Widget type="Button" skin="MW_Button" position="418 4 110 24" name="TabHome"/>
++      <Widget type="Button" skin="MW_Button" position="532 4 110 24" name="TabPlayers"/>
++      <Widget type="Button" skin="MW_Button" position="646 4 54 24" name="ReturnButton"/>
++    </Widget>
++
++    <Widget type="Widget" skin="" position="10 44 700 30" align="HStretch Top" name="ChatToolbar">
++      <Property key="Visible" value="false"/>
++      <Widget type="Button" skin="MW_Button" position="0 2 52 26" name="ModeOoc"/>
++      <Widget type="Button" skin="MW_Button" position="56 2 52 26" name="ModeRp"/>
++      <Widget type="Button" skin="MW_Button" position="112 2 80 26" name="ChannelDefault"/>
++      <Widget type="Button" skin="MW_Button" position="196 2 80 26" name="ChannelLocal"/>
++      <Widget type="Button" skin="MW_Button" position="280 2 86 26" name="ChannelGlobal"/>
++      <Widget type="Button" skin="MW_Button" position="370 2 64 26" name="StylePlain"/>
++      <Widget type="Button" skin="MW_Button" position="438 2 52 26" name="StyleMe"/>
++      <Widget type="Button" skin="MW_Button" position="494 2 52 26" name="StyleDo"/>
++      <Widget type="Button" skin="MW_Button" position="550 2 70 26" name="EmojiToggle"/>
++      <Widget type="Button" skin="MW_Button" position="624 2 74 26" name="ColorToggle"/>
++    </Widget>
++
++    <!-- X052: two rows of ten quick-insert symbols. GUIChat decides at runtime
++         whether the Unicode palette or the always-renderable ASCII palette is
++         used, so a missing glyph can never turn into an empty box. -->
++    <Widget type="Widget" skin="MW_Box" position="10 78 700 68" align="HStretch Top" name="EmojiBar">
+       <Property key="Visible" value="false"/>
+       <Property key="NeedMouse" value="true"/>
+-      <Widget type="Button" skin="MW_Button" position="4 5 42 24" name="Emoji1"/>
+-      <Widget type="Button" skin="MW_Button" position="50 5 42 24" name="Emoji2"/>
+-      <Widget type="Button" skin="MW_Button" position="96 5 42 24" name="Emoji3"/>
+-      <Widget type="Button" skin="MW_Button" position="142 5 42 24" name="Emoji4"/>
+-      <Widget type="Button" skin="MW_Button" position="188 5 42 24" name="Emoji5"/>
+-      <Widget type="Button" skin="MW_Button" position="234 5 42 24" name="Emoji6"/>
++      <Widget type="Button" skin="MW_Button" position="6 6 62 26" name="Emoji1"/>
++      <Widget type="Button" skin="MW_Button" position="72 6 62 26" name="Emoji2"/>
++      <Widget type="Button" skin="MW_Button" position="138 6 62 26" name="Emoji3"/>
++      <Widget type="Button" skin="MW_Button" position="204 6 62 26" name="Emoji4"/>
++      <Widget type="Button" skin="MW_Button" position="270 6 62 26" name="Emoji5"/>
++      <Widget type="Button" skin="MW_Button" position="336 6 62 26" name="Emoji6"/>
++      <Widget type="Button" skin="MW_Button" position="402 6 62 26" name="Emoji7"/>
++      <Widget type="Button" skin="MW_Button" position="468 6 62 26" name="Emoji8"/>
++      <Widget type="Button" skin="MW_Button" position="534 6 62 26" name="Emoji9"/>
++      <Widget type="Button" skin="MW_Button" position="600 6 62 26" name="Emoji10"/>
++      <Widget type="Button" skin="MW_Button" position="6 36 62 26" name="Emoji11"/>
++      <Widget type="Button" skin="MW_Button" position="72 36 62 26" name="Emoji12"/>
++      <Widget type="Button" skin="MW_Button" position="138 36 62 26" name="Emoji13"/>
++      <Widget type="Button" skin="MW_Button" position="204 36 62 26" name="Emoji14"/>
++      <Widget type="Button" skin="MW_Button" position="270 36 62 26" name="Emoji15"/>
++      <Widget type="Button" skin="MW_Button" position="336 36 62 26" name="Emoji16"/>
++      <Widget type="Button" skin="MW_Button" position="402 36 62 26" name="Emoji17"/>
++      <Widget type="Button" skin="MW_Button" position="468 36 62 26" name="Emoji18"/>
++      <Widget type="Button" skin="MW_Button" position="534 36 62 26" name="Emoji19"/>
++      <Widget type="Button" skin="MW_Button" position="600 36 62 26" name="Emoji20"/>
++    </Widget>
++
++    <!-- X052: nickname colour picker. Swatch captions are drawn with
++         setTextColour, so no special font or glyph is required. -->
++    <Widget type="Widget" skin="MW_Box" position="10 78 700 68" align="HStretch Top" name="ColorBar">
++      <Property key="Visible" value="false"/>
++      <Property key="NeedMouse" value="true"/>
++      <Widget type="TextBox" skin="SandText" position="8 4 684 20" name="ColorBarLabel">
++        <Property key="TextAlign" value="Left VCenter"/>
++      </Widget>
++      <Widget type="Button" skin="MW_Button" position="6 28 38 26" name="Color1"/>
++      <Widget type="Button" skin="MW_Button" position="48 28 38 26" name="Color2"/>
++      <Widget type="Button" skin="MW_Button" position="90 28 38 26" name="Color3"/>
++      <Widget type="Button" skin="MW_Button" position="132 28 38 26" name="Color4"/>
++      <Widget type="Button" skin="MW_Button" position="174 28 38 26" name="Color5"/>
++      <Widget type="Button" skin="MW_Button" position="216 28 38 26" name="Color6"/>
++      <Widget type="Button" skin="MW_Button" position="258 28 38 26" name="Color7"/>
++      <Widget type="Button" skin="MW_Button" position="300 28 38 26" name="Color8"/>
++      <Widget type="Button" skin="MW_Button" position="342 28 38 26" name="Color9"/>
++      <Widget type="Button" skin="MW_Button" position="384 28 38 26" name="Color10"/>
++      <Widget type="Button" skin="MW_Button" position="426 28 38 26" name="Color11"/>
++      <Widget type="Button" skin="MW_Button" position="468 28 38 26" name="Color12"/>
++      <Widget type="Button" skin="MW_Button" position="510 28 38 26" name="Color13"/>
++      <Widget type="Button" skin="MW_Button" position="552 28 38 26" name="Color14"/>
++      <Widget type="Button" skin="MW_Button" position="594 28 38 26" name="Color15"/>
++      <Widget type="Button" skin="MW_Button" position="636 28 38 26" name="Color16"/>
+     </Widget>
+ 
+     <!-- History is the only widget visible in passive HUD mode. -->
+-    <Widget type="EditBox" skin="TES3MP_ChatHistory" position="8 8 604 330" align="Stretch" name="list_History">
++    <Widget type="EditBox" skin="TES3MP_ChatHistory" position="8 8 704 300" align="Stretch" name="list_History">
+       <Property key="MultiLine" value="1"/>
+       <Property key="ReadOnly" value="true"/>
+       <Property key="NeedMouse" value="false"/>
+@@ -70,7 +118,7 @@
+       <Property key="WordWrap" value="true"/>
+     </Widget>
+ 
+-    <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="10 300 600 54" align="HStretch Bottom" name="edit_Command">
++    <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="10 340 700 54" align="HStretch Bottom" name="edit_Command">
+       <Property key="InvertSelected" value="false"/>
+       <Property key="MultiLine" value="true"/>
+       <Property key="WordWrap" value="true"/>
+@@ -79,52 +127,80 @@
+       <UserString key="AcceptTab" value="true"/>
+     </Widget>
+ 
+-    <Widget type="Button" skin="MW_Button" position="10 384 268 26" align="Left Bottom" name="StayOpenButton">
++    <Widget type="Button" skin="MW_Button" position="10 434 280 28" align="Left Bottom" name="StayOpenButton">
+       <Property key="Visible" value="false"/>
+     </Widget>
+-    <Widget type="Button" skin="MW_Button" position="500 384 110 26" align="Right Bottom" name="SendButton">
++    <Widget type="Button" skin="MW_Button" position="590 434 120 28" align="Right Bottom" name="SendButton">
+       <Property key="Visible" value="false"/>
+     </Widget>
+ 
+     <!-- X050: server-backed group page. The controls send /groupui actions
+-         through the existing chat packet; state comes back as hidden control text. -->
+-    <Widget type="Widget" skin="MW_Box" position="10 44 600 366" align="Stretch" name="GroupPane">
++         through the existing chat packet; state comes back as hidden control text.
++         X052: the online roster on the right removes the need to type names. -->
++    <Widget type="Widget" skin="MW_Box" position="10 46 700 416" align="Stretch" name="GroupPane">
+       <Property key="Visible" value="false"/>
+-      <Widget type="TextBox" skin="SandBrightText" position="18 10 564 26" name="GroupTitle"/>
+-      <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="18 40 564 150" name="GroupInfo">
++      <Widget type="TextBox" skin="SandBrightText" position="14 8 420 24" name="GroupTitle"/>
++      <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="14 36 420 180" name="GroupInfo">
+         <Property key="EditStatic" value="true"/><Property key="ReadOnly" value="true"/>
+         <Property key="MultiLine" value="true"/><Property key="WordWrap" value="true"/>
+         <Property key="FontName" value="DejaVuLGCSansMono"/>
+       </Widget>
+ 
+-      <Widget type="TextBox" skin="SandText" position="18 200 96 24" name="GroupNameLabel"/>
+-      <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="118 198 250 28" name="GroupNameEdit">
++      <Widget type="TextBox" skin="SandBrightText" position="444 8 242 24" name="GroupRosterLabel"/>
++      <Widget type="ListBox" skin="MW_List" position="444 36 242 180" name="GroupRoster"/>
++
++      <Widget type="TextBox" skin="SandText" position="14 226 110 24" name="GroupNameLabel"/>
++      <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="128 224 280 28" name="GroupNameEdit">
+         <Property key="MultiLine" value="false"/><Property key="FontName" value="DejaVuLGCSansMono"/>
+       </Widget>
+-      <Widget type="Button" skin="MW_Button" position="376 198 98 28" name="GroupCreateButton"/>
++      <Widget type="Button" skin="MW_Button" position="416 224 120 28" name="GroupCreateButton"/>
+ 
+-      <Widget type="TextBox" skin="SandText" position="18 236 96 24" name="GroupTargetLabel"/>
+-      <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="118 234 250 28" name="GroupTargetEdit">
++      <Widget type="TextBox" skin="SandText" position="14 262 110 24" name="GroupTargetLabel"/>
++      <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="128 260 280 28" name="GroupTargetEdit">
+         <Property key="MultiLine" value="false"/><Property key="FontName" value="DejaVuLGCSansMono"/>
+       </Widget>
+-      <Widget type="Button" skin="MW_Button" position="376 234 66 28" name="GroupInviteButton"/>
+-      <Widget type="Button" skin="MW_Button" position="446 234 62 28" name="GroupKickButton"/>
+-      <Widget type="Button" skin="MW_Button" position="512 234 70 28" name="GroupLeaderButton"/>
+ 
+-      <Widget type="Button" skin="MW_Button" position="18 270 180 28" name="GroupJournalButton"/>
+-      <Widget type="Button" skin="MW_Button" position="204 270 180 28" name="GroupTopicsButton"/>
+-      <Widget type="Button" skin="MW_Button" position="390 270 90 28" name="GroupLeaveButton"/>
+-      <Widget type="Button" skin="MW_Button" position="486 270 96 28" name="GroupDisbandButton"/>
++      <Widget type="Widget" skin="" position="14 296 672 30" name="GroupActionRow1">
++        <Widget type="Button" skin="MW_Button" position="0 2 200 26" name="GroupInviteButton"/>
++        <Widget type="Button" skin="MW_Button" position="206 2 200 26" name="GroupKickButton"/>
++        <Widget type="Button" skin="MW_Button" position="412 2 200 26" name="GroupLeaderButton"/>
++      </Widget>
++
++      <Widget type="Widget" skin="" position="14 330 672 30" name="GroupActionRow2">
++        <Widget type="Button" skin="MW_Button" position="0 2 220 26" name="GroupJournalButton"/>
++        <Widget type="Button" skin="MW_Button" position="226 2 220 26" name="GroupTopicsButton"/>
++        <Widget type="Button" skin="MW_Button" position="452 2 100 26" name="GroupLeaveButton"/>
++        <Widget type="Button" skin="MW_Button" position="558 2 110 26" name="GroupDisbandButton"/>
++      </Widget>
+ 
+-      <Widget type="Button" skin="MW_Button" position="18 306 126 28" name="GroupAcceptButton"/>
+-      <Widget type="Button" skin="MW_Button" position="150 306 126 28" name="GroupDeclineButton"/>
+-      <Widget type="Button" skin="MW_Button" position="486 306 96 28" name="GroupRefreshButton"/>
++      <Widget type="Widget" skin="" position="14 364 672 30" name="GroupActionRow3">
++        <Widget type="Button" skin="MW_Button" position="0 2 200 26" name="GroupAcceptButton"/>
++        <Widget type="Button" skin="MW_Button" position="206 2 200 26" name="GroupDeclineButton"/>
++        <Widget type="Button" skin="MW_Button" position="412 2 120 26" name="GroupRefreshButton"/>
++      </Widget>
++    </Widget>
++
++    <!-- X052: server player list, the same roster /list reports. -->
++    <Widget type="Widget" skin="MW_Box" position="10 46 700 416" align="Stretch" name="PlayersPane">
++      <Property key="Visible" value="false"/>
++      <Widget type="TextBox" skin="SandBrightText" position="14 8 672 24" name="PlayersTitle"/>
++      <Widget type="ListBox" skin="MW_List" position="14 36 280 336" name="PlayersList"/>
++      <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="302 36 384 336" name="PlayersInfo">
++        <Property key="EditStatic" value="true"/><Property key="ReadOnly" value="true"/>
++        <Property key="MultiLine" value="true"/><Property key="WordWrap" value="true"/>
++        <Property key="FontName" value="DejaVuLGCSansMono"/>
++      </Widget>
++      <Widget type="Widget" skin="" position="14 378 672 30" name="PlayersActionRow">
++        <Widget type="Button" skin="MW_Button" position="0 2 160 26" name="PlayersRefreshButton"/>
++        <Widget type="Button" skin="MW_Button" position="166 2 200 26" name="PlayersOpenListButton"/>
++        <Widget type="Button" skin="MW_Button" position="372 2 200 26" name="PlayersInviteButton"/>
++      </Widget>
+     </Widget>
+ 
+-    <Widget type="Widget" skin="MW_Box" position="10 44 600 366" align="Stretch" name="HomePane">
++    <Widget type="Widget" skin="MW_Box" position="10 46 700 416" align="Stretch" name="HomePane">
+       <Property key="Visible" value="false"/>
+-      <Widget type="TextBox" skin="SandBrightText" position="18 18 564 28" name="HomeTitle"/>
+-      <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="18 58 564 280" name="HomeInfo">
++      <Widget type="TextBox" skin="SandBrightText" position="18 18 664 28" name="HomeTitle"/>
++      <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="18 58 664 330" name="HomeInfo">
+         <Property key="EditStatic" value="true"/><Property key="ReadOnly" value="true"/>
+         <Property key="MultiLine" value="true"/><Property key="WordWrap" value="true"/>
+       </Widget>
+--- a/files/settings-default.cfg
++++ b/files/settings-default.cfg
+@@ -1101,6 +1101,12 @@
+ rp mode = false
+ stay after send = false
+ player menu tab = 0
++# X052: name of a MyGUI font that actually contains emoji/dingbat glyphs.
++# Empty (the default) keeps the always-renderable ASCII palette, which is what
++# stops the quick-insert buttons from showing empty boxes with OpenMW's stock
++# DejaVu LGC face. Point this at a font you registered yourself to get real
++# Unicode emoji instead.
++emoji font =
+ 
+ [Equipment Requirements]
+ # ArenaMP fallback defaults. The server overwrites every value in this
+--- a/files/vfs/l10n/arenamp/ru.ini
++++ b/files/vfs/l10n/arenamp/ru.ini
+@@ -739,3 +739,15 @@
+ chat.group.other_cell = другая ячейка
+ chat.group.xp.kill = Групповой XP за убийство
+ chat.group.xp.quest = Групповой XP за квест
++# X052 player menu UX
++chat.tab.players = Игроки
++chat.color.button = Цвет ника
++chat.color.hint = Цвет вашего имени в чате. Нажмите номер, чтобы применить.
++chat.group.roster = Игроки онлайн
++chat.group.roster_empty = Других игроков онлайн нет
++chat.group.tag.member = в группе
++chat.group.tag.busy = занят
++chat.players.title = Игроки на сервере
++chat.players.loading = Загрузка списка игроков...
++chat.players.empty = Сейчас на сервере никого нет
++chat.players.open_list = Открыть /list
+--- a/files/vfs/l10n/arenamp/en.ini
++++ b/files/vfs/l10n/arenamp/en.ini
+@@ -739,3 +739,15 @@
+ chat.group.other_cell = another cell
+ chat.group.xp.kill = Group kill XP
+ chat.group.xp.quest = Group quest XP
++# X052 player menu UX
++chat.tab.players = Players
++chat.color.button = Name colour
++chat.color.hint = Colour of your name in chat. Click a number to apply it.
++chat.group.roster = Players online
++chat.group.roster_empty = No other players online
++chat.group.tag.member = in group
++chat.group.tag.busy = busy
++chat.players.title = Players on the server
++chat.players.loading = Loading player list...
++chat.players.empty = Nobody is online right now
++chat.players.open_list = Open /list
+--- a/server/scripts/serverCore.lua
++++ b/server/scripts/serverCore.lua
+@@ -35,6 +35,9 @@
+ eventHandler = require("eventHandler")
+ -- X050: persistent server-authoritative group system.
+ groupHelper = require("groupHelper")
++-- X052: nickname colour picker and the Player Menu copy of the /list roster.
++chatColorHelper = require("chatColorHelper")
++playerListHelper = require("playerListHelper")
+ -- X050a: built-in ArenaMP owner/console helper moved out of scripts/custom.
+ helperAreana = require("helperAreana")
+ guiHelper = require("guiHelper")
+--- a/server/scripts/eventHandler.lua
++++ b/server/scripts/eventHandler.lua
+@@ -824,8 +824,40 @@
+ -- ArenaMP X049: structured player-menu chat. The client keeps the original
+ -- ChatMessage packet and wraps only non-default visual modes in /ampchat, so
+ -- legacy slash commands and unmodified chat remain protocol-compatible.
++-- X052: the speaker's name is drawn in the colour the player picked in the
++-- Player Menu. Rank prefixes keep their own colours and still win visually.
++local function getArenaNameColor(pid)
++    if chatColorHelper ~= nil and type(chatColorHelper.GetColor) == "function" then
++        return chatColorHelper.GetColor(pid)
++    end
++    return color.White
++end
++
++-- X052: a "#" typed by a player would otherwise be parsed by the client as the
++-- start of a MyGUI colour tag, which lets anyone forge another player's colour.
++local function escapeArenaChatText(text)
++    if type(config.chatNameColors) == "table" and config.chatNameColors.escapeUserColorCodes == false then
++        return text
++    end
++    return (tostring(text or ""):gsub("#", "##"))
++end
++
++-- X052: cutting a message at a fixed byte count can split a multi-byte UTF-8
++-- character in half, which is what turned long Cyrillic or emoji messages into
++-- broken glyphs. Step back to the last start byte instead.
++local function truncateUtf8(text, maxBytes)
++    if #text <= maxBytes then return text end
++    local cut = maxBytes
++    while cut > 0 do
++        local nextByte = text:byte(cut + 1)
++        if nextByte == nil or nextByte < 0x80 or nextByte >= 0xC0 then break end
++        cut = cut - 1
++    end
++    return text:sub(1, cut)
++end
++
+ local function getArenaChatSpeaker(pid)
+-    local message = color.White .. logicHandler.GetChatName(pid)
++    local message = getArenaNameColor(pid) .. logicHandler.GetChatName(pid)
+     if Players[pid]:IsServerStaff() then
+         if Players[pid]:IsServerOwner() then
+             message = config.rankColors.serverOwner .. "[Owner] " .. message
+@@ -854,10 +886,11 @@
+ local function buildArenaChatMessage(pid, scope, style, rpMode, text)
+     local tag = getArenaChatTag(scope, rpMode)
+     if style == "me" then
+-        return tag .. color.Yellow .. "* " .. logicHandler.GetChatName(pid) .. " " .. color.White .. text .. "\n"
++        return tag .. color.Yellow .. "* " .. getArenaNameColor(pid) .. logicHandler.GetChatName(pid) ..
++            " " .. color.White .. text .. "\n"
+     elseif style == "do" then
+         return tag .. color.Yellow .. "* " .. color.White .. text .. color.Grey ..
+-            " ((" .. logicHandler.GetChatName(pid) .. "))\n"
++            " ((" .. getArenaNameColor(pid) .. logicHandler.GetChatName(pid) .. color.Grey .. "))\n"
+     end
+     return tag .. getArenaChatSpeaker(pid) .. color.White .. ": " .. text .. "\n"
+ end
+@@ -903,9 +936,8 @@
+     -- Keep multiline chat, but prevent the private envelope from being abused as
+     -- an unbounded server-side payload. This is intentionally generous compared
+     -- with the UI's normal editor size.
+-    if #text > 4096 then
+-        text = text:sub(1, 4096)
+-    end
++    text = truncateUtf8(text, 4096)
++    text = escapeArenaChatText(text)
+ 
+     local rpMode = rpFlag == "1"
+     local effectiveScope = scope
+@@ -949,7 +981,8 @@
+                 local command = (message:sub(2, #message)):split(" ")
+                 commandHandler.ProcessCommand(pid, command)
+             else
+-                local message = color.White .. logicHandler.GetChatName(pid) .. ": " .. message .. "\n"
++                local message = getArenaNameColor(pid) .. logicHandler.GetChatName(pid) ..
++                    color.White .. ": " .. escapeArenaChatText(message) .. "\n"
+ 
+                 -- Check for chat overrides that add extra text
+                 if Players[pid]:IsServerStaff() then
+--- a/server/scripts/groupHelper.lua
++++ b/server/scripts/groupHelper.lua
+@@ -286,6 +286,32 @@
+     return table.concat(items, ";")
+ end
+ 
++-- X052: everyone online except the viewer, so the Player Menu can offer an
++-- invite list instead of asking the leader to type a name correctly.
++--   name ^ hasAnyGroup ^ inViewersGroup ^ sameCell
++local function buildRosterField(viewerPid)
++    if not isValidPid(viewerPid) then return "" end
++    local viewerGroup = groupHelper.GetPlayerGroup(viewerPid)
++    local viewerCell = tes3mp.GetCell(viewerPid)
++    local items = {}
++
++    for pid, player in pairs(Players) do
++        if player ~= nil and player:IsLoggedIn() and pid ~= viewerPid then
++            local theirGroup = groupHelper.GetPlayerGroup(pid)
++            local inViewersGroup = viewerGroup ~= nil and theirGroup ~= nil and
++                tostring(theirGroup.id) == tostring(viewerGroup.id)
++            local sameCell = viewerCell ~= nil and tes3mp.GetCell(pid) == viewerCell
++            table.insert(items, safeToken(displayName(pid), 48) .. "^" ..
++                (theirGroup ~= nil and "1" or "0") .. "^" ..
++                (inViewersGroup and "1" or "0") .. "^" ..
++                (sameCell and "1" or "0"))
++        end
++    end
++
++    table.sort(items)
++    return table.concat(items, ";")
++end
++
+ function groupHelper.SendState(pid)
+     if not isValidPid(pid) then return end
+     local prefs = ensurePlayerPrefs(pid)
+@@ -308,7 +334,8 @@
+         group ~= nil and escapeField((group.members[group.leader] or {}).name or group.leader) or "",
+         group ~= nil and escapeField(buildMembersField(group, pid)) or "",
+         invite ~= nil and escapeField(invite.inviterName or invite.inviterAccount) or "",
+-        invite ~= nil and escapeField(invite.groupName or "") or ""
++        invite ~= nil and escapeField(invite.groupName or "") or "",
++        escapeField(buildRosterField(pid))
+     }
+     tes3mp.SendMessage(pid, STATE_PREFIX .. table.concat(fields, "\t") .. "\n", false)
+ end
+@@ -933,6 +960,9 @@
+         ok, message = toggleSync(pid, "journalSync")
+     elseif sub == "topics" then
+         ok, message = toggleSync(pid, "topicSync")
++    elseif sub == "roster" then
++        groupHelper.SendState(pid)
++        return
+     else
+         ok, message = false, "Unknown group action"
+     end
+--- a/server/scripts/config.lua
++++ b/server/scripts/config.lua
+@@ -525,6 +525,20 @@
+ -- conversation / nearby-area distance without becoming a zone-wide broadcast.
+ config.localChatRadius = 5000
+ 
++-- ArenaMP X052: nickname colours in chat.
++--   enabled              - master switch for the whole feature;
++--   assignOnFirstLogin   - hand out an unused palette colour to new players so
++--                          a fresh server is readable without anyone opening
++--                          the menu; set to false to start everyone on white;
++--   escapeUserColorCodes - rewrite a bare "#" typed by a player into "##" so a
++--                          message cannot inject MyGUI colour tags and imitate
++--                          another player's colour or a staff rank.
++config.chatNameColors = {
++    enabled = true,
++    assignOnFirstLogin = true,
++    escapeUserColorCodes = true
++}
++
+ -- Compact pre-login greeting shown before the password/registration dialog.
+ -- Placeholders: {name} = player name, {count} = online count, {seconds} = login timeout.
+ config.startupMessage = {
+--- a/server/scripts/chatColorHelper.lua
++++ b/server/scripts/chatColorHelper.lua
+@@ -0,0 +1,181 @@
++-- ArenaMP X052: per-player nickname colour for the chat.
++--
++-- Design notes:
++--   * the palette is stored here as literal #RRGGBB values instead of names
++--     from color.lua, so it does not depend on a server having the extended
++--     colour table an older Nirn/jrp setup used to ship;
++--   * the client receives only hex codes and the selected index; the human
++--     readable colour names come from the client's own localization, so RU and
++--     EN players each see their own language without a server round trip;
++--   * the choice lives in customVariables and therefore survives a relog.
++
++local chatColorHelper = {}
++
++local STATE_PREFIX = "@@AMP_COLOR@@"
++
++chatColorHelper.palette = {
++    "#87CEEB", -- sky blue
++    "#4682B4", -- steel blue
++    "#3CB371", -- medium sea green
++    "#8FBC8F", -- dark sea green
++    "#FFC0CB", -- pink
++    "#FF69B4", -- hot pink
++    "#F0E68C", -- khaki
++    "#DAA520", -- goldenrod
++    "#FA8072", -- salmon
++    "#E9967A", -- dark salmon
++    "#40E0D0", -- turquoise
++    "#20B2AA", -- light sea green
++    "#BC8F8F", -- rosy brown
++    "#DDA0DD", -- plum
++    "#DEB887", -- burly wood
++    "#C0C0C0"  -- silver
++}
++
++local DEFAULT_COLOR = "#FFFFFF"
++
++local function isValidPid(pid)
++    return Players[pid] ~= nil and Players[pid]:IsLoggedIn() and Players[pid].data ~= nil
++end
++
++local function enabled()
++    return type(config.chatNameColors) ~= "table" or config.chatNameColors.enabled ~= false
++end
++
++local function persist(pid)
++    if not isValidPid(pid) then return end
++    if type(Players[pid].QuicksaveToDrive) == "function" then
++        Players[pid]:QuicksaveToDrive()
++    elseif type(Players[pid].Save) == "function" then
++        Players[pid]:Save()
++    end
++end
++
++local function ensureVars(pid)
++    if not isValidPid(pid) then return nil end
++    Players[pid].data.customVariables = Players[pid].data.customVariables or {}
++    return Players[pid].data.customVariables
++end
++
++-- Index of the colour the player picked, or nil when they use the default.
++function chatColorHelper.GetIndex(pid)
++    local vars = ensureVars(pid)
++    if vars == nil then return nil end
++    local index = tonumber(vars.arenampChatColor)
++    if index == nil or index < 1 or index > #chatColorHelper.palette then
++        return nil
++    end
++    return math.floor(index)
++end
++
++-- The colour code to prefix a player's name with. Always safe to concatenate.
++function chatColorHelper.GetColor(pid)
++    if not enabled() then return DEFAULT_COLOR end
++    local index = chatColorHelper.GetIndex(pid)
++    if index == nil then return DEFAULT_COLOR end
++    return chatColorHelper.palette[index]
++end
++
++-- Assign a random unused colour on first login so a fresh server already looks
++-- readable without anyone touching the menu. Disabled via config.
++function chatColorHelper.EnsureColor(pid)
++    if not enabled() then return end
++    if type(config.chatNameColors) == "table" and config.chatNameColors.assignOnFirstLogin == false then
++        return
++    end
++    if chatColorHelper.GetIndex(pid) ~= nil then return end
++
++    local taken = {}
++    for otherPid, player in pairs(Players) do
++        if player ~= nil and otherPid ~= pid then
++            local index = chatColorHelper.GetIndex(otherPid)
++            if index ~= nil then taken[index] = true end
++        end
++    end
++
++    local free = {}
++    for i = 1, #chatColorHelper.palette do
++        if not taken[i] then table.insert(free, i) end
++    end
++    if #free == 0 then
++        for i = 1, #chatColorHelper.palette do table.insert(free, i) end
++    end
++
++    chatColorHelper.SetIndex(pid, free[math.random(1, #free)], true)
++end
++
++function chatColorHelper.SetIndex(pid, index, quiet)
++    local vars = ensureVars(pid)
++    if vars == nil then return false, "Player is not logged in" end
++
++    index = tonumber(index)
++    if index == nil or index < 1 or index > #chatColorHelper.palette then
++        return false, "Colour index must be between 1 and " .. tostring(#chatColorHelper.palette)
++    end
++
++    vars.arenampChatColor = math.floor(index)
++    persist(pid)
++    if not quiet then
++        chatColorHelper.SendState(pid)
++    end
++    return true
++end
++
++function chatColorHelper.ResetIndex(pid)
++    local vars = ensureVars(pid)
++    if vars == nil then return false, "Player is not logged in" end
++    vars.arenampChatColor = nil
++    persist(pid)
++    return true
++end
++
++function chatColorHelper.SendState(pid)
++    if not isValidPid(pid) then return end
++    local index = chatColorHelper.GetIndex(pid)
++    local fields = {
++        "STATE",
++        index ~= nil and tostring(index) or "0",
++        table.concat(chatColorHelper.palette, ";")
++    }
++    tes3mp.SendMessage(pid, STATE_PREFIX .. table.concat(fields, "\t") .. "\n", false)
++end
++
++local function processCommand(pid, cmd)
++    if not isValidPid(pid) then return end
++
++    local sub = tostring(cmd[2] or "state"):lower()
++    if sub == "state" or sub == "" then
++        chatColorHelper.SendState(pid)
++        return
++    end
++
++    if sub == "default" or sub == "reset" then
++        chatColorHelper.ResetIndex(pid)
++        chatColorHelper.SendState(pid)
++        tes3mp.SendMessage(pid, color.Turquoise .. "[Chat] " .. color.White ..
++            "Nickname colour reset.\n", false)
++        return
++    end
++
++    local ok, message = chatColorHelper.SetIndex(pid, sub)
++    if not ok then
++        tes3mp.SendMessage(pid, color.Red .. "[Chat] " .. color.White .. tostring(message) .. "\n", false)
++        return
++    end
++
++    local applied = chatColorHelper.GetColor(pid)
++    tes3mp.SendMessage(pid, color.Turquoise .. "[Chat] " .. color.White .. "Nickname colour: " ..
++        applied .. logicHandler.GetChatName(pid) .. color.Default .. "\n", false)
++end
++
++customCommandHooks.registerCommand("chatcolor", processCommand)
++customCommandHooks.registerCommand("nickcolor", processCommand)
++
++customEventHooks.registerHandler("OnPlayerAuthentified", function(eventStatus, pid)
++    if isValidPid(pid) then
++        chatColorHelper.EnsureColor(pid)
++        chatColorHelper.SendState(pid)
++    end
++end)
++
++return chatColorHelper
+--- a/server/scripts/playerListHelper.lua
++++ b/server/scripts/playerListHelper.lua
+@@ -0,0 +1,119 @@
++-- ArenaMP X052: the /list roster, rendered inside the Player Menu.
++--
++-- The menu's "Players" tab asks for /playerlistui state and gets the same
++-- information /list reports, encoded as a hidden control message. The tab also
++-- carries a button that simply sends /list, so the original server dialog stays
++-- reachable and the two views can never disagree about who is online.
++
++local playerListHelper = {}
++
++local STATE_PREFIX = "@@AMP_PLAYERS@@"
++
++local function isValidPid(pid)
++    return Players[pid] ~= nil and Players[pid]:IsLoggedIn() and Players[pid].data ~= nil
++end
++
++local function escapeField(value)
++    value = tostring(value or "")
++    value = value:gsub("\\", "\\\\")
++    value = value:gsub("\t", "\\t")
++    value = value:gsub("\r", "")
++    value = value:gsub("\n", "\\n")
++    return value
++end
++
++local function safeToken(value, maxLength)
++    value = tostring(value or "")
++    value = value:gsub("[%c\t]", " ")
++    value = value:gsub("[;%^]", " ")
++    value = value:gsub("%s+", " ")
++    value = value:match("^%s*(.-)%s*$") or ""
++    if maxLength ~= nil and #value > maxLength then value = value:sub(1, maxLength) end
++    return value
++end
++
++local function rankTag(pid)
++    if Players[pid] == nil or not Players[pid]:IsServerStaff() then return "" end
++    if Players[pid]:IsServerOwner() then return "[Owner] " end
++    if Players[pid]:IsAdmin() then return "[Admin] " end
++    if Players[pid]:IsModerator() then return "[Mod] " end
++    return ""
++end
++
++local function characterLine(pid)
++    local character = Players[pid].data.character or {}
++    local stats = Players[pid].data.stats or {}
++    local parts = {}
++    if character.race ~= nil then table.insert(parts, tostring(character.race)) end
++    if character.class ~= nil then table.insert(parts, tostring(character.class)) end
++    if stats.level ~= nil then table.insert(parts, tostring(stats.level) .. " lvl") end
++    return table.concat(parts, ", ")
++end
++
++local function locationLines(viewerPid, pid)
++    local location = Players[pid].data.location or {}
++    local lines = {}
++
++    -- Ghost mode hides a player's whereabouts from everyone but staff, which is
++    -- the same courtesy the original /list handler extends.
++    local vars = Players[pid].data.customVariables or {}
++    local hidden = vars.Ghost == 1 or vars.Ghost == true
++    local viewerIsStaff = Players[viewerPid] ~= nil and Players[viewerPid]:IsServerStaff()
++
++    if hidden and not viewerIsStaff and viewerPid ~= pid then
++        return lines
++    end
++
++    if location.cell ~= nil then table.insert(lines, "Cell: " .. tostring(location.cell)) end
++    if location.regionName ~= nil then table.insert(lines, "Region: " .. tostring(location.regionName)) end
++    return lines
++end
++
++local function buildEntry(viewerPid, pid)
++    local name = safeToken(Players[pid].name or Players[pid].accountName or ("PID " .. tostring(pid)), 48)
++
++    local label = safeToken(rankTag(pid) .. name, 64)
++    local sameCell = tes3mp.GetCell(viewerPid) == tes3mp.GetCell(pid)
++    if sameCell and viewerPid ~= pid then label = label .. " *" end
++
++    local details = { rankTag(pid) .. name, "PID: " .. tostring(pid) }
++
++    local character = characterLine(pid)
++    if character ~= "" then table.insert(details, character) end
++
++    for _, line in ipairs(locationLines(viewerPid, pid)) do table.insert(details, line) end
++
++    if groupHelper ~= nil and type(groupHelper.GetPlayerGroup) == "function" then
++        local group = groupHelper.GetPlayerGroup(pid)
++        if group ~= nil then table.insert(details, "Group: " .. tostring(group.name)) end
++    end
++
++    return name .. "^" .. escapeField(table.concat(details, "\n")) .. "^" .. label
++end
++
++function playerListHelper.SendState(pid)
++    if not isValidPid(pid) then return end
++
++    local entries = {}
++    local count = 0
++    local lastPid = tes3mp.GetLastPlayerId()
++    for otherPid = 0, lastPid do
++        if isValidPid(otherPid) then
++            count = count + 1
++            table.insert(entries, buildEntry(pid, otherPid))
++        end
++    end
++
++    local header = "Players online: " .. tostring(count)
++    local fields = { "STATE", escapeField(header), table.concat(entries, ";") }
++    tes3mp.SendMessage(pid, STATE_PREFIX .. table.concat(fields, "\t") .. "\n", false)
++end
++
++local function processCommand(pid, cmd)
++    if not isValidPid(pid) then return end
++    playerListHelper.SendState(pid)
++end
++
++customCommandHooks.registerCommand("playerlistui", processCommand)
++
++return playerListHelper

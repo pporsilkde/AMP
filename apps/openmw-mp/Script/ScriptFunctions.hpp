@@ -204,6 +204,7 @@ public:
             {"OnPlayerDeath",            Callback<unsigned short>()},
             {"OnPlayerResurrect",        Callback<unsigned short>()},
             {"OnPlayerCellChange",       Callback<unsigned short>()},
+            {"OnPlayerPosition",         Callback<unsigned short>()},
             {"OnPlayerAttribute",        Callback<unsigned short>()},
             {"OnPlayerSkill",            Callback<unsigned short>()},
             {"OnPlayerLevel",            Callback<unsigned short>()},

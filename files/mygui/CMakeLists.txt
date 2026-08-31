@@ -110,6 +110,9 @@ set(MYGUI_FILES
     tes3mp_dialog_list.layout
     tes3mp_chat.layout
     tes3mp_chat.skin.xml
+    # X053: generated colour emoji atlas (see tools/arenamp_make_emoji_font.py)
+    ArenaMPChatColor.xml
+    ArenaMPChatColor.png
     tes3mp_text_input.layout
     arenamp_serverquesteditor.layout
 )

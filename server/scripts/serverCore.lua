@@ -35,6 +35,9 @@ logicHandler = require("logicHandler")
 eventHandler = require("eventHandler")
 -- X050: persistent server-authoritative group system.
 groupHelper = require("groupHelper")
+-- X052: nickname colour picker and the Player Menu copy of the /list roster.
+chatColorHelper = require("chatColorHelper")
+playerListHelper = require("playerListHelper")
 -- X050a: built-in ArenaMP owner/console helper moved out of scripts/custom.
 helperAreana = require("helperAreana")
 guiHelper = require("guiHelper")
@@ -555,6 +558,11 @@ end
 function OnPlayerShapeshift(pid)
     tes3mp.LogMessage(enumerations.log.INFO, "Called \"OnPlayerShapeshift\" for " .. logicHandler.GetChatName(pid))
     eventHandler.OnPlayerShapeshift(pid)
+end
+
+function OnPlayerPosition(pid)
+    -- X051: deliberately no per-packet INFO log; movement packets are frequent.
+    eventHandler.OnPlayerPosition(pid)
 end
 
 function OnPlayerCellChange(pid)

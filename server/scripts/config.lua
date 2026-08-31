@@ -19,6 +19,20 @@ config.gameMode = "ArenaMP MMO"
 -- Time to login, in seconds
 config.loginTime = 60
 
+-- X051: restart-safe player position persistence. The stock TES3MP 0.8.1
+-- server does not expose ID_PLAYER_POSITION to Lua, so X051 adds that callback
+-- and keeps the last in-cell transform authoritative. Disk writes are debounced;
+-- disconnect always saves the cached value instead of querying a closing peer.
+config.positionSafety = {
+    enabled = true,
+    autosaveSeconds = 10,
+    loginGuardEnabled = true,
+    loginGuardDelaysMs = {400, 1200, 3000},
+    loginGuardFallThreshold = 24,
+    loginGuardMoveCancelDistance = 96,
+    maxAbsCoordinate = 100000000
+}
+
 -- How many clients are allowed to connect from the same IP address
 config.maxClientsPerIP = 3
 
@@ -510,6 +524,20 @@ config.chatWindowInstructionsEN = color.SkyBlue .. "[Player menu / chat - " .. c
 -- Local messages are also restricted to the same cell. 5000 is roughly a
 -- conversation / nearby-area distance without becoming a zone-wide broadcast.
 config.localChatRadius = 5000
+
+-- ArenaMP X052: nickname colours in chat.
+--   enabled              - master switch for the whole feature;
+--   assignOnFirstLogin   - hand out an unused palette colour to new players so
+--                          a fresh server is readable without anyone opening
+--                          the menu; set to false to start everyone on white;
+--   escapeUserColorCodes - rewrite a bare "#" typed by a player into "##" so a
+--                          message cannot inject MyGUI colour tags and imitate
+--                          another player's colour or a staff rank.
+config.chatNameColors = {
+    enabled = true,
+    assignOnFirstLogin = true,
+    escapeUserColorCodes = true
+}
 
 -- Compact pre-login greeting shown before the password/registration dialog.
 -- Placeholders: {name} = player name, {count} = online count, {seconds} = login timeout.

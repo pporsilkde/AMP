@@ -2,7 +2,9 @@
 #define OPENMW_GUICHAT_HPP
 
 #include <list>
+#include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "apps/openmw/mwgui/windowbase.hpp"
@@ -10,6 +12,7 @@
 namespace MyGUI
 {
     class Button;
+    class ListBox;
     class ScrollBar;
     class TextBox;
     class Widget;
@@ -51,8 +54,20 @@ namespace mwmp
         {
             TAB_CHAT = 0,
             TAB_GROUP,
-            TAB_HOME
+            TAB_HOME,
+            TAB_PLAYERS
         };
+
+        // X052: only one auxiliary strip may occupy the row under the toolbar.
+        enum ChatDrawer
+        {
+            DRAWER_NONE = 0,
+            DRAWER_EMOJI,
+            DRAWER_COLOR
+        };
+
+        static const int sEmojiSlotCount = 20;
+        static const int sColorSlotCount = 16;
 
         MyGUI::EditBox* mCommandLine;
         MyGUI::EditBox* mHistory;
@@ -115,6 +130,16 @@ namespace mwmp
         void setModeFromSetting(const std::string& mode);
         void syncSettings();
 
+        // X052 caption-aware layout. Buttons are sized from their measured
+        // localized caption instead of from hardcoded pixel widths, so RU and
+        // EN text both fit and neither is clipped.
+        void setMenuCaption(MyGUI::Widget* widget, const std::string& caption);
+        void refitCaption(MyGUI::Widget* widget);
+        void layoutRow(const std::vector<MyGUI::Widget*>& row, int left, int top, int width, int height, int gap);
+        void layoutGrid(const std::vector<MyGUI::Widget*>& cells, int left, int top, int width,
+            int rowHeight, int columns, int gap);
+        void applyMenuLayout();
+
         // X049 player-menu shell.
         void setupPlayerMenu();
         void refreshPlayerMenu();
@@ -132,6 +157,25 @@ namespace mwmp
         void sendGroupAction(const std::string& action, const std::string& argument = std::string());
         void updateGroupControls();
         void rebuildGroupInfo(const std::vector<std::string>& fields);
+        void rebuildGroupRoster(const std::string& rosterField);
+        std::string selectedRosterName() const;
+
+        // X052 server player list. Mirrors what /list reports, rendered inside
+        // the player menu instead of a separate server-driven dialog.
+        void requestPlayerList();
+        void rebuildPlayerList(const std::vector<std::string>& fields);
+        void updatePlayerDetails();
+
+        // X052 quick-insert strip and nickname colour picker.
+        void setDrawer(ChatDrawer drawer);
+        // X053: pull in the generated colour atlas font, if one is configured.
+        void ensureChatFontLoaded();
+        bool unicodeEmojiEnabled() const;
+        const char* emojiSymbol(int index) const;
+        void applyEmojiPalette();
+        void rebuildColorPalette(const std::vector<std::string>& fields);
+        void updateColorButtons();
+        void requestColorState();
 
         void onTabClicked(MyGUI::Widget* sender);
         void onModeClicked(MyGUI::Widget* sender);
@@ -141,8 +185,14 @@ namespace mwmp
         void onSendClicked(MyGUI::Widget* sender);
         void onReturnClicked(MyGUI::Widget* sender);
         void onEmojiToggleClicked(MyGUI::Widget* sender);
+        void onColorToggleClicked(MyGUI::Widget* sender);
         void onEmojiClicked(MyGUI::Widget* sender);
+        void onColorClicked(MyGUI::Widget* sender);
         void onGroupButtonClicked(MyGUI::Widget* sender);
+        void onRosterSelected(MyGUI::ListBox* sender, size_t index);
+        void onRosterAccepted(MyGUI::ListBox* sender, size_t index);
+        void onPlayersButtonClicked(MyGUI::Widget* sender);
+        void onPlayerListSelected(MyGUI::ListBox* sender, size_t index);
 
         void onDragStart(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
         void onDrag(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
@@ -157,17 +207,32 @@ namespace mwmp
         MyGUI::Widget* mDragHandle;
         MyGUI::Widget* mChatToolbar;
         MyGUI::Widget* mEmojiBar;
+        MyGUI::Widget* mColorBar;
         MyGUI::Widget* mGroupPane;
         MyGUI::Widget* mHomePane;
+        MyGUI::Widget* mPlayersPane;
+        MyGUI::Widget* mPlayersActionRow;
+        MyGUI::Widget* mGroupActionRow1;
+        MyGUI::Widget* mGroupActionRow2;
+        MyGUI::Widget* mGroupActionRow3;
         MyGUI::EditBox* mGroupInfo;
+        MyGUI::EditBox* mPlayersInfo;
+        MyGUI::ListBox* mGroupRoster;
+        MyGUI::ListBox* mPlayersList;
+        MyGUI::TextBox* mGroupRosterLabel;
         MyGUI::TextBox* mGroupNameLabel;
         MyGUI::TextBox* mGroupTargetLabel;
+        MyGUI::TextBox* mColorBarLabel;
         MyGUI::EditBox* mGroupNameEdit;
         MyGUI::EditBox* mGroupTargetEdit;
 
         MyGUI::Button* mTabChat;
         MyGUI::Button* mTabGroup;
         MyGUI::Button* mTabHome;
+        MyGUI::Button* mTabPlayers;
+        MyGUI::Button* mPlayersRefreshButton;
+        MyGUI::Button* mPlayersOpenListButton;
+        MyGUI::Button* mPlayersInviteButton;
         MyGUI::Button* mModeOoc;
         MyGUI::Button* mModeRp;
         MyGUI::Button* mChannelDefault;
@@ -180,7 +245,9 @@ namespace mwmp
         MyGUI::Button* mSendButton;
         MyGUI::Button* mReturnButton;
         MyGUI::Button* mEmojiToggleButton;
-        MyGUI::Button* mEmojiButtons[6];
+        MyGUI::Button* mColorToggleButton;
+        MyGUI::Button* mEmojiButtons[sEmojiSlotCount];
+        MyGUI::Button* mColorButtons[sColorSlotCount];
         MyGUI::Button* mGroupCreateButton;
         MyGUI::Button* mGroupRefreshButton;
         MyGUI::Button* mGroupInviteButton;
@@ -199,7 +266,15 @@ namespace mwmp
         PlayerMenuTab activeTab;
         bool rpMode;
         bool stayOpenAfterSend;
-        bool emojiBarVisible;
+        ChatDrawer activeDrawer;
+        std::string emojiFontName;
+        std::string menuFontName;
+        std::vector<std::string> groupRosterNames;
+        std::vector<std::string> playerListNames;
+        std::vector<std::string> playerListDetails;
+        std::vector<std::pair<unsigned int, std::string>> colorPalette;
+        int selectedColorIndex;
+        std::map<MyGUI::Widget*, std::string> menuCaptions;
         bool groupInGroup;
         bool groupIsLeader;
         bool groupJournalSync;

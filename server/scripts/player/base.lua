@@ -1198,6 +1198,11 @@ function BasePlayer:SaveCell(playerPacket)
     self.data.location.rotX = playerPacket.location.rotX
     self.data.location.rotZ = playerPacket.location.rotZ
 
+    -- X051: a cell-change transform is an authoritative position snapshot too.
+    self.positionDirty = false
+    self.positionLastPacketTime = os.time()
+    self.positionLastQuicksaveTime = os.time()
+
     stateHelper:SaveMapExploration(self.pid, self)
 end
 

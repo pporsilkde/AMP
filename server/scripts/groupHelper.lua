@@ -286,6 +286,32 @@ local function buildMembersField(group, viewerPid)
     return table.concat(items, ";")
 end
 
+-- X052: everyone online except the viewer, so the Player Menu can offer an
+-- invite list instead of asking the leader to type a name correctly.
+--   name ^ hasAnyGroup ^ inViewersGroup ^ sameCell
+local function buildRosterField(viewerPid)
+    if not isValidPid(viewerPid) then return "" end
+    local viewerGroup = groupHelper.GetPlayerGroup(viewerPid)
+    local viewerCell = tes3mp.GetCell(viewerPid)
+    local items = {}
+
+    for pid, player in pairs(Players) do
+        if player ~= nil and player:IsLoggedIn() and pid ~= viewerPid then
+            local theirGroup = groupHelper.GetPlayerGroup(pid)
+            local inViewersGroup = viewerGroup ~= nil and theirGroup ~= nil and
+                tostring(theirGroup.id) == tostring(viewerGroup.id)
+            local sameCell = viewerCell ~= nil and tes3mp.GetCell(pid) == viewerCell
+            table.insert(items, safeToken(displayName(pid), 48) .. "^" ..
+                (theirGroup ~= nil and "1" or "0") .. "^" ..
+                (inViewersGroup and "1" or "0") .. "^" ..
+                (sameCell and "1" or "0"))
+        end
+    end
+
+    table.sort(items)
+    return table.concat(items, ";")
+end
+
 function groupHelper.SendState(pid)
     if not isValidPid(pid) then return end
     local prefs = ensurePlayerPrefs(pid)
@@ -308,7 +334,8 @@ function groupHelper.SendState(pid)
         group ~= nil and escapeField((group.members[group.leader] or {}).name or group.leader) or "",
         group ~= nil and escapeField(buildMembersField(group, pid)) or "",
         invite ~= nil and escapeField(invite.inviterName or invite.inviterAccount) or "",
-        invite ~= nil and escapeField(invite.groupName or "") or ""
+        invite ~= nil and escapeField(invite.groupName or "") or "",
+        escapeField(buildRosterField(pid))
     }
     tes3mp.SendMessage(pid, STATE_PREFIX .. table.concat(fields, "\t") .. "\n", false)
 end
@@ -933,6 +960,9 @@ local function processCommand(pid, cmd)
         ok, message = toggleSync(pid, "journalSync")
     elseif sub == "topics" then
         ok, message = toggleSync(pid, "topicSync")
+    elseif sub == "roster" then
+        groupHelper.SendState(pid)
+        return
     else
         ok, message = false, "Unknown group action"
     end

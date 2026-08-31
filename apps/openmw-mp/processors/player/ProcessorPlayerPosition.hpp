@@ -15,9 +15,14 @@ namespace mwmp
 
         void Do(PlayerPacket &packet, Player &player) override
         {
+            // ArenaMP X051: expose movement packets to CoreScripts before they
+            // are forwarded. This lets the server persist the last known-good
+            // in-cell transform instead of sampling a half-closed peer during
+            // OnPlayerDisconnect after a server restart/shutdown.
+            Script::Call<Script::CallbackIdentity("OnPlayerPosition")>(player.getId());
             player.sendToLoaded(&packet);
         }
     };
 }
 
-#endif //OPENMW_PROCESSORPLAYERPOSITION_HPP
+#endif // OPENMW_PROCESSORPLAYERPOSITION_HPP

@@ -4,6 +4,7 @@ commandHandler = require("commandHandler")
 local privateCellInstances = require("privateCellInstances")
 local questItemPhasing = require("questItemPhasing")
 local questIndexStore = require("questIndexStore")
+local positionSafetyHelper = require("positionSafetyHelper")
 
 local consoleKickMessage = " has been kicked for using the console despite not having the permission to do so.\n"
 
@@ -620,7 +621,10 @@ eventHandler.OnPlayerDisconnect = function(pid)
                     targetPlayer:SetConfiscationState(false)
                 end
 
-                Players[pid]:SaveCell(packetReader.GetPlayerPacketTables(pid, "PlayerCellChange"))
+                -- X051: do not sample PlayerCellChange/position from a peer that is
+                -- already disconnecting. ID_PLAYER_POSITION has kept data.location
+                -- current throughout the session; persist that last known-good value.
+                positionSafetyHelper.FlushCachedPosition(pid)
                 Players[pid]:SaveStatsDynamic(packetReader.GetPlayerPacketTables(pid, "PlayerStatsDynamic"))
                 tes3mp.LogMessage(enumerations.log.INFO, "Saving player " .. logicHandler.GetChatName(pid))
                 Players[pid]:SaveToDrive()
@@ -820,8 +824,40 @@ end
 -- ArenaMP X049: structured player-menu chat. The client keeps the original
 -- ChatMessage packet and wraps only non-default visual modes in /ampchat, so
 -- legacy slash commands and unmodified chat remain protocol-compatible.
+-- X052: the speaker's name is drawn in the colour the player picked in the
+-- Player Menu. Rank prefixes keep their own colours and still win visually.
+local function getArenaNameColor(pid)
+    if chatColorHelper ~= nil and type(chatColorHelper.GetColor) == "function" then
+        return chatColorHelper.GetColor(pid)
+    end
+    return color.White
+end
+
+-- X052: a "#" typed by a player would otherwise be parsed by the client as the
+-- start of a MyGUI colour tag, which lets anyone forge another player's colour.
+local function escapeArenaChatText(text)
+    if type(config.chatNameColors) == "table" and config.chatNameColors.escapeUserColorCodes == false then
+        return text
+    end
+    return (tostring(text or ""):gsub("#", "##"))
+end
+
+-- X052: cutting a message at a fixed byte count can split a multi-byte UTF-8
+-- character in half, which is what turned long Cyrillic or emoji messages into
+-- broken glyphs. Step back to the last start byte instead.
+local function truncateUtf8(text, maxBytes)
+    if #text <= maxBytes then return text end
+    local cut = maxBytes
+    while cut > 0 do
+        local nextByte = text:byte(cut + 1)
+        if nextByte == nil or nextByte < 0x80 or nextByte >= 0xC0 then break end
+        cut = cut - 1
+    end
+    return text:sub(1, cut)
+end
+
 local function getArenaChatSpeaker(pid)
-    local message = color.White .. logicHandler.GetChatName(pid)
+    local message = getArenaNameColor(pid) .. logicHandler.GetChatName(pid)
     if Players[pid]:IsServerStaff() then
         if Players[pid]:IsServerOwner() then
             message = config.rankColors.serverOwner .. "[Owner] " .. message
@@ -850,10 +886,11 @@ end
 local function buildArenaChatMessage(pid, scope, style, rpMode, text)
     local tag = getArenaChatTag(scope, rpMode)
     if style == "me" then
-        return tag .. color.Yellow .. "* " .. logicHandler.GetChatName(pid) .. " " .. color.White .. text .. "\n"
+        return tag .. color.Yellow .. "* " .. getArenaNameColor(pid) .. logicHandler.GetChatName(pid) ..
+            " " .. color.White .. text .. "\n"
     elseif style == "do" then
         return tag .. color.Yellow .. "* " .. color.White .. text .. color.Grey ..
-            " ((" .. logicHandler.GetChatName(pid) .. "))\n"
+            " ((" .. getArenaNameColor(pid) .. logicHandler.GetChatName(pid) .. color.Grey .. "))\n"
     end
     return tag .. getArenaChatSpeaker(pid) .. color.White .. ": " .. text .. "\n"
 end
@@ -899,9 +936,8 @@ local function processArenaStructuredChat(pid, rawMessage)
     -- Keep multiline chat, but prevent the private envelope from being abused as
     -- an unbounded server-side payload. This is intentionally generous compared
     -- with the UI's normal editor size.
-    if #text > 4096 then
-        text = text:sub(1, 4096)
-    end
+    text = truncateUtf8(text, 4096)
+    text = escapeArenaChatText(text)
 
     local rpMode = rpFlag == "1"
     local effectiveScope = scope
@@ -945,7 +981,8 @@ eventHandler.OnPlayerSendMessage = function(pid, message)
                 local command = (message:sub(2, #message)):split(" ")
                 commandHandler.ProcessCommand(pid, command)
             else
-                local message = color.White .. logicHandler.GetChatName(pid) .. ": " .. message .. "\n"
+                local message = getArenaNameColor(pid) .. logicHandler.GetChatName(pid) ..
+                    color.White .. ": " .. escapeArenaChatText(message) .. "\n"
 
                 -- Check for chat overrides that add extra text
                 if Players[pid]:IsServerStaff() then
@@ -1098,6 +1135,15 @@ eventHandler.OnPlayerSpellsActive = function(pid)
             tes3mp.SendSpellsActiveChanges(pid, true, true)
         end
         customEventHooks.triggerHandlers("OnPlayerSpellsActive", eventStatus, {pid, playerPacket})
+    end
+end
+
+-- ArenaMP X051: ID_PLAYER_POSITION is now surfaced by the server C++
+-- processor. Cache its transform while the connection is healthy so reconnects
+-- and server restarts never depend on a native snapshot taken during teardown.
+eventHandler.OnPlayerPosition = function(pid)
+    if Players[pid] ~= nil and Players[pid]:IsLoggedIn() then
+        positionSafetyHelper.CacheCurrentPosition(pid)
     end
 end
 
