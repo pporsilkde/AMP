@@ -1,0 +1,15 @@
+CHANGELOG.md
+README.md
+README_RU.md
+apps/launcher/graphicspage.cpp
+apps/launcher/graphicspage.hpp
+apps/launcher/maindialog.cpp
+apps/openmw/engine.cpp
+apps/openmw/mwgui/hud.cpp
+docs/FEATURES.md
+docs/TES3MP_DIFFERENCES.md
+docs/TES3MP_DIFFERENCES_RU.md
+files/mygui/openmw_hud.layout
+files/vfs/l10n/arenamp/en.ini
+files/vfs/l10n/arenamp/ru.ini
+server/ARENAMP_CORE_VERSION.txt

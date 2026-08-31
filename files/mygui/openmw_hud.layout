@@ -11,8 +11,7 @@
             <Property key="TextAlign" value="Left VCenter"/>
             <Property key="TextShadow" value="true"/>
             <Property key="TextShadowColour" value="0 0 0"/>
-            <Property key="FontName" value="Russo"/>
-            <Property key="FontHeight" value="16"/>
+            <Property key="FontHeight" value="12"/>
             <Property key="Caption" value="FPS: --"/>
         </Widget>
 
