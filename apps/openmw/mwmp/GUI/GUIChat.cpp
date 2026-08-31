@@ -2,20 +2,25 @@
 
 #include <algorithm>
 #include <cmath>
+
+#include <MyGUI_Button.h>
 #include <MyGUI_EditBox.h>
+#include <MyGUI_InputManager.h>
 #include <MyGUI_LanguageManager.h>
+#include <MyGUI_RenderManager.h>
 #include <MyGUI_ScrollBar.h>
+#include <MyGUI_TextBox.h>
+#include <MyGUI_Widget.h>
+
 #include "apps/openmw/mwbase/environment.hpp"
 #include "apps/openmw/mwgui/windowmanagerimp.hpp"
 #include "apps/openmw/mwinput/inputmanagerimp.hpp"
-#include <MyGUI_InputManager.h>
 #include <components/openmw-mp/TimedLog.hpp>
 #include <components/settings/settings.hpp>
 
 #include "../Networking.hpp"
 #include "../Main.hpp"
 #include "../LocalPlayer.hpp"
-
 #include "../GUIController.hpp"
 
 namespace
@@ -24,6 +29,9 @@ namespace
     constexpr float sThirtyPercentTransparentAlpha = 0.7f;
     constexpr float sSixtyPercentTransparentAlpha = 0.4f;
     constexpr float sFadeSpeed = 4.f;
+    constexpr float sGeometrySaveDebounce = 0.45f;
+    constexpr int sMinimumPanelWidth = 620;
+    constexpr int sMinimumPanelHeight = 380;
 
     std::string localizeArena(const std::string& key)
     {
@@ -38,26 +46,64 @@ namespace
     }
 }
 
-
 namespace mwmp
 {
     GUIChat::GUIChat(int x, int y, int w, int h)
-            : WindowBase("tes3mp_chat.layout")
-            , mHistoryScroll(nullptr)
-            , mCommandScroll(nullptr)
-            , windowState(CHAT_TRANSPARENT_30)
-            , editState(false)
-            , historyReviewState(false)
-            , mainMenuOpen(false)
-            , historyDisplayEnabled(true)
-            , externalHistoryDisplayEnabled(true)
-            , hideAfterFade(false)
-            , delay(3.f)
-            , revealTime(0.f)
-            , currentAlpha(sThirtyPercentTransparentAlpha)
-            , targetAlpha(sThirtyPercentTransparentAlpha)
+        : WindowBase("tes3mp_chat.layout")
+        , mCommandLine(nullptr)
+        , mHistory(nullptr)
+        , mHistoryScroll(nullptr)
+        , mCommandScroll(nullptr)
+        , mPanelBackground(nullptr)
+        , mDragHandle(nullptr)
+        , mChatToolbar(nullptr)
+        , mEmojiBar(nullptr)
+        , mGroupPane(nullptr)
+        , mHomePane(nullptr)
+        , mTabChat(nullptr)
+        , mTabGroup(nullptr)
+        , mTabHome(nullptr)
+        , mModeOoc(nullptr)
+        , mModeRp(nullptr)
+        , mChannelDefault(nullptr)
+        , mChannelLocal(nullptr)
+        , mChannelGlobal(nullptr)
+        , mStylePlain(nullptr)
+        , mStyleMe(nullptr)
+        , mStyleDo(nullptr)
+        , mStayOpenButton(nullptr)
+        , mSendButton(nullptr)
+        , mReturnButton(nullptr)
+        , mEmojiToggleButton(nullptr)
+        , mEmojiButtons{}
+        , windowState(CHAT_TRANSPARENT_30)
+        , chatChannel(CHANNEL_DEFAULT)
+        , chatStyle(STYLE_PLAIN)
+        , activeTab(TAB_CHAT)
+        , rpMode(false)
+        , stayOpenAfterSend(false)
+        , emojiBarVisible(false)
+        , editState(false)
+        , historyReviewState(false)
+        , mainMenuOpen(false)
+        , historyDisplayEnabled(true)
+        , externalHistoryDisplayEnabled(true)
+        , hideAfterFade(false)
+        , geometryDirty(false)
+        , geometrySaveDelay(0.f)
+        , delay(3.f)
+        , revealTime(0.f)
+        , currentAlpha(sThirtyPercentTransparentAlpha)
+        , targetAlpha(sThirtyPercentTransparentAlpha)
+        , dragStartMouse(0, 0)
+        , dragStartWindow(0, 0)
     {
-        setCoord(x, y, w, h);
+        // X049 migration: the old passive chat was commonly only ~260 px wide.
+        // The activated player menu needs enough width for the channel/style bar.
+        // Keep the saved position while upgrading too-small legacy dimensions.
+        const int panelWidth = std::max(sMinimumPanelWidth, w);
+        const int panelHeight = std::max(sMinimumPanelHeight, h);
+        setCoord(x, y, panelWidth, panelHeight);
 
         getWidget(mCommandLine, "edit_Command");
         getWidget(mHistory, "list_History");
@@ -90,35 +136,130 @@ namespace mwmp
             mCommandScroll->setNeedMouseFocus(false);
         }
 
-        // Set up the command line box
-        mCommandLine->eventEditSelectAccept +=
-                newDelegate(this, &GUIChat::acceptCommand);
-        mCommandLine->eventKeyButtonPressed +=
-                newDelegate(this, &GUIChat::keyPress);
-        mCommandLine->eventEditTextChange +=
-                newDelegate(this, &GUIChat::commandTextChanged);
-
-        // X011: use the same real multiline behaviour as OpenMW's book/note
-        // editors. In particular, disable one-line overflow so long text is laid
-        // out into visual rows instead of scrolling horizontally off screen.
+        mCommandLine->eventEditSelectAccept += MyGUI::newDelegate(this, &GUIChat::acceptCommand);
+        mCommandLine->eventKeyButtonPressed += MyGUI::newDelegate(this, &GUIChat::keyPress);
+        mCommandLine->eventEditTextChange += MyGUI::newDelegate(this, &GUIChat::commandTextChanged);
         mCommandLine->setEditMultiLine(true);
         mCommandLine->setEditWordWrap(true);
         mCommandLine->setOverflowToTheLeft(false);
 
-        setTitle("Chat");
+        setTitle("ArenaMP");
 
         mHistory->setOverflowToTheLeft(false);
         mHistory->setEditWordWrap(true);
         mHistory->setEditReadOnly(true);
         mHistory->setTextShadow(true);
         mHistory->setTextShadowColour(MyGUI::Colour::Black);
-
         mHistory->setNeedKeyFocus(false);
+        setFont(Settings::Manager::getString("font", "Chat"));
+
+        setupPlayerMenu();
+        syncSettings();
+
+        const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
+        clampToViewport(view.width, view.height);
+        if (panelWidth != w || panelHeight != h)
+            persistGeometry();
 
         mCommandLine->setVisible(false);
         updateCommandLineLayout();
-        syncSettings();
+        refreshPlayerMenu();
         applyAlpha(currentAlpha);
+    }
+
+    void GUIChat::setupPlayerMenu()
+    {
+        getWidget(mPanelBackground, "PanelBackground");
+        getWidget(mDragHandle, "DragHandle");
+        getWidget(mChatToolbar, "ChatToolbar");
+        getWidget(mEmojiBar, "EmojiBar");
+        getWidget(mGroupPane, "GroupPane");
+        getWidget(mHomePane, "HomePane");
+
+        getWidget(mTabChat, "TabChat");
+        getWidget(mTabGroup, "TabGroup");
+        getWidget(mTabHome, "TabHome");
+        getWidget(mModeOoc, "ModeOoc");
+        getWidget(mModeRp, "ModeRp");
+        getWidget(mChannelDefault, "ChannelDefault");
+        getWidget(mChannelLocal, "ChannelLocal");
+        getWidget(mChannelGlobal, "ChannelGlobal");
+        getWidget(mStylePlain, "StylePlain");
+        getWidget(mStyleMe, "StyleMe");
+        getWidget(mStyleDo, "StyleDo");
+        getWidget(mStayOpenButton, "StayOpenButton");
+        getWidget(mSendButton, "SendButton");
+        getWidget(mReturnButton, "ReturnButton");
+        getWidget(mEmojiToggleButton, "EmojiToggle");
+        getWidget(mEmojiButtons[0], "Emoji1");
+        getWidget(mEmojiButtons[1], "Emoji2");
+        getWidget(mEmojiButtons[2], "Emoji3");
+        getWidget(mEmojiButtons[3], "Emoji4");
+        getWidget(mEmojiButtons[4], "Emoji5");
+        getWidget(mEmojiButtons[5], "Emoji6");
+
+        MyGUI::TextBox* title = nullptr;
+        MyGUI::TextBox* groupTitle = nullptr;
+        MyGUI::EditBox* groupInfo = nullptr;
+        MyGUI::TextBox* homeTitle = nullptr;
+        MyGUI::EditBox* homeInfo = nullptr;
+        getWidget(title, "PlayerMenuTitle");
+        getWidget(groupTitle, "GroupTitle");
+        getWidget(groupInfo, "GroupInfo");
+        getWidget(homeTitle, "HomeTitle");
+        getWidget(homeInfo, "HomeInfo");
+
+        title->setCaption(localizeArena("chat.menu.title"));
+        mTabChat->setCaption(localizeArena("chat.tab.chat"));
+        mTabGroup->setCaption(localizeArena("chat.tab.group"));
+        mTabHome->setCaption(localizeArena("chat.tab.home"));
+        mReturnButton->setCaption(localizeArena("chat.return_game"));
+        mModeOoc->setCaption("OOC");
+        mModeRp->setCaption("RP");
+        mChannelDefault->setCaption(localizeArena("chat.channel.default"));
+        mChannelLocal->setCaption(localizeArena("chat.channel.local"));
+        mChannelGlobal->setCaption(localizeArena("chat.channel.global"));
+        mStylePlain->setCaption(localizeArena("chat.style.plain"));
+        mStyleMe->setCaption("/me");
+        mStyleDo->setCaption("/do");
+        mEmojiToggleButton->setCaption(localizeArena("chat.emoji"));
+        mStayOpenButton->setCaption(localizeArena("chat.stay_after_send"));
+        mSendButton->setCaption(localizeArena("chat.send"));
+
+        groupTitle->setCaption(localizeArena("chat.group.title"));
+        groupInfo->setCaption(localizeArena("chat.group.placeholder"));
+        homeTitle->setCaption(localizeArena("chat.home.title"));
+        homeInfo->setCaption(localizeArena("chat.home.placeholder"));
+
+        const char* symbols[6] = { "\xE2\x98\xBA", "\xE2\x99\xA5", "\xE2\x98\x85", "\xE2\x98\x80", "\xE2\x98\x95", "\xE2\x9C\x93" };
+        for (int i = 0; i < 6; ++i)
+            mEmojiButtons[i]->setCaption(symbols[i]);
+
+        mTabChat->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onTabClicked);
+        mTabGroup->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onTabClicked);
+        mTabHome->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onTabClicked);
+        mModeOoc->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onModeClicked);
+        mModeRp->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onModeClicked);
+        mChannelDefault->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onChannelClicked);
+        mChannelLocal->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onChannelClicked);
+        mChannelGlobal->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onChannelClicked);
+        mStylePlain->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onStyleClicked);
+        mStyleMe->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onStyleClicked);
+        mStyleDo->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onStyleClicked);
+        mStayOpenButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onStayOpenClicked);
+        mSendButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onSendClicked);
+        mReturnButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onReturnClicked);
+        mEmojiToggleButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onEmojiToggleClicked);
+        for (int i = 0; i < 6; ++i)
+            mEmojiButtons[i]->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onEmojiClicked);
+
+        mDragHandle->eventMouseButtonPressed += MyGUI::newDelegate(this, &GUIChat::onDragStart);
+        mDragHandle->eventMouseDrag += MyGUI::newDelegate(this, &GUIChat::onDrag);
+
+        // Keep the title bar draggable even though its label occupies part of it.
+        title->setNeedMouseFocus(false);
+        groupInfo->setEditReadOnly(true);
+        homeInfo->setEditReadOnly(true);
     }
 
     void GUIChat::onOpen()
@@ -128,11 +269,17 @@ namespace mwmp
 
     void GUIChat::onClose()
     {
+        if (geometryDirty)
+            persistGeometry();
     }
 
     bool GUIChat::exit()
     {
-        //WindowBase::exit();
+        if (editState)
+        {
+            setEditState(false);
+            return false;
+        }
         return true;
     }
 
@@ -141,44 +288,48 @@ namespace mwmp
         return editState;
     }
 
-    void GUIChat::acceptCommand(MyGUI::EditBox *_sender)
+    void GUIChat::acceptCommand(MyGUI::EditBox*)
     {
-        // A controller Return and MyGUI accept event can arrive in the same
-        // input frame. Once submission closes the editor, ignore any duplicate.
-        if (!editState)
+        if (!editState || activeTab != TAB_CHAT)
             return;
 
-        const std::string &cm = mCommandLine->getOnlyText();
+        const std::string cm = mCommandLine->getOnlyText();
 
-        // If they enter nothing, then it should be canceled.
-        // Otherwise, there's no way of closing without having text.
+        // With "stay in menu" enabled, an empty Enter is harmless. Without it,
+        // retain the historical quick-cancel behaviour.
         if (cm.empty())
         {
-            mCommandLine->setCaption("");
-            setEditState(false);
+            if (!stayOpenAfterSend)
+                setEditState(false);
             return;
         }
 
         LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Player: %s", cm.c_str());
 
-        // Add the command to the history, and set the current pointer to
-        // the end of the list
         if (mCommandHistory.empty() || mCommandHistory.back() != cm)
             mCommandHistory.push_back(cm);
         mCurrent = mCommandHistory.end();
         mEditString.clear();
 
-        // Reset the command line before the command execution.
-        // It prevents the re-triggering of the acceptCommand() event for the same command
-        // during the actual command execution
         mCommandLine->setCaption("");
-        setEditState(false);
-        send(cm);
+        const std::string outgoing = buildOutgoingMessage(cm);
+        send(outgoing);
+
+        if (stayOpenAfterSend)
+        {
+            selectTab(TAB_CHAT, false);
+            MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
+            updateCommandLineLayout();
+        }
+        else
+            setEditState(false);
     }
 
     void GUIChat::onResChange(int width, int height)
     {
-        setCoord(10, 40, width-10, height/2); // Original chat layout, shifted 30 px down.
+        // X049: never reset to the historical full-width rectangle on resolution
+        // changes. Clamp the player's saved/moved panel instead.
+        clampToViewport(width, height);
         updateCommandLineLayout();
     }
 
@@ -190,7 +341,7 @@ namespace mwmp
 
     void GUIChat::print(const std::string &msg, const std::string &color)
     {
-        if(msg.size() == 0)
+        if (msg.empty())
         {
             clean();
             LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Chat cleaned");
@@ -202,8 +353,6 @@ namespace mwmp
                 scrollHistoryToBottom();
             LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "%s", msg.c_str());
 
-            // A received message temporarily restores full opacity. Auto-hide mode also
-            // fades the chat in for the configured delay. Fully hidden chat stays hidden.
             if (historyDisplayEnabled && windowState != CHAT_HIDDEN && !mainMenuOpen)
                 revealTemporarily();
         }
@@ -222,13 +371,36 @@ namespace mwmp
     void GUIChat::send(const std::string &str)
     {
         LocalPlayer *localPlayer = Main::get().getLocalPlayer();
-
         Networking *networking = Main::get().getNetworking();
 
         localPlayer->chatMessage = str;
-
         networking->getPlayerPacket(ID_CHAT_MESSAGE)->setPlayer(localPlayer);
         networking->getPlayerPacket(ID_CHAT_MESSAGE)->Send();
+    }
+
+    std::string GUIChat::buildOutgoingMessage(const std::string& text) const
+    {
+        // User-entered slash commands always bypass the visual mode selector.
+        // This keeps /help and every existing server command 100% compatible.
+        if (!text.empty() && text[0] == '/')
+            return text;
+
+        if (chatChannel == CHANNEL_DEFAULT && chatStyle == STYLE_PLAIN && !rpMode)
+            return text;
+
+        std::string channel = "default";
+        if (chatChannel == CHANNEL_LOCAL)
+            channel = "local";
+        else if (chatChannel == CHANNEL_GLOBAL)
+            channel = "global";
+
+        std::string style = "plain";
+        if (chatStyle == STYLE_ME)
+            style = "me";
+        else if (chatStyle == STYLE_DO)
+            style = "do";
+
+        return "/ampchat " + channel + " " + style + " " + (rpMode ? "1 " : "0 ") + text;
     }
 
     void GUIChat::clean()
@@ -241,8 +413,7 @@ namespace mwmp
     {
         if (!historyDisplayEnabled)
         {
-            MWBase::Environment::get().getWindowManager()->messageBox(
-                localizeArena("chat.history_hidden"));
+            MWBase::Environment::get().getWindowManager()->messageBox(localizeArena("chat.history_hidden"));
             return;
         }
 
@@ -258,7 +429,8 @@ namespace mwmp
         if (windowState == CHAT_HIDDEN)
         {
             setHistoryReviewState(false);
-            setEditState(false);
+            if (editState)
+                setEditState(false);
         }
 
         refreshPresentation();
@@ -269,24 +441,43 @@ namespace mwmp
         if (state && historyReviewState)
             setHistoryReviewState(false);
 
+        if (editState == state)
+        {
+            if (state && activeTab == TAB_CHAT)
+                MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
+            return;
+        }
+
         editState = state;
-        mCommandLine->setVisible(editState);
-        updateCommandLineLayout();
-        MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(editState ? mCommandLine : nullptr);
+        emojiBarVisible = false;
 
         if (editState)
+        {
+            selectTab(TAB_CHAT, false);
             revealTime = 0.f;
-        else if (windowState == CHAT_AUTOHIDE)
-            revealTime = delay;
+            MWBase::Environment::get().getInputManager()->changeInputMode(true);
+            MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
+            mMainWidget->setNeedMouseFocus(true);
+        }
+        else
+        {
+            MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(nullptr);
+            mMainWidget->setNeedMouseFocus(false);
+            if (!mainMenuOpen && !historyReviewState)
+                MWBase::Environment::get().getInputManager()->changeInputMode(false);
+            if (windowState == CHAT_AUTOHIDE)
+                revealTime = delay;
+            if (geometryDirty)
+                persistGeometry();
+        }
 
+        refreshPlayerMenu();
+        updateCommandLineLayout();
         refreshPresentation();
     }
 
     void GUIChat::commandTextChanged(MyGUI::EditBox*)
     {
-        // Reflow immediately after every edit. Waiting for the next frame leaves
-        // the native EditBox with its previous viewport for one input event, which
-        // is especially noticeable when a word first wraps onto row 2 or row 6.
         updateCommandLineLayout();
     }
 
@@ -295,50 +486,55 @@ namespace mwmp
         if (!mMainWidget || !mCommandLine || !mHistory)
             return;
 
-        // Arena X011: grow the editor from one to five visible rows. The text
-        // measurement also catches wrapped lines, while the explicit newline
-        // count keeps the result stable for short lines and empty paragraphs.
+        const int mainWidth = mMainWidget->getWidth();
+        const int mainHeight = mMainWidget->getHeight();
+
+        if (!editState)
+        {
+            mHistory->setCoord(8, 8, std::max(32, mainWidth - 16), std::max(20, mainHeight - 16));
+            mCommandLine->setVisible(false);
+            return;
+        }
+
+        if (activeTab != TAB_CHAT)
+        {
+            mCommandLine->setVisible(false);
+            return;
+        }
+
         constexpr int lineHeight = 20;
         constexpr int maxVisibleLines = 5;
-        constexpr int inputPadding = 6;
-        constexpr int sideMargin = 8;
-        constexpr int bottomMargin = 8;
-        constexpr int gap = 6;
+        constexpr int inputPadding = 8;
+        constexpr int sideMargin = 10;
+        constexpr int bottomFooterHeight = 46;
+        constexpr int gap = 8;
 
         const std::string text = mCommandLine->getOnlyText();
-        int explicitLines = 1;
-        explicitLines += static_cast<int>(std::count(text.begin(), text.end(), '\n'));
-
+        int explicitLines = 1 + static_cast<int>(std::count(text.begin(), text.end(), '\n'));
         const int measuredHeight = std::max(lineHeight, mCommandLine->getTextSize().height);
         const int measuredLines = std::max(1, (measuredHeight + lineHeight - 1) / lineHeight);
         const int contentLines = std::max(explicitLines, measuredLines);
-        const int totalLines = editState ? contentLines : 1;
-        const int visibleLines = std::min(maxVisibleLines, totalLines);
+        const int visibleLines = std::min(maxVisibleLines, contentLines);
         const int commandHeight = inputPadding + visibleLines * lineHeight;
+        const int commandBottom = std::max(150, mainHeight - bottomFooterHeight);
+        const int commandTop = std::max(118, commandBottom - commandHeight);
 
-        const int mainWidth = mMainWidget->getWidth();
-        const int mainHeight = mMainWidget->getHeight();
-        const int commandTop = std::max(sideMargin, mainHeight - bottomMargin - commandHeight);
         mCommandLine->setCoord(sideMargin, commandTop,
-            std::max(32, mainWidth - sideMargin * 2), commandHeight);
-
-        // Some older MyGUI builds recalculate EditText flow only when these flags
-        // are touched after a geometry change. Keep them explicit here so resize,
-        // UI scaling and the transition to the fifth row cannot restore horizontal
-        // overflow.
+            std::max(32, mainWidth - sideMargin * 2), std::max(28, commandBottom - commandTop));
         mCommandLine->setEditMultiLine(true);
         mCommandLine->setEditWordWrap(true);
         mCommandLine->setOverflowToTheLeft(false);
 
-        const int historyHeight = std::max(20, commandTop - gap - sideMargin);
-        mHistory->setCoord(sideMargin, sideMargin,
+        const int historyTop = emojiBarVisible ? 114 : 78;
+        const int historyHeight = std::max(40, commandTop - gap - historyTop);
+        mHistory->setCoord(sideMargin, historyTop,
             std::max(32, mainWidth - sideMargin * 2), historyHeight);
 
         if (mCommandScroll)
         {
-            const bool overflow = totalLines > maxVisibleLines;
+            const bool overflow = contentLines > maxVisibleLines;
             mCommandScroll->setVisible(overflow);
-            mCommandScroll->setNeedMouseFocus(overflow && editState);
+            mCommandScroll->setNeedMouseFocus(overflow);
         }
     }
 
@@ -358,8 +554,8 @@ namespace mwmp
         historyReviewState = state;
         if (state)
         {
-            editState = false;
-            mCommandLine->setVisible(false);
+            if (editState)
+                setEditState(false);
             mMainWidget->setNeedMouseFocus(true);
             mHistory->setNeedMouseFocus(true);
             mHistory->setNeedKeyFocus(true);
@@ -382,7 +578,7 @@ namespace mwmp
                 mHistoryScroll->setNeedMouseFocus(false);
             }
             MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(nullptr);
-            if (!mainMenuOpen)
+            if (!mainMenuOpen && !editState)
                 MWBase::Environment::get().getInputManager()->changeInputMode(false);
             scrollHistoryToBottom();
             if (windowState == CHAT_AUTOHIDE)
@@ -406,9 +602,8 @@ namespace mwmp
         mainMenuOpen = state;
         if (state)
         {
-            // The pause menu already owns keyboard/mouse focus. Close the live
-            // chat controls without clearing the focus assigned to menu buttons.
             editState = false;
+            emojiBarVisible = false;
             mCommandLine->setVisible(false);
             historyReviewState = false;
             mMainWidget->setNeedMouseFocus(false);
@@ -422,29 +617,37 @@ namespace mwmp
             currentAlpha = 0.f;
             targetAlpha = 0.f;
             hideAfterFade = false;
+            refreshPlayerMenu();
             applyAlpha(0.f);
             setVisible(false);
         }
         else
         {
             updateCommandLineLayout();
+            refreshPlayerMenu();
             refreshPresentation();
         }
     }
 
     void GUIChat::pressedSay()
     {
-        if (!mCommandLine->getVisible())
-            LOG_MESSAGE_SIMPLE(TimedLog::LOG_VERBOSE, "Opening chat.");
+        if (!editState)
+            LOG_MESSAGE_SIMPLE(TimedLog::LOG_VERBOSE, "Opening ArenaMP player chat menu.");
 
         setEditState(true);
+        selectTab(TAB_CHAT, false);
+        mCommandLine->setVisible(true);
+        MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
     }
 
-    void GUIChat::keyPress(MyGUI::Widget *_sender, MyGUI::KeyCode key, MyGUI::Char _char)
+    void GUIChat::keyPress(MyGUI::Widget*, MyGUI::KeyCode key, MyGUI::Char)
     {
-        // Keyboard Return is intercepted before MyGUI in KeyboardManager so that
-        // plain Enter submits while Shift/Ctrl+Enter inserts a line break. This
-        // fallback keeps controller/virtual-keyboard Return behaving as Submit.
+        if (key == MyGUI::KeyCode::Escape)
+        {
+            setEditState(false);
+            return;
+        }
+
         if (key == MyGUI::KeyCode::Return || key == MyGUI::KeyCode::NumpadEnter)
         {
             acceptCommand(mCommandLine);
@@ -453,19 +656,16 @@ namespace mwmp
 
         updateCommandLineLayout();
 
-        // Once the editor contains multiple visual rows, Up/Down belong to the
-        // text cursor rather than chat history traversal.
         const bool multiRow = mCommandLine->getOnlyText().find('\n') != std::string::npos
             || mCommandLine->getTextSize().height > 24;
         if (multiRow && (key == MyGUI::KeyCode::ArrowUp || key == MyGUI::KeyCode::ArrowDown))
             return;
 
-        if (mCommandHistory.empty()) return;
+        if (mCommandHistory.empty())
+            return;
 
-        // Traverse history with up and down arrows
         if (key == MyGUI::KeyCode::ArrowUp)
         {
-            // If the user was editing a string, store it for later
             if (mCurrent == mCommandHistory.end())
                 mEditString = mCommandLine->getOnlyText();
 
@@ -480,22 +680,26 @@ namespace mwmp
             if (mCurrent != mCommandHistory.end())
             {
                 ++mCurrent;
-
                 if (mCurrent != mCommandHistory.end())
                     mCommandLine->setCaption(*mCurrent);
                 else
-                    // Restore the edit string
                     mCommandLine->setCaption(mEditString);
             }
         }
-
     }
 
     void GUIChat::update(float dt)
     {
         syncSettings();
-        if (editState)
+        if (editState && activeTab == TAB_CHAT)
             updateCommandLineLayout();
+
+        if (geometryDirty)
+        {
+            geometrySaveDelay = std::max(0.f, geometrySaveDelay - std::max(0.f, dt));
+            if (geometrySaveDelay <= 0.f)
+                persistGeometry();
+        }
 
         if (mainMenuOpen)
             return;
@@ -528,16 +732,22 @@ namespace mwmp
         if (mainMenuOpen)
             return;
 
-        if (!historyDisplayEnabled)
+        refreshPlayerMenu();
+
+        // Input/player-menu mode is always fully opaque regardless of HUD opacity.
+        if (editState)
         {
-            if (editState)
-                showSmoothly(sFullyVisibleAlpha);
-            else
-                hideSmoothly();
+            showSmoothly(sFullyVisibleAlpha);
             return;
         }
 
-        if (editState || historyReviewState)
+        if (!historyDisplayEnabled)
+        {
+            hideSmoothly();
+            return;
+        }
+
+        if (historyReviewState)
         {
             showSmoothly(sFullyVisibleAlpha);
             return;
@@ -554,6 +764,245 @@ namespace mwmp
             showSmoothly(restingAlpha);
         else
             hideSmoothly();
+    }
+
+    void GUIChat::refreshPlayerMenu()
+    {
+        const bool menuVisible = editState && !mainMenuOpen;
+        const bool chatVisible = menuVisible && activeTab == TAB_CHAT;
+
+        mPanelBackground->setVisible(menuVisible);
+        mDragHandle->setVisible(menuVisible);
+        mChatToolbar->setVisible(chatVisible);
+        mStayOpenButton->setVisible(chatVisible);
+        mSendButton->setVisible(chatVisible);
+        mEmojiBar->setVisible(chatVisible && emojiBarVisible);
+        mGroupPane->setVisible(menuVisible && activeTab == TAB_GROUP);
+        mHomePane->setVisible(menuVisible && activeTab == TAB_HOME);
+
+        mCommandLine->setVisible(chatVisible);
+        mHistory->setVisible(historyDisplayEnabled && (!menuVisible || chatVisible));
+
+        mHistory->setNeedMouseFocus(chatVisible);
+        if (mHistoryScroll)
+        {
+            mHistoryScroll->setVisible(chatVisible || historyReviewState);
+            mHistoryScroll->setNeedMouseFocus(chatVisible || historyReviewState);
+        }
+
+        updateToggleButtons();
+    }
+
+    void GUIChat::selectTab(PlayerMenuTab tab, bool persist)
+    {
+        activeTab = tab;
+        if (persist)
+        {
+            Settings::Manager::setInt("player menu tab", "Chat", static_cast<int>(activeTab));
+            Settings::Manager::saveUser();
+        }
+
+        emojiBarVisible = false;
+        refreshPlayerMenu();
+        updateCommandLineLayout();
+
+        if (!editState)
+            return;
+
+        if (activeTab == TAB_CHAT)
+            MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
+        else
+            MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(nullptr);
+    }
+
+    void GUIChat::updateToggleButtons()
+    {
+        mTabChat->setStateSelected(activeTab == TAB_CHAT);
+        mTabGroup->setStateSelected(activeTab == TAB_GROUP);
+        mTabHome->setStateSelected(activeTab == TAB_HOME);
+        mModeOoc->setStateSelected(!rpMode);
+        mModeRp->setStateSelected(rpMode);
+        mChannelDefault->setStateSelected(chatChannel == CHANNEL_DEFAULT);
+        mChannelLocal->setStateSelected(chatChannel == CHANNEL_LOCAL);
+        mChannelGlobal->setStateSelected(chatChannel == CHANNEL_GLOBAL);
+        mStylePlain->setStateSelected(chatStyle == STYLE_PLAIN);
+        mStyleMe->setStateSelected(chatStyle == STYLE_ME);
+        mStyleDo->setStateSelected(chatStyle == STYLE_DO);
+        mStayOpenButton->setStateSelected(stayOpenAfterSend);
+        mEmojiToggleButton->setStateSelected(emojiBarVisible);
+    }
+
+    void GUIChat::setChatChannel(ChatChannel channel)
+    {
+        chatChannel = channel;
+        const char* setting = chatChannel == CHANNEL_LOCAL ? "local"
+            : (chatChannel == CHANNEL_GLOBAL ? "global" : "default");
+        Settings::Manager::setString("send channel", "Chat", setting);
+        Settings::Manager::saveUser();
+        updateToggleButtons();
+    }
+
+    void GUIChat::setChatStyle(ChatStyle style)
+    {
+        chatStyle = style;
+        const char* setting = chatStyle == STYLE_ME ? "me" : (chatStyle == STYLE_DO ? "do" : "plain");
+        Settings::Manager::setString("send style", "Chat", setting);
+        Settings::Manager::saveUser();
+        updateToggleButtons();
+    }
+
+    void GUIChat::setRpMode(bool enabled)
+    {
+        rpMode = enabled;
+        Settings::Manager::setBool("rp mode", "Chat", rpMode);
+        Settings::Manager::saveUser();
+        updateToggleButtons();
+    }
+
+    void GUIChat::setStayOpenAfterSend(bool enabled)
+    {
+        stayOpenAfterSend = enabled;
+        Settings::Manager::setBool("stay after send", "Chat", stayOpenAfterSend);
+        Settings::Manager::saveUser();
+        updateToggleButtons();
+    }
+
+    void GUIChat::onTabClicked(MyGUI::Widget* sender)
+    {
+        if (sender == mTabGroup)
+            selectTab(TAB_GROUP);
+        else if (sender == mTabHome)
+            selectTab(TAB_HOME);
+        else
+            selectTab(TAB_CHAT);
+    }
+
+    void GUIChat::onModeClicked(MyGUI::Widget* sender)
+    {
+        setRpMode(sender == mModeRp);
+    }
+
+    void GUIChat::onChannelClicked(MyGUI::Widget* sender)
+    {
+        if (sender == mChannelLocal)
+            setChatChannel(CHANNEL_LOCAL);
+        else if (sender == mChannelGlobal)
+            setChatChannel(CHANNEL_GLOBAL);
+        else
+            setChatChannel(CHANNEL_DEFAULT);
+    }
+
+    void GUIChat::onStyleClicked(MyGUI::Widget* sender)
+    {
+        if (sender == mStyleMe)
+            setChatStyle(STYLE_ME);
+        else if (sender == mStyleDo)
+            setChatStyle(STYLE_DO);
+        else
+            setChatStyle(STYLE_PLAIN);
+    }
+
+    void GUIChat::onStayOpenClicked(MyGUI::Widget*)
+    {
+        setStayOpenAfterSend(!stayOpenAfterSend);
+    }
+
+    void GUIChat::onSendClicked(MyGUI::Widget*)
+    {
+        acceptCommand(mCommandLine);
+    }
+
+    void GUIChat::onReturnClicked(MyGUI::Widget*)
+    {
+        setEditState(false);
+    }
+
+    void GUIChat::onEmojiToggleClicked(MyGUI::Widget*)
+    {
+        emojiBarVisible = !emojiBarVisible;
+        refreshPlayerMenu();
+        updateCommandLineLayout();
+    }
+
+    void GUIChat::onEmojiClicked(MyGUI::Widget* sender)
+    {
+        static const char* symbols[6] = { "\xE2\x98\xBA", "\xE2\x99\xA5", "\xE2\x98\x85", "\xE2\x98\x80", "\xE2\x98\x95", "\xE2\x9C\x93" };
+        for (int i = 0; i < 6; ++i)
+        {
+            if (sender != mEmojiButtons[i])
+                continue;
+
+            MyGUI::UString text = mCommandLine->getCaption();
+            text += MyGUI::UString(symbols[i]);
+            mCommandLine->setCaption(text);
+            mCommandLine->setTextCursor(text.size());
+            MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
+            updateCommandLineLayout();
+            break;
+        }
+    }
+
+    void GUIChat::onDragStart(MyGUI::Widget*, int, int, MyGUI::MouseButton id)
+    {
+        if (id != MyGUI::MouseButton::Left || !editState)
+            return;
+        dragStartMouse = MyGUI::InputManager::getInstance().getMousePosition();
+        dragStartWindow = mMainWidget->getPosition();
+    }
+
+    void GUIChat::onDrag(MyGUI::Widget*, int, int, MyGUI::MouseButton id)
+    {
+        if (id != MyGUI::MouseButton::Left || !editState)
+            return;
+
+        const MyGUI::IntPoint mouse = MyGUI::InputManager::getInstance().getMousePosition();
+        const MyGUI::IntPoint delta = mouse - dragStartMouse;
+        mMainWidget->setPosition(dragStartWindow + delta);
+        const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
+        clampToViewport(view.width, view.height);
+        markGeometryDirty();
+    }
+
+    void GUIChat::clampToViewport(int width, int height)
+    {
+        if (!mMainWidget || width <= 0 || height <= 0)
+            return;
+
+        MyGUI::IntSize size = mMainWidget->getSize();
+        size.width = std::min(std::max(sMinimumPanelWidth, size.width), std::max(sMinimumPanelWidth, width));
+        size.height = std::min(std::max(sMinimumPanelHeight, size.height), std::max(sMinimumPanelHeight, height));
+        if (width < sMinimumPanelWidth)
+            size.width = width;
+        if (height < sMinimumPanelHeight)
+            size.height = height;
+        mMainWidget->setSize(size);
+
+        MyGUI::IntPoint pos = mMainWidget->getPosition();
+        pos.left = std::max(0, std::min(pos.left, std::max(0, width - size.width)));
+        pos.top = std::max(0, std::min(pos.top, std::max(0, height - size.height)));
+        mMainWidget->setPosition(pos);
+    }
+
+    void GUIChat::markGeometryDirty()
+    {
+        geometryDirty = true;
+        geometrySaveDelay = sGeometrySaveDebounce;
+    }
+
+    void GUIChat::persistGeometry()
+    {
+        if (!mMainWidget)
+            return;
+
+        const MyGUI::IntCoord coord = mMainWidget->getCoord();
+        Settings::Manager::setInt("x", "Chat", coord.left);
+        Settings::Manager::setInt("y", "Chat", coord.top);
+        Settings::Manager::setInt("w", "Chat", coord.width);
+        Settings::Manager::setInt("h", "Chat", coord.height);
+        Settings::Manager::setInt("panel layout version", "Chat", 1);
+        Settings::Manager::saveUser();
+        geometryDirty = false;
+        geometrySaveDelay = 0.f;
     }
 
     void GUIChat::revealTemporarily()
@@ -589,22 +1038,33 @@ namespace mwmp
 
     void GUIChat::applyAlpha(float alpha)
     {
-        mHistory->setAlpha(alpha);
-        mCommandLine->setAlpha(alpha);
+        // Player-menu chrome stays readable while the passive history still obeys
+        // the legacy opacity/autohide state machine.
+        if (editState)
+        {
+            mHistory->setAlpha(1.f);
+            mCommandLine->setAlpha(1.f);
+            mPanelBackground->setAlpha(1.f);
+            mDragHandle->setAlpha(1.f);
+            mChatToolbar->setAlpha(1.f);
+            mGroupPane->setAlpha(1.f);
+            mHomePane->setAlpha(1.f);
+        }
+        else
+        {
+            mHistory->setAlpha(alpha);
+            mCommandLine->setAlpha(alpha);
+        }
     }
 
     float GUIChat::getRestingAlpha() const
     {
         switch (windowState)
         {
-            case CHAT_VISIBLE:
-                return sFullyVisibleAlpha;
-            case CHAT_TRANSPARENT_30:
-                return sThirtyPercentTransparentAlpha;
-            case CHAT_TRANSPARENT_60:
-                return sSixtyPercentTransparentAlpha;
-            default:
-                return 0.f;
+            case CHAT_VISIBLE: return sFullyVisibleAlpha;
+            case CHAT_TRANSPARENT_30: return sThirtyPercentTransparentAlpha;
+            case CHAT_TRANSPARENT_60: return sSixtyPercentTransparentAlpha;
+            default: return 0.f;
         }
     }
 
@@ -612,21 +1072,14 @@ namespace mwmp
     {
         switch (windowState)
         {
-            case CHAT_VISIBLE:
-                return localizeArena("chat.mode.visible");
-            case CHAT_TRANSPARENT_30:
-                return localizeArena("chat.mode.opacity_30");
-            case CHAT_TRANSPARENT_60:
-                return localizeArena("chat.mode.opacity_60");
-            case CHAT_AUTOHIDE:
-                return localizeArena("chat.mode.autohide");
-            case CHAT_HIDDEN:
-                return localizeArena("chat.mode.hidden");
-            default:
-                return localizeArena("chat.mode.visible");
+            case CHAT_VISIBLE: return localizeArena("chat.mode.visible");
+            case CHAT_TRANSPARENT_30: return localizeArena("chat.mode.opacity_30");
+            case CHAT_TRANSPARENT_60: return localizeArena("chat.mode.opacity_60");
+            case CHAT_AUTOHIDE: return localizeArena("chat.mode.autohide");
+            case CHAT_HIDDEN: return localizeArena("chat.mode.hidden");
+            default: return localizeArena("chat.mode.visible");
         }
     }
-
 
     std::string GUIChat::getModeSetting() const
     {
@@ -657,8 +1110,7 @@ namespace mwmp
 
     void GUIChat::syncSettings()
     {
-        const bool enabled = externalHistoryDisplayEnabled
-            && Settings::Manager::getBool("enabled", "Chat");
+        const bool enabled = externalHistoryDisplayEnabled && Settings::Manager::getBool("enabled", "Chat");
         const float configuredDelay = std::max(0.f, Settings::Manager::getFloat("delay", "Chat"));
         const std::string configuredMode = Settings::Manager::getString("mode", "Chat");
 
@@ -666,7 +1118,6 @@ namespace mwmp
         if (historyDisplayEnabled != enabled)
         {
             historyDisplayEnabled = enabled;
-            mHistory->setVisible(enabled);
             if (!enabled && historyReviewState)
                 setHistoryReviewState(false);
             changed = true;
@@ -682,19 +1133,51 @@ namespace mwmp
         setModeFromSetting(configuredMode);
         if (windowState != previousState)
         {
-            if (windowState == CHAT_HIDDEN)
+            if (windowState == CHAT_HIDDEN && !editState)
             {
                 if (historyReviewState)
                     setHistoryReviewState(false);
-                if (editState)
-                    setEditState(false);
             }
             revealTime = windowState == CHAT_AUTOHIDE ? delay : 0.f;
             changed = true;
         }
 
+        const std::string channel = Settings::Manager::getString("send channel", "Chat");
+        const ChatChannel configuredChannel = channel == "local" ? CHANNEL_LOCAL
+            : (channel == "global" ? CHANNEL_GLOBAL : CHANNEL_DEFAULT);
+        if (chatChannel != configuredChannel)
+        {
+            chatChannel = configuredChannel;
+            changed = true;
+        }
+
+        const std::string style = Settings::Manager::getString("send style", "Chat");
+        const ChatStyle configuredStyle = style == "me" ? STYLE_ME : (style == "do" ? STYLE_DO : STYLE_PLAIN);
+        if (chatStyle != configuredStyle)
+        {
+            chatStyle = configuredStyle;
+            changed = true;
+        }
+
+        const bool configuredRp = Settings::Manager::getBool("rp mode", "Chat");
+        if (rpMode != configuredRp)
+        {
+            rpMode = configuredRp;
+            changed = true;
+        }
+
+        const bool configuredStay = Settings::Manager::getBool("stay after send", "Chat");
+        if (stayOpenAfterSend != configuredStay)
+        {
+            stayOpenAfterSend = configuredStay;
+            changed = true;
+        }
+
         if (changed)
+        {
+            updateToggleButtons();
             refreshPresentation();
+        }
     }
 
     void GUIChat::setHistoryDisplayEnabled(bool enabled)

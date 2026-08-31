@@ -481,10 +481,15 @@ config.defaultTimeTable = { year = 427, month = 7, day = 16, hour = 9,
 
 -- The chat window instructions that show up when players join the server.
 -- Keep the original compact ArenaMP/Nirn formatting here so it is easy to edit.
-config.chatWindowInstructions = color.SkyBlue .. "[Написать в чат - " .. color.Turquoise .. "Y" .. color.SkyBlue .. "] [Скрыть чат - " .. color.Turquoise .. "F2" .. color.SkyBlue .. "] [Все доступные команды  - " .. color.Turquoise .. "/help" .. color.SkyBlue .. "]\n"
+config.chatWindowInstructions = color.SkyBlue .. "[Меню игрока / чат - " .. color.Turquoise .. "Y" .. color.SkyBlue .. "] [Скрыть чат - " .. color.Turquoise .. "F2" .. color.SkyBlue .. "] [Все доступные команды  - " .. color.Turquoise .. "/help" .. color.SkyBlue .. "]\n"
 
 -- English equivalent used only for EN clients when per-client localization is enabled.
-config.chatWindowInstructionsEN = color.SkyBlue .. "[Chat - " .. color.Turquoise .. "Y" .. color.SkyBlue .. "] [Chat opacity - " .. color.Turquoise .. "F2" .. color.SkyBlue .. "] [All available commands  - " .. color.Turquoise .. "/help" .. color.SkyBlue .. "]\n"
+config.chatWindowInstructionsEN = color.SkyBlue .. "[Player menu / chat - " .. color.Turquoise .. "Y" .. color.SkyBlue .. "] [Chat opacity - " .. color.Turquoise .. "F2" .. color.SkyBlue .. "] [All available commands  - " .. color.Turquoise .. "/help" .. color.SkyBlue .. "]\n"
+
+-- ArenaMP X049: radius in Morrowind world units for the Local channel.
+-- Local messages are also restricted to the same cell. 5000 is roughly a
+-- conversation / nearby-area distance without becoming a zone-wide broadcast.
+config.localChatRadius = 5000
 
 -- Compact pre-login greeting shown before the password/registration dialog.
 -- Placeholders: {name} = player name, {count} = online count, {seconds} = login timeout.

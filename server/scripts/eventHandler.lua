@@ -817,6 +817,117 @@ eventHandler.OnGUIAction = function(pid, idGui, data)
     return false
 end
 
+-- ArenaMP X049: structured player-menu chat. The client keeps the original
+-- ChatMessage packet and wraps only non-default visual modes in /ampchat, so
+-- legacy slash commands and unmodified chat remain protocol-compatible.
+local function getArenaChatSpeaker(pid)
+    local message = color.White .. logicHandler.GetChatName(pid)
+    if Players[pid]:IsServerStaff() then
+        if Players[pid]:IsServerOwner() then
+            message = config.rankColors.serverOwner .. "[Owner] " .. message
+        elseif Players[pid]:IsAdmin() then
+            message = config.rankColors.admin .. "[Admin] " .. message
+        elseif Players[pid]:IsModerator() then
+            message = config.rankColors.moderator .. "[Mod] " .. message
+        end
+    end
+    return message
+end
+
+local function getArenaChatTag(scope, rpMode)
+    local tag = ""
+    if scope == "local" then
+        tag = color.Turquoise .. "[Local] "
+    elseif scope == "global" then
+        tag = color.SkyBlue .. "[Global] "
+    end
+    if rpMode then
+        tag = tag .. color.Yellow .. "[RP] "
+    end
+    return tag
+end
+
+local function buildArenaChatMessage(pid, scope, style, rpMode, text)
+    local tag = getArenaChatTag(scope, rpMode)
+    if style == "me" then
+        return tag .. color.Yellow .. "* " .. logicHandler.GetChatName(pid) .. " " .. color.White .. text .. "\n"
+    elseif style == "do" then
+        return tag .. color.Yellow .. "* " .. color.White .. text .. color.Grey ..
+            " ((" .. logicHandler.GetChatName(pid) .. "))\n"
+    end
+    return tag .. getArenaChatSpeaker(pid) .. color.White .. ": " .. text .. "\n"
+end
+
+local function isArenaLocalChatRecipient(originPid, targetPid, radius)
+    if Players[targetPid] == nil or not Players[targetPid]:IsLoggedIn() then
+        return false
+    end
+    if tes3mp.GetCell(originPid) ~= tes3mp.GetCell(targetPid) then
+        return false
+    end
+
+    local dx = (tonumber(tes3mp.GetPosX(originPid)) or 0) - (tonumber(tes3mp.GetPosX(targetPid)) or 0)
+    local dy = (tonumber(tes3mp.GetPosY(originPid)) or 0) - (tonumber(tes3mp.GetPosY(targetPid)) or 0)
+    local dz = (tonumber(tes3mp.GetPosZ(originPid)) or 0) - (tonumber(tes3mp.GetPosZ(targetPid)) or 0)
+    return dx * dx + dy * dy + dz * dz <= radius * radius
+end
+
+local function processArenaStructuredChat(pid, rawMessage)
+    if rawMessage:sub(1, 9) ~= "/ampchat " then
+        return false
+    end
+
+    local scope, style, rpFlag, text = rawMessage:match("^/ampchat%s+(%S+)%s+(%S+)%s+(%S+)%s+(.+)$")
+    if scope == nil or text == nil or text == "" then
+        tes3mp.SendMessage(pid, color.Red .. "Invalid ArenaMP chat message.\n", false)
+        return true
+    end
+
+    if scope ~= "default" and scope ~= "local" and scope ~= "global" then
+        tes3mp.SendMessage(pid, color.Red .. "Invalid ArenaMP chat channel.\n", false)
+        return true
+    end
+    if style ~= "plain" and style ~= "me" and style ~= "do" then
+        tes3mp.SendMessage(pid, color.Red .. "Invalid ArenaMP chat style.\n", false)
+        return true
+    end
+    if rpFlag ~= "0" and rpFlag ~= "1" then
+        tes3mp.SendMessage(pid, color.Red .. "Invalid ArenaMP RP mode.\n", false)
+        return true
+    end
+
+    -- Keep multiline chat, but prevent the private envelope from being abused as
+    -- an unbounded server-side payload. This is intentionally generous compared
+    -- with the UI's normal editor size.
+    if #text > 4096 then
+        text = text:sub(1, 4096)
+    end
+
+    local rpMode = rpFlag == "1"
+    local effectiveScope = scope
+    if scope == "default" then
+        -- RP actions are local by default; the player can explicitly choose
+        -- Global when a scene is intended for the whole server. Plain OOC keeps
+        -- the historical server-wide default.
+        effectiveScope = (rpMode or style ~= "plain") and "local" or "global"
+    end
+    local formatted = buildArenaChatMessage(pid, scope, style, rpMode, text)
+
+    if effectiveScope == "local" then
+        local radius = tonumber(config.localChatRadius) or 5000
+        radius = math.max(0, radius)
+        for recipientPid, player in pairs(Players) do
+            if player ~= nil and isArenaLocalChatRecipient(pid, recipientPid, radius) then
+                tes3mp.SendMessage(recipientPid, formatted, false)
+            end
+        end
+    else
+        tes3mp.SendMessage(pid, formatted, true)
+    end
+
+    return true
+end
+
 eventHandler.OnPlayerSendMessage = function(pid, message)
 
     if Players[pid] ~= nil and Players[pid]:IsLoggedIn() then
@@ -825,8 +936,11 @@ eventHandler.OnPlayerSendMessage = function(pid, message)
         local eventStatus = customEventHooks.triggerValidators("OnPlayerSendMessage", {pid, message})
             
         if eventStatus.validDefaultHandler then
-            -- Is this a chat command? If so, pass it over to the commandHandler
-            if message:sub(1, 1) == '/' then
+            -- X049 structured UI chat is handled before ordinary slash commands.
+            -- /help and every user-entered command still go through commandHandler.
+            if processArenaStructuredChat(pid, message) then
+                -- handled
+            elseif message:sub(1, 1) == '/' then
 
                 local command = (message:sub(2, #message)):split(" ")
                 commandHandler.ProcessCommand(pid, command)

@@ -1,33 +1,105 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<MyGUI type="Layout">
-  <Widget type="Window" skin="" position="0 0 420 150" layer="Chat" name="_Main">
-    <Property key="Caption" value="#{sConsoleTitle}"/>
-    <Property key="MinSize" value="40 40"/>
+<MyGUI type="Layout" version="3.2.0">
+  <!-- X049: the chat stays lightweight in HUD mode. When text input is opened,
+       C++ reveals the framed player-menu shell and mouse-oriented controls. -->
+  <Widget type="Window" skin="" position="0 0 620 420" layer="Chat" name="_Main">
+    <Property key="Caption" value="ArenaMP"/>
+    <Property key="MinSize" value="560 360"/>
     <Property key="Visible" value="false"/>
     <Property key="NeedMouse" value="false"/>
     <Property key="NeedKey" value="false"/>
 
-    <!-- Log window -->
-    <Widget type="EditBox" skin="TES3MP_ChatHistory" position="8 8 404 102" align="Stretch" name="list_History">
-        <Property key="MultiLine" value="1"/>
-        <Property key="ReadOnly" value="true"/>
-        <Property key="NeedMouse" value="false"/>
-        <Property key="NeedKey" value="false"/>
-        <Property key="FontName" value="Russo"/>
-        <Property key="TextAlign" value="Left Top"/>
-        <Property key="TextColour" value="1 1 1"/>
-        <Property key="InvertSelected" value="true"/>
-        <Property key="WordWrap" value="true"/>
+    <!-- Dark framed shell; hidden while the chat is only a HUD overlay. -->
+    <Widget type="Widget" skin="MW_Box" position="0 0 620 420" align="Stretch" name="PanelBackground">
+      <Property key="Visible" value="false"/>
+      <Property key="NeedMouse" value="false"/>
     </Widget>
 
-    <!-- Command line -->
-    <Widget type="EditBox" skin="MW_TextBoxEdit" position="8 116 404 26" align="HStretch Bottom" name="edit_Command">
-        <Property key="InvertSelected" value="false"/>
-        <Property key="MultiLine" value="true"/>
-        <Property key="WordWrap" value="true"/>
-        <Property key="TextAlign" value="Left Top"/>
-        <UserString key="AcceptTab" value="true"/>
+    <!-- Drag strip. It is deliberately separate from buttons, so the player can
+         grab empty title-bar space without accidentally switching tabs. -->
+    <Widget type="Widget" skin="MW_Box" position="6 6 608 30" align="HStretch Top" name="DragHandle">
+      <Property key="Visible" value="false"/>
+      <Property key="NeedMouse" value="true"/>
+      <Widget type="TextBox" skin="SandBrightText" position="8 4 188 22" name="PlayerMenuTitle">
+        <Property key="TextAlign" value="Left VCenter"/>
+      </Widget>
+      <Widget type="Button" skin="MW_Button" position="210 3 92 24" name="TabChat"/>
+      <Widget type="Button" skin="MW_Button" position="308 3 92 24" name="TabGroup"/>
+      <Widget type="Button" skin="MW_Button" position="406 3 92 24" name="TabHome"/>
+      <Widget type="Button" skin="MW_Button" position="520 3 78 24" name="ReturnButton"/>
     </Widget>
 
+    <Widget type="Widget" skin="" position="10 42 600 30" align="HStretch Top" name="ChatToolbar">
+      <Property key="Visible" value="false"/>
+      <Widget type="Button" skin="MW_Button" position="0 2 54 24" name="ModeOoc"/>
+      <Widget type="Button" skin="MW_Button" position="58 2 54 24" name="ModeRp"/>
+      <Widget type="Button" skin="MW_Button" position="122 2 72 24" name="ChannelDefault"/>
+      <Widget type="Button" skin="MW_Button" position="198 2 72 24" name="ChannelLocal"/>
+      <Widget type="Button" skin="MW_Button" position="274 2 78 24" name="ChannelGlobal"/>
+      <Widget type="Button" skin="MW_Button" position="362 2 64 24" name="StylePlain"/>
+      <Widget type="Button" skin="MW_Button" position="430 2 52 24" name="StyleMe"/>
+      <Widget type="Button" skin="MW_Button" position="486 2 52 24" name="StyleDo"/>
+      <Widget type="Button" skin="MW_Button" position="544 2 54 24" name="EmojiToggle"/>
+    </Widget>
+
+    <Widget type="Widget" skin="MW_Box" position="320 76 288 34" align="Right Top" name="EmojiBar">
+      <Property key="Visible" value="false"/>
+      <Property key="NeedMouse" value="true"/>
+      <Widget type="Button" skin="MW_Button" position="4 5 42 24" name="Emoji1"/>
+      <Widget type="Button" skin="MW_Button" position="50 5 42 24" name="Emoji2"/>
+      <Widget type="Button" skin="MW_Button" position="96 5 42 24" name="Emoji3"/>
+      <Widget type="Button" skin="MW_Button" position="142 5 42 24" name="Emoji4"/>
+      <Widget type="Button" skin="MW_Button" position="188 5 42 24" name="Emoji5"/>
+      <Widget type="Button" skin="MW_Button" position="234 5 42 24" name="Emoji6"/>
+    </Widget>
+
+    <!-- History is the only widget visible in passive HUD mode. -->
+    <Widget type="EditBox" skin="TES3MP_ChatHistory" position="8 8 604 330" align="Stretch" name="list_History">
+      <Property key="MultiLine" value="1"/>
+      <Property key="ReadOnly" value="true"/>
+      <Property key="NeedMouse" value="false"/>
+      <Property key="NeedKey" value="false"/>
+      <Property key="FontName" value="DejaVuLGCSansMono"/>
+      <Property key="TextAlign" value="Left Top"/>
+      <Property key="TextColour" value="1 1 1"/>
+      <Property key="InvertSelected" value="true"/>
+      <Property key="WordWrap" value="true"/>
+    </Widget>
+
+    <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="10 300 600 54" align="HStretch Bottom" name="edit_Command">
+      <Property key="InvertSelected" value="false"/>
+      <Property key="MultiLine" value="true"/>
+      <Property key="WordWrap" value="true"/>
+      <Property key="TextAlign" value="Left Top"/>
+      <Property key="FontName" value="DejaVuLGCSansMono"/>
+      <UserString key="AcceptTab" value="true"/>
+    </Widget>
+
+    <Widget type="Button" skin="MW_Button" position="10 384 268 26" align="Left Bottom" name="StayOpenButton">
+      <Property key="Visible" value="false"/>
+    </Widget>
+    <Widget type="Button" skin="MW_Button" position="500 384 110 26" align="Right Bottom" name="SendButton">
+      <Property key="Visible" value="false"/>
+    </Widget>
+
+    <!-- Extensible player-menu pages. X049 intentionally provides the shell only;
+         server-backed party/home actions can be added without replacing chat again. -->
+    <Widget type="Widget" skin="MW_Box" position="10 44 600 366" align="Stretch" name="GroupPane">
+      <Property key="Visible" value="false"/>
+      <Widget type="TextBox" skin="SandBrightText" position="18 18 564 28" name="GroupTitle"/>
+      <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="18 58 564 280" name="GroupInfo">
+        <Property key="EditStatic" value="true"/><Property key="ReadOnly" value="true"/>
+        <Property key="MultiLine" value="true"/><Property key="WordWrap" value="true"/>
+      </Widget>
+    </Widget>
+
+    <Widget type="Widget" skin="MW_Box" position="10 44 600 366" align="Stretch" name="HomePane">
+      <Property key="Visible" value="false"/>
+      <Widget type="TextBox" skin="SandBrightText" position="18 18 564 28" name="HomeTitle"/>
+      <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="18 58 564 280" name="HomeInfo">
+        <Property key="EditStatic" value="true"/><Property key="ReadOnly" value="true"/>
+        <Property key="MultiLine" value="true"/><Property key="WordWrap" value="true"/>
+      </Widget>
+    </Widget>
   </Widget>
 </MyGUI>
