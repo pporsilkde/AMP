@@ -9,7 +9,7 @@ DataManager.dataPrefix = "custom/__data_"
 
 local function log(level, message)
     if tes3mp ~= nil and enumerations ~= nil then
-        tes3mp.LogMessage(level, "[CoreArenaMP_DataManager] " .. message)
+        tes3mp.LogMessage(level, "[ArenaMP Core] " .. message)
     end
 end
 

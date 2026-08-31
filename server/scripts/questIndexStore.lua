@@ -122,13 +122,13 @@ local function load()
         if autoGenerateEnabled() then
             if config ~= nil and config.questIndexAutoGenerate == false then
                 tes3mp.LogMessage(enumerations.log.WARN,
-                    "[QuestIndex] Ignoring legacy config.questIndexAutoGenerate=false; X020 auto-bootstrap is active. Use config.questIndexRequireQuorum=true only if quorum mode is intentionally required")
+                    "[ArenaMP Core] Ignoring legacy config.questIndexAutoGenerate=false; X020 auto-bootstrap is active. Use config.questIndexRequireQuorum=true only if quorum mode is intentionally required")
             end
             tes3mp.LogMessage(enumerations.log.INFO,
-                "[QuestIndex] No stored index; X020 auto-bootstrap will accept the first valid client upload and create questIndex.json")
+                "[ArenaMP Core] No stored index; X020 auto-bootstrap will accept the first valid client upload and create questIndex.json")
         else
             tes3mp.LogMessage(enumerations.log.INFO,
-                "[QuestIndex] No stored index; explicit questIndexRequireQuorum=true keeps phasing disabled until quorum/staff approval")
+                "[ArenaMP Core] No stored index; explicit questIndexRequireQuorum=true keeps phasing disabled until quorum/staff approval")
         end
         return
     end
@@ -137,7 +137,7 @@ local function load()
     if not ok or type(data) ~= "table" or type(data.entries) ~= "table" or
         type(data.contentKey) ~= "string" or type(data.indexHash) ~= "string" then
         tes3mp.LogMessage(enumerations.log.ERROR,
-            "[QuestIndex] " .. STORE_PATH .. " is unreadable; phasing stays disabled")
+            "[ArenaMP Core] " .. STORE_PATH .. " is unreadable; phasing stays disabled")
         return
     end
 
@@ -146,7 +146,7 @@ local function load()
     local recomputed = hashEntries(data.entries)
     if recomputed ~= data.indexHash then
         tes3mp.LogMessage(enumerations.log.ERROR,
-            "[QuestIndex] Stored index hash mismatch (" .. recomputed .. " vs " .. data.indexHash ..
+            "[ArenaMP Core] Stored index hash mismatch (" .. recomputed .. " vs " .. data.indexHash ..
             "); phasing stays disabled until a fresh index is accepted")
         return
     end
@@ -162,7 +162,7 @@ local function load()
     -- file. Manual Reset() remains the explicit admin rebuild path.
     if configBool("questIndexRefreshOnServerStart", false) then
         tes3mp.LogMessage(enumerations.log.WARN,
-            "[QuestIndex] questIndexRefreshOnServerStart is deprecated and ignored by X046; the valid stored questIndex.json will be reused. Use the explicit quest index reset/rebuild command when the content set intentionally changes.")
+            "[ArenaMP Core] questIndexRefreshOnServerStart is deprecated and ignored by X046; the valid stored questIndex.json will be reused. Use the explicit quest index reset/rebuild command when the content set intentionally changes.")
     end
 
     applyIndex(data.contentKey, data.indexHash, data.entries)
@@ -171,7 +171,7 @@ local function load()
     state.storedIndexHash = nil
 
     tes3mp.LogMessage(enumerations.log.INFO,
-        "[QuestIndex] Reusing persistent index: loaded " .. state.entryCount ..
+        "[ArenaMP Core] Reusing persistent index: loaded " .. state.entryCount ..
         " phaseable records for content key " .. state.contentKey ..
         " (hash " .. state.indexHash .. "); no startup client scan required")
 end
@@ -195,7 +195,7 @@ local function commit(contentKey, indexHash, entries, reason, generatedBy, gener
     confirmations = {}
 
     tes3mp.LogMessage(enumerations.log.INFO,
-        "[QuestIndex] Accepted index with " .. state.entryCount .. " records (" .. reason ..
+        "[ArenaMP Core] Accepted index with " .. state.entryCount .. " records (" .. reason ..
         "); quest item phasing is now active")
 
     -- Everyone online can stop classifying locally now.
@@ -253,7 +253,7 @@ function questIndexStore.Reset()
     driftWarned = {}
 
     tes3mp.LogMessage(enumerations.log.WARN,
-        "[QuestIndex] Index reset; phasing is temporarily disabled while a fresh index is requested")
+        "[ArenaMP Core] Index reset; phasing is temporarily disabled while a fresh index is requested")
 
     for pid, _ in pairs(Players) do
         if Players[pid] ~= nil and Players[pid]:IsLoggedIn() then
@@ -271,7 +271,7 @@ function questIndexStore.RequestFrom(pid, mode)
     -- is available in the matching executable.
     if type(tes3mp.SendQuestIndexRequest) ~= "function" then
         tes3mp.LogMessage(enumerations.log.ERROR,
-            "[QuestIndex] Native QuestIndex API is unavailable; phasing remains disabled. Rebuild server/client from the same ArenaMP cumulative patch.")
+            "[ArenaMP Core] Native QuestIndex API is unavailable; phasing remains disabled. Rebuild server/client from the same ArenaMP cumulative patch.")
         return false
     end
 
@@ -317,7 +317,7 @@ local function noteDrift(pid, contentKey, indexHash)
     driftWarned[pid] = true
 
     tes3mp.LogMessage(enumerations.log.WARN,
-        "[QuestIndex] " .. logicHandler.GetChatName(pid) .. " reports content key " .. contentKey ..
+        "[ArenaMP Core] " .. logicHandler.GetChatName(pid) .. " reports content key " .. contentKey ..
         " / hash " .. indexHash .. ", server has " .. tostring(state.contentKey) .. " / " ..
         tostring(state.indexHash) .. " - their load order differs from the one the index was built from")
 end
@@ -346,7 +346,7 @@ local function registerConfirmation(pid, contentKey, indexHash, entries)
     -- flow explicitly.
     if autoGenerateEnabled() then
         tes3mp.LogMessage(enumerations.log.INFO,
-            "[QuestIndex] X020 auto-bootstrap: accepting first verified upload from " .. chatName ..
+            "[ArenaMP Core] X020 auto-bootstrap: accepting first verified upload from " .. chatName ..
             " (" .. tostring(#entries) .. " records, hash " .. indexHash .. ")")
         commit(contentKey, indexHash, entries,
             "auto-generated from first valid upload by " .. chatName,
@@ -374,7 +374,7 @@ local function registerConfirmation(pid, contentKey, indexHash, entries)
     local required = math.max(1, configNumber("questIndexRequiredConfirmations", 2))
 
     tes3mp.LogMessage(enumerations.log.INFO,
-        "[QuestIndex] Upload from " .. logicHandler.GetChatName(pid) .. " accepted as confirmation " ..
+        "[ArenaMP Core] Upload from " .. logicHandler.GetChatName(pid) .. " accepted as confirmation " ..
         record.count .. "/" .. required .. " for hash " .. indexHash)
 
     if record.count >= required then
@@ -395,7 +395,7 @@ function questIndexStore.OnPacket(pid)
 
     if #contentKey ~= 16 or #indexHash ~= 16 then
         tes3mp.LogMessage(enumerations.log.WARN,
-            "[QuestIndex] Discarding malformed keys from " .. logicHandler.GetChatName(pid))
+            "[ArenaMP Core] Discarding malformed keys from " .. logicHandler.GetChatName(pid))
         pending[pid] = nil
         return
     end
@@ -435,7 +435,7 @@ function questIndexStore.OnPacket(pid)
 
         if buffer.contentKey ~= contentKey or buffer.indexHash ~= indexHash then
             tes3mp.LogMessage(enumerations.log.WARN,
-                "[QuestIndex] " .. logicHandler.GetChatName(pid) .. " changed keys mid-upload; discarding")
+                "[ArenaMP Core] " .. logicHandler.GetChatName(pid) .. " changed keys mid-upload; discarding")
             pending[pid] = nil
             return
         end
@@ -444,7 +444,7 @@ function questIndexStore.OnPacket(pid)
         for i = 0, size - 1 do
             if #buffer.entries >= buffer.entryCount then
                 tes3mp.LogMessage(enumerations.log.WARN,
-                    "[QuestIndex] " .. logicHandler.GetChatName(pid) .. " sent more entries than declared; discarding")
+                    "[ArenaMP Core] " .. logicHandler.GetChatName(pid) .. " sent more entries than declared; discarding")
                 pending[pid] = nil
                 return
             end
@@ -460,7 +460,7 @@ function questIndexStore.OnPacket(pid)
 
         if #buffer.entries ~= buffer.entryCount then
             tes3mp.LogMessage(enumerations.log.WARN,
-                "[QuestIndex] Incomplete upload from " .. logicHandler.GetChatName(pid) ..
+                "[ArenaMP Core] Incomplete upload from " .. logicHandler.GetChatName(pid) ..
                 " (" .. #buffer.entries .. "/" .. buffer.entryCount .. "); discarded")
             return
         end
@@ -471,7 +471,7 @@ function questIndexStore.OnPacket(pid)
         local recomputed = hashEntries(buffer.entries)
         if recomputed ~= buffer.indexHash then
             tes3mp.LogMessage(enumerations.log.WARN,
-                "[QuestIndex] Hash mismatch from " .. logicHandler.GetChatName(pid) ..
+                "[ArenaMP Core] Hash mismatch from " .. logicHandler.GetChatName(pid) ..
                 " (" .. recomputed .. " vs " .. buffer.indexHash .. "); discarded")
             return
         end

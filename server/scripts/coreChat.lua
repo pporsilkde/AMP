@@ -667,6 +667,6 @@ customCommandHooks.registerCommand("chathelp", commandHelp)
 
 -- Book recording from the old RolePlayMode is intentionally not ported.
 installRPSystemChatFilter()
-tes3mp.LogMessage(enumerations.log.INFO, "[coreChat] ArenaMP RP chat loaded (RU/EN, no book recording)")
+tes3mp.LogMessage(enumerations.log.INFO, "[ArenaMP Core] ArenaMP RP chat loaded (RU/EN, no book recording)")
 
 return coreChat

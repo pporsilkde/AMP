@@ -34,7 +34,7 @@ serverQuestSystem.editor = {}
 serverQuestSystem.validation = {}
 
 local function log(level, message)
-    tes3mp.LogMessage(level, "[ServerQuest] " .. tostring(message))
+    tes3mp.LogMessage(level, "[ArenaMP Core] " .. tostring(message))
 end
 
 local function enabled()
@@ -1717,7 +1717,7 @@ local function onPlayerInventoryResync(eventStatus, pid)
 
     local ok = serverQuestSystem.ApplyChoice(pid, quest, pending.topicId, pending.choiceId, false)
     if ok then
-        log(enumerations.log.INFO, "[ServerQuest] X048 replayed choice " .. tostring(pending.choiceId)
+        log(enumerations.log.INFO, "replayed choice " .. tostring(pending.choiceId)
             .. " for " .. tostring(pending.questId) .. " after inventory resync (pid " .. tostring(pid) .. ")")
         sendDialogueResponse(pid, quest, pending.topicId)
         serverQuestSystem.SyncPlayer(pid)
@@ -3179,7 +3179,7 @@ local function onObjectActivateQuestResync(eventStatus, pid, cellDescription, ob
     end
 
     if shouldSync then
-        log(enumerations.log.INFO, "[ServerQuest] X047 JIT topic sync for pid " .. tostring(pid)
+        log(enumerations.log.INFO, "JIT topic sync for pid " .. tostring(pid)
             .. " in " .. tostring(cellDescription))
         serverQuestSystem.SyncPlayer(pid)
 
@@ -3255,7 +3255,7 @@ function serverQuestSystem.Initialize()
     customEventHooks.registerHandler("OnPlayerDisconnect", onPlayerDisconnectQuest)
     customEventHooks.registerValidator("OnObjectDialogueChoice", validateServerQuestDialogue)
     customEventHooks.registerHandler("OnObjectDialogueChoice", handleServerQuestDialogue)
-    log(enumerations.log.INFO, "X048 quest hand-in resync + journal injection + Quest Studio autofit initialized")
+    log(enumerations.log.INFO, "quest hand-in resync + journal injection + Quest Studio autofit initialized")
 end
 
 serverQuestSystem.Initialize()

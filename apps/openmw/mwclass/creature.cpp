@@ -310,6 +310,18 @@ namespace MWClass
             End of tes3mp change (major)
         */
 
+        /*
+            ArenaMP friendly fire
+
+            Npc::hit has had this gate for a while; Creature::hit never did,
+            which is precisely the path a summoned atronach or clannfear takes.
+            Stopping here means no hit chance roll, no damage, no attack packet
+            and no target assignment for a swing at the summoner or at a member
+            of the summoner's party.
+        */
+        if (!MechanicsHelper::isFriendlyFireAllowed(ptr, victim))
+            return;
+
         osg::Vec3f hitPosition (result.second);
 
         float hitchance = MWMechanics::getHitChance(ptr, victim, ref->mBase->mData.mCombat);
@@ -441,6 +453,18 @@ namespace MWClass
 
     void Creature::onHit(const MWWorld::Ptr &ptr, float damage, bool ishealth, const MWWorld::Ptr &object, const MWWorld::Ptr &attacker, const osg::Vec3f &hitPosition, bool successful) const
     {
+        /*
+            ArenaMP friendly fire
+
+            Defensive gate for everything below: setAttacked, actorAttacked,
+            the hit attempt actor ids and the damage itself. This is what stops
+            a summon from turning on its own master, or on a party member who
+            caught it with a stray area effect -- suppressing only the damage
+            would still leave the summon aggroed.
+        */
+        if (!MechanicsHelper::isFriendlyFireAllowed(attacker, ptr))
+            return;
+
         MWMechanics::CreatureStats& stats = getCreatureStats(ptr);
 
         // NOTE: 'object' and/or 'attacker' may be empty.        

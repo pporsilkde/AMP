@@ -4,8 +4,11 @@
 #include <components/openmw-mp/Base/BaseStructs.hpp>
 
 #include "../mwworld/containerstore.hpp"
+#include "../mwworld/ptr.hpp"
 
 #include <osg/Vec3f>
+
+#include <set>
 
 
 namespace MechanicsHelper
@@ -41,9 +44,27 @@ namespace MechanicsHelper
     //       who isn't mutually allied to you
     bool isTeamMember(const MWWorld::Ptr& playerChecked, const MWWorld::Ptr& playerWithTeam);
 
+    // True for the local player and for any DedicatedPlayer.
+    bool isPlayerPtr(const MWWorld::Ptr& ptr);
+
+    // Resolve an actor to the player it fights for: itself for a player,
+    // the master for a summon, a commanded creature or a follower, and an
+    // empty Ptr for anything that answers to no player.
+    MWWorld::Ptr getCommandingPlayer(const MWWorld::Ptr& actor);
+
+    // True when two actors belong to the same player or to two players on
+    // the same team, after resolving summons to their owners.
+    bool areAllied(const MWWorld::Ptr& first, const MWWorld::Ptr& second);
+
+    // Collect the players teamed up with any player in sources, skipping
+    // anyone already present there. Lets follower/summon combat logic reason
+    // about the whole party, which getActorsSidingWith cannot see.
+    void getAlliedPlayers(const std::set<MWWorld::Ptr>& sources, std::set<MWWorld::Ptr>& out);
+
     // Check whether damage or another harmful effect is allowed between two
-    // multiplayer player references according to the server-enforced
-    // "friendly fire mode" [Game] setting.
+    // actors according to the server-enforced "friendly fire mode" [Game]
+    // setting. Summons are resolved to their owning player first, so this
+    // covers player-to-summon and summon-to-summon as well as PvP.
     bool isFriendlyFireAllowed(const MWWorld::Ptr& attacker, const MWWorld::Ptr& target);
 
     bool getSpellSuccess(std::string spellId, const MWWorld::Ptr& caster);

@@ -71,7 +71,7 @@ function positionSafetyHelper.CacheCurrentPosition(pid)
     local rx, rz = tes3mp.GetRotX(pid), tes3mp.GetRotZ(pid)
     if not validTransform(x, y, z, rx, rz) then
         tes3mp.LogAppend(enumerations.log.WARN,
-            "[POSITION SAFETY] Rejected invalid position packet for " .. tostring(player.accountName or pid))
+            "[ArenaMP Core] Rejected invalid position packet for " .. tostring(player.accountName or pid))
         return false
     end
 
@@ -194,7 +194,7 @@ function positionSafetyHelper.ReassertLoginPosition(pid, accountName)
         tes3mp.SendPos(pid)
         guard.sentOnce = true
         tes3mp.LogAppend(enumerations.log.INFO,
-            "[POSITION SAFETY] Reasserted login transform for " .. tostring(accountName) ..
+            "[ArenaMP Core] Reasserted login transform for " .. tostring(accountName) ..
             " in " .. tostring(guard.cell))
     end
     return finish(shouldReassert)

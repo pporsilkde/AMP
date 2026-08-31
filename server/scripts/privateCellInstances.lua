@@ -211,7 +211,7 @@ function privateCellInstances.RedirectCellChange(pid, player, playerPacket)
     tes3mp.SendPos(pid)
 
     tes3mp.LogAppend(enumerations.log.INFO,
-        "[PRIVATE CELL] Redirected " .. tostring(player.accountName or player.name or pid) ..
+        "[ArenaMP Core] Redirected " .. tostring(player.accountName or player.name or pid) ..
         " from " .. tostring(currentCell) .. " to " .. tostring(ownCell))
 
     return true, ownCell, key, definition
@@ -318,7 +318,7 @@ function privateCellInstances.PrepareLoginRestore(player)
     player.privateCellLoginRestore.redirects = 0
 
     tes3mp.LogAppend(enumerations.log.INFO,
-        "[PRIVATE CELL] Prepared login restore for " ..
+        "[ArenaMP Core] Prepared login restore for " ..
         tostring(player.accountName or player.name or player.pid) .. " in " .. tostring(cellDescription))
     return true
 end
@@ -335,7 +335,7 @@ function privateCellInstances.HandleLoginCellChange(pid, player, playerPacket)
     local restore = player.privateCellLoginRestore
     if os.time() - (restore.startedAt or os.time()) > 15 then
         tes3mp.LogAppend(enumerations.log.WARN,
-            "[PRIVATE CELL] Login restore timed out for " ..
+            "[ArenaMP Core] Login restore timed out for " ..
             tostring(player.accountName or player.name or pid))
         player.privateCellLoginRestore = nil
         return false
@@ -347,7 +347,7 @@ function privateCellInstances.HandleLoginCellChange(pid, player, playerPacket)
         privateCellInstances.SendCellRecords(pid, player)
         sendAuthoritativeLocation(pid, restore)
         tes3mp.LogAppend(enumerations.log.INFO,
-            "[PRIVATE CELL] Ignored stale login cell " .. incomingCell ..
+            "[ArenaMP Core] Ignored stale login cell " .. incomingCell ..
             "; restoring " .. tostring(restore.cell))
         return true
     end
@@ -371,7 +371,7 @@ function privateCellInstances.HandleLoginCellChange(pid, player, playerPacket)
     end
 
     tes3mp.LogAppend(enumerations.log.INFO,
-        "[PRIVATE CELL] Login restore confirmed in " .. tostring(restore.cell) ..
+        "[ArenaMP Core] Login restore confirmed in " .. tostring(restore.cell) ..
         " after " .. tostring(restore.redirects or 0) .. " stale packet(s)")
     player.privateCellLoginRestore = nil
     return false

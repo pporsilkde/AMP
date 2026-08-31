@@ -33,6 +33,8 @@
 #include "../mwworld/ptr.hpp"
 #include "../mwworld/timestamp.hpp"
 
+#include "../mwmp/MechanicsHelper.hpp"
+
 namespace
 {
     float clampFloat(float value, float low, float high)
@@ -341,6 +343,21 @@ namespace
 
         if (attacker.isEmpty())
             return false;
+
+        /*
+            ArenaMP addition
+
+            Credit a summon's kill to whoever summoned it, directly.
+
+            getActorsSidingWith below already covers the normal case, but it is
+            rebuilt from live follow links and comes back empty for a short
+            window after a cell change or an authority handover -- exactly when
+            a summon is most likely to land a finishing blow. Resolving the
+            master straight off the AI sequence is cheap and does not depend on
+            that cache being warm.
+        */
+        if (MechanicsHelper::getCommandingPlayer(attacker) == player)
+            return true;
 
         std::set<MWWorld::Ptr> followers;
         MWBase::Environment::get().getMechanicsManager()->getActorsSidingWith(player, followers);

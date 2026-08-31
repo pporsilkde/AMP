@@ -107,7 +107,7 @@ local function callLas(methodName, ...)
     end
 
     tes3mp.LogAppend(enumerations.log.WARN,
-        "[resetHelrer] las." .. methodName .. " вызвал ошибку; вызов пропущен.")
+        "[ArenaMP Core] las." .. methodName .. " вызвал ошибку; вызов пропущен.")
     return nil, false
 end
 
@@ -180,7 +180,7 @@ local function loadCellResetTimersFile()
     -- post-init.
     cellResetTimersNeedsInitialSave = true
     tes3mp.LogAppend(enumerations.log.WARN,
-        "[resetHelrer] cellResetTimers.json отсутствует или поврежден; будет создан новый пустой файл.")
+        "[ArenaMP Core] cellResetTimers.json отсутствует или поврежден; будет создан новый пустой файл.")
     return {}
 end
 
@@ -230,7 +230,7 @@ local function safeSendCellReset(cellDescription)
             if hasCellLoaded then
                 tes3mp.SendCellReset(pid, false)
                 tes3mp.LogAppend(enumerations.log.VERBOSE,
-                    "[SAFE RESET] Sent cell reset for " .. cellDescription .. " to pid " .. pid)
+                    "[ArenaMP Core] Sent cell reset for " .. cellDescription .. " to pid " .. pid)
             end
         end
     end
@@ -622,7 +622,7 @@ local resetCellsOnStartup = function()
             worldDataChanged = true
         else
             tes3mp.LogAppend(enumerations.log.WARN,
-                "[resetHelrer] WorldInstance.data.kills ещё не создан; сброс kill counters при старте пропущен.")
+                "[ArenaMP Core] WorldInstance.data.kills ещё не создан; сброс kill counters при старте пропущен.")
         end
     end
 
@@ -643,7 +643,7 @@ local resetCellsOnStartup = function()
             -- clientVariables table yet.  Treat that as an empty globals set,
             -- not as a fatal startup error.
             tes3mp.LogAppend(enumerations.log.WARN,
-                "[resetHelrer] WorldInstance.data.clientVariables.globals ещё не создан; сброс globals при старте пропущен.")
+                "[ArenaMP Core] WorldInstance.data.clientVariables.globals ещё не создан; сброс globals при старте пропущен.")
         end
     end
 
@@ -759,7 +759,7 @@ end
 local function cleanUnownedHouses()
     if not canLookupHouseOwner() then
         tes3mp.LogAppend(enumerations.log.WARN,
-            "[UnownedHouse] houseHelper отсутствует или не имеет API владельцев; очистка домов пропущена.")
+            "[ArenaMP Core] houseHelper отсутствует или не имеет API владельцев; очистка домов пропущена.")
         return 0, 0
     end
     local cleaned = 0
@@ -775,10 +775,10 @@ local function cleanUnownedHouses()
                     -- В ячейке кто-то есть — пропустим до следующей проверки
                     skipped = skipped + 1
                     tes3mp.LogAppend(enumerations.log.WARN,
-                        "[UnownedHouse] Пропуск " .. cellDescription .. " — ячейка загружена (игроки внутри).")
+                        "[ArenaMP Core] Пропуск " .. cellDescription .. " — ячейка загружена (игроки внутри).")
                 else
                     tes3mp.LogAppend(enumerations.log.INFO,
-                        "[UnownedHouse] Сброс пустующего дома: " .. houseName .. " (" .. cellDescription .. ")")
+                        "[ArenaMP Core] Сброс пустующего дома: " .. houseName .. " (" .. cellDescription .. ")")
                     local ok, err = pcall(function()
                         periodicCellResets.ResetHome(cellDescription)
                     end)
@@ -786,7 +786,7 @@ local function cleanUnownedHouses()
                         cleaned = cleaned + 1
                     else
                         tes3mp.LogAppend(enumerations.log.ERROR,
-                            "[UnownedHouse] Ошибка при сбросе " .. cellDescription .. ": " .. tostring(err))
+                            "[ArenaMP Core] Ошибка при сбросе " .. cellDescription .. ": " .. tostring(err))
                     end
                 end
             end
@@ -794,7 +794,7 @@ local function cleanUnownedHouses()
     end
 
     tes3mp.LogAppend(enumerations.log.INFO,
-        "[UnownedHouse] Завершено: очищено " .. cleaned .. " ячеек, пропущено " .. skipped .. " (заняты).")
+        "[ArenaMP Core] Завершено: очищено " .. cleaned .. " ячеек, пропущено " .. skipped .. " (заняты).")
     return cleaned, skipped
 end
 
@@ -975,24 +975,24 @@ end
 periodicCellResets.ResetHome = function(cellDescription)
     if isPrivateCaiusInstance(cellDescription) then
         tes3mp.LogAppend(enumerations.log.INFO,
-            "[ResetHome] Пропуск личного инстанса дома Кая: " .. cellDescription)
+            "[ArenaMP Core] Пропуск личного инстанса дома Кая: " .. cellDescription)
         return
     end
 
-    tes3mp.LogAppend(enumerations.log.INFO, "[ResetHome] Начало процесса сброса дома для ячейки: " .. cellDescription)
+    tes3mp.LogAppend(enumerations.log.INFO, "[ArenaMP Core] Начало процесса сброса дома для ячейки: " .. cellDescription)
 
     if hasCellBackup(cellDescription) then
-        tes3mp.LogAppend(enumerations.log.INFO, "[ResetHome] Обнаружен бэкап для ячейки: " .. cellDescription)
+        tes3mp.LogAppend(enumerations.log.INFO, "[ArenaMP Core] Обнаружен бэкап для ячейки: " .. cellDescription)
         if restoreCellFromBackup(cellDescription) then
-            tes3mp.LogAppend(enumerations.log.INFO, "[ResetHome] Ячейка " .. cellDescription .. " успешно восстановлена из бэкапа.")
+            tes3mp.LogAppend(enumerations.log.INFO, "[ArenaMP Core] Ячейка " .. cellDescription .. " успешно восстановлена из бэкапа.")
             cellResetTimers[cellDescription] = nil
             SaveCellResetTimers(true)
             return
         else
-            tes3mp.LogAppend(enumerations.log.ERROR, "[ResetHome] Не удалось восстановить бэкап для ячейки: " .. cellDescription .. ". Выполняется стандартный сброс.")
+            tes3mp.LogAppend(enumerations.log.ERROR, "[ArenaMP Core] Не удалось восстановить бэкап для ячейки: " .. cellDescription .. ". Выполняется стандартный сброс.")
         end
     else
-        tes3mp.LogAppend(enumerations.log.INFO, "[ResetHome] Бэкап для ячейки " .. cellDescription .. " не найден. Выполняется стандартный сброс.")
+        tes3mp.LogAppend(enumerations.log.INFO, "[ArenaMP Core] Бэкап для ячейки " .. cellDescription .. " не найден. Выполняется стандартный сброс.")
     end
 
     local unloadAtEnd = false
@@ -1013,7 +1013,7 @@ periodicCellResets.ResetHome = function(cellDescription)
     end
 
     removeCustomRecordsFromResetCell(cellDescription)
-    tes3mp.LogAppend(enumerations.log.INFO, "[ResetHome] Завершён сброс ячейки " .. cellDescription)
+    tes3mp.LogAppend(enumerations.log.INFO, "[ArenaMP Core] Завершён сброс ячейки " .. cellDescription)
 end
 
 -- ============================================================================
@@ -1054,7 +1054,7 @@ local pushCellResetsEarly = function(pid, cmd)
                 end)
                 if not success then
                     tes3mp.LogMessage(enumerations.log.ERROR,
-                        "[PUSH RESET ERROR] " .. cellDescription .. ": " .. tostring(err))
+                        "[ArenaMP Core] " .. cellDescription .. ": " .. tostring(err))
                 end
             end
         end
@@ -1121,7 +1121,7 @@ local pushResetAllCells = function(pid, cmd)
                 heapPush(retryTime, cellDescription)
                 doSave = true
                 tes3mp.LogAppend(enumerations.log.INFO,
-                    "[RESET ALL] Ячейка " .. cellDescription .. " занята — перепланирован сброс через " .. cellResetTimeCheck .. " сек.")
+                    "[ArenaMP Core] Ячейка " .. cellDescription .. " занята — перепланирован сброс через " .. cellResetTimeCheck .. " сек.")
             end
 
             -- Сбрасываем свободные ячейки
@@ -1134,7 +1134,7 @@ local pushResetAllCells = function(pid, cmd)
                 end)
                 if not success then
                     tes3mp.LogMessage(enumerations.log.ERROR,
-                        "[RESET ALL ERROR] " .. cellDescription .. ": " .. tostring(err))
+                        "[ArenaMP Core] " .. cellDescription .. ": " .. tostring(err))
                 end
             end
         end
@@ -1306,7 +1306,7 @@ periodicCellResets.UpdateResetTimers = function()
             end)
             if not success then
                 tes3mp.LogMessage(enumerations.log.ERROR,
-                    "[TIMER RESET ERROR] " .. cellDescription .. ": " .. tostring(err))
+                    "[ArenaMP Core] " .. cellDescription .. ": " .. tostring(err))
             end
         end
 
@@ -1698,7 +1698,7 @@ periodicCellResets.cleanCurrentCell = function(pid, cmd)
 
     if success then
         tes3mp.SendMessage(pid, color.Yellow .. "[Обновление Ячейки]: " .. color.Green .. message .. "\n")
-        tes3mp.LogAppend(enumerations.log.INFO, "[CLEAN] Игрок " .. Players[pid].name .. " выполнил мягкий сброс ячейки: " .. cellDescription)
+        tes3mp.LogAppend(enumerations.log.INFO, "[ArenaMP Core] Игрок " .. Players[pid].name .. " выполнил мягкий сброс ячейки: " .. cellDescription)
     else
         tes3mp.SendMessage(pid, color.Yellow .. "[Обновление Ячейки]: " .. color.Error .. message .. "\n")
     end
@@ -1717,7 +1717,7 @@ periodicCellResets.clearCurrentCell = function(pid, cmd)
 
     if success then
         tes3mp.SendMessage(pid, color.Yellow .. "[Очистка Ячейки]: " .. color.Green .. message .. "\n")
-        tes3mp.LogAppend(enumerations.log.INFO, "[CLEAR] Игрок " .. Players[pid].name .. " выполнил полный сброс ячейки: " .. cellDescription)
+        tes3mp.LogAppend(enumerations.log.INFO, "[ArenaMP Core] Игрок " .. Players[pid].name .. " выполнил полный сброс ячейки: " .. cellDescription)
     else
         tes3mp.SendMessage(pid, color.Yellow .. "[Очистка Ячейки]: " .. color.Error .. message .. "\n")
     end
@@ -1785,12 +1785,12 @@ customCommandHooks.registerCommand("cleanunowned", cmdCleanUnowned)
 customEventHooks.registerHandler("OnServerPostInit", function(eventStatus)
     if not houseHelper then
         tes3mp.LogAppend(enumerations.log.WARN,
-            "[resetHelrer] houseHelper.lua не найден. Сервер продолжает работу; дополнительные housing-проверки отключены.")
+            "[ArenaMP Core] houseHelper.lua не найден. Сервер продолжает работу; дополнительные housing-проверки отключены.")
     end
 
     if not getLas() then
         tes3mp.LogAppend(enumerations.log.WARN,
-            "[resetHelrer] las не найден. Reset Controller интеграция отключена; базовые hourly reset работают.")
+            "[ArenaMP Core] las не найден. Reset Controller интеграция отключена; базовые hourly reset работают.")
     else
         callLas("LoadRCbl")
         callLas("LoadRC")
@@ -1801,7 +1801,7 @@ customEventHooks.registerHandler("OnServerPostInit", function(eventStatus)
         SaveCellResetTimers(true)
         if cellResetTimersNeedsInitialSave then
             tes3mp.LogAppend(enumerations.log.INFO,
-                "[resetHelrer] Создан server/data/custom/cellResetTimers.json.")
+                "[ArenaMP Core] Создан server/data/custom/cellResetTimers.json.")
             cellResetTimersNeedsInitialSave = false
         end
     end

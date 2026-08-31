@@ -832,7 +832,7 @@ logicHandler.ReturnStrayActorsHome = function()
 
                         if not alreadyOrdered and now - awayTime >= config.actorHomeReturnDelay then
 
-                            tes3mp.LogMessage(enumerations.log.INFO, "[X024] Telling " .. uniqueIndex ..
+                            tes3mp.LogMessage(enumerations.log.INFO, "[ArenaMP Core] Telling " .. uniqueIndex ..
                                 " in " .. cellDescription .. " to return home to " .. home.cell)
 
                             -- shouldRepeat is passed explicitly: packetBuilder feeds

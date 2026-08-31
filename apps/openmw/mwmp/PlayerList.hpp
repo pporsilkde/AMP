@@ -12,6 +12,7 @@
 #include "DedicatedPlayer.hpp"
 
 #include <map>
+#include <vector>
 #include <RakNetTypes.h>
 
 namespace MWMechanics
@@ -36,6 +37,10 @@ namespace mwmp
         static DedicatedPlayer *getPlayer(const MWWorld::Ptr &ptr);
         static DedicatedPlayer* getPlayer(int actorId);
         static std::vector<RakNet::RakNetGUID> getPlayersInCell(const ESM::Cell& cell);
+
+        // Every DedicatedPlayer that currently has a usable Ptr. Used to
+        // resolve team relationships without exposing the player map itself.
+        static void getPlayerPtrs(std::vector<MWWorld::Ptr>& out);
 
         static bool isDedicatedPlayer(const MWWorld::Ptr &ptr);
 

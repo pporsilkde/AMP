@@ -113,7 +113,7 @@ function configHotReload.Initialize()
     local contents = readConfigFile()
     if contents == nil then
         tes3mp.LogMessage(enumerations.log.WARN,
-            "[X031 ConfigReload] Could not locate config.lua; live reload is disabled until the file becomes readable")
+            "[ArenaMP Core] Could not locate config.lua; live reload is disabled until the file becomes readable")
         return false
     end
 
@@ -121,7 +121,7 @@ function configHotReload.Initialize()
     lastAttemptedContents = contents
     lastAttemptFailed = false
     tes3mp.LogMessage(enumerations.log.INFO,
-        "[X031 ConfigReload] Watching " .. tostring(resolvedPath))
+        "[ArenaMP Core] Watching " .. tostring(resolvedPath))
     return true
 end
 
@@ -161,7 +161,7 @@ function configHotReload.Check()
     if chunk == nil then
         lastAttemptFailed = true
         tes3mp.LogMessage(enumerations.log.ERROR,
-            "[X031 ConfigReload] RAW config.lua syntax rejected; previous working config remains active: " ..
+            "[ArenaMP Core] RAW config.lua syntax rejected; previous working config remains active: " ..
             tostring(compileError))
         return false
     end
@@ -180,7 +180,7 @@ function configHotReload.Check()
         lastAttemptFailed = true
         local reason = ok and validationError or result
         tes3mp.LogMessage(enumerations.log.ERROR,
-            "[X031 ConfigReload] RAW config.lua reload rejected; previous working config remains active: " ..
+            "[ArenaMP Core] RAW config.lua reload rejected; previous working config remains active: " ..
             tostring(reason))
         return false
     end
@@ -191,7 +191,7 @@ function configHotReload.Check()
     lastAppliedContents = contents
 
     tes3mp.LogMessage(enumerations.log.INFO,
-        "[X031 ConfigReload] RAW config.lua reloaded successfully; applying live server settings")
+        "[ArenaMP Core] RAW config.lua reloaded successfully; applying live server settings")
     return true
 end
 

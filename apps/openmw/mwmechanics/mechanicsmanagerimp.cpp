@@ -21,6 +21,7 @@
 #include "../mwmp/LocalPlayer.hpp"
 #include "../mwmp/PlayerList.hpp"
 #include "../mwmp/CellController.hpp"
+#include "../mwmp/MechanicsHelper.hpp"
 /*
     End of tes3mp addition
 */
@@ -1608,6 +1609,22 @@ namespace MWMechanics
     {
         const MWWorld::Ptr& player = getPlayer();
         if (target.isEmpty() || attacker.isEmpty() || !target.getClass().isActor() || !attacker.getClass().isActor())
+            return false;
+
+        /*
+            ArenaMP friendly fire
+
+            A hit that friendly fire forbids must not generate aggression of any
+            kind: no crime, no startCombat, no friendlyHit counter ticking
+            towards the eighth strike after which the target fights back. This
+            is the single place that covers every damage source at once --
+            weapons, spells, area effects and traps all funnel through here.
+
+            Summons are resolved to their owning player inside
+            isFriendlyFireAllowed, so a party member clipping another member's
+            atronach is handled the same way as hitting the member directly.
+        */
+        if (!MechanicsHelper::isFriendlyFireAllowed(attacker, target))
             return false;
 
         // Record who actually initiated this actor pair before MP-specific early-outs.

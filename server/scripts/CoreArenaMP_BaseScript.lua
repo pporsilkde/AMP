@@ -8,7 +8,7 @@ BaseScript.version = "1.1"
 BaseScript.modules = {}
 
 local function log(level, message)
-    tes3mp.LogMessage(level, "[CoreArenaMP_BaseScript] " .. message)
+    tes3mp.LogMessage(level, "[ArenaMP Core] " .. message)
 end
 
 function BaseScript.RegisterModule(name, version)

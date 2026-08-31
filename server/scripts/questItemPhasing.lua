@@ -116,7 +116,7 @@ local function ensurePlayerData(pid)
     if migrate(data) then
         quicksavePlayer(pid)
         tes3mp.LogAppend(enumerations.log.INFO,
-            "[QuestItemPhasing] Migrated claims of " .. logicHandler.GetChatName(pid) .. " to layout 2")
+            "[ArenaMP Core] Migrated claims of " .. logicHandler.GetChatName(pid) .. " to layout 2")
     end
 
     return data
@@ -153,7 +153,7 @@ local function loadLegacyHints()
 
     if count > 0 then
         tes3mp.LogMessage(enumerations.log.INFO,
-            "[QuestItemPhasing] Imported " .. count .. " legacy LAS QIP source hints for migration")
+            "[ArenaMP Core] Imported " .. count .. " legacy LAS QIP source hints for migration")
     end
 end
 
@@ -214,7 +214,7 @@ function questItemPhasing.ClaimWorld(pid, cellDescription, object)
         }
         quicksavePlayer(pid)
         tes3mp.LogAppend(enumerations.log.INFO,
-            "[QuestItemPhasing] " .. logicHandler.GetChatName(pid) .. " claimed world source " ..
+            "[ArenaMP Core] " .. logicHandler.GetChatName(pid) .. " claimed world source " ..
             object.refId .. " " .. object.uniqueIndex)
     end
     return true
@@ -333,7 +333,7 @@ function questItemPhasing.StampInventory(cellDescription, uniqueIndex, inventory
             item.questPhaseExplicitShared ~= true and questIndexStore.IsQuestItem(item.refId) then
             questItemPhasing.MarkContainerSource(item, num(item.count, 0))
             tes3mp.LogAppend(enumerations.log.INFO,
-                "[QuestItemPhasing] Stamped pre-X013 quest source " .. tostring(item.refId) ..
+                "[ArenaMP Core] Stamped pre-X013 quest source " .. tostring(item.refId) ..
                 " in " .. tostring(uniqueIndex) .. " of " .. tostring(cellDescription))
         end
     end
@@ -386,7 +386,7 @@ function questItemPhasing.ClaimContainer(pid, cellDescription, uniqueIndex, item
     quicksavePlayer(pid)
 
     tes3mp.LogAppend(enumerations.log.INFO,
-        "[QuestItemPhasing] " .. logicHandler.GetChatName(pid) .. " claimed " .. accepted .. "x " ..
+        "[ArenaMP Core] " .. logicHandler.GetChatName(pid) .. " claimed " .. accepted .. "x " ..
         tostring(item.refId) .. " from container " .. tostring(uniqueIndex))
 
     return accepted

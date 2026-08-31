@@ -56,7 +56,7 @@ local function claimOwnershipIfVacant(pid)
     variables[OWNER_KEY] = tostring(Players[pid].accountName)
     saveWorld()
 
-    tes3mp.LogMessage(enumerations.log.WARN, "[helperAreana] " .. tostring(Players[pid].accountName) ..
+    tes3mp.LogMessage(enumerations.log.WARN, "[ArenaMP Core] " .. tostring(Players[pid].accountName) ..
         " is the first registered account and is now the server owner")
     return true
 end
@@ -75,7 +75,7 @@ local function applyConsoleState(pid)
         -- player file says otherwise.
         if player.data.settings.staffRank ~= 3 then
             player.data.settings.staffRank = 3
-            tes3mp.LogMessage(enumerations.log.INFO, "[helperAreana] restored owner rank for " ..
+            tes3mp.LogMessage(enumerations.log.INFO, "[ArenaMP Core] restored owner rank for " ..
                 tostring(player.accountName))
         end
         player.data.settings.consoleAllowed = true

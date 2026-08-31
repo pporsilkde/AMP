@@ -1,10 +1,13 @@
--- ArenaMP X050: server-authoritative group core integrated with the X049 player menu.
+-- ArenaMP server-authoritative group core, integrated with the player menu.
 --
 -- Responsibilities:
 --   * persistent groups, leader/member management and invitations;
 --   * independent journal/topic synchronization toggles;
---   * same-cell XP splitting for validated kill/quest rewards;
---   * friendly summon protection for group members;
+--   * same-cell XP splitting for validated kill/quest rewards, including
+--     kills landed by a member's summon;
+--   * registering group members as native allies so the engine's own
+--     "friendly fire mode = group" rule covers the party;
+--   * friendly summon protection for the owner and the whole party;
 --   * hidden state protocol consumed by GUIChat's Group tab.
 
 local groupHelper = {}
@@ -26,7 +29,10 @@ local cfg = {
     summonCheckInterval = 2000,
     summonStopCombatCooldown = 2,
     debugMode = false,
-    invitePopups = true
+    invitePopups = true,
+    nativeAllies = true,
+    summonKillXp = true,
+    summonXpEventLifetime = 20
 }
 
 if type(config.groupSystem) == "table" then
@@ -38,6 +44,9 @@ if type(config.groupSystem) == "table" then
     if config.groupSystem["summon protection"] ~= nil then cfg.protectSummons = config.groupSystem["summon protection"] end
     cfg.summonCheckInterval = tonumber(config.groupSystem["summon check interval ms"]) or cfg.summonCheckInterval
     if config.groupSystem["invite popups"] ~= nil then cfg.invitePopups = config.groupSystem["invite popups"] end
+    if config.groupSystem["native allies"] ~= nil then cfg.nativeAllies = config.groupSystem["native allies"] end
+    if config.groupSystem["summon kill xp"] ~= nil then cfg.summonKillXp = config.groupSystem["summon kill xp"] end
+    cfg.summonXpEventLifetime = tonumber(config.groupSystem["summon xp event lifetime seconds"]) or cfg.summonXpEventLifetime
 end
 
 local data = { version = 1, nextId = 1, groups = {} }
@@ -52,7 +61,7 @@ local function now()
 end
 
 local function log(level, message)
-    tes3mp.LogMessage(level, "[groupHelper] " .. tostring(message))
+    ampCore.Log(level, message)
 end
 
 local function lower(value)
@@ -119,8 +128,11 @@ local function ensurePlayerPrefs(pid)
 end
 
 local function loadData()
-    local ok, loaded = pcall(jsonInterface.load, DATA_PATH)
-    if ok and type(loaded) == "table" then
+    -- EnsureJson writes the default registry when the file is not there yet,
+    -- which is what stops io2 from printing "Cannot open custom/groupHelper.json
+    -- in mode r" on every fresh install.
+    local loaded = ampCore.EnsureJson(DATA_PATH, { version = 1, nextId = 1, groups = {} }, DATA_PATH)
+    if type(loaded) == "table" then
         data = loaded
     end
     data.version = 1
@@ -129,8 +141,7 @@ local function loadData()
 end
 
 local function saveData()
-    local ok, err = pcall(jsonInterface.save, DATA_PATH, data)
-    if not ok then log(enumerations.log.ERROR, "failed to save " .. DATA_PATH .. ": " .. tostring(err)) end
+    ampCore.SaveJson(DATA_PATH, data, DATA_PATH)
 end
 
 local function getGroupById(id)
@@ -242,6 +253,95 @@ local function clearPlayerGroup(pid)
     if prefs == nil then return end
     prefs.id = nil
     persistPlayer(pid)
+end
+
+-- Native ally registration -------------------------------------------------
+--
+-- The engine already knows how to suppress player-versus-player damage: the
+-- server runs with "friendly fire mode = group", and MechanicsFunctions
+-- resolves that against Player::alliedPlayers. Nothing was ever writing group
+-- membership into that list, though -- it was only ever fed by the legacy
+-- /ally and /invite commands -- so party members happily damaged each other
+-- while the mode claimed otherwise. Mirroring the roster into
+-- data.alliedPlayers and calling LoadAllies closes that gap, and it is also
+-- what lets the client resolve a summon's owner to a friendly player.
+--
+-- Entries added here are tracked separately in the player's group prefs so a
+-- later refresh removes exactly what the group system added and leaves any
+-- manually added ally alone.
+
+local function trackedNativeAllies(pid)
+    local prefs = ensurePlayerPrefs(pid)
+    if prefs == nil then return nil end
+    if type(prefs.nativeAllies) ~= "table" then prefs.nativeAllies = {} end
+    return prefs
+end
+
+local function applyNativeAllies(pid, desiredAccounts)
+    if not cfg.nativeAllies or not isValidPid(pid) then return false end
+    local prefs = trackedNativeAllies(pid)
+    if prefs == nil then return false end
+
+    local player = Players[pid]
+    if type(player.data.alliedPlayers) ~= "table" then player.data.alliedPlayers = {} end
+    local allied = player.data.alliedPlayers
+    local selfAccount = lower(accountName(pid) or "")
+
+    local desired = {}
+    for _, account in ipairs(desiredAccounts or {}) do
+        local key = lower(account)
+        if key ~= "" and key ~= selfAccount then desired[key] = account end
+    end
+
+    local changed = false
+
+    for _, previous in ipairs(prefs.nativeAllies) do
+        if desired[lower(previous)] == nil and tableHelper.containsValue(allied, previous) then
+            tableHelper.removeValue(allied, previous)
+            tableHelper.cleanNils(allied)
+            changed = true
+        end
+    end
+
+    local tracked = {}
+    for _, account in pairs(desired) do
+        table.insert(tracked, account)
+        if not tableHelper.containsValue(allied, account) then
+            table.insert(allied, account)
+            changed = true
+        end
+    end
+    table.sort(tracked)
+    prefs.nativeAllies = tracked
+
+    if changed then persistPlayer(pid) end
+
+    -- LoadAllies rebuilds the native list from data.alliedPlayers and pushes a
+    -- PlayerAlly packet to everyone, so it runs even when the stored list did
+    -- not change: the set of *online* allies may still have.
+    if type(player.LoadAllies) == "function" then
+        local ok, err = pcall(function() player:LoadAllies() end)
+        if not ok then
+            log(enumerations.log.ERROR, "could not publish party allies for pid " .. tostring(pid) .. ": " .. tostring(err))
+        end
+    end
+    return changed
+end
+
+local function refreshNativeAllies(group, alsoRefreshPids)
+    if not cfg.nativeAllies then return end
+    local accounts = {}
+    if group ~= nil then
+        for account in pairs(group.members or {}) do table.insert(accounts, account) end
+        for _, memberPid in ipairs(onlineGroupPids(group)) do
+            applyNativeAllies(memberPid, accounts)
+        end
+    end
+    -- Players who just left, were kicked or were disbanded still hold stale
+    -- native allies until they are cleared explicitly.
+    for _, pid in ipairs(alsoRefreshPids or {}) do
+        if isValidPid(pid) then applyNativeAllies(pid, {}) end
+    end
 end
 
 local function generateGroupId()
@@ -363,6 +463,7 @@ local function createGroup(pid, requestedName)
     }
     setPlayerGroup(pid, id)
     saveData()
+    refreshNativeAllies(data.groups[id])
     return true, "Group created: " .. name
 end
 
@@ -459,6 +560,7 @@ local function acceptInvite(pid)
     setPlayerGroup(pid, group.id)
     pendingInvites[key] = nil
     saveData()
+    refreshNativeAllies(group)
     notifyInviteResult(invite, pid, true)
     broadcastState(group)
     return true, "Joined group: " .. group.name
@@ -505,6 +607,7 @@ local function leaveGroup(pid)
         group.leader = chooseNewLeader(group, account)
     end
     saveData()
+    refreshNativeAllies(group, { pid })
     broadcastState(group)
     groupHelper.SendState(pid)
     return true, "You left the group"
@@ -518,6 +621,7 @@ local function disbandGroup(pid)
     for _, memberPid in ipairs(online) do clearPlayerGroup(memberPid) end
     data.groups[group.id] = nil
     saveData()
+    refreshNativeAllies(nil, online)
     for _, memberPid in ipairs(online) do
         groupHelper.SendState(memberPid)
         sendNotice(memberPid, "The group was disbanded", false)
@@ -547,6 +651,7 @@ local function kickMember(pid, targetName)
         sendNotice(targetPid, "You were removed from " .. group.name, true)
     end
     saveData()
+    refreshNativeAllies(group, targetPid ~= nil and { targetPid } or {})
     broadcastState(group)
     return true, targetDisplay .. " removed from the group"
 end
@@ -787,11 +892,14 @@ local function parseXpSignal(key)
     return signal
 end
 
-local function pruneList(list, lifetime)
-    local cutoff = now() - lifetime
+local function pruneList(list, lifetime, summonLifetime)
+    local current = now()
+    local cutoff = current - lifetime
+    local summonCutoff = current - (summonLifetime or lifetime)
     local kept = {}
     for _, item in ipairs(list or {}) do
-        if (item.time or 0) >= cutoff then table.insert(kept, item) end
+        local limit = item.viaSummon and summonCutoff or cutoff
+        if (item.time or 0) >= limit then table.insert(kept, item) end
     end
     return kept
 end
@@ -806,7 +914,11 @@ end
 
 local function tryMatchXp(pid)
     pendingXpSignals[pid] = pruneList(pendingXpSignals[pid], cfg.xpSignalLifetime)
-    recentXpEvents[pid] = pruneList(recentXpEvents[pid], cfg.xpEventLifetime)
+    -- A kill credited through a summon is reported by whichever client holds
+    -- authority over the dying actor, while the matching reward signal only
+    -- arrives with the owner's next level packet. Those two can land a few
+    -- seconds apart, so summon events get a longer window than direct ones.
+    recentXpEvents[pid] = pruneList(recentXpEvents[pid], cfg.xpEventLifetime, cfg.summonXpEventLifetime)
     local signals = pendingXpSignals[pid] or {}
     local events = recentXpEvents[pid] or {}
     if #signals == 0 or #events == 0 then return end
@@ -872,15 +984,29 @@ local getSummonOwnerPid
 function groupHelper.RecordKillEvents(pid, cellDescription, actors)
     for _, actor in pairs(actors or {}) do
         local killerPid = actor.killer and actor.killer.pid or nil
+        local viaSummon = false
+
+        -- A kill landed by a summon is credited to the player who summoned it,
+        -- and from there to the party through sameCellRecipients, exactly as if
+        -- the owner had swung the weapon themselves.
         if killerPid == nil and actor.killer ~= nil and actor.killer.uniqueIndex ~= nil and getSummonOwnerPid ~= nil then
             killerPid = getSummonOwnerPid(cellDescription, actor.killer.uniqueIndex)
+            viaSummon = killerPid ~= nil
         end
+
+        if viaSummon and not cfg.summonKillXp then killerPid = nil end
+
         if killerPid ~= nil and isValidPid(killerPid) then
             recentXpEvents[killerPid] = recentXpEvents[killerPid] or {}
             table.insert(recentXpEvents[killerPid], {
                 kind = "kill", time = now(), cell = cellDescription,
+                viaSummon = viaSummon,
                 recipients = sameCellRecipients(killerPid, cellDescription)
             })
+            if viaSummon and cfg.debugMode then
+                log(enumerations.log.INFO, "credited a summon kill in " .. tostring(cellDescription) ..
+                    " to " .. displayName(killerPid))
+            end
             tryMatchXp(killerPid)
         end
     end
@@ -908,6 +1034,20 @@ local function makeUID(refNum, mpNum)
 end
 
 getSummonOwnerPid = function(cellDescription, uniqueIndex)
+    if uniqueIndex == nil then return nil end
+
+    -- Fast path: cell/base.lua already keeps a reverse index on the player
+    -- (Players[pid].summons[uniqueIndex] = refId) when a summon is spawned,
+    -- so a scan of the cell's object data is usually unnecessary and, more
+    -- importantly, still works while the cell is being swapped between
+    -- authorities.
+    for pid, player in pairs(Players) do
+        if player ~= nil and player:IsLoggedIn() and type(player.summons) == "table"
+            and player.summons[uniqueIndex] ~= nil then
+            return pid
+        end
+    end
+
     local cell = LoadedCells[cellDescription]
     if cell == nil or cell.data == nil or cell.data.objectData == nil then return nil end
     local obj = cell.data.objectData[uniqueIndex]
@@ -917,6 +1057,20 @@ getSummonOwnerPid = function(cellDescription, uniqueIndex)
         if player ~= nil and player:IsLoggedIn() and lower(player.accountName) == lower(ownerName) then return pid end
     end
     return nil
+end
+
+--- Resolve any actor to the player it fights for, if there is one.
+-- Returns nil for ordinary NPCs and wildlife, which must keep their normal
+-- combat rules.
+function groupHelper.GetActorOwnerPid(cellDescription, uniqueIndex)
+    return getSummonOwnerPid(cellDescription, uniqueIndex)
+end
+
+--- True when two actors/players should never damage one another.
+function groupHelper.AreFriendly(pidA, pidB)
+    if pidA == nil or pidB == nil then return false end
+    if pidA == pidB then return true end
+    return groupHelper.ArePlayersInSameGroup(pidA, pidB)
 end
 
 function groupHelper.IsFriendlySummon(pid, cellDescription, uniqueIndex)
@@ -1042,7 +1196,7 @@ customEventHooks.registerHandler("OnServerPostInit", function(eventStatus)
     if cfg.protectSummons then
         tes3mp.StartTimer(tes3mp.CreateTimerEx("GroupHelper_SummonTick", cfg.summonCheckInterval, "i", 0))
     end
-    log(enumerations.log.INFO, "X050 loaded: groups, journal/topics sync, shared XP, summon protection")
+    log(enumerations.log.INFO, "loaded: groups, journal/topics sync, shared XP, summon protection")
 end)
 
 customEventHooks.registerHandler("OnPlayerAuthentified", function(eventStatus, pid)
@@ -1054,6 +1208,7 @@ customEventHooks.registerHandler("OnPlayerAuthentified", function(eventStatus, p
             if prefs.journalSync then reconcileJournalForGroup(group) end
             if prefs.topicSync then reconcileTopicsForGroup(group) end
         end
+        refreshNativeAllies(group)
         groupHelper.SendState(pid)
         local invite = pendingInvites[lower(accountName(pid))]
         if invite ~= nil and invite.expiresAt >= now() then showInvitePopup(pid, invite) end
@@ -1078,9 +1233,14 @@ customEventHooks.registerHandler("OnGUIAction", function(eventStatus, pid, idGui
 end)
 
 customEventHooks.registerHandler("OnPlayerDisconnect", function(eventStatus, pid)
+    local group = groupHelper.GetPlayerGroup(pid)
     pendingXpSignals[pid] = nil
     recentXpEvents[pid] = nil
     strippedSignalPids[pid] = nil
+    -- Refresh the remaining members so the departing player stops being
+    -- published as a native ally; LoadAllies only republishes online players,
+    -- so the stored roster itself is left intact for the next login.
+    if group ~= nil then refreshNativeAllies(group) end
 end)
 
 customEventHooks.registerHandler("OnPlayerJournal", function(eventStatus, pid, playerPacket)
@@ -1098,6 +1258,13 @@ customEventHooks.registerHandler("OnActorDeath", function(eventStatus, pid, cell
     if eventStatus.validDefaultHandler then groupHelper.RecordKillEvents(pid, cellDescription, actors) end
 end)
 
+-- Server-side backstop for friendly damage on summons.
+--
+-- The authoritative fix lives on the client: MechanicsHelper resolves a summon
+-- to its owning player and refuses the hit before any damage, aggro or hit
+-- attempt is recorded. This validator stays because the server cannot assume
+-- every connected client is running the matching build, and because a hit
+-- packet that did get through must not be relayed to everyone else.
 customEventHooks.registerValidator("OnObjectHit", function(eventStatus, pid, cellDescription)
     if not cfg.protectSummons or not isValidPid(pid) then return end
     tes3mp.ReadReceivedObjectList()

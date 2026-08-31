@@ -38,6 +38,9 @@ require("time")
 
 customEventHooks = require("customEventHooks")
 customCommandHooks = require("customCommandHooks")
+-- Shared ArenaMP log identity and JSON bootstrap. Required before any
+-- helper that owns a file in server/data so the file exists on first read.
+ampCore = require("ampCore")
 logicHandler = require("logicHandler")
 eventHandler = require("eventHandler")
 -- X050: persistent server-authoritative group system.
@@ -248,7 +251,7 @@ local function ApplyLiveConfig()
         ApplyConfigToOnlinePlayer(pid)
     end
     tes3mp.LogMessage(enumerations.log.INFO,
-        "[X031 ConfigReload] Live settings applied to server and connected players")
+        "[ArenaMP Core] Live settings applied to server and connected players")
 end
 
 local rawConfigReloadCountdown = 0

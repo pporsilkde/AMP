@@ -102,19 +102,36 @@ config.arenaGlobalXpMultiplier = 1.0
 -- convenience profiles; remote servers still choose their own value.
 config.arenaXpRateMultiplier = 1.0
 
--- X050: persistent group/party rules. Journal and topic synchronization are
--- opt-in per member from the Player Menu; XP sharing itself is automatic and
--- only includes online group members standing in the same cell as the source.
+-- Persistent group/party rules. Journal and topic synchronization are opt-in
+-- per member from the Player Menu; XP sharing itself is automatic and only
+-- includes online group members standing in the same cell as the source.
 config.groupSystem = {
     ["invite lifetime seconds"] = 120,
-    ["invite popups"] = true, -- X056: immediate Yes/No dialog for the invited player
+    ["invite popups"] = true, -- immediate Yes/No dialog for the invited player
     ["xp signal lifetime seconds"] = 8,
     ["summon protection"] = true,
     ["summon check interval ms"] = 2000,
     ["max client kill xp signal"] = 25000,
     ["max client quest xp signal"] = 25000,
 
-    -- X050b: ordinary group management notices may be silenced independently.
+    -- Mirror group membership into each member's native allied-player list.
+    -- This is what makes config.friendlyFireMode = "group" actually cover the
+    -- party: the engine resolves friendly fire against that list, and until
+    -- now only the legacy /ally command ever wrote to it. It is also how the
+    -- client recognises a party member's summon as friendly. Turning this off
+    -- restores the old behaviour where party members can damage each other.
+    ["native allies"] = true,
+
+    -- Credit a kill landed by a player's summon to that player, and split it
+    -- across the party in the usual same-cell way.
+    ["summon kill xp"] = true,
+
+    -- A summon kill is reported by whichever client owns the dying actor,
+    -- while the reward signal comes from the summoner's own client, so the two
+    -- can arrive several seconds apart. Direct kills keep the shorter window.
+    ["summon xp event lifetime seconds"] = 20,
+
+    -- Ordinary group management notices may be silenced independently.
     -- Shared-XP messages are off by default because they are frequent and the
     -- XP bar already gives the player feedback.
     ["chat notifications"] = true,

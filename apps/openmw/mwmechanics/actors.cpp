@@ -1425,6 +1425,19 @@ namespace MWMechanics
         if (creatureStats2.isDead())
             return;
 
+        /*
+            ArenaMP addition
+
+            Never let a party-friendly pair drift into combat on its own. A
+            summon must not decide its master's group mate is a valid target
+            because of an awareness roll, a stray area effect or a leftover hit
+            attempt id, and two grouped players must not be pushed into combat
+            by their followers either. Summons resolve to their owning player
+            inside isFriendlyFireAllowed.
+        */
+        if (!MechanicsHelper::isFriendlyFireAllowed(actor1, actor2))
+            return;
+
         const osg::Vec3f actor1Pos(actor1.getRefData().getPosition().asVec3());
         const osg::Vec3f actor2Pos(actor2.getRefData().getPosition().asVec3());
         float sqrDist = (actor1Pos - actor2Pos).length2();
@@ -1459,6 +1472,49 @@ namespace MWMechanics
             // If there's been no attack attempt yet but an ally of actor1 is in combat with actor2, become aggressive to actor2
             if (ally.getClass().getCreatureStats(ally).getAiSequence().isInCombat(actor2))
                 aggressive = true;
+        }
+
+        /*
+            ArenaMP addition
+
+            Extend the check above across the party.
+
+            getActorsSidingWith only walks follow/escort links, so a summon
+            sides with its own master and nobody else. That is why a summon
+            would stand idle while its master's group mate was being beaten:
+            the group exists on the server and in the allied-player list, but
+            never in this set.
+
+            The allied players of every player in allies1 are collected into a
+            separate set and only read from -- deliberately not merged into
+            allies1, because that set is also handed to startCombat() further
+            down and player Ptrs do not belong there.
+        */
+        if (!aggressive)
+        {
+            std::set<MWWorld::Ptr> partyAllies;
+            MechanicsHelper::getAlliedPlayers(allies1, partyAllies);
+
+            for (const MWWorld::Ptr &partyAlly : partyAllies)
+            {
+                if (creatureStats1.getAiSequence().isInCombat(partyAlly))
+                    continue;
+
+                const CreatureStats& partyAllyStats = partyAlly.getClass().getCreatureStats(partyAlly);
+
+                // A group mate has traded blows with actor2: join that fight.
+                if (creatureStats2.matchesActorId(partyAllyStats.getHitAttemptActorId()))
+                {
+                    MWBase::Environment::get().getMechanicsManager()->startCombat(actor1, actor2);
+                    creatureStats1.setHitAttemptActorId(partyAllyStats.getHitAttemptActorId());
+                    return;
+                }
+
+                // A group mate is already fighting actor2: become willing to,
+                // subject to the usual awareness check at the end.
+                if (partyAllyStats.getAiSequence().isInCombat(actor2))
+                    aggressive = true;
+            }
         }
 
         std::set<MWWorld::Ptr> playerAllies;

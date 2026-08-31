@@ -143,6 +143,21 @@ std::vector<RakNet::RakNetGUID> PlayerList::getPlayersInCell(const ESM::Cell& ce
     return playersInCell;
 }
 
+void PlayerList::getPlayerPtrs(std::vector<MWWorld::Ptr>& out)
+{
+    for (auto& playerEntry : playerList)
+    {
+        if (playerEntry.first == RakNet::UNASSIGNED_CRABNET_GUID)
+            continue;
+
+        DedicatedPlayer* player = playerEntry.second;
+        if (player == nullptr || player->getPtr().mRef == nullptr)
+            continue;
+
+        out.push_back(player->getPtr());
+    }
+}
+
 bool PlayerList::isDedicatedPlayer(const MWWorld::Ptr &ptr)
 {
     if (ptr.mRef == nullptr)

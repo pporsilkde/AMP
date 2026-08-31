@@ -10,6 +10,9 @@
 #include "../mwbase/world.hpp"
 
 #include "../mwmechanics/creaturestats.hpp"
+#include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/aisequence.hpp"
+#include "../mwmechanics/aipackage.hpp"
 #include "../mwmechanics/combat.hpp"
 #include "../mwmechanics/levelledlist.hpp"
 #include "../mwmechanics/spellcasting.hpp"
@@ -19,6 +22,9 @@
 
 #include "../mwworld/class.hpp"
 #include "../mwworld/inventorystore.hpp"
+
+#include <set>
+#include <vector>
 
 #include "MechanicsHelper.hpp"
 #include "Main.hpp"
@@ -347,18 +353,136 @@ bool MechanicsHelper::isTeamMember(const MWWorld::Ptr& playerChecked, const MWWo
     return isTeamMember;
 }
 
+bool MechanicsHelper::isPlayerPtr(const MWWorld::Ptr& ptr)
+{
+    if (ptr.isEmpty())
+        return false;
+
+    return ptr == MWMechanics::getPlayer() || mwmp::PlayerList::isDedicatedPlayer(ptr);
+}
+
+MWWorld::Ptr MechanicsHelper::getCommandingPlayer(const MWWorld::Ptr& actor)
+{
+    if (actor.isEmpty() || !actor.getClass().isActor())
+        return MWWorld::Ptr();
+
+    // A player commands itself.
+    if (isPlayerPtr(actor))
+        return actor;
+
+    /*
+        ArenaMP addition
+
+        Resolve a summon, a commanded creature or a follower back to the player
+        it fights for.
+
+        Every summon synchronised by the server is given an AiFollow package
+        pointing at its master when ObjectList spawns it, and the Command
+        Creature/Humanoid effects do the same, so the master is always reachable
+        through the AI sequence. The whole sequence is walked rather than only
+        the active package, because an AiCombat package is stacked on top the
+        moment the summon engages an enemy while the AiFollow link underneath it
+        stays valid.
+
+        Anything that resolves to no player at all -- ordinary NPCs, wildlife, a
+        creature following another creature -- returns an empty Ptr and keeps
+        its normal combat rules.
+    */
+    MWMechanics::CreatureStats& stats = actor.getClass().getCreatureStats(actor);
+
+    for (const auto& package : stats.getAiSequence())
+    {
+        if (!package || !package->followTargetThroughDoors())
+            continue;
+
+        const MWWorld::Ptr master = package->getTarget();
+        if (isPlayerPtr(master))
+            return master;
+    }
+
+    return MWWorld::Ptr();
+}
+
+bool MechanicsHelper::areAllied(const MWWorld::Ptr& first, const MWWorld::Ptr& second)
+{
+    if (first.isEmpty() || second.isEmpty())
+        return false;
+
+    const MWWorld::Ptr firstOwner = getCommandingPlayer(first);
+    const MWWorld::Ptr secondOwner = getCommandingPlayer(second);
+
+    if (firstOwner.isEmpty() || secondOwner.isEmpty())
+        return false;
+
+    if (firstOwner == secondOwner)
+        return true;
+
+    return isTeamMember(firstOwner, secondOwner) || isTeamMember(secondOwner, firstOwner);
+}
+
+void MechanicsHelper::getAlliedPlayers(const std::set<MWWorld::Ptr>& sources, std::set<MWWorld::Ptr>& out)
+{
+    /*
+        ArenaMP addition
+
+        Collect the players teamed up with any player in sources.
+
+        getActorsSidingWith only walks follow and escort links, so it has no
+        idea two players share a group. The party lives in each player's
+        allied-player list, which the server fills from the group roster, and
+        isTeamMember is what reads it. Both directions are checked so a
+        one-sided ally list mid-update cannot split the party in half.
+    */
+    std::vector<MWWorld::Ptr> candidates;
+    candidates.push_back(MWMechanics::getPlayer());
+    mwmp::PlayerList::getPlayerPtrs(candidates);
+
+    for (const MWWorld::Ptr& source : sources)
+    {
+        if (!isPlayerPtr(source))
+            continue;
+
+        for (const MWWorld::Ptr& candidate : candidates)
+        {
+            if (candidate.isEmpty() || candidate == source)
+                continue;
+
+            if (sources.find(candidate) != sources.end())
+                continue;
+
+            if (isTeamMember(candidate, source) || isTeamMember(source, candidate))
+                out.insert(candidate);
+        }
+    }
+}
+
 bool MechanicsHelper::isFriendlyFireAllowed(const MWWorld::Ptr& attacker, const MWWorld::Ptr& target)
 {
     if (attacker.isEmpty() || target.isEmpty() || attacker == target)
         return true;
 
-    const bool attackerIsPlayer = attacker == MWMechanics::getPlayer() || mwmp::PlayerList::isDedicatedPlayer(attacker);
-    const bool targetIsPlayer = target == MWMechanics::getPlayer() || mwmp::PlayerList::isDedicatedPlayer(target);
+    /*
+        ArenaMP change
 
-    // Friendly fire only governs player-versus-player interactions. NPCs,
-    // creatures and followers continue to use their existing combat rules.
-    if (!attackerIsPlayer || !targetIsPlayer)
+        Friendly fire used to be a strictly player-versus-player rule, which
+        left every summon outside it: a party member could hit another member's
+        atronach, and the atronach would happily turn on them.
+
+        Both sides are now resolved through their commanding player first, so
+        one rule covers player-to-player, player-to-summon, summon-to-player and
+        summon-to-summon. An actor with no commanding player is not part of this
+        at all and the call returns true, exactly as before.
+    */
+    const MWWorld::Ptr attackerOwner = getCommandingPlayer(attacker);
+    const MWWorld::Ptr targetOwner = getCommandingPlayer(target);
+
+    if (attackerOwner.isEmpty() || targetOwner.isEmpty())
         return true;
+
+    // Your own summons are never a valid target, and can never damage you,
+    // regardless of the configured mode.
+    if (attackerOwner == targetOwner)
+        return false;
 
     std::string mode = Settings::Manager::getString("friendly fire mode", "Game");
     Misc::StringUtils::lowerCaseInPlace(mode);
@@ -372,7 +496,7 @@ bool MechanicsHelper::isFriendlyFireAllowed(const MWWorld::Ptr& attacker, const 
     // The default and safest fallback is group mode. Check both directions so
     // a short-lived one-sided ally-list update cannot expose either player to
     // friendly damage.
-    return !isTeamMember(attacker, target) && !isTeamMember(target, attacker);
+    return !isTeamMember(attackerOwner, targetOwner) && !isTeamMember(targetOwner, attackerOwner);
 }
 
 void MechanicsHelper::processAttack(Attack attack, const MWWorld::Ptr& attacker)
