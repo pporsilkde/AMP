@@ -97,7 +97,13 @@ config.groupSystem = {
     ["summon protection"] = true,
     ["summon check interval ms"] = 2000,
     ["max client kill xp signal"] = 25000,
-    ["max client quest xp signal"] = 25000
+    ["max client quest xp signal"] = 25000,
+
+    -- X050b: ordinary group management notices may be silenced independently.
+    -- Shared-XP messages are off by default because they are frequent and the
+    -- XP bar already gives the player feedback.
+    ["chat notifications"] = true,
+    ["xp share chat messages"] = false
 }
 
 -- X031: RAW config.lua is watched while the server is running. A successful
@@ -541,12 +547,17 @@ config.serverQuests = {
     greenTopicColor = "#61D879",
     maxSyncedTopicsPerNpc = 64,
 
-    -- X048: quest progression is already visible in Dialogue/Quest Manager, so
-    -- automatic chat echoes are disabled by default. These switches affect only
-    -- runtime quest notifications; explicit /quest editor command feedback stays visible.
+    -- X050b: runtime quest notifications are intentionally quiet by default.
+    -- The master flag suppresses every automatic [Quest] line while leaving
+    -- explicit /quest and Quest Studio feedback intact. Category flags become
+    -- active only when chatNotificationsEnabled=true.
+    chatNotificationsEnabled = false,
     chatProgressMessages = false,
     chatRewardMessages = false,
-    chatRuntimeErrors = false
+    chatRuntimeErrors = false,
+
+    -- Keep one compact journal popup without mirroring the same text into chat.
+    journalUpdatePopup = true
 }
 
 -- X042: modifying original Morrowind journal stages is disabled by default.

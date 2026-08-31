@@ -66,6 +66,25 @@ local function send(pid, message)
     end
 end
 
+-- X050b: runtime quest notifications are separate from explicit /quest/editor
+-- feedback. This keeps the authoritative quest system quiet in the normal chat
+-- unless the administrator deliberately enables a category in config.lua.
+local function runtimeChatEnabled(category)
+    local questConfig = type(config.serverQuests) == "table" and config.serverQuests or {}
+    if questConfig.chatNotificationsEnabled == false then return false end
+
+    local key = nil
+    if category == "progress" then key = "chatProgressMessages"
+    elseif category == "reward" then key = "chatRewardMessages"
+    elseif category == "error" then key = "chatRuntimeErrors" end
+
+    return key ~= nil and questConfig[key] == true
+end
+
+local function sendRuntime(pid, message, category)
+    if runtimeChatEnabled(category) then send(pid, message) end
+end
+
 local function percentEncode(value)
     value = tostring(value or "")
     return (value:gsub("([^%w%-%._~ ])", function(c)
@@ -921,7 +940,7 @@ local function applyReward(pid, state, reward)
         cv.serverQuestVariables[tostring(reward.key)] = reward.value
         return true
     elseif kind == "message" then
-        send(pid, tostring(reward.text or reward.value or ""))
+        sendRuntime(pid, tostring(reward.text or reward.value or ""), "reward")
         return true
 
     -- X042: additional server-authoritative effects.
@@ -1078,7 +1097,7 @@ function serverQuestSystem.StartQuest(pid, questId, force, silent)
     if state.state == "completed" or state.state == "failed" then state.completedAt = os.time() end
     Players[pid]:QuicksaveToDrive()
     if serverQuestSystem.SyncPlayer ~= nil then serverQuestSystem.SyncPlayer(pid) end
-    if not silent then send(pid, "Started: " .. quest.name .. " (stage " .. stage.index .. ")") end
+    if not silent then sendRuntime(pid, "Started: " .. quest.name .. " (stage " .. stage.index .. ")", "progress") end
     return true, state
 end
 
@@ -1116,7 +1135,7 @@ function serverQuestSystem.AdvanceQuest(pid, questId, targetStage, force, silent
     Players[pid]:QuicksaveToDrive()
     if serverQuestSystem.SyncPlayer ~= nil then serverQuestSystem.SyncPlayer(pid) end
     if not silent then
-        send(pid, quest.name .. " -> stage " .. target.index .. (state.state ~= "active" and (" [" .. state.state .. "]") or ""))
+        sendRuntime(pid, quest.name .. " -> stage " .. target.index .. (state.state ~= "active" and (" [" .. state.state .. "]") or ""), "progress")
     end
     return true, state
 end
@@ -1406,9 +1425,13 @@ local function notifyJournalUpdate(pid, quest, stage)
     if text == "" then return end
 
     -- The client mirrors these entries into the vanilla journal window through the
-    -- ServerQuestRegistry, so all the server has to do is tell the player to look.
-    callIfPresent("MessageBox", pid, -1, "Дневник обновлён: " .. tostring(quest.name))
-    send(pid, tostring(quest.name) .. " — " .. text)
+    -- ServerQuestRegistry. X050b avoids the old double notification: by default
+    -- the player gets only this compact popup and no duplicate [Quest] chat line.
+    local questConfig = type(config.serverQuests) == "table" and config.serverQuests or {}
+    if questConfig.journalUpdatePopup ~= false then
+        callIfPresent("MessageBox", pid, -1, "Дневник обновлён: " .. tostring(quest.name))
+    end
+    sendRuntime(pid, tostring(quest.name) .. " — " .. text, "progress")
 end
 
 -- Applies a server-validated dialogue choice. Returns ok, why.
@@ -1465,9 +1488,9 @@ function serverQuestSystem.ApplyChoice(pid, quest, topicId, choiceId, announce)
 
         if announce then
             if failing ~= nil then
-                send(pid, "Не выполнено условие — " .. requirementText(pid, failing))
+                sendRuntime(pid, "Не выполнено условие — " .. requirementText(pid, failing), "error")
             elseif why ~= nil then
-                send(pid, tostring(why))
+                sendRuntime(pid, tostring(why), "error")
             end
 
             -- An item/gold requirement may have failed only because our copy of the
@@ -1586,8 +1609,8 @@ local function handleServerQuestDialogue(eventStatus, pid, cellDescription, obje
                 if state == nil then
                     local ok, why, failing = serverQuestSystem.StartQuest(pid, questId, false, true)
                     if not ok then
-                        send(pid, "Cannot start " .. quest.name .. ": "
-                            .. (failing ~= nil and requirementText(pid, failing) or tostring(why)))
+                        sendRuntime(pid, "Cannot start " .. quest.name .. ": "
+                            .. (failing ~= nil and requirementText(pid, failing) or tostring(why)), "error")
                         serverQuestSystem.SyncPlayer(pid)
                         return
                     end

@@ -246,8 +246,16 @@ local function generateGroupId()
     return id
 end
 
+local function groupChatNotificationsEnabled()
+    return type(config.groupSystem) ~= "table" or config.groupSystem["chat notifications"] ~= false
+end
+
+local function groupXpChatMessagesEnabled()
+    return type(config.groupSystem) == "table" and config.groupSystem["xp share chat messages"] == true
+end
+
 local function sendNotice(pid, text, errorState)
-    if not isValidPid(pid) then return end
+    if not groupChatNotificationsEnabled() or not isValidPid(pid) then return end
     local prefix = errorState and color.Red or color.Turquoise
     tes3mp.SendMessage(pid, prefix .. "[Group] " .. color.White .. tostring(text) .. "\n", false)
 end
@@ -652,7 +660,7 @@ local function dispatchSharedXp(originPid, amount, scaled, kind, reason, recipie
     for _, pid in ipairs(recipients) do
         sendXpControl(pid, share, scaled, kind, reason)
     end
-    if #recipients > 1 then
+    if groupXpChatMessagesEnabled() and #recipients > 1 then
         for _, pid in ipairs(recipients) do
             sendNotice(pid, string.format("Shared %s XP: %.1f each (%d members in cell)", kind or "group", share, #recipients), false)
         end

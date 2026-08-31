@@ -1,0 +1,252 @@
+diff -ruN x050a_base/X050b_CHAT_NOTIFICATION_DEDUP_RU.md x050b_notify/X050b_CHAT_NOTIFICATION_DEDUP_RU.md
+--- x050a_base/X050b_CHAT_NOTIFICATION_DEDUP_RU.md	1970-01-01 00:00:00.000000000 +0000
++++ x050b_notify/X050b_CHAT_NOTIFICATION_DEDUP_RU.md	2026-08-31 01:13:11.611001411 +0000
+@@ -0,0 +1,55 @@
++# ArenaMP X050b — chat notification deduplication
++
++База: X050a.
++
++## Что изменено
++
++### Server Quest runtime
++
++`serverQuestSystem.lua` больше не дублирует обычное обновление серверного квеста одновременно в MessageBox и в чат.
++По умолчанию при обновлении этапа остаётся только компактный `MessageBox` «Дневник обновлён: ...».
++
++Автоматические `[Quest]` сообщения вынесены в отдельный runtime-канал и теперь управляются флагами `config.serverQuests`:
++
++```lua
++chatNotificationsEnabled = false, -- мастер-флаг для автоматических сообщений
++chatProgressMessages = false,     -- старт/этап/текст journal
++chatRewardMessages = false,       -- reward type=message
++chatRuntimeErrors = false,        -- ошибки условий в игровом диалоге
++journalUpdatePopup = true         -- отдельный popup об обновлении журнала
++```
++
++Чтобы вернуть сообщения о прогрессе в чат:
++
++```lua
++config.serverQuests.chatNotificationsEnabled = true
++config.serverQuests.chatProgressMessages = true
++```
++
++Если нужен только чат без popup:
++
++```lua
++config.serverQuests.journalUpdatePopup = false
++```
++
++Команды `/quest` и сообщения Quest Studio не подавляются этими флагами: администратор/редактор по-прежнему получает обратную связь.
++
++### Group runtime
++
++В `config.groupSystem` добавлены:
++
++```lua
++["chat notifications"] = true,
++["xp share chat messages"] = false
++```
++
++- `chat notifications=false` отключает обычные `[Group]` уведомления в чате, не отключая группу и Player Menu.
++- `xp share chat messages=false` по умолчанию убирает частый текст `Shared ... XP`; само деление XP продолжает работать.
++
++Проверки читают текущий `config` при отправке, поэтому эти переключатели совместимы с hot-reload `config.lua`.
++
++## Изменённые файлы
++
++- `server/scripts/serverQuestSystem.lua`
++- `server/scripts/groupHelper.lua`
++- `server/scripts/config.lua`
+diff -ruN x050a_base/X050b_chat_notification_harness.py x050b_notify/X050b_chat_notification_harness.py
+--- x050a_base/X050b_chat_notification_harness.py	1970-01-01 00:00:00.000000000 +0000
++++ x050b_notify/X050b_chat_notification_harness.py	2026-08-31 01:13:11.615292281 +0000
+@@ -0,0 +1,23 @@
++from pathlib import Path
++root = Path(__file__).resolve().parent
++quest = (root/'server/scripts/serverQuestSystem.lua').read_text(encoding='utf-8')
++group = (root/'server/scripts/groupHelper.lua').read_text(encoding='utf-8')
++config = (root/'server/scripts/config.lua').read_text(encoding='utf-8')
++checks = {
++    'quest master flag': 'chatNotificationsEnabled = false' in config,
++    'quest progress flag wired': 'sendRuntime(pid, tostring(quest.name) .. " — " .. text, "progress")' in quest,
++    'journal popup independently gated': 'questConfig.journalUpdatePopup ~= false' in quest,
++    'old unconditional journal chat echo removed': 'send(pid, tostring(quest.name) .. " — " .. text)' not in quest,
++    'reward runtime gate': 'sendRuntime(pid, tostring(reward.text or reward.value or ""), "reward")' in quest,
++    'runtime error gate': 'sendRuntime(pid, "Не выполнено условие — "' in quest,
++    'group chat flag': '["chat notifications"] = true' in config,
++    'group xp spam default off': '["xp share chat messages"] = false' in config,
++    'group notice reads live config': 'groupChatNotificationsEnabled()' in group,
++    'group xp notice reads live config': 'groupXpChatMessagesEnabled()' in group,
++}
++failed=[name for name, ok in checks.items() if not ok]
++for name, ok in checks.items():
++    print(('OK   ' if ok else 'FAIL ') + name)
++if failed:
++    raise SystemExit('Failed: ' + ', '.join(failed))
++print('X050b chat notification harness: OK')
+diff -ruN x050a_base/server/scripts/config.lua x050b_notify/server/scripts/config.lua
+--- x050a_base/server/scripts/config.lua	2026-08-31 00:51:02.000000000 +0000
++++ x050b_notify/server/scripts/config.lua	2026-08-31 01:12:22.385074647 +0000
+@@ -97,7 +97,13 @@
+     ["summon protection"] = true,
+     ["summon check interval ms"] = 2000,
+     ["max client kill xp signal"] = 25000,
+-    ["max client quest xp signal"] = 25000
++    ["max client quest xp signal"] = 25000,
++
++    -- X050b: ordinary group management notices may be silenced independently.
++    -- Shared-XP messages are off by default because they are frequent and the
++    -- XP bar already gives the player feedback.
++    ["chat notifications"] = true,
++    ["xp share chat messages"] = false
+ }
+ 
+ -- X031: RAW config.lua is watched while the server is running. A successful
+@@ -541,12 +547,17 @@
+     greenTopicColor = "#61D879",
+     maxSyncedTopicsPerNpc = 64,
+ 
+-    -- X048: quest progression is already visible in Dialogue/Quest Manager, so
+-    -- automatic chat echoes are disabled by default. These switches affect only
+-    -- runtime quest notifications; explicit /quest editor command feedback stays visible.
++    -- X050b: runtime quest notifications are intentionally quiet by default.
++    -- The master flag suppresses every automatic [Quest] line while leaving
++    -- explicit /quest and Quest Studio feedback intact. Category flags become
++    -- active only when chatNotificationsEnabled=true.
++    chatNotificationsEnabled = false,
+     chatProgressMessages = false,
+     chatRewardMessages = false,
+-    chatRuntimeErrors = false
++    chatRuntimeErrors = false,
++
++    -- Keep one compact journal popup without mirroring the same text into chat.
++    journalUpdatePopup = true
+ }
+ 
+ -- X042: modifying original Morrowind journal stages is disabled by default.
+diff -ruN x050a_base/server/scripts/groupHelper.lua x050b_notify/server/scripts/groupHelper.lua
+--- x050a_base/server/scripts/groupHelper.lua	2026-08-31 00:59:03.000000000 +0000
++++ x050b_notify/server/scripts/groupHelper.lua	2026-08-31 01:12:47.795246605 +0000
+@@ -246,8 +246,16 @@
+     return id
+ end
+ 
++local function groupChatNotificationsEnabled()
++    return type(config.groupSystem) ~= "table" or config.groupSystem["chat notifications"] ~= false
++end
++
++local function groupXpChatMessagesEnabled()
++    return type(config.groupSystem) == "table" and config.groupSystem["xp share chat messages"] == true
++end
++
+ local function sendNotice(pid, text, errorState)
+-    if not isValidPid(pid) then return end
++    if not groupChatNotificationsEnabled() or not isValidPid(pid) then return end
+     local prefix = errorState and color.Red or color.Turquoise
+     tes3mp.SendMessage(pid, prefix .. "[Group] " .. color.White .. tostring(text) .. "\n", false)
+ end
+@@ -652,7 +660,7 @@
+     for _, pid in ipairs(recipients) do
+         sendXpControl(pid, share, scaled, kind, reason)
+     end
+-    if #recipients > 1 then
++    if groupXpChatMessagesEnabled() and #recipients > 1 then
+         for _, pid in ipairs(recipients) do
+             sendNotice(pid, string.format("Shared %s XP: %.1f each (%d members in cell)", kind or "group", share, #recipients), false)
+         end
+diff -ruN x050a_base/server/scripts/serverQuestSystem.lua x050b_notify/server/scripts/serverQuestSystem.lua
+--- x050a_base/server/scripts/serverQuestSystem.lua	2026-08-31 00:50:52.000000000 +0000
++++ x050b_notify/server/scripts/serverQuestSystem.lua	2026-08-31 01:12:22.384836808 +0000
+@@ -66,6 +66,25 @@
+     end
+ end
+ 
++-- X050b: runtime quest notifications are separate from explicit /quest/editor
++-- feedback. This keeps the authoritative quest system quiet in the normal chat
++-- unless the administrator deliberately enables a category in config.lua.
++local function runtimeChatEnabled(category)
++    local questConfig = type(config.serverQuests) == "table" and config.serverQuests or {}
++    if questConfig.chatNotificationsEnabled == false then return false end
++
++    local key = nil
++    if category == "progress" then key = "chatProgressMessages"
++    elseif category == "reward" then key = "chatRewardMessages"
++    elseif category == "error" then key = "chatRuntimeErrors" end
++
++    return key ~= nil and questConfig[key] == true
++end
++
++local function sendRuntime(pid, message, category)
++    if runtimeChatEnabled(category) then send(pid, message) end
++end
++
+ local function percentEncode(value)
+     value = tostring(value or "")
+     return (value:gsub("([^%w%-%._~ ])", function(c)
+@@ -921,7 +940,7 @@
+         cv.serverQuestVariables[tostring(reward.key)] = reward.value
+         return true
+     elseif kind == "message" then
+-        send(pid, tostring(reward.text or reward.value or ""))
++        sendRuntime(pid, tostring(reward.text or reward.value or ""), "reward")
+         return true
+ 
+     -- X042: additional server-authoritative effects.
+@@ -1078,7 +1097,7 @@
+     if state.state == "completed" or state.state == "failed" then state.completedAt = os.time() end
+     Players[pid]:QuicksaveToDrive()
+     if serverQuestSystem.SyncPlayer ~= nil then serverQuestSystem.SyncPlayer(pid) end
+-    if not silent then send(pid, "Started: " .. quest.name .. " (stage " .. stage.index .. ")") end
++    if not silent then sendRuntime(pid, "Started: " .. quest.name .. " (stage " .. stage.index .. ")", "progress") end
+     return true, state
+ end
+ 
+@@ -1116,7 +1135,7 @@
+     Players[pid]:QuicksaveToDrive()
+     if serverQuestSystem.SyncPlayer ~= nil then serverQuestSystem.SyncPlayer(pid) end
+     if not silent then
+-        send(pid, quest.name .. " -> stage " .. target.index .. (state.state ~= "active" and (" [" .. state.state .. "]") or ""))
++        sendRuntime(pid, quest.name .. " -> stage " .. target.index .. (state.state ~= "active" and (" [" .. state.state .. "]") or ""), "progress")
+     end
+     return true, state
+ end
+@@ -1406,9 +1425,13 @@
+     if text == "" then return end
+ 
+     -- The client mirrors these entries into the vanilla journal window through the
+-    -- ServerQuestRegistry, so all the server has to do is tell the player to look.
+-    callIfPresent("MessageBox", pid, -1, "Дневник обновлён: " .. tostring(quest.name))
+-    send(pid, tostring(quest.name) .. " — " .. text)
++    -- ServerQuestRegistry. X050b avoids the old double notification: by default
++    -- the player gets only this compact popup and no duplicate [Quest] chat line.
++    local questConfig = type(config.serverQuests) == "table" and config.serverQuests or {}
++    if questConfig.journalUpdatePopup ~= false then
++        callIfPresent("MessageBox", pid, -1, "Дневник обновлён: " .. tostring(quest.name))
++    end
++    sendRuntime(pid, tostring(quest.name) .. " — " .. text, "progress")
+ end
+ 
+ -- Applies a server-validated dialogue choice. Returns ok, why.
+@@ -1465,9 +1488,9 @@
+ 
+         if announce then
+             if failing ~= nil then
+-                send(pid, "Не выполнено условие — " .. requirementText(pid, failing))
++                sendRuntime(pid, "Не выполнено условие — " .. requirementText(pid, failing), "error")
+             elseif why ~= nil then
+-                send(pid, tostring(why))
++                sendRuntime(pid, tostring(why), "error")
+             end
+ 
+             -- An item/gold requirement may have failed only because our copy of the
+@@ -1586,8 +1609,8 @@
+                 if state == nil then
+                     local ok, why, failing = serverQuestSystem.StartQuest(pid, questId, false, true)
+                     if not ok then
+-                        send(pid, "Cannot start " .. quest.name .. ": "
+-                            .. (failing ~= nil and requirementText(pid, failing) or tostring(why)))
++                        sendRuntime(pid, "Cannot start " .. quest.name .. ": "
++                            .. (failing ~= nil and requirementText(pid, failing) or tostring(why)), "error")
+                         serverQuestSystem.SyncPlayer(pid)
+                         return
+                     end

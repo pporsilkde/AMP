@@ -11,6 +11,7 @@ namespace MyGUI
 {
     class Button;
     class ScrollBar;
+    class TextBox;
     class Widget;
 }
 
@@ -156,8 +157,8 @@ namespace mwmp
         MyGUI::Widget* mGroupPane;
         MyGUI::Widget* mHomePane;
         MyGUI::EditBox* mGroupInfo;
-        MyGUI::Widget* mGroupNameLabel;
-        MyGUI::Widget* mGroupTargetLabel;
+        MyGUI::TextBox* mGroupNameLabel;
+        MyGUI::TextBox* mGroupTargetLabel;
         MyGUI::EditBox* mGroupNameEdit;
         MyGUI::EditBox* mGroupTargetEdit;
 
