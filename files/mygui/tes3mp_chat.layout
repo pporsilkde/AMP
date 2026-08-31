@@ -4,15 +4,19 @@
        C++ reveals the framed player-menu shell and mouse-oriented controls. -->
   <Widget type="Window" skin="" position="0 0 620 420" layer="Chat" name="_Main">
     <Property key="Caption" value="ArenaMP"/>
-    <Property key="MinSize" value="560 360"/>
+    <Property key="MinSize" value="40 40"/>
     <Property key="Visible" value="false"/>
     <Property key="NeedMouse" value="false"/>
     <Property key="NeedKey" value="false"/>
 
     <!-- Dark framed shell; hidden while the chat is only a HUD overlay. -->
-    <Widget type="Widget" skin="MW_Box" position="0 0 620 420" align="Stretch" name="PanelBackground">
+    <Widget type="Widget" skin="FullBlackBG" position="0 0 620 420" align="Stretch" name="PanelBackground">
       <Property key="Visible" value="false"/>
       <Property key="NeedMouse" value="false"/>
+      <Property key="Alpha" value="0.92"/>
+      <Widget type="Widget" skin="MW_Box" position="0 0 620 420" align="Stretch" name="PanelBorder">
+        <Property key="NeedMouse" value="false"/>
+      </Widget>
     </Widget>
 
     <!-- Drag strip. It is deliberately separate from buttons, so the player can
@@ -59,7 +63,7 @@
       <Property key="ReadOnly" value="true"/>
       <Property key="NeedMouse" value="false"/>
       <Property key="NeedKey" value="false"/>
-      <Property key="FontName" value="DejaVuLGCSansMono"/>
+      <Property key="FontName" value="Russo"/>
       <Property key="TextAlign" value="Left Top"/>
       <Property key="TextColour" value="1 1 1"/>
       <Property key="InvertSelected" value="true"/>

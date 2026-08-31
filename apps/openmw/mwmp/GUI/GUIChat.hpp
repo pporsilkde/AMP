@@ -146,6 +146,9 @@ namespace mwmp
 
         void onDragStart(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
         void onDrag(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
+        void applyHudGeometry(int width, int height);
+        void applyPanelGeometry(int width, int height);
+        void syncInteractiveInputMode();
         void clampToViewport(int width, int height);
         void markGeometryDirty();
         void persistGeometry();
@@ -216,6 +219,7 @@ namespace mwmp
         float targetAlpha;
         MyGUI::IntPoint dragStartMouse;
         MyGUI::IntPoint dragStartWindow;
+        MyGUI::IntCoord panelCoord;
     };
 }
 #endif //OPENMW_GUICHAT_HPP

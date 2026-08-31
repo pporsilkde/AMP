@@ -1,17 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <MyGUI type="Resource" version="1.1">
-    <!-- X049: switch from Russo One to the already-shipped DejaVu LGC family.
-         It is freely licensed, keeps Cyrillic readable at chat sizes and includes
-         the classic Unicode symbols used by the built-in emoji strip. -->
+    <!-- X050d: passive HUD chat uses the original wide Russo font.
+         C++ switches history/input to DejaVu LGC only while Player Menu is active. -->
     <Resource type="ResourceSkin" name="TES3MP_EditClient" size="10 10">
-        <Property key="FontName" value="DejaVuLGCSansMono"/>
+        <Property key="FontName" value="Russo"/>
         <Property key="TextAlign" value="Left Top"/>
         <Property key="TextColour" value="1 1 1"/>
         <BasisSkin type="EditText" offset="0 0 10 10" align="Stretch"/>
     </Resource>
 
     <Resource type="ResourceSkin" name="TES3MP_ChatHistory" size="512 20">
-        <Property key="FontName" value="DejaVuLGCSansMono"/>
+        <Property key="FontName" value="Russo"/>
         <Property key="TextAlign" value="Left Top"/>
         <Property key="TextColour" value="1 1 1"/>
         <Property key="WordWrap" value="true"/>

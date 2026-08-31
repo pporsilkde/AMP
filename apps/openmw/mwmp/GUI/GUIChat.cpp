@@ -33,8 +33,15 @@ namespace
     constexpr float sSixtyPercentTransparentAlpha = 0.4f;
     constexpr float sFadeSpeed = 4.f;
     constexpr float sGeometrySaveDebounce = 0.45f;
+    constexpr float sMenuBackgroundAlpha = 0.92f;
     constexpr int sMinimumPanelWidth = 620;
     constexpr int sMinimumPanelHeight = 380;
+    constexpr int sHudX = 1;
+    constexpr int sHudY = 25;
+    constexpr int sHudWidth = 260;
+    constexpr int sHudHeight = 400;
+    constexpr const char* sHudFont = "Russo";
+    constexpr const char* sMenuFont = "DejaVuLGCSansMono";
 
     std::string localizeArena(const std::string& key)
     {
@@ -163,13 +170,11 @@ namespace mwmp
         , targetAlpha(sThirtyPercentTransparentAlpha)
         , dragStartMouse(0, 0)
         , dragStartWindow(0, 0)
+        , panelCoord(x, y, std::max(sMinimumPanelWidth, w), std::max(sMinimumPanelHeight, h))
     {
-        // X049 migration: the old passive chat was commonly only ~260 px wide.
-        // The activated player menu needs enough width for the channel/style bar.
-        // Keep the saved position while upgrading too-small legacy dimensions.
-        const int panelWidth = std::max(sMinimumPanelWidth, w);
-        const int panelHeight = std::max(sMinimumPanelHeight, h);
-        setCoord(x, y, panelWidth, panelHeight);
+        // X050d: x/y/w/h are the saved interactive player-menu geometry.
+        // Passive HUD chat deliberately keeps the compact X048 rectangle.
+        setCoord(sHudX, sHudY, sHudWidth, sHudHeight);
 
         getWidget(mCommandLine, "edit_Command");
         getWidget(mHistory, "list_History");
@@ -217,15 +222,14 @@ namespace mwmp
         mHistory->setTextShadow(true);
         mHistory->setTextShadowColour(MyGUI::Colour::Black);
         mHistory->setNeedKeyFocus(false);
-        setFont(Settings::Manager::getString("font", "Chat"));
+        mHistory->setFontName(sHudFont);
+        mCommandLine->setFontName(sMenuFont);
 
         setupPlayerMenu();
         syncSettings();
 
         const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
-        clampToViewport(view.width, view.height);
-        if (panelWidth != w || panelHeight != h)
-            persistGeometry();
+        applyHudGeometry(view.width, view.height);
 
         mCommandLine->setVisible(false);
         updateCommandLineLayout();
@@ -432,16 +436,23 @@ namespace mwmp
 
     void GUIChat::onResChange(int width, int height)
     {
-        // X049: never reset to the historical full-width rectangle on resolution
-        // changes. Clamp the player's saved/moved panel instead.
-        clampToViewport(width, height);
+        if (editState)
+        {
+            clampToViewport(width, height);
+            panelCoord = mMainWidget->getCoord();
+        }
+        else
+            applyHudGeometry(width, height);
         updateCommandLineLayout();
     }
 
     void GUIChat::setFont(const std::string &fntName)
     {
-        mHistory->setFontName(fntName);
+        // Kept for API compatibility. The HUD intentionally uses Russo while
+        // the interactive player-menu chat uses the Unicode/emoji-capable font.
         mCommandLine->setFontName(fntName);
+        if (editState)
+            mHistory->setFontName(fntName);
     }
 
     void GUIChat::print(const std::string &msg, const std::string &color)
@@ -588,31 +599,44 @@ namespace mwmp
         if (editState == state)
         {
             if (state && activeTab == TAB_CHAT)
+            {
+                syncInteractiveInputMode();
                 MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
+            }
             return;
+        }
+
+        if (!state && editState)
+        {
+            panelCoord = mMainWidget->getCoord();
+            if (geometryDirty)
+                persistGeometry();
         }
 
         editState = state;
         emojiBarVisible = false;
 
+        const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
         if (editState)
         {
+            applyPanelGeometry(view.width, view.height);
+            mHistory->setFontName(sMenuFont);
+            mCommandLine->setFontName(sMenuFont);
             selectTab(TAB_CHAT, false);
             revealTime = 0.f;
-            MWBase::Environment::get().getInputManager()->changeInputMode(true);
-            MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
             mMainWidget->setNeedMouseFocus(true);
+            syncInteractiveInputMode();
+            MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
         }
         else
         {
             MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(nullptr);
             mMainWidget->setNeedMouseFocus(false);
-            if (!mainMenuOpen && !historyReviewState)
-                MWBase::Environment::get().getInputManager()->changeInputMode(false);
+            syncInteractiveInputMode();
+            mHistory->setFontName(sHudFont);
+            applyHudGeometry(view.width, view.height);
             if (windowState == CHAT_AUTOHIDE)
                 revealTime = delay;
-            if (geometryDirty)
-                persistGeometry();
         }
 
         refreshPlayerMenu();
@@ -695,11 +719,12 @@ namespace mwmp
         if (historyReviewState == state)
             return;
 
+        if (state && editState)
+            setEditState(false);
+
         historyReviewState = state;
         if (state)
         {
-            if (editState)
-                setEditState(false);
             mMainWidget->setNeedMouseFocus(true);
             mHistory->setNeedMouseFocus(true);
             mHistory->setNeedKeyFocus(true);
@@ -708,7 +733,7 @@ namespace mwmp
                 mHistoryScroll->setVisible(true);
                 mHistoryScroll->setNeedMouseFocus(true);
             }
-            MWBase::Environment::get().getInputManager()->changeInputMode(true);
+            syncInteractiveInputMode();
             MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mHistory);
         }
         else
@@ -722,8 +747,7 @@ namespace mwmp
                 mHistoryScroll->setNeedMouseFocus(false);
             }
             MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(nullptr);
-            if (!mainMenuOpen && !editState)
-                MWBase::Environment::get().getInputManager()->changeInputMode(false);
+            syncInteractiveInputMode();
             scrollHistoryToBottom();
             if (windowState == CHAT_AUTOHIDE)
                 revealTime = delay;
@@ -746,10 +770,20 @@ namespace mwmp
         mainMenuOpen = state;
         if (state)
         {
+            if (editState)
+            {
+                panelCoord = mMainWidget->getCoord();
+                if (geometryDirty)
+                    persistGeometry();
+            }
             editState = false;
             emojiBarVisible = false;
             mCommandLine->setVisible(false);
             historyReviewState = false;
+            syncInteractiveInputMode();
+            const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
+            mHistory->setFontName(sHudFont);
+            applyHudGeometry(view.width, view.height);
             mMainWidget->setNeedMouseFocus(false);
             mHistory->setNeedMouseFocus(false);
             mHistory->setNeedKeyFocus(false);
@@ -1238,7 +1272,46 @@ namespace mwmp
         mMainWidget->setPosition(dragStartWindow + delta);
         const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
         clampToViewport(view.width, view.height);
+        panelCoord = mMainWidget->getCoord();
         markGeometryDirty();
+    }
+
+    void GUIChat::applyHudGeometry(int width, int height)
+    {
+        if (!mMainWidget)
+            return;
+
+        const int hudWidth = width > 0 ? std::min(sHudWidth, width) : sHudWidth;
+        const int hudHeight = height > 0 ? std::min(sHudHeight, height) : sHudHeight;
+        const int hudX = width > 0 ? std::max(0, std::min(sHudX, width - hudWidth)) : sHudX;
+        const int hudY = height > 0 ? std::max(0, std::min(sHudY, height - hudHeight)) : sHudY;
+        mMainWidget->setCoord(hudX, hudY, hudWidth, hudHeight);
+    }
+
+    void GUIChat::applyPanelGeometry(int width, int height)
+    {
+        if (!mMainWidget)
+            return;
+        mMainWidget->setCoord(panelCoord);
+        clampToViewport(width, height);
+        panelCoord = mMainWidget->getCoord();
+    }
+
+    void GUIChat::syncInteractiveInputMode()
+    {
+        MWBase::WindowManager* windowManager = MWBase::Environment::get().getWindowManager();
+        const MWGui::GuiMode playerMenuMode = static_cast<MWGui::GuiMode>(GUIController::GM_ARENAMP_PlayerMenu);
+        const bool interactive = !mainMenuOpen && (editState || historyReviewState);
+
+        if (interactive)
+        {
+            if (!windowManager->containsMode(playerMenuMode))
+                windowManager->pushGuiMode(playerMenuMode);
+            // Fallback for forks that defer WindowManager::updateVisible().
+            MWBase::Environment::get().getInputManager()->changeInputMode(true);
+        }
+        else if (windowManager->containsMode(playerMenuMode))
+            windowManager->removeGuiMode(playerMenuMode);
     }
 
     void GUIChat::clampToViewport(int width, int height)
@@ -1272,12 +1345,12 @@ namespace mwmp
         if (!mMainWidget)
             return;
 
-        const MyGUI::IntCoord coord = mMainWidget->getCoord();
-        Settings::Manager::setInt("x", "Chat", coord.left);
-        Settings::Manager::setInt("y", "Chat", coord.top);
-        Settings::Manager::setInt("w", "Chat", coord.width);
-        Settings::Manager::setInt("h", "Chat", coord.height);
-        Settings::Manager::setInt("panel layout version", "Chat", 1);
+        if (editState)
+            panelCoord = mMainWidget->getCoord();
+        Settings::Manager::setInt("x", "Chat", panelCoord.left);
+        Settings::Manager::setInt("y", "Chat", panelCoord.top);
+        Settings::Manager::setInt("w", "Chat", panelCoord.width);
+        Settings::Manager::setInt("h", "Chat", panelCoord.height);
         Settings::Manager::saveUser();
         geometryDirty = false;
         geometrySaveDelay = 0.f;
@@ -1322,7 +1395,7 @@ namespace mwmp
         {
             mHistory->setAlpha(1.f);
             mCommandLine->setAlpha(1.f);
-            mPanelBackground->setAlpha(1.f);
+            mPanelBackground->setAlpha(sMenuBackgroundAlpha);
             mDragHandle->setAlpha(1.f);
             mChatToolbar->setAlpha(1.f);
             mGroupPane->setAlpha(1.f);

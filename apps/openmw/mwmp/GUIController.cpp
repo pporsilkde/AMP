@@ -461,6 +461,10 @@ void mwmp::GUIController::WM_UpdateVisible(MWGui::GuiMode mode)
             }
             break;
         }
+        case GM_ARENAMP_PlayerMenu:
+            // GUIChat owns its widgets. The mode exists so the core WindowManager
+            // releases mouse-look and exposes the cursor while chat is interactive.
+            break;
         default:
             break;
     }
