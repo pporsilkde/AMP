@@ -103,36 +103,61 @@ guiHelper.ShowRegister = function(pid)
         localization.Get(pid, "core", "register_dialog_note"))
 end
 
+-- X054: one implementation of the /list entry, used both by the classic
+-- ListBox dialog and by the Player Menu's "Players" tab. The two views cannot
+-- drift apart because there is only one formatter now.
+--
+-- Returns nil for a pid that is not online. Otherwise:
+--   name  - the raw account name, for invites and lookups
+--   label - a single colourless line for a plain list widget
+--   block - the full multi-line coloured card, exactly as /list renders it
+guiHelper.GetPlayerListEntry = function(requestingPid, playerIndex)
+    if Players[playerIndex] == nil or not Players[playerIndex]:IsLoggedIn() then return nil end
+    if Players[playerIndex].data == nil then return nil end
+
+    local isRequestingAdmin = Players[requestingPid] and Players[requestingPid]:IsAdmin()
+    local custom = Players[playerIndex].data.customVariables or {}
+    local playerColor = custom.chatColor or color.Default
+    local character = Players[playerIndex].data.character or {}
+    local stats = Players[playerIndex].data.stats or {}
+    local location = Players[playerIndex].data.location or {}
+    local race = getTranslatedRaceName(requestingPid, character.race, character.gender)
+    local level = stats.level or 1
+
+    local headline = getPlayerRankTag(playerIndex) .. getRolePlayModeTag(playerIndex) ..
+        " PID " .. tostring(Players[playerIndex].pid) .. " [ " .. tostring(Players[playerIndex].name) ..
+        ", " .. race .. ", " .. tostring(level) .. " " .. L(requestingPid, "list_level") .. " ]"
+    local header = playerColor .. headline
+
+    local isGhost = custom.Ghost == 1
+    local hasBounty = stats.bounty ~= nil and stats.bounty > 2000
+    local canSee = isRequestingAdmin or not isGhost or hasBounty
+    local cell = canSee and tostring(location.cell or "-") or L(requestingPid, "list_hidden")
+    local region = canSee and tostring(location.regionName or "-") or L(requestingPid, "list_hidden")
+    local block = header .. "\n" ..
+        playerColor .. L(requestingPid, "list_location") .. ": [ " .. cell .. " ]\n" ..
+        playerColor .. L(requestingPid, "list_region") .. ": [ " .. region .. " ]\n" ..
+        playerColor .. buildPingAndTimeLine(requestingPid, playerIndex)
+    if isGhost and isRequestingAdmin then
+        block = block .. "\n" .. playerColor .. L(requestingPid, "ghost_marker")
+    end
+
+    return {
+        pid = playerIndex,
+        name = tostring(Players[playerIndex].name),
+        color = playerColor,
+        label = headline,
+        block = block
+    }
+end
+
 local GetConnectedPlayerList = function(requestingPid)
     local lines = {}
-    local isRequestingAdmin = Players[requestingPid] and Players[requestingPid]:IsAdmin()
     local lastPid = tes3mp.GetLastPlayerId()
     for playerIndex = 0, lastPid do
-        if Players[playerIndex] ~= nil and Players[playerIndex]:IsLoggedIn() then
-            local custom = Players[playerIndex].data.customVariables or {}
-            local playerColor = custom.chatColor or color.Default
-            local character = Players[playerIndex].data.character or {}
-            local stats = Players[playerIndex].data.stats or {}
-            local location = Players[playerIndex].data.location or {}
-            local race = getTranslatedRaceName(requestingPid, character.race, character.gender)
-            local level = stats.level or 1
-            local header = playerColor .. getPlayerRankTag(playerIndex) .. getRolePlayModeTag(playerIndex) ..
-                " PID " .. tostring(Players[playerIndex].pid) .. " [ " .. tostring(Players[playerIndex].name) ..
-                ", " .. race .. ", " .. tostring(level) .. " " .. L(requestingPid, "list_level") .. " ]"
-
-            local isGhost = custom.Ghost == 1
-            local hasBounty = stats.bounty ~= nil and stats.bounty > 2000
-            local canSee = isRequestingAdmin or not isGhost or hasBounty
-            local cell = canSee and tostring(location.cell or "-") or L(requestingPid, "list_hidden")
-            local region = canSee and tostring(location.regionName or "-") or L(requestingPid, "list_hidden")
-            local block = header .. "\n" ..
-                playerColor .. L(requestingPid, "list_location") .. ": [ " .. cell .. " ]\n" ..
-                playerColor .. L(requestingPid, "list_region") .. ": [ " .. region .. " ]\n" ..
-                playerColor .. buildPingAndTimeLine(requestingPid, playerIndex)
-            if isGhost and isRequestingAdmin then
-                block = block .. "\n" .. playerColor .. L(requestingPid, "ghost_marker")
-            end
-            lines[#lines + 1] = block
+        local entry = guiHelper.GetPlayerListEntry(requestingPid, playerIndex)
+        if entry ~= nil then
+            lines[#lines + 1] = entry.block
         end
     end
     return table.concat(lines, "\n")

@@ -79,9 +79,18 @@ namespace mwmp
         void setGlobalMapMarkerTooltip(MWGui::MapWindow *mapWindow ,MyGUI::Widget* markerWidget, int x, int y);
 
     private:
+        // X054: tap-vs-hold arbitration for the Say key. The press itself opens
+        // the historic HUD caret; only a sustained hold promotes it to the full
+        // Player Menu.
+        void updateSayKeyHold(float dt);
+
         GUIChat *mChat;
         int keySay;
         int keyChatMode;
+        bool sayHoldArmed;
+        bool sayHoldTriggered;
+        float sayHoldTime;
+        float sayHoldThreshold;
 
         long id;
         TextInputDialog *mInputBox;

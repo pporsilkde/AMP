@@ -98,5 +98,35 @@
         "requirements": []
       }
     ]
+  },
+  "sourceLanguage": "RU",
+  "translations": {
+    "EN": {
+      "name": "Fighters Guild Dues",
+      "topics": {
+        "arena_eydis_dues_topic": "guild dues"
+      },
+      "offer": {
+        "dialogue": "New here? Then the dues come first.",
+        "choices": {
+          "accept": "What do I need to do?",
+          "decline": "Not interested."
+        }
+      },
+      "stages": {
+        "10": {
+          "journal": "Eydis Fire-Eye wants me to pay 25 gold into the Fighters Guild coffers.",
+          "dialogue": "Twenty-five septims into the coffers, and the bed and the training room are yours to use.",
+          "choices": {
+            "pay": "Here are twenty-five septims.",
+            "later": "I'll come back later."
+          }
+        },
+        "20": {
+          "journal": "I paid my dues to the Balmora Fighters Guild.",
+          "dialogue": "Noted. You're more than a passer-by now."
+        }
+      }
+    }
   }
 }

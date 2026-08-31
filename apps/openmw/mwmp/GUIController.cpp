@@ -1,6 +1,8 @@
 #include <components/openmw-mp/TimedLog.hpp>
 #include <components/openmw-mp/Base/BasePlayer.hpp>
 
+#include <SDL_keyboard.h>
+#include <SDL_scancode.h>
 #include <SDL_system.h>
 
 #include <MyGUI_FactoryManager.h>
@@ -46,6 +48,10 @@ mwmp::GUIController::GUIController()
     mChat = nullptr;
     keySay = SDL_SCANCODE_Y;
     keyChatMode = SDL_SCANCODE_F2;
+    sayHoldArmed = false;
+    sayHoldTriggered = false;
+    sayHoldTime = 0.f;
+    sayHoldThreshold = 0.35f;
 }
 
 mwmp::GUIController::~GUIController()
@@ -90,6 +96,13 @@ void mwmp::GUIController::setupChat()
 
     keySay = SDL_GetScancodeFromName(Settings::Manager::getString("keySay", "Chat").c_str());
     keyChatMode = SDL_GetScancodeFromName(Settings::Manager::getString("keyChatMode", "Chat").c_str());
+
+    // X054: how long the Say key has to stay down before the compact HUD caret
+    // is promoted to the Player Menu. 0 disables the hold gesture entirely and
+    // restores "tap opens the menu" for anyone who preferred X049.
+    sayHoldThreshold = Settings::Manager::getFloat("player menu hold", "Chat");
+    if (sayHoldThreshold < 0.f)
+        sayHoldThreshold = 0.f;
 
     mChat = new GUIChat(chatX, chatY, chatW, chatH);
     mChat->setDelay(chatDelay);
@@ -368,10 +381,58 @@ bool mwmp::GUIController::pressedKey(int key)
     }
     else if (key == keySay)
     {
+        // X054: once the caret is already in the chat the Say key is just an
+        // ordinary character. Only a press that arrives from gameplay opens it.
+        if (mChat->getEditState())
+            return false;
+
+        if (sayHoldThreshold <= 0.f)
+        {
+            mChat->openPlayerMenu();
+            return true;
+        }
+
         mChat->pressedSay();
+        // The key is still physically down at this point, so mark it before the
+        // first update tick: SDL may already have queued a text-input event for
+        // it against the editor we just focused.
+        mChat->setSayKeyHeld(true);
+        sayHoldArmed = true;
+        sayHoldTriggered = false;
+        sayHoldTime = 0.f;
         return true;
     }
     return false;
+}
+
+void mwmp::GUIController::updateSayKeyHold(float dt)
+{
+    if (mChat == nullptr)
+        return;
+
+    const Uint8* keyboard = SDL_GetKeyboardState(nullptr);
+    const bool down = sayHoldArmed && keyboard != nullptr && keySay > 0
+        && keySay < SDL_NUM_SCANCODES && keyboard[keySay] != 0;
+
+    if (!down)
+    {
+        if (sayHoldArmed)
+            mChat->setSayKeyHeld(false);
+        sayHoldArmed = false;
+        sayHoldTriggered = false;
+        sayHoldTime = 0.f;
+        return;
+    }
+
+    if (sayHoldTriggered)
+        return;
+
+    sayHoldTime += std::max(0.f, dt);
+    if (sayHoldTime >= sayHoldThreshold)
+    {
+        sayHoldTriggered = true;
+        mChat->openPlayerMenu();
+    }
 }
 
 void mwmp::GUIController::changeChatMode()
@@ -414,7 +475,10 @@ void mwmp::GUIController::setChatMainMenuOpen(bool state)
 void mwmp::GUIController::update(float dt)
 {
     if (mChat != nullptr)
+    {
+        updateSayKeyHold(dt);
         mChat->update(dt);
+    }
 
     // Re-arm automatic credential submission only after a successful login, so
     // a wrong password produces the retry card instead of an infinite resend loop.

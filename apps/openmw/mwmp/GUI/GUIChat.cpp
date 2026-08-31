@@ -39,12 +39,19 @@ namespace
     constexpr float sGeometrySaveDebounce = 0.45f;
     constexpr float sMenuBackgroundAlpha = 0.92f;
     constexpr int sMinimumPanelWidth = 700;
-    constexpr int sMinimumPanelHeight = 460;
+    constexpr int sMinimumPanelHeight = 500;
     constexpr int sButtonPadding = 22;
     constexpr int sMinimumButtonWidth = 34;
     constexpr int sRowGap = 6;
+    constexpr int sToolbarTop = 44;
+    // X054: the toolbar carries coreChat's five channels and four styles now,
+    // so it is two rows tall. sToolbarHeight is one row; the container gets
+    // sToolbarRows of them.
     constexpr int sToolbarHeight = 30;
+    constexpr int sToolbarRows = 2;
+    constexpr int sDrawerTop = sToolbarTop + sToolbarHeight * sToolbarRows + 4;
     constexpr int sDrawerHeight = 68;
+    constexpr int sColorDrawerHeight = 96;
     constexpr int sSideMargin = 10;
     constexpr int sHudX = 1;
     constexpr int sHudY = 25;
@@ -258,12 +265,15 @@ namespace mwmp
         , mPlayersInviteButton(nullptr)
         , mModeOoc(nullptr)
         , mModeRp(nullptr)
-        , mChannelDefault(nullptr)
-        , mChannelLocal(nullptr)
-        , mChannelGlobal(nullptr)
+        , mChannelSay(nullptr)
+        , mChannelWhisper(nullptr)
+        , mChannelShout(nullptr)
+        , mChannelLocalOoc(nullptr)
+        , mChannelGlobalOoc(nullptr)
         , mStylePlain(nullptr)
         , mStyleMe(nullptr)
         , mStyleDo(nullptr)
+        , mStyleTry(nullptr)
         , mStayOpenButton(nullptr)
         , mSendButton(nullptr)
         , mReturnButton(nullptr)
@@ -283,7 +293,7 @@ namespace mwmp
         , mGroupAcceptButton(nullptr)
         , mGroupDeclineButton(nullptr)
         , windowState(CHAT_TRANSPARENT_30)
-        , chatChannel(CHANNEL_DEFAULT)
+        , chatChannel(CHANNEL_SAY)
         , chatStyle(STYLE_PLAIN)
         , activeTab(TAB_CHAT)
         , rpMode(false)
@@ -295,6 +305,7 @@ namespace mwmp
         , playerListNames()
         , playerListDetails()
         , colorPalette()
+        , colorNames()
         , selectedColorIndex(-1)
         , menuCaptions()
         , groupInGroup(false)
@@ -303,6 +314,8 @@ namespace mwmp
         , groupTopicSync(true)
         , groupPendingInvite(false)
         , editState(false)
+        , menuState(false)
+        , sayKeyHeld(false)
         , historyReviewState(false)
         , mainMenuOpen(false)
         , historyDisplayEnabled(true)
@@ -412,9 +425,12 @@ namespace mwmp
         getWidget(mTabPlayers, "TabPlayers");
         getWidget(mModeOoc, "ModeOoc");
         getWidget(mModeRp, "ModeRp");
-        getWidget(mChannelDefault, "ChannelDefault");
-        getWidget(mChannelLocal, "ChannelLocal");
-        getWidget(mChannelGlobal, "ChannelGlobal");
+        // X054: the three layout slots become Say / local OOC / global OOC;
+        // whisper, shout and /try are created below so the .layout file does
+        // not have to grow a widget per coreChat feature.
+        getWidget(mChannelSay, "ChannelDefault");
+        getWidget(mChannelLocalOoc, "ChannelLocal");
+        getWidget(mChannelGlobalOoc, "ChannelGlobal");
         getWidget(mStylePlain, "StylePlain");
         getWidget(mStyleMe, "StyleMe");
         getWidget(mStyleDo, "StyleDo");
@@ -425,8 +441,29 @@ namespace mwmp
         getWidget(mColorToggleButton, "ColorToggle");
         for (int i = 0; i < sEmojiSlotCount; ++i)
             getWidget(mEmojiButtons[i], "Emoji" + std::to_string(i + 1));
-        for (int i = 0; i < sColorSlotCount; ++i)
+
+        // The layout ships sLayoutColorSlotCount swatches; coreChat has 40, so
+        // the remainder are created here. Widgets made in code sit in the same
+        // parent and take part in applyMenuLayout() exactly like XML ones.
+        // Note the split: the first block must go through getWidget(), because
+        // WindowBase prefixes layout widget names at load time.
+        for (int i = 0; i < sLayoutColorSlotCount; ++i)
             getWidget(mColorButtons[i], "Color" + std::to_string(i + 1));
+        for (int i = sLayoutColorSlotCount; i < sColorSlotCount; ++i)
+        {
+            mColorButtons[i] = mColorBar->createWidget<MyGUI::Button>("MW_Button",
+                MyGUI::IntCoord(6, 28, 38, 26), MyGUI::Align::Default);
+        }
+
+        // Whisper, shout and /try have no slot in the .layout file. They are
+        // created as ordinary children of the toolbar, which is enough for
+        // applyMenuLayout() to place them like any XML-declared button.
+        mChannelWhisper = mChatToolbar->createWidget<MyGUI::Button>("MW_Button",
+            MyGUI::IntCoord(0, 2, 60, 26), MyGUI::Align::Default);
+        mChannelShout = mChatToolbar->createWidget<MyGUI::Button>("MW_Button",
+            MyGUI::IntCoord(0, 2, 60, 26), MyGUI::Align::Default);
+        mStyleTry = mChatToolbar->createWidget<MyGUI::Button>("MW_Button",
+            MyGUI::IntCoord(0, 32, 60, 26), MyGUI::Align::Default);
 
         getWidget(mGroupInfo, "GroupInfo");
         getWidget(mGroupNameLabel, "GroupNameLabel");
@@ -464,12 +501,15 @@ namespace mwmp
         setMenuCaption(mReturnButton, localizeArena("chat.return_game"));
         setMenuCaption(mModeOoc, "OOC");
         setMenuCaption(mModeRp, "RP");
-        setMenuCaption(mChannelDefault, localizeArena("chat.channel.default"));
-        setMenuCaption(mChannelLocal, localizeArena("chat.channel.local"));
-        setMenuCaption(mChannelGlobal, localizeArena("chat.channel.global"));
+        setMenuCaption(mChannelSay, localizeArena("chat.channel.say"));
+        setMenuCaption(mChannelWhisper, localizeArena("chat.channel.whisper"));
+        setMenuCaption(mChannelShout, localizeArena("chat.channel.shout"));
+        setMenuCaption(mChannelLocalOoc, localizeArena("chat.channel.local_ooc"));
+        setMenuCaption(mChannelGlobalOoc, localizeArena("chat.channel.global_ooc"));
         setMenuCaption(mStylePlain, localizeArena("chat.style.plain"));
         setMenuCaption(mStyleMe, "/me");
         setMenuCaption(mStyleDo, "/do");
+        setMenuCaption(mStyleTry, "/try");
         setMenuCaption(mEmojiToggleButton, localizeArena("chat.emoji"));
         setMenuCaption(mColorToggleButton, localizeArena("chat.color.button"));
         setMenuCaption(mStayOpenButton, localizeArena("chat.stay_after_send"));
@@ -513,12 +553,15 @@ namespace mwmp
         mTabPlayers->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onTabClicked);
         mModeOoc->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onModeClicked);
         mModeRp->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onModeClicked);
-        mChannelDefault->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onChannelClicked);
-        mChannelLocal->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onChannelClicked);
-        mChannelGlobal->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onChannelClicked);
+        mChannelSay->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onChannelClicked);
+        mChannelWhisper->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onChannelClicked);
+        mChannelShout->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onChannelClicked);
+        mChannelLocalOoc->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onChannelClicked);
+        mChannelGlobalOoc->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onChannelClicked);
         mStylePlain->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onStyleClicked);
         mStyleMe->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onStyleClicked);
         mStyleDo->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onStyleClicked);
+        mStyleTry->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onStyleClicked);
         mStayOpenButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onStayOpenClicked);
         mSendButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onSendClicked);
         mReturnButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onReturnClicked);
@@ -528,6 +571,8 @@ namespace mwmp
             mEmojiButtons[i]->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onEmojiClicked);
         for (int i = 0; i < sColorSlotCount; ++i)
         {
+            if (mColorButtons[i] == nullptr)
+                continue;
             mColorButtons[i]->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onColorClicked);
             mColorButtons[i]->setVisible(false);
         }
@@ -625,7 +670,7 @@ namespace mwmp
 
     void GUIChat::onResChange(int width, int height)
     {
-        if (editState)
+        if (editState && menuState)
         {
             clampToViewport(width, height);
             panelCoord = mMainWidget->getCoord();
@@ -682,9 +727,13 @@ namespace mwmp
 
         if (msg.compare(0, groupPrefix.size(), groupPrefix) == 0)
         {
+            // X054: do NOT unescape here. Fields 8 and 11 are themselves lists
+            // that still have to be split on ';' and '^', and an early unescape
+            // turned every "\n" inside a record into a real newline that the
+            // splitter then dropped - which is what glued the detail lines
+            // together with no separator. Escape sequences are resolved on the
+            // leaves instead, right before they reach a caption.
             std::vector<std::string> fields = splitControlFields(msg.substr(groupPrefix.size()), '\t');
-            for (std::string& field : fields)
-                field = unescapeControlField(field);
             if (!fields.empty() && fields[0] == "STATE")
                 rebuildGroupInfo(fields);
             return true;
@@ -693,8 +742,6 @@ namespace mwmp
         if (msg.compare(0, colorPrefix.size(), colorPrefix) == 0)
         {
             std::vector<std::string> fields = splitControlFields(msg.substr(colorPrefix.size()), '\t');
-            for (std::string& field : fields)
-                field = unescapeControlField(field);
             if (!fields.empty() && fields[0] == "STATE")
                 rebuildColorPalette(fields);
             return true;
@@ -703,8 +750,6 @@ namespace mwmp
         if (msg.compare(0, playersPrefix.size(), playersPrefix) == 0)
         {
             std::vector<std::string> fields = splitControlFields(msg.substr(playersPrefix.size()), '\t');
-            for (std::string& field : fields)
-                field = unescapeControlField(field);
             if (!fields.empty() && fields[0] == "STATE")
                 rebuildPlayerList(fields);
             return true;
@@ -751,22 +796,33 @@ namespace mwmp
         if (!text.empty() && text[0] == '/')
             return text;
 
-        if (chatChannel == CHANNEL_DEFAULT && chatStyle == STYLE_PLAIN && !rpMode)
-            return text;
+        // X054: the menu no longer speaks its own /ampchat dialect. X052 sent a
+        // structured envelope that eventHandler formatted on its own, which is
+        // why /me from the toolbar and /me typed by hand looked different, and
+        // why the toolbar ignored RP mode, popup mode and whisper/shout ranges
+        // entirely. Now the toolbar emits the exact command a player would
+        // type, so coreChat is the single formatter and there is nothing left
+        // to keep in sync.
+        //
+        // Style wins over channel because coreChat's /me, /do and /try are
+        // always cell-local actions, exactly as they are from the keyboard.
+        switch (chatStyle)
+        {
+            case STYLE_ME: return "/me " + text;
+            case STYLE_DO: return "/do " + text;
+            case STYLE_TRY: return "/try " + text;
+            default: break;
+        }
 
-        std::string channel = "default";
-        if (chatChannel == CHANNEL_LOCAL)
-            channel = "local";
-        else if (chatChannel == CHANNEL_GLOBAL)
-            channel = "global";
-
-        std::string style = "plain";
-        if (chatStyle == STYLE_ME)
-            style = "me";
-        else if (chatStyle == STYLE_DO)
-            style = "do";
-
-        return "/ampchat " + channel + " " + style + " " + (rpMode ? "1 " : "0 ") + text;
+        switch (chatChannel)
+        {
+            case CHANNEL_WHISPER: return "/w " + text;
+            case CHANNEL_SHOUT: return "/sh " + text;
+            case CHANNEL_LOCAL_OOC: return "// " + text;
+            case CHANNEL_GLOBAL_OOC: return "/// " + text;
+            case CHANNEL_SAY:
+            default: return "/s " + text;
+        }
     }
 
     void GUIChat::clean()
@@ -819,23 +875,27 @@ namespace mwmp
 
         if (!state && editState)
         {
-            panelCoord = mMainWidget->getCoord();
+            if (menuState)
+                panelCoord = mMainWidget->getCoord();
             if (geometryDirty)
                 persistGeometry();
         }
 
         editState = state;
         activeDrawer = DRAWER_NONE;
+        // X054: leaving the input state always drops the expanded menu too, so
+        // the next tap of the Say key starts from the compact HUD again.
+        if (!editState)
+            menuState = false;
 
-        const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
         if (editState)
         {
-            applyPanelGeometry(view.width, view.height);
-            mHistory->setFontName(menuFontName);
-            mCommandLine->setFontName(menuFontName);
+            applyStateGeometry();
+            mHistory->setFontName(menuState ? menuFontName : sHudFont);
+            mCommandLine->setFontName(menuState ? menuFontName : sHudFont);
             selectTab(TAB_CHAT, false);
             revealTime = 0.f;
-            mMainWidget->setNeedMouseFocus(true);
+            mMainWidget->setNeedMouseFocus(menuState);
             syncInteractiveInputMode();
             MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
         }
@@ -845,7 +905,8 @@ namespace mwmp
             mMainWidget->setNeedMouseFocus(false);
             syncInteractiveInputMode();
             mHistory->setFontName(sHudFont);
-            applyHudGeometry(view.width, view.height);
+            mCommandLine->setFontName(sHudFont);
+            applyStateGeometry();
             if (windowState == CHAT_AUTOHIDE)
                 revealTime = delay;
         }
@@ -855,8 +916,63 @@ namespace mwmp
         refreshPresentation();
     }
 
+    // X054: the second tier of the chat window. editState alone is the historic
+    // HUD caret - no cursor, no mouse capture, camera untouched. menuState is
+    // what turns the strip into the real Player Menu, and only holding the Say
+    // key (or clicking a tab) gets you there.
+    void GUIChat::setMenuState(bool state)
+    {
+        if (!editState)
+            state = false;
+        if (menuState == state)
+            return;
+
+        if (!state)
+        {
+            panelCoord = mMainWidget->getCoord();
+            if (geometryDirty)
+                persistGeometry();
+        }
+
+        menuState = state;
+        activeDrawer = DRAWER_NONE;
+
+        mHistory->setFontName(menuState ? menuFontName : sHudFont);
+        mCommandLine->setFontName(menuState ? menuFontName : sHudFont);
+        mMainWidget->setNeedMouseFocus(menuState);
+
+        applyStateGeometry();
+        syncInteractiveInputMode();
+        if (activeTab == TAB_CHAT)
+            MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
+
+        refreshPlayerMenu();
+        updateCommandLineLayout();
+        refreshPresentation();
+    }
+
+    bool GUIChat::getMenuState() const
+    {
+        return menuState;
+    }
+
+    void GUIChat::setSayKeyHeld(bool held)
+    {
+        sayKeyHeld = held;
+    }
+
     void GUIChat::commandTextChanged(MyGUI::EditBox*)
     {
+        // X054: while the Say key is still physically down we are inside the
+        // tap-or-hold window. SDL key auto-repeat would otherwise stream the
+        // bound character into the freshly focused editor, so anything typed by
+        // the key that opened the chat is discarded until it is released.
+        if (sayKeyHeld && mCommandLine != nullptr && !mCommandLine->getOnlyText().empty())
+        {
+            mCommandLine->setCaption(std::string());
+            mCommandLine->setTextCursor(0);
+        }
+
         updateCommandLineLayout();
     }
 
@@ -875,7 +991,7 @@ namespace mwmp
             return;
         }
 
-        if (activeTab != TAB_CHAT)
+        if (menuState && activeTab != TAB_CHAT)
         {
             mCommandLine->setVisible(false);
             return;
@@ -895,8 +1011,38 @@ namespace mwmp
         const int contentLines = std::max(explicitLines, measuredLines);
         const int visibleLines = std::min(maxVisibleLines, contentLines);
         const int commandHeight = inputPadding + visibleLines * lineHeight;
-        const int commandBottom = std::max(150, mainHeight - bottomFooterHeight);
-        const int commandTop = std::max(118, commandBottom - commandHeight);
+
+        // X054: the compact HUD editor has no toolbar, no footer and no tab
+        // strip to dodge, so it pins the input to the bottom of the small
+        // rectangle and gives every remaining pixel to the history.
+        if (!menuState)
+        {
+            const int hudMargin = 6;
+            const int hudCommandHeight = std::min(std::max(24, commandHeight), std::max(24, mainHeight / 2));
+            const int hudCommandTop = std::max(hudMargin, mainHeight - hudMargin - hudCommandHeight);
+            const int hudInnerWidth = std::max(32, mainWidth - hudMargin * 2);
+
+            mCommandLine->setCoord(hudMargin, hudCommandTop, hudInnerWidth, hudCommandHeight);
+            mCommandLine->setEditMultiLine(true);
+            mCommandLine->setEditWordWrap(true);
+            mCommandLine->setOverflowToTheLeft(false);
+            mHistory->setCoord(hudMargin, hudMargin, hudInnerWidth,
+                std::max(20, hudCommandTop - hudMargin * 2));
+
+            if (mCommandScroll)
+            {
+                const bool hudOverflow = contentLines > maxVisibleLines;
+                mCommandScroll->setVisible(hudOverflow);
+                mCommandScroll->setNeedMouseFocus(hudOverflow);
+            }
+            return;
+        }
+
+        const int drawerHeight = activeDrawer == DRAWER_COLOR ? sColorDrawerHeight : sDrawerHeight;
+        const int historyTop = activeDrawer != DRAWER_NONE ? sDrawerTop + drawerHeight + 6 : sDrawerTop;
+
+        const int commandBottom = std::max(historyTop + 80, mainHeight - bottomFooterHeight);
+        const int commandTop = std::max(historyTop + 40, commandBottom - commandHeight);
 
         mCommandLine->setCoord(sideMargin, commandTop,
             std::max(32, mainWidth - sideMargin * 2), std::max(28, commandBottom - commandTop));
@@ -904,7 +1050,6 @@ namespace mwmp
         mCommandLine->setEditWordWrap(true);
         mCommandLine->setOverflowToTheLeft(false);
 
-        const int historyTop = activeDrawer != DRAWER_NONE ? 152 : 78;
         const int historyHeight = std::max(40, commandTop - gap - historyTop);
         mHistory->setCoord(sideMargin, historyTop,
             std::max(32, mainWidth - sideMargin * 2), historyHeight);
@@ -1021,12 +1166,28 @@ namespace mwmp
     void GUIChat::pressedSay()
     {
         if (!editState)
-            LOG_MESSAGE_SIMPLE(TimedLog::LOG_VERBOSE, "Opening ArenaMP player chat menu.");
+            LOG_MESSAGE_SIMPLE(TimedLog::LOG_VERBOSE, "Opening ArenaMP HUD chat input.");
 
+        // X054: a tap restores the pre-X049 behaviour exactly - the caret lands
+        // in the compact HUD strip and nothing else about the game changes.
         setEditState(true);
         selectTab(TAB_CHAT, false);
         mCommandLine->setVisible(true);
         MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
+    }
+
+    void GUIChat::openPlayerMenu()
+    {
+        if (!editState)
+        {
+            LOG_MESSAGE_SIMPLE(TimedLog::LOG_VERBOSE, "Opening ArenaMP player menu.");
+            setEditState(true);
+        }
+        setMenuState(true);
+        mCommandLine->setVisible(activeTab == TAB_CHAT);
+        // RP mode and the channel may have been changed from the keyboard since
+        // the menu was last open.
+        requestChatState();
     }
 
     void GUIChat::keyPress(MyGUI::Widget*, MyGUI::KeyCode key, MyGUI::Char)
@@ -1157,8 +1318,11 @@ namespace mwmp
 
     void GUIChat::refreshPlayerMenu()
     {
-        const bool menuVisible = editState && !mainMenuOpen;
+        // X054: menuVisible is the expanded Player Menu; editorVisible is the
+        // plain HUD caret, which must keep working with no menu chrome at all.
+        const bool menuVisible = editState && menuState && !mainMenuOpen;
         const bool chatVisible = menuVisible && activeTab == TAB_CHAT;
+        const bool editorVisible = editState && !mainMenuOpen && (!menuState || activeTab == TAB_CHAT);
 
         mPanelBackground->setVisible(menuVisible);
         mDragHandle->setVisible(menuVisible);
@@ -1171,7 +1335,7 @@ namespace mwmp
         mHomePane->setVisible(menuVisible && activeTab == TAB_HOME);
         mPlayersPane->setVisible(menuVisible && activeTab == TAB_PLAYERS);
 
-        mCommandLine->setVisible(chatVisible);
+        mCommandLine->setVisible(editorVisible);
         mHistory->setVisible(historyDisplayEnabled && (!menuVisible || chatVisible));
 
         mHistory->setNeedMouseFocus(chatVisible);
@@ -1224,22 +1388,67 @@ namespace mwmp
         mTabPlayers->setStateSelected(activeTab == TAB_PLAYERS);
         mModeOoc->setStateSelected(!rpMode);
         mModeRp->setStateSelected(rpMode);
-        mChannelDefault->setStateSelected(chatChannel == CHANNEL_DEFAULT);
-        mChannelLocal->setStateSelected(chatChannel == CHANNEL_LOCAL);
-        mChannelGlobal->setStateSelected(chatChannel == CHANNEL_GLOBAL);
+        mChannelSay->setStateSelected(chatChannel == CHANNEL_SAY);
+        mChannelWhisper->setStateSelected(chatChannel == CHANNEL_WHISPER);
+        mChannelShout->setStateSelected(chatChannel == CHANNEL_SHOUT);
+        mChannelLocalOoc->setStateSelected(chatChannel == CHANNEL_LOCAL_OOC);
+        mChannelGlobalOoc->setStateSelected(chatChannel == CHANNEL_GLOBAL_OOC);
         mStylePlain->setStateSelected(chatStyle == STYLE_PLAIN);
         mStyleMe->setStateSelected(chatStyle == STYLE_ME);
         mStyleDo->setStateSelected(chatStyle == STYLE_DO);
+        mStyleTry->setStateSelected(chatStyle == STYLE_TRY);
         mStayOpenButton->setStateSelected(stayOpenAfterSend);
         mEmojiToggleButton->setStateSelected(activeDrawer == DRAWER_EMOJI);
         mColorToggleButton->setStateSelected(activeDrawer == DRAWER_COLOR);
     }
 
+    void GUIChat::requestChatState()
+    {
+        send("/chatcolor state");
+    }
+
+    // X054: coreChat owns RP status and the speech channel, so the toolbar
+    // shows what the server reports rather than a local guess. Fields 4..6 are
+    // appended by X054's chatColorHelper; an older server simply omits them and
+    // the buttons keep their last value.
+    void GUIChat::applyChatState(const std::vector<std::string>& fields)
+    {
+        if (fields.size() > 3)
+        {
+            const bool serverRp = fields[3] == "1";
+            if (serverRp != rpMode)
+                setRpMode(serverRp);
+        }
+
+        if (fields.size() > 4)
+        {
+            // coreChat channel ids: 1 global OOC, 2 speak, 3 whisper,
+            // 4 shout, 5 local OOC.
+            switch (std::atoi(fields[4].c_str()))
+            {
+                case 1: chatChannel = CHANNEL_GLOBAL_OOC; break;
+                case 3: chatChannel = CHANNEL_WHISPER; break;
+                case 4: chatChannel = CHANNEL_SHOUT; break;
+                case 5: chatChannel = CHANNEL_LOCAL_OOC; break;
+                case 2:
+                default: chatChannel = CHANNEL_SAY; break;
+            }
+            updateToggleButtons();
+        }
+    }
+
     void GUIChat::setChatChannel(ChatChannel channel)
     {
         chatChannel = channel;
-        const char* setting = chatChannel == CHANNEL_LOCAL ? "local"
-            : (chatChannel == CHANNEL_GLOBAL ? "global" : "default");
+        const char* setting = "say";
+        switch (chatChannel)
+        {
+            case CHANNEL_WHISPER: setting = "whisper"; break;
+            case CHANNEL_SHOUT: setting = "shout"; break;
+            case CHANNEL_LOCAL_OOC: setting = "local"; break;
+            case CHANNEL_GLOBAL_OOC: setting = "global"; break;
+            default: break;
+        }
         Settings::Manager::setString("send channel", "Chat", setting);
         Settings::Manager::saveUser();
         updateToggleButtons();
@@ -1248,7 +1457,8 @@ namespace mwmp
     void GUIChat::setChatStyle(ChatStyle style)
     {
         chatStyle = style;
-        const char* setting = chatStyle == STYLE_ME ? "me" : (chatStyle == STYLE_DO ? "do" : "plain");
+        const char* setting = chatStyle == STYLE_ME ? "me"
+            : (chatStyle == STYLE_DO ? "do" : (chatStyle == STYLE_TRY ? "try" : "plain"));
         Settings::Manager::setString("send style", "Chat", setting);
         Settings::Manager::saveUser();
         updateToggleButtons();
@@ -1328,11 +1538,11 @@ namespace mwmp
         groupTopicSync = controlBool(fields, 4);
         groupPendingInvite = controlBool(fields, 5);
 
-        const std::string groupName = fields.size() > 6 ? fields[6] : std::string();
-        const std::string leaderName = fields.size() > 7 ? fields[7] : std::string();
+        const std::string groupName = fields.size() > 6 ? unescapeControlField(fields[6]) : std::string();
+        const std::string leaderName = fields.size() > 7 ? unescapeControlField(fields[7]) : std::string();
         const std::string membersField = fields.size() > 8 ? fields[8] : std::string();
-        const std::string inviteFrom = fields.size() > 9 ? fields[9] : std::string();
-        const std::string inviteGroup = fields.size() > 10 ? fields[10] : std::string();
+        const std::string inviteFrom = fields.size() > 9 ? unescapeControlField(fields[9]) : std::string();
+        const std::string inviteGroup = fields.size() > 10 ? unescapeControlField(fields[10]) : std::string();
 
         std::ostringstream info;
         if (!groupInGroup)
@@ -1360,7 +1570,7 @@ namespace mwmp
                 if (encoded.empty())
                     continue;
                 const std::vector<std::string> member = splitControlFields(encoded, '^');
-                const std::string name = !member.empty() ? member[0] : "?";
+                const std::string name = !member.empty() ? unescapeControlField(member[0]) : "?";
                 const bool online = member.size() > 1 && member[1] == "1";
                 const bool sameCell = member.size() > 2 && member[2] == "1";
                 const bool leader = member.size() > 3 && member[3] == "1";
@@ -1379,6 +1589,9 @@ namespace mwmp
 
     void GUIChat::onTabClicked(MyGUI::Widget* sender)
     {
+        // Tabs only exist while the expanded menu is on screen, but keep this
+        // defensive: any tab interaction implies the menu tier.
+        setMenuState(true);
         if (sender == mTabGroup)
             selectTab(TAB_GROUP);
         else if (sender == mTabHome)
@@ -1391,17 +1604,30 @@ namespace mwmp
 
     void GUIChat::onModeClicked(MyGUI::Widget* sender)
     {
-        setRpMode(sender == mModeRp);
+        // X054: RP mode belongs to coreChat (customVariables.RPStatus), not to
+        // a client setting. /rp is a toggle, so only send it when the requested
+        // state actually differs, then redraw from the server's reply.
+        const bool wanted = (sender == mModeRp);
+        if (wanted == rpMode)
+            return;
+
+        send("/rp");
+        setRpMode(wanted);
+        requestChatState();
     }
 
     void GUIChat::onChannelClicked(MyGUI::Widget* sender)
     {
-        if (sender == mChannelLocal)
-            setChatChannel(CHANNEL_LOCAL);
-        else if (sender == mChannelGlobal)
-            setChatChannel(CHANNEL_GLOBAL);
+        if (sender == mChannelWhisper)
+            setChatChannel(CHANNEL_WHISPER);
+        else if (sender == mChannelShout)
+            setChatChannel(CHANNEL_SHOUT);
+        else if (sender == mChannelLocalOoc)
+            setChatChannel(CHANNEL_LOCAL_OOC);
+        else if (sender == mChannelGlobalOoc)
+            setChatChannel(CHANNEL_GLOBAL_OOC);
         else
-            setChatChannel(CHANNEL_DEFAULT);
+            setChatChannel(CHANNEL_SAY);
     }
 
     void GUIChat::onStyleClicked(MyGUI::Widget* sender)
@@ -1410,6 +1636,8 @@ namespace mwmp
             setChatStyle(STYLE_ME);
         else if (sender == mStyleDo)
             setChatStyle(STYLE_DO);
+        else if (sender == mStyleTry)
+            setChatStyle(STYLE_TRY);
         else
             setChatStyle(STYLE_PLAIN);
     }
@@ -1468,7 +1696,11 @@ namespace mwmp
         {
             if (sender != mColorButtons[i] || static_cast<std::size_t>(i) >= colorPalette.size())
                 continue;
+            // /chatcolor now writes customVariables.chatColor, the same
+            // variable /color writes, so the pick is live everywhere at once.
             send("/chatcolor " + std::to_string(i + 1));
+            selectedColorIndex = i;
+            updateColorButtons();
             break;
         }
     }
@@ -1533,7 +1765,7 @@ namespace mwmp
 
     void GUIChat::onDragStart(MyGUI::Widget*, int, int, MyGUI::MouseButton id)
     {
-        if (id != MyGUI::MouseButton::Left || !editState)
+        if (id != MyGUI::MouseButton::Left || !editState || !menuState)
             return;
         dragStartMouse = MyGUI::InputManager::getInstance().getMousePosition();
         dragStartWindow = mMainWidget->getPosition();
@@ -1541,7 +1773,7 @@ namespace mwmp
 
     void GUIChat::onDrag(MyGUI::Widget*, int, int, MyGUI::MouseButton id)
     {
-        if (id != MyGUI::MouseButton::Left || !editState)
+        if (id != MyGUI::MouseButton::Left || !editState || !menuState)
             return;
 
         const MyGUI::IntPoint mouse = MyGUI::InputManager::getInstance().getMousePosition();
@@ -1575,11 +1807,22 @@ namespace mwmp
         panelCoord = mMainWidget->getCoord();
     }
 
+    void GUIChat::applyStateGeometry()
+    {
+        const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
+        if (editState && menuState)
+            applyPanelGeometry(view.width, view.height);
+        else
+            applyHudGeometry(view.width, view.height);
+    }
+
     void GUIChat::syncInteractiveInputMode()
     {
         MWBase::WindowManager* windowManager = MWBase::Environment::get().getWindowManager();
         const MWGui::GuiMode playerMenuMode = static_cast<MWGui::GuiMode>(GUIController::GM_ARENAMP_PlayerMenu);
-        const bool interactive = !mainMenuOpen && (editState || historyReviewState);
+        // X054: the compact HUD caret deliberately does NOT enter GUI mode, so
+        // mouse-look stays live exactly as it did before the player menu existed.
+        const bool interactive = !mainMenuOpen && ((editState && menuState) || historyReviewState);
 
         if (interactive)
         {
@@ -1623,7 +1866,7 @@ namespace mwmp
         if (!mMainWidget)
             return;
 
-        if (editState)
+        if (editState && menuState)
             panelCoord = mMainWidget->getCoord();
         Settings::Manager::setInt("x", "Chat", panelCoord.left);
         Settings::Manager::setInt("y", "Chat", panelCoord.top);
@@ -1772,8 +2015,11 @@ namespace mwmp
         }
 
         const std::string channel = Settings::Manager::getString("send channel", "Chat");
-        const ChatChannel configuredChannel = channel == "local" ? CHANNEL_LOCAL
-            : (channel == "global" ? CHANNEL_GLOBAL : CHANNEL_DEFAULT);
+        ChatChannel configuredChannel = CHANNEL_SAY;
+        if (channel == "whisper") configuredChannel = CHANNEL_WHISPER;
+        else if (channel == "shout") configuredChannel = CHANNEL_SHOUT;
+        else if (channel == "local") configuredChannel = CHANNEL_LOCAL_OOC;
+        else if (channel == "global") configuredChannel = CHANNEL_GLOBAL_OOC;
         if (chatChannel != configuredChannel)
         {
             chatChannel = configuredChannel;
@@ -1781,7 +2027,8 @@ namespace mwmp
         }
 
         const std::string style = Settings::Manager::getString("send style", "Chat");
-        const ChatStyle configuredStyle = style == "me" ? STYLE_ME : (style == "do" ? STYLE_DO : STYLE_PLAIN);
+        const ChatStyle configuredStyle = style == "me" ? STYLE_ME
+            : (style == "do" ? STYLE_DO : (style == "try" ? STYLE_TRY : STYLE_PLAIN));
         if (chatStyle != configuredStyle)
         {
             chatStyle = configuredStyle;
@@ -1970,32 +2217,43 @@ namespace mwmp
         tabs.push_back(mReturnButton);
         layoutRow(tabs, titleWidth, 4, std::max(120, mDragHandle->getWidth() - titleWidth - 10), 24, sRowGap);
 
-        mChatToolbar->setCoord(sSideMargin, 44, inner, sToolbarHeight);
+        // X054: one container, two rows. Row 1 is the RP switch plus coreChat's
+        // five speech channels; row 2 is the roleplay action styles and the two
+        // drawers. Nine buttons on one line was already tight in RU, and
+        // thirteen simply do not fit.
+        mChatToolbar->setCoord(sSideMargin, sToolbarTop, inner, sToolbarHeight * sToolbarRows);
         std::vector<MyGUI::Widget*> toolbar;
         toolbar.push_back(mModeOoc);
         toolbar.push_back(mModeRp);
-        toolbar.push_back(mChannelDefault);
-        toolbar.push_back(mChannelLocal);
-        toolbar.push_back(mChannelGlobal);
-        toolbar.push_back(mStylePlain);
-        toolbar.push_back(mStyleMe);
-        toolbar.push_back(mStyleDo);
-        toolbar.push_back(mEmojiToggleButton);
-        toolbar.push_back(mColorToggleButton);
+        toolbar.push_back(mChannelSay);
+        toolbar.push_back(mChannelWhisper);
+        toolbar.push_back(mChannelShout);
+        toolbar.push_back(mChannelLocalOoc);
+        toolbar.push_back(mChannelGlobalOoc);
         layoutRow(toolbar, 0, 2, inner, 26, sRowGap);
 
-        mEmojiBar->setCoord(sSideMargin, 78, inner, sDrawerHeight);
+        std::vector<MyGUI::Widget*> toolbar2;
+        toolbar2.push_back(mStylePlain);
+        toolbar2.push_back(mStyleMe);
+        toolbar2.push_back(mStyleDo);
+        toolbar2.push_back(mStyleTry);
+        toolbar2.push_back(mEmojiToggleButton);
+        toolbar2.push_back(mColorToggleButton);
+        layoutRow(toolbar2, 0, sToolbarHeight + 2, inner, 26, sRowGap);
+
+        mEmojiBar->setCoord(sSideMargin, sDrawerTop, inner, sDrawerHeight);
         std::vector<MyGUI::Widget*> emoji;
         for (int i = 0; i < sEmojiSlotCount; ++i)
             emoji.push_back(mEmojiButtons[i]);
         layoutGrid(emoji, 6, 6, inner - 12, 26, 10, 4);
 
-        mColorBar->setCoord(sSideMargin, 78, inner, sDrawerHeight);
+        // 40 swatches over two rows of 20.
+        mColorBar->setCoord(sSideMargin, sDrawerTop, inner, sColorDrawerHeight);
         mColorBarLabel->setCoord(8, 4, inner - 16, 20);
         std::vector<MyGUI::Widget*> swatches;
         for (int i = 0; i < sColorSlotCount; ++i)
             swatches.push_back(mColorButtons[i]);
-        layoutGrid(swatches, 6, 28, inner - 12, 26, 16, 4);
+        layoutGrid(swatches, 6, 28, inner - 12, 26, 20, 4);
 
         const int footerTop = std::max(120, mainHeight - 36);
         const int sendWidth = std::max(90, std::min(160, inner / 5));
@@ -2156,7 +2414,7 @@ namespace mwmp
 
     void GUIChat::requestColorState()
     {
-        send("/chatcolor state");
+        requestChatState();
     }
 
     void GUIChat::rebuildColorPalette(const std::vector<std::string>& fields)
@@ -2171,6 +2429,7 @@ namespace mwmp
         }
 
         colorPalette.clear();
+        colorNames.clear();
         if (fields.size() > 2)
         {
             const std::vector<std::string> entries = splitControlFields(fields[2], ';');
@@ -2178,12 +2437,24 @@ namespace mwmp
             {
                 if (entries[i].empty())
                     continue;
+
+                // X054: each record is "#RRGGBB^localized name". The name is
+                // produced by coreChat's own dictionary, so the swatch tooltip
+                // matches what /color prints in the player's language.
+                const std::vector<std::string> parts = splitControlFields(entries[i], '^');
+                if (parts.empty())
+                    continue;
+
+                const std::string hex = unescapeControlField(parts[0]);
                 unsigned int rgb = 0;
-                if (parseHexColour(entries[i], rgb))
-                    colorPalette.push_back(std::make_pair(rgb, entries[i]));
+                if (!parseHexColour(hex, rgb))
+                    continue;
+                colorPalette.push_back(std::make_pair(rgb, hex));
+                colorNames.push_back(parts.size() > 1 ? unescapeControlField(parts[1]) : std::string());
             }
         }
 
+        applyChatState(fields);
         updateColorButtons();
     }
 
@@ -2205,6 +2476,12 @@ namespace mwmp
             setMenuCaption(mColorButtons[i], std::to_string(i + 1));
             mColorButtons[i]->setTextColour(toMyGuiColour(colorPalette[i].first));
             mColorButtons[i]->setStateSelected(i == selectedColorIndex);
+            if (static_cast<std::size_t>(i) < colorNames.size() && !colorNames[i].empty())
+            {
+                mColorButtons[i]->setUserString("ToolTipType", "Layout");
+                mColorButtons[i]->setUserString("ToolTipLayout", "TextToolTip");
+                mColorButtons[i]->setUserString("Caption_Text", colorNames[i]);
+            }
         }
     }
 
@@ -2230,7 +2507,7 @@ namespace mwmp
             const bool inMyGroup = parts.size() > 2 && parts[2] == "1";
             const bool sameCell = parts.size() > 3 && parts[3] == "1";
 
-            std::string label = parts[0];
+            std::string label = unescapeControlField(parts[0]);
             if (inMyGroup)
                 label += " [" + localizeArena("chat.group.tag.member") + "]";
             else if (hasGroup)
@@ -2238,7 +2515,7 @@ namespace mwmp
             if (sameCell)
                 label += " *";
 
-            groupRosterNames.push_back(parts[0]);
+            groupRosterNames.push_back(unescapeControlField(parts[0]));
             mGroupRoster->addItem(label);
         }
 
@@ -2265,7 +2542,7 @@ namespace mwmp
         playerListDetails.clear();
         mPlayersList->removeAllItems();
 
-        const std::string header = fields.size() > 1 ? fields[1] : std::string();
+        const std::string header = fields.size() > 1 ? unescapeControlField(fields[1]) : std::string();
         const std::string body = fields.size() > 2 ? fields[2] : std::string();
 
         const std::vector<std::string> entries = splitControlFields(body, ';');
@@ -2277,9 +2554,12 @@ namespace mwmp
             if (parts.empty() || parts[0].empty())
                 continue;
 
-            playerListNames.push_back(parts[0]);
-            playerListDetails.push_back(parts.size() > 1 ? parts[1] : std::string());
-            mPlayersList->addItem(parts.size() > 2 && !parts[2].empty() ? parts[2] : parts[0]);
+            // X054: the record separators are gone by now, so it is finally safe
+            // to turn "\n" back into the real line breaks the detail card needs.
+            playerListNames.push_back(unescapeControlField(parts[0]));
+            playerListDetails.push_back(parts.size() > 1 ? unescapeControlField(parts[1]) : std::string());
+            mPlayersList->addItem(unescapeControlField(
+                parts.size() > 2 && !parts[2].empty() ? parts[2] : parts[0]));
         }
 
         if (playerListNames.empty())

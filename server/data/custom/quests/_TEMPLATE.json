@@ -91,5 +91,28 @@
         "requirements": []
       }
     ]
+  },
+  "sourceLanguage": "RU",
+  "translations": {
+    "EN": {
+      "name": "Quest name",
+      "topics": {
+        "arena_my_topic": "a new conversation topic"
+      },
+      "stages": {
+        "10": {
+          "journal": "First server journal entry.",
+          "dialogue": "First server NPC line.",
+          "choices": {
+            "finish": "I have done what you asked.",
+            "later": "I am not finished yet."
+          }
+        },
+        "20": {
+          "journal": "Quest complete.",
+          "dialogue": "Thank you for your help."
+        }
+      }
+    }
   }
 }

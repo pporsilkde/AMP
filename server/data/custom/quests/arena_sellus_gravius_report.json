@@ -91,5 +91,35 @@
         "requirements": []
       }
     ]
+  },
+  "sourceLanguage": "RU",
+  "translations": {
+    "EN": {
+      "name": "A Report for Sellus Gravius",
+      "topics": {
+        "arena_sellus_report_topic": "census errand"
+      },
+      "offer": {
+        "dialogue": "Hold on. While you're here, the office has a short errand for you.",
+        "choices": {
+          "accept": "I'm listening.",
+          "decline": "Not right now."
+        }
+      },
+      "stages": {
+        "10": {
+          "journal": "Sellus Gravius asked me to confirm that I have been through the census and received my papers. I need to go back and tell him so.",
+          "dialogue": "Well then, do you have all your papers? The Empire needs it on record that the new arrival cleared the census.",
+          "choices": {
+            "confirm": "Yes, I have my documents.",
+            "later": "I haven't sorted the paperwork out yet."
+          }
+        },
+        "20": {
+          "journal": "Sellus Gravius entered me in the register and handed over my starting funds.",
+          "dialogue": "Recorded. Take your allowance - the Empire doesn't leave its own without a coin. You're on your own from here."
+        }
+      }
+    }
   }
 }

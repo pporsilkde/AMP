@@ -36,18 +36,25 @@ namespace mwmp
             CHAT_STATE_COUNT
         };
 
+        // X054: these mirror coreChat's own channels one for one. The menu no
+        // longer invents a parallel chat format - it emits the same commands a
+        // player would type, so /s, /w, /sh, // and /// behave identically
+        // whether they come from the toolbar or from the keyboard.
         enum ChatChannel
         {
-            CHANNEL_DEFAULT = 0,
-            CHANNEL_LOCAL,
-            CHANNEL_GLOBAL
+            CHANNEL_SAY = 0,
+            CHANNEL_WHISPER,
+            CHANNEL_SHOUT,
+            CHANNEL_LOCAL_OOC,
+            CHANNEL_GLOBAL_OOC
         };
 
         enum ChatStyle
         {
             STYLE_PLAIN = 0,
             STYLE_ME,
-            STYLE_DO
+            STYLE_DO,
+            STYLE_TRY
         };
 
         enum PlayerMenuTab
@@ -67,7 +74,12 @@ namespace mwmp
         };
 
         static const int sEmojiSlotCount = 20;
-        static const int sColorSlotCount = 16;
+        // X054: coreChat ships 40 nickname colours and /color offers all of
+        // them, so the menu strip has to carry the same 40. Only the first
+        // sLayoutColorSlotCount exist in tes3mp_chat.layout; the rest are
+        // created at runtime, so the .layout file does not need editing.
+        static const int sLayoutColorSlotCount = 16;
+        static const int sColorSlotCount = 40;
 
         MyGUI::EditBox* mCommandLine;
         MyGUI::EditBox* mHistory;
@@ -84,6 +96,11 @@ namespace mwmp
 
         void pressedChatMode();
         void pressedSay();
+        // X054: tapping the Say key restores the historic HUD caret; holding it
+        // is what promotes the strip into the full Player Menu.
+        void openPlayerMenu();
+        bool getMenuState() const;
+        void setSayKeyHeld(bool held);
         void setDelay(float newDelay);
         void setHistoryDisplayEnabled(bool enabled);
 
@@ -116,6 +133,7 @@ namespace mwmp
         void commandTextChanged(MyGUI::EditBox* _sender);
 
         void setEditState(bool state);
+        void setMenuState(bool state);
         void setHistoryReviewState(bool state);
         void scrollHistoryToBottom();
         void updateCommandLineLayout();
@@ -150,6 +168,10 @@ namespace mwmp
         void setChatStyle(ChatStyle style);
         void setRpMode(bool enabled);
         void setStayOpenAfterSend(bool enabled);
+        // X054: RP mode and the speech channel live on the server (coreChat),
+        // so the buttons ask for a change and then redraw from the reply.
+        void requestChatState();
+        void applyChatState(const std::vector<std::string>& fields);
 
         // X050 group page. All actions travel through the existing ChatMessage
         // command path (/groupui); no new network packet is required.
@@ -198,6 +220,7 @@ namespace mwmp
         void onDrag(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
         void applyHudGeometry(int width, int height);
         void applyPanelGeometry(int width, int height);
+        void applyStateGeometry();
         void syncInteractiveInputMode();
         void clampToViewport(int width, int height);
         void markGeometryDirty();
@@ -235,12 +258,15 @@ namespace mwmp
         MyGUI::Button* mPlayersInviteButton;
         MyGUI::Button* mModeOoc;
         MyGUI::Button* mModeRp;
-        MyGUI::Button* mChannelDefault;
-        MyGUI::Button* mChannelLocal;
-        MyGUI::Button* mChannelGlobal;
+        MyGUI::Button* mChannelSay;
+        MyGUI::Button* mChannelWhisper;
+        MyGUI::Button* mChannelShout;
+        MyGUI::Button* mChannelLocalOoc;
+        MyGUI::Button* mChannelGlobalOoc;
         MyGUI::Button* mStylePlain;
         MyGUI::Button* mStyleMe;
         MyGUI::Button* mStyleDo;
+        MyGUI::Button* mStyleTry;
         MyGUI::Button* mStayOpenButton;
         MyGUI::Button* mSendButton;
         MyGUI::Button* mReturnButton;
@@ -273,6 +299,7 @@ namespace mwmp
         std::vector<std::string> playerListNames;
         std::vector<std::string> playerListDetails;
         std::vector<std::pair<unsigned int, std::string>> colorPalette;
+        std::vector<std::string> colorNames;
         int selectedColorIndex;
         std::map<MyGUI::Widget*, std::string> menuCaptions;
         bool groupInGroup;
@@ -281,6 +308,8 @@ namespace mwmp
         bool groupTopicSync;
         bool groupPendingInvite;
         bool editState;
+        bool menuState;
+        bool sayKeyHeld;
         bool historyReviewState;
         bool mainMenuOpen;
         bool historyDisplayEnabled;

@@ -17,6 +17,13 @@ require("config")
 localization = require("localization")
 local coreLocaleLoaded = localization.LoadDictionary("core", "locales.core")
 local coreChatLocaleLoaded = localization.LoadDictionary("coreChat", "locales.coreChat")
+-- X054: wrapper strings of the server quest system. Quest content itself is
+-- translated inside each quest JSON, not here.
+local questLocaleLoaded = localization.LoadDictionary("serverQuests", "locales.serverQuests")
+if not questLocaleLoaded then
+    tes3mp.LogMessage(enumerations.log.WARN,
+        "ArenaMP serverQuests localization dictionary failed to load; quest notices will be suppressed")
+end
 if not coreLocaleLoaded then
     tes3mp.LogMessage(enumerations.log.ERROR,
         "ArenaMP core localization dictionary failed to load; safe built-in fallbacks are active")

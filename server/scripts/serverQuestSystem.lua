@@ -171,6 +171,129 @@ local function copy(value)
     return out
 end
 
+-- X054 ----------------------------------------------------------------------
+-- Quest localization.
+--
+-- A quest JSON is authored in one language ("sourceLanguage", RU by default)
+-- and may carry a "translations" block keyed by language code. The block
+-- mirrors the quest structure by id, so an author never has to renumber
+-- anything to add a language:
+--
+--   "sourceLanguage": "RU",
+--   "translations": {
+--     "EN": {
+--       "name": "A Drink for Caius",
+--       "topics":  { "<topicId>": "..." },
+--       "offer":   { "dialogue": "...", "choices": { "<choiceId>": "..." } },
+--       "stages":  { "10": { "journal": "...", "dialogue": "...",
+--                            "choices": { "<choiceId>": "..." } } }
+--     }
+--   }
+--
+-- Nothing is required: a missing language, a missing key or an empty string all
+-- fall through to the source text, so a partially translated quest still works.
+-- Requirements, rewards, stage numbers and ids are never translated - only text
+-- the player reads.
+local questLocalizationCache = {}
+
+local function questSourceLanguage(quest)
+    local language = tostring(quest.sourceLanguage or "RU"):upper()
+    if language ~= "EN" and language ~= "RU" then return "RU" end
+    return language
+end
+
+local function questLocalizationKey(quest)
+    return tostring(quest.version or 0) .. ":" .. tostring(quest.updatedAt or 0)
+end
+
+local function applyChoiceTranslations(choices, translated)
+    if type(choices) ~= "table" or type(translated) ~= "table" then return end
+    for _, choice in ipairs(choices) do
+        local text = translated[choice.id]
+        if type(text) == "string" and text ~= "" then choice.text = text end
+    end
+end
+
+local function buildLocalizedQuest(quest, translation)
+    local clone = copy(quest)
+
+    if type(translation.name) == "string" and translation.name ~= "" then
+        clone.name = translation.name
+    end
+
+    if clone.offer ~= nil and type(translation.offer) == "table" then
+        if type(translation.offer.dialogue) == "string" and translation.offer.dialogue ~= "" then
+            clone.offer.dialogue = translation.offer.dialogue
+        end
+        applyChoiceTranslations(clone.offer.choices, translation.offer.choices)
+    end
+
+    if type(translation.topics) == "table" then
+        for _, topic in ipairs(clone.topics or {}) do
+            local text = translation.topics[topic.id]
+            if type(text) == "string" and text ~= "" then topic.text = text end
+        end
+    end
+
+    if type(translation.stages) == "table" then
+        for _, stage in ipairs(clone.stages or {}) do
+            -- JSON object keys are strings; accept a numeric key too so a
+            -- hand-written table is not silently ignored.
+            local entry = translation.stages[tostring(stage.index)] or translation.stages[stage.index]
+            if type(entry) == "table" then
+                if type(entry.journal) == "string" and entry.journal ~= "" then stage.journal = entry.journal end
+                if type(entry.dialogue) == "string" and entry.dialogue ~= "" then stage.dialogue = entry.dialogue end
+                applyChoiceTranslations(stage.choices, entry.choices)
+            end
+        end
+    end
+
+    return clone
+end
+
+-- Returns the quest as the given player should read it. Falls back to the quest
+-- itself whenever there is nothing to apply, so callers never have to branch.
+function serverQuestSystem.GetLocalizedQuest(pid, quest)
+    if type(quest) ~= "table" then return quest end
+
+    local language = "RU"
+    if type(localization) == "table" and type(localization.GetLanguage) == "function" then
+        language = tostring(localization.GetLanguage(pid) or "RU"):upper()
+    end
+    if language == questSourceLanguage(quest) then return quest end
+
+    local translations = quest.translations
+    if type(translations) ~= "table" then return quest end
+    local translation = translations[language]
+    if type(translation) ~= "table" then return quest end
+
+    local key = questLocalizationKey(quest)
+    local perQuest = questLocalizationCache[quest.id]
+    if perQuest ~= nil and perQuest.key == key and perQuest[language] ~= nil then
+        return perQuest[language]
+    end
+
+    if perQuest == nil or perQuest.key ~= key then
+        perQuest = { key = key }
+        questLocalizationCache[quest.id] = perQuest
+    end
+    perQuest[language] = buildLocalizedQuest(quest, translation)
+    return perQuest[language]
+end
+
+local function invalidateQuestLocalization(questId)
+    if questId == nil then
+        questLocalizationCache = {}
+    else
+        questLocalizationCache[questId] = nil
+    end
+end
+
+local function questText(pid, key, variables)
+    if type(localization) ~= "table" or type(localization.Get) ~= "function" then return "" end
+    return localization.Get(pid, "serverQuests", key, variables)
+end
+
 local function saveJson(path, value)
     local ok, err = pcall(jsonInterface.save, path, value)
     if not ok then
@@ -270,6 +393,19 @@ local function normalizeQuest(quest)
         quest.offer.choices = normalizeChoiceList(quest.offer.choices)
     end
     quest.audit = type(quest.audit) == "table" and quest.audit or {}
+    -- X054: translation metadata is preserved verbatim; only the language codes
+    -- are normalized so "en"/"En"/"EN" all resolve to the same bucket.
+    quest.sourceLanguage = questSourceLanguage(quest)
+    if type(quest.translations) == "table" then
+        local normalized = {}
+        for language, block in pairs(quest.translations) do
+            if type(block) == "table" then
+                normalized[tostring(language):upper()] = block
+            end
+        end
+        quest.translations = normalized
+    end
+    invalidateQuestLocalization(quest.id)
 
     for _, topic in ipairs(quest.topics) do
         topic.id = normalizeId(topic.id)
@@ -866,7 +1002,10 @@ end
 
 -- Player-facing description of a single unmet requirement.
 local function requirementText(pid, requirement)
-    if type(requirement) ~= "table" then return "неизвестное условие" end
+    -- X054: these lines used to be hardcoded Russian, so an EN player was told
+    -- in Russian what they were missing. They now come from the serverQuests
+    -- dictionary like every other engine string.
+    if type(requirement) ~= "table" then return questText(pid, "requirement_unknown") end
 
     local kind = tostring(requirement.type or "?")
     local op = tostring(requirement.operator or ">=")
@@ -875,23 +1014,28 @@ local function requirementText(pid, requirement)
     if kind == "item" then
         local refId = tostring(requirement.refId or "?")
         local need = math.floor(tonumber(requirement.count or value or 1) or 1)
-        return string.format("предмет \"%s\": нужно %d, у тебя %d", refId, need, inventoryCount(pid, refId))
+        return questText(pid, "requirement_item",
+            { refId = refId, need = need, have = inventoryCount(pid, refId) })
     elseif kind == "gold" then
         local need = math.floor(tonumber(value or requirement.count or 0) or 0)
-        return string.format("золото: нужно %s%d, у тебя %d", op, need, inventoryCount(pid, "gold_001"))
+        return questText(pid, "requirement_gold",
+            { op = op, need = need, have = inventoryCount(pid, "gold_001") })
     elseif kind == "level" then
-        return string.format("уровень %s%s", op, tostring(value))
+        return questText(pid, "requirement_level", { op = op, value = tostring(value) })
     elseif kind == "skill" or kind == "attribute" then
-        return string.format("%s %s %s%s", kind, tostring(requirement.key or requirement.refId or "?"), op, tostring(value))
+        return questText(pid, "requirement_stat", { kind = kind,
+            key = tostring(requirement.key or requirement.refId or "?"), op = op, value = tostring(value) })
     elseif kind == "faction" or kind == "factionRank" then
-        return string.format("фракция %s %s%s", tostring(requirement.key or requirement.refId or "?"), op, tostring(value or ""))
+        return questText(pid, "requirement_faction",
+            { key = tostring(requirement.key or requirement.refId or "?"), op = op, value = tostring(value or "") })
     elseif kind == "questCompleted" then
-        return string.format("сначала заверши квест %s", tostring(requirement.questId or "?"))
+        return questText(pid, "requirement_quest_completed", { questId = tostring(requirement.questId or "?") })
     elseif kind == "questStage" or kind == "questState" then
-        return string.format("квест %s %s%s", tostring(requirement.questId or "?"), op, tostring(value))
+        return questText(pid, "requirement_quest_stage",
+            { questId = tostring(requirement.questId or "?"), op = op, value = tostring(value) })
     end
 
-    return string.format("%s %s%s", kind, op, tostring(value))
+    return questText(pid, "requirement_generic", { kind = kind, op = op, value = tostring(value) })
 end
 
 -- Requirements the player can satisfy by simply carrying something are worth a
@@ -1097,7 +1241,10 @@ function serverQuestSystem.StartQuest(pid, questId, force, silent)
     if state.state == "completed" or state.state == "failed" then state.completedAt = os.time() end
     Players[pid]:QuicksaveToDrive()
     if serverQuestSystem.SyncPlayer ~= nil then serverQuestSystem.SyncPlayer(pid) end
-    if not silent then sendRuntime(pid, "Started: " .. quest.name .. " (stage " .. stage.index .. ")", "progress") end
+    if not silent then
+        local view = serverQuestSystem.GetLocalizedQuest(pid, quest)
+        sendRuntime(pid, questText(pid, "quest_started", { name = view.name, stage = stage.index }), "progress")
+    end
     return true, state
 end
 
@@ -1135,7 +1282,14 @@ function serverQuestSystem.AdvanceQuest(pid, questId, targetStage, force, silent
     Players[pid]:QuicksaveToDrive()
     if serverQuestSystem.SyncPlayer ~= nil then serverQuestSystem.SyncPlayer(pid) end
     if not silent then
-        sendRuntime(pid, quest.name .. " -> stage " .. target.index .. (state.state ~= "active" and (" [" .. state.state .. "]") or ""), "progress")
+        local view = serverQuestSystem.GetLocalizedQuest(pid, quest)
+        if state.state ~= "active" then
+            sendRuntime(pid, questText(pid, "quest_advanced_state",
+                { name = view.name, stage = target.index, state = state.state }), "progress")
+        else
+            sendRuntime(pid, questText(pid, "quest_advanced",
+                { name = view.name, stage = target.index }), "progress")
+        end
     end
     return true, state
 end
@@ -1152,6 +1306,9 @@ function serverQuestSystem.GetAvailableTopics(pid, actorRefId, cellDescription)
         if giverMatches and cellMatches and (validation == nil or #validation.errors == 0) then
             local state = serverQuestSystem.GetPlayerState(pid, id)
             if state == nil or state.state == "active" then
+                -- X054: the green topic text is what the player clicks on, so it
+                -- comes from their language view of the quest.
+                quest = serverQuestSystem.GetLocalizedQuest(pid, quest)
                 for _, topic in ipairs(quest.topics) do
                     if topic.enabled ~= false then
                         table.insert(result, {
@@ -1173,6 +1330,12 @@ function serverQuestSystem.GetCurrentDialogue(pid, questId)
     local quest = serverQuestSystem.quests[normalizeId(questId)]
     if quest == nil then return nil end
     local state = serverQuestSystem.GetPlayerState(pid, quest.id)
+
+    -- X054: everything below this line is text the player reads - the quest
+    -- name, the NPC line and the answer buttons - so switch to their language
+    -- view. Ids, stage numbers and requirements are identical in every language,
+    -- so validation elsewhere is unaffected.
+    quest = serverQuestSystem.GetLocalizedQuest(pid, quest)
 
     local source = nil
     local stageIndex = 0
@@ -1218,7 +1381,7 @@ function serverQuestSystem.SyncPlayer(pid)
 
     sendTransport(pid, "CLEAR")
     for _, id in ipairs(sortedQuestIds("published")) do
-        local quest = serverQuestSystem.quests[id]
+        local quest = serverQuestSystem.GetLocalizedQuest(pid, serverQuestSystem.quests[id])
         local validation = serverQuestSystem.validation[id]
         local state = serverQuestSystem.GetPlayerState(pid, id)
         if validation == nil or #validation.errors == 0 then
@@ -1229,7 +1392,17 @@ function serverQuestSystem.SyncPlayer(pid)
                     quest.giver.cell, state.state, state.stage))
                 for _, entry in ipairs(state.journal or {}) do
                     local date = os.date("%Y-%m-%d %H:%M", tonumber(entry.time) or os.time())
-                    sendTransport(pid, transportLine("JOURNAL", quest.id, entry.stage, date, entry.text))
+                    -- X054: journal history is persisted in the authoring
+                    -- language. Rather than migrating saves, the stage is looked
+                    -- up again and its localized text is preferred; the stored
+                    -- text remains the fallback for a stage that has since been
+                    -- deleted or renumbered.
+                    local stage = findStage(quest, entry.stage)
+                    local text = entry.text
+                    if stage ~= nil and trim(tostring(stage.journal or "")) ~= "" then
+                        text = stage.journal
+                    end
+                    sendTransport(pid, transportLine("JOURNAL", quest.id, entry.stage, date, text))
                 end
             end
 
@@ -1421,7 +1594,12 @@ local PENDING_CHOICE_TIMEOUT = 20
 
 local function notifyJournalUpdate(pid, quest, stage)
     if stage == nil then return end
-    local text = trim(tostring(stage.journal or ""))
+
+    -- X054: the popup and the runtime line are read by the player, so both the
+    -- quest name and the journal text come from that player's language view.
+    local view = serverQuestSystem.GetLocalizedQuest(pid, quest)
+    local localizedStage = findStage(view, stage.index) or stage
+    local text = trim(tostring(localizedStage.journal or ""))
     if text == "" then return end
 
     -- The client mirrors these entries into the vanilla journal window through the
@@ -1429,9 +1607,9 @@ local function notifyJournalUpdate(pid, quest, stage)
     -- the player gets only this compact popup and no duplicate [Quest] chat line.
     local questConfig = type(config.serverQuests) == "table" and config.serverQuests or {}
     if questConfig.journalUpdatePopup ~= false then
-        callIfPresent("MessageBox", pid, -1, "Дневник обновлён: " .. tostring(quest.name))
+        callIfPresent("MessageBox", pid, -1, questText(pid, "journal_updated", { name = view.name }))
     end
-    sendRuntime(pid, tostring(quest.name) .. " — " .. text, "progress")
+    sendRuntime(pid, questText(pid, "journal_line", { name = view.name, text = text }), "progress")
 end
 
 -- Applies a server-validated dialogue choice. Returns ok, why.
@@ -1488,7 +1666,8 @@ function serverQuestSystem.ApplyChoice(pid, quest, topicId, choiceId, announce)
 
         if announce then
             if failing ~= nil then
-                sendRuntime(pid, "Не выполнено условие — " .. requirementText(pid, failing), "error")
+                sendRuntime(pid, questText(pid, "requirement_failed",
+                    { reason = requirementText(pid, failing) }), "error")
             elseif why ~= nil then
                 sendRuntime(pid, tostring(why), "error")
             end
@@ -1609,8 +1788,10 @@ local function handleServerQuestDialogue(eventStatus, pid, cellDescription, obje
                 if state == nil then
                     local ok, why, failing = serverQuestSystem.StartQuest(pid, questId, false, true)
                     if not ok then
-                        sendRuntime(pid, "Cannot start " .. quest.name .. ": "
-                            .. (failing ~= nil and requirementText(pid, failing) or tostring(why)), "error")
+                        sendRuntime(pid, questText(pid, "quest_cannot_start", {
+                            name = serverQuestSystem.GetLocalizedQuest(pid, quest).name,
+                            reason = failing ~= nil and requirementText(pid, failing) or tostring(why)
+                        }), "error")
                         serverQuestSystem.SyncPlayer(pid)
                         return
                     end

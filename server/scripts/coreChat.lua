@@ -572,6 +572,59 @@ local function installRPSystemChatFilter()
     rpSystemFilterInstalled = true
 end
 
+-- X054: the ArenaMP Player Menu drives the very same state these commands do,
+-- so everything it needs is exported here instead of being reimplemented.
+-- There is deliberately no second palette and no second nickname colour: the
+-- menu, /color and the /list rank colours all read customVariables.chatColor.
+coreChat.playerColors = playerColors
+coreChat.channels = {
+    globalOoc = CHANNEL_GLOBAL_OOC,
+    speak = CHANNEL_SPEAK,
+    whisper = CHANNEL_WHISPER,
+    shout = CHANNEL_SHOUT,
+    localOoc = CHANNEL_LOCAL_OOC
+}
+
+coreChat.GetColorName = function(pid, index)
+    index = tonumber(index)
+    if index == nil or playerColors[index] == nil then return "" end
+    return L(pid, string.format("color_name_%02d", index))
+end
+
+-- Index of the player's current colour inside playerColors, or nil when the
+-- stored value is not one of them (a hand-edited save, for example).
+coreChat.GetColorIndex = function(pid)
+    local custom = ensureCustomVariables(pid)
+    if custom == nil then return nil end
+    local current = custom.chatColor
+    if current == nil or current == "" then return nil end
+    for index, value in ipairs(playerColors) do
+        if value == current then return index end
+    end
+    return nil
+end
+
+coreChat.SetColorIndex = function(pid, index)
+    if not isLoggedIn(pid) then return false end
+    index = tonumber(index)
+    if index == nil or playerColors[index] == nil then return false end
+    initializePlayer(pid)
+    ensureCustomVariables(pid).chatColor = playerColors[index]
+    Players[pid]:Save()
+    return true
+end
+
+coreChat.GetChannel = function(pid)
+    local custom = ensureCustomVariables(pid)
+    if custom == nil then return CHANNEL_SPEAK end
+    return tonumber(custom.chat_channel) or CHANNEL_SPEAK
+end
+
+coreChat.IsPopupMode = function(pid)
+    local custom = ensureCustomVariables(pid)
+    return custom ~= nil and custom.popupMode == true
+end
+
 coreChat.IsRP = isRP
 coreChat.GetPlayerColor = ensurePlayerColor
 coreChat.GetDisplayName = function(pid)

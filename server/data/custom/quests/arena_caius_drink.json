@@ -114,5 +114,35 @@
         "requirements": []
       }
     ]
+  },
+  "sourceLanguage": "RU",
+  "translations": {
+    "EN": {
+      "name": "A Drink for Caius",
+      "topics": {
+        "arena_caius_drink_topic": "a little drink"
+      },
+      "offer": {
+        "dialogue": "Listen, before we get back to business - fetch me a bottle of mazte, would you? Nothing rare, just an ordinary bottle.",
+        "choices": {
+          "accept": "All right, I'll bring you the mazte.",
+          "decline": "Not right now."
+        }
+      },
+      "stages": {
+        "10": {
+          "journal": "Caius Cosades asked me to bring him a bottle of mazte. Almost any tavern in Balmora sells it.",
+          "dialogue": "So, any luck with that drink? All I need is one bottle of mazte.",
+          "choices": {
+            "hand_over": "Here's the bottle of mazte.",
+            "not_yet": "Not yet. I'm still looking."
+          }
+        },
+        "20": {
+          "journal": "I brought Caius Cosades a bottle of mazte. He took it and paid me for the trouble.",
+          "dialogue": "Now that's more like it. Leave the bottle here. A bit of gold for your trouble - and I'll remember you were quick about it."
+        }
+      }
+    }
   }
 }
