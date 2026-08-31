@@ -1,5 +1,5 @@
 diff -ruN --binary a/apps/openmw/mwclass/creature.cpp b/apps/openmw/mwclass/creature.cpp
---- a/apps/openmw/mwclass/creature.cpp	2026-08-31 18:49:01.040063169 +0000
+--- a/apps/openmw/mwclass/creature.cpp	2026-08-31 19:09:05.608958257 +0000
 +++ b/apps/openmw/mwclass/creature.cpp	2026-08-31 18:45:37.998716081 +0000
 @@ -310,6 +310,18 @@
              End of tes3mp change (major)
@@ -40,7 +40,7 @@ diff -ruN --binary a/apps/openmw/mwclass/creature.cpp b/apps/openmw/mwclass/crea
  
          // NOTE: 'object' and/or 'attacker' may be empty.        
 diff -ruN --binary a/apps/openmw/mwmechanics/actors.cpp b/apps/openmw/mwmechanics/actors.cpp
---- a/apps/openmw/mwmechanics/actors.cpp	2026-08-31 18:49:01.047073422 +0000
+--- a/apps/openmw/mwmechanics/actors.cpp	2026-08-31 19:09:05.635397072 +0000
 +++ b/apps/openmw/mwmechanics/actors.cpp	2026-08-31 18:47:52.915011440 +0000
 @@ -1425,6 +1425,19 @@
          if (creatureStats2.isDead())
@@ -113,7 +113,7 @@ diff -ruN --binary a/apps/openmw/mwmechanics/actors.cpp b/apps/openmw/mwmechanic
          getActorsSidingWith(MWMechanics::getPlayer(), playerAllies, cachedAllies);
  
 diff -ruN --binary a/apps/openmw/mwmechanics/mechanicsmanagerimp.cpp b/apps/openmw/mwmechanics/mechanicsmanagerimp.cpp
---- a/apps/openmw/mwmechanics/mechanicsmanagerimp.cpp	2026-08-31 18:49:01.049101928 +0000
+--- a/apps/openmw/mwmechanics/mechanicsmanagerimp.cpp	2026-08-31 19:09:05.642067990 +0000
 +++ b/apps/openmw/mwmechanics/mechanicsmanagerimp.cpp	2026-08-31 18:45:58.709328024 +0000
 @@ -21,6 +21,7 @@
  #include "../mwmp/LocalPlayer.hpp"
@@ -147,7 +147,7 @@ diff -ruN --binary a/apps/openmw/mwmechanics/mechanicsmanagerimp.cpp b/apps/open
          // Guards only consume this provenance for the local player, but keeping it here
          // also makes the result consistent if authority changes during the fight.
 diff -ruN --binary a/apps/openmw/mwmechanics/xpleveling.cpp b/apps/openmw/mwmechanics/xpleveling.cpp
---- a/apps/openmw/mwmechanics/xpleveling.cpp	2026-08-31 18:49:01.050556104 +0000
+--- a/apps/openmw/mwmechanics/xpleveling.cpp	2026-08-31 19:09:05.647816032 +0000
 +++ b/apps/openmw/mwmechanics/xpleveling.cpp	2026-08-31 18:48:47.752737176 +0000
 @@ -33,6 +33,8 @@
  #include "../mwworld/ptr.hpp"
@@ -181,7 +181,7 @@ diff -ruN --binary a/apps/openmw/mwmechanics/xpleveling.cpp b/apps/openmw/mwmech
          MWBase::Environment::get().getMechanicsManager()->getActorsSidingWith(player, followers);
          return followers.find(attacker) != followers.end();
 diff -ruN --binary a/apps/openmw/mwmp/MechanicsHelper.cpp b/apps/openmw/mwmp/MechanicsHelper.cpp
---- a/apps/openmw/mwmp/MechanicsHelper.cpp	2026-08-31 18:49:01.051781513 +0000
+--- a/apps/openmw/mwmp/MechanicsHelper.cpp	2026-08-31 19:09:05.670201376 +0000
 +++ b/apps/openmw/mwmp/MechanicsHelper.cpp	2026-08-31 18:48:20.608788219 +0000
 @@ -10,6 +10,9 @@
  #include "../mwbase/world.hpp"
@@ -356,7 +356,7 @@ diff -ruN --binary a/apps/openmw/mwmp/MechanicsHelper.cpp b/apps/openmw/mwmp/Mec
  
  void MechanicsHelper::processAttack(Attack attack, const MWWorld::Ptr& attacker)
 diff -ruN --binary a/apps/openmw/mwmp/MechanicsHelper.hpp b/apps/openmw/mwmp/MechanicsHelper.hpp
---- a/apps/openmw/mwmp/MechanicsHelper.hpp	2026-08-31 18:49:01.051835967 +0000
+--- a/apps/openmw/mwmp/MechanicsHelper.hpp	2026-08-31 19:09:05.670334881 +0000
 +++ b/apps/openmw/mwmp/MechanicsHelper.hpp	2026-08-31 18:48:27.001064029 +0000
 @@ -4,9 +4,12 @@
  #include <components/openmw-mp/Base/BaseStructs.hpp>
@@ -402,7 +402,7 @@ diff -ruN --binary a/apps/openmw/mwmp/MechanicsHelper.hpp b/apps/openmw/mwmp/Mec
  
      bool getSpellSuccess(std::string spellId, const MWWorld::Ptr& caster);
 diff -ruN --binary a/apps/openmw/mwmp/PlayerList.cpp b/apps/openmw/mwmp/PlayerList.cpp
---- a/apps/openmw/mwmp/PlayerList.cpp	2026-08-31 18:49:01.052172275 +0000
+--- a/apps/openmw/mwmp/PlayerList.cpp	2026-08-31 19:09:05.671014812 +0000
 +++ b/apps/openmw/mwmp/PlayerList.cpp	2026-08-31 18:48:03.218629062 +0000
 @@ -143,6 +143,21 @@
      return playersInCell;
@@ -427,7 +427,7 @@ diff -ruN --binary a/apps/openmw/mwmp/PlayerList.cpp b/apps/openmw/mwmp/PlayerLi
  {
      if (ptr.mRef == nullptr)
 diff -ruN --binary a/apps/openmw/mwmp/PlayerList.hpp b/apps/openmw/mwmp/PlayerList.hpp
---- a/apps/openmw/mwmp/PlayerList.hpp	2026-08-31 18:49:01.052184931 +0000
+--- a/apps/openmw/mwmp/PlayerList.hpp	2026-08-31 19:09:05.671422120 +0000
 +++ b/apps/openmw/mwmp/PlayerList.hpp	2026-08-31 18:48:10.369338704 +0000
 @@ -12,6 +12,7 @@
  #include "DedicatedPlayer.hpp"
@@ -449,7 +449,7 @@ diff -ruN --binary a/apps/openmw/mwmp/PlayerList.hpp b/apps/openmw/mwmp/PlayerLi
  
          static void enableMarkers(const ESM::Cell& cell);
 diff -ruN --binary a/server/scripts/CoreArenaMP_BaseScript.lua b/server/scripts/CoreArenaMP_BaseScript.lua
---- a/server/scripts/CoreArenaMP_BaseScript.lua	2026-08-31 18:49:01.073183582 +0000
+--- a/server/scripts/CoreArenaMP_BaseScript.lua	2026-08-31 19:09:05.742759072 +0000
 +++ b/server/scripts/CoreArenaMP_BaseScript.lua	2026-08-31 18:40:31.199218056 +0000
 @@ -8,7 +8,7 @@
  BaseScript.modules = {}
@@ -461,7 +461,7 @@ diff -ruN --binary a/server/scripts/CoreArenaMP_BaseScript.lua b/server/scripts/
  
  function BaseScript.RegisterModule(name, version)
 diff -ruN --binary a/server/scripts/CoreArenaMP_DataManager.lua b/server/scripts/CoreArenaMP_DataManager.lua
---- a/server/scripts/CoreArenaMP_DataManager.lua	2026-08-31 18:49:01.073211067 +0000
+--- a/server/scripts/CoreArenaMP_DataManager.lua	2026-08-31 19:09:05.743110978 +0000
 +++ b/server/scripts/CoreArenaMP_DataManager.lua	2026-08-31 18:40:31.188778568 +0000
 @@ -9,7 +9,7 @@
  
@@ -671,7 +671,7 @@ diff -ruN --binary a/server/scripts/ampCore.lua b/server/scripts/ampCore.lua
 +
 +return ampCore
 diff -ruN --binary a/server/scripts/config.lua b/server/scripts/config.lua
---- a/server/scripts/config.lua	2026-08-31 18:49:01.073094951 +0000
+--- a/server/scripts/config.lua	2026-08-31 19:09:05.741742344 +0000
 +++ b/server/scripts/config.lua	2026-08-31 18:43:29.094876056 +0000
 @@ -102,19 +102,36 @@
  -- convenience profiles; remote servers still choose their own value.
@@ -716,7 +716,7 @@ diff -ruN --binary a/server/scripts/config.lua b/server/scripts/config.lua
      -- XP bar already gives the player feedback.
      ["chat notifications"] = true,
 diff -ruN --binary a/server/scripts/configHotReload.lua b/server/scripts/configHotReload.lua
---- a/server/scripts/configHotReload.lua	2026-08-31 18:49:01.073155627 +0000
+--- a/server/scripts/configHotReload.lua	2026-08-31 19:09:05.742391432 +0000
 +++ b/server/scripts/configHotReload.lua	2026-08-31 18:40:31.193248238 +0000
 @@ -113,7 +113,7 @@
      local contents = readConfigFile()
@@ -764,7 +764,7 @@ diff -ruN --binary a/server/scripts/configHotReload.lua b/server/scripts/configH
  end
  
 diff -ruN --binary a/server/scripts/coreChat.lua b/server/scripts/coreChat.lua
---- a/server/scripts/coreChat.lua	2026-08-31 18:49:01.073357435 +0000
+--- a/server/scripts/coreChat.lua	2026-08-31 19:09:05.743383514 +0000
 +++ b/server/scripts/coreChat.lua	2026-08-31 18:40:31.201675235 +0000
 @@ -667,6 +667,6 @@
  
@@ -775,7 +775,7 @@ diff -ruN --binary a/server/scripts/coreChat.lua b/server/scripts/coreChat.lua
  
  return coreChat
 diff -ruN --binary a/server/scripts/groupHelper.lua b/server/scripts/groupHelper.lua
---- a/server/scripts/groupHelper.lua	2026-08-31 18:49:01.073630487 +0000
+--- a/server/scripts/groupHelper.lua	2026-08-31 19:09:05.746555216 +0000
 +++ b/server/scripts/groupHelper.lua	2026-08-31 18:43:14.821716926 +0000
 @@ -1,10 +1,13 @@
 --- ArenaMP X050: server-authoritative group core integrated with the X049 player menu.
@@ -1135,7 +1135,7 @@ diff -ruN --binary a/server/scripts/groupHelper.lua b/server/scripts/groupHelper
      if not cfg.protectSummons or not isValidPid(pid) then return end
      tes3mp.ReadReceivedObjectList()
 diff -ruN --binary a/server/scripts/helperAreana.lua b/server/scripts/helperAreana.lua
---- a/server/scripts/helperAreana.lua	2026-08-31 18:49:01.073830222 +0000
+--- a/server/scripts/helperAreana.lua	2026-08-31 19:09:05.747575421 +0000
 +++ b/server/scripts/helperAreana.lua	2026-08-31 18:40:31.200627950 +0000
 @@ -56,7 +56,7 @@
      variables[OWNER_KEY] = tostring(Players[pid].accountName)
@@ -1156,7 +1156,7 @@ diff -ruN --binary a/server/scripts/helperAreana.lua b/server/scripts/helperArea
          end
          player.data.settings.consoleAllowed = true
 diff -ruN --binary a/server/scripts/logicHandler.lua b/server/scripts/logicHandler.lua
---- a/server/scripts/logicHandler.lua	2026-08-31 18:49:01.073991552 +0000
+--- a/server/scripts/logicHandler.lua	2026-08-31 19:09:05.749286024 +0000
 +++ b/server/scripts/logicHandler.lua	2026-08-31 18:40:31.188198519 +0000
 @@ -832,7 +832,7 @@
  
@@ -1168,7 +1168,7 @@ diff -ruN --binary a/server/scripts/logicHandler.lua b/server/scripts/logicHandl
  
                              -- shouldRepeat is passed explicitly: packetBuilder feeds
 diff -ruN --binary a/server/scripts/positionSafetyHelper.lua b/server/scripts/positionSafetyHelper.lua
---- a/server/scripts/positionSafetyHelper.lua	2026-08-31 18:49:01.074452376 +0000
+--- a/server/scripts/positionSafetyHelper.lua	2026-08-31 19:09:05.754074803 +0000
 +++ b/server/scripts/positionSafetyHelper.lua	2026-08-31 18:40:31.201016555 +0000
 @@ -71,7 +71,7 @@
      local rx, rz = tes3mp.GetRotX(pid), tes3mp.GetRotZ(pid)
@@ -1189,7 +1189,7 @@ diff -ruN --binary a/server/scripts/positionSafetyHelper.lua b/server/scripts/po
      end
      return finish(shouldReassert)
 diff -ruN --binary a/server/scripts/privateCellInstances.lua b/server/scripts/privateCellInstances.lua
---- a/server/scripts/privateCellInstances.lua	2026-08-31 18:49:01.074502630 +0000
+--- a/server/scripts/privateCellInstances.lua	2026-08-31 19:09:05.754228195 +0000
 +++ b/server/scripts/privateCellInstances.lua	2026-08-31 18:40:31.187375698 +0000
 @@ -211,7 +211,7 @@
      tes3mp.SendPos(pid)
@@ -1237,7 +1237,7 @@ diff -ruN --binary a/server/scripts/privateCellInstances.lua b/server/scripts/pr
      player.privateCellLoginRestore = nil
      return false
 diff -ruN --binary a/server/scripts/questIndexStore.lua b/server/scripts/questIndexStore.lua
---- a/server/scripts/questIndexStore.lua	2026-08-31 18:49:01.074521659 +0000
+--- a/server/scripts/questIndexStore.lua	2026-08-31 19:09:05.754509373 +0000
 +++ b/server/scripts/questIndexStore.lua	2026-08-31 18:40:31.201997672 +0000
 @@ -122,13 +122,13 @@
          if autoGenerateEnabled() then
@@ -1392,7 +1392,7 @@ diff -ruN --binary a/server/scripts/questIndexStore.lua b/server/scripts/questIn
              return
          end
 diff -ruN --binary a/server/scripts/questItemPhasing.lua b/server/scripts/questItemPhasing.lua
---- a/server/scripts/questItemPhasing.lua	2026-08-31 18:49:01.074541742 +0000
+--- a/server/scripts/questItemPhasing.lua	2026-08-31 19:09:05.755033061 +0000
 +++ b/server/scripts/questItemPhasing.lua	2026-08-31 18:40:31.194156983 +0000
 @@ -116,7 +116,7 @@
      if migrate(data) then
@@ -1440,7 +1440,7 @@ diff -ruN --binary a/server/scripts/questItemPhasing.lua b/server/scripts/questI
  
      return accepted
 diff -ruN --binary a/server/scripts/resetHelrer.lua b/server/scripts/resetHelrer.lua
---- a/server/scripts/resetHelrer.lua	2026-08-31 18:49:01.074693455 +0000
+--- a/server/scripts/resetHelrer.lua	2026-08-31 19:09:05.756085796 +0000
 +++ b/server/scripts/resetHelrer.lua	2026-08-31 18:40:31.186424330 +0000
 @@ -107,7 +107,7 @@
      end
@@ -1646,7 +1646,7 @@ diff -ruN --binary a/server/scripts/resetHelrer.lua b/server/scripts/resetHelrer
          end
      end
 diff -ruN --binary a/server/scripts/serverCore.lua b/server/scripts/serverCore.lua
---- a/server/scripts/serverCore.lua	2026-08-31 18:49:01.074752457 +0000
+--- a/server/scripts/serverCore.lua	2026-08-31 19:09:05.756977336 +0000
 +++ b/server/scripts/serverCore.lua	2026-08-31 18:40:31.195614309 +0000
 @@ -38,6 +38,9 @@
  
@@ -1668,8 +1668,8 @@ diff -ruN --binary a/server/scripts/serverCore.lua b/server/scripts/serverCore.l
  
  local rawConfigReloadCountdown = 0
 diff -ruN --binary a/server/scripts/serverQuestSystem.lua b/server/scripts/serverQuestSystem.lua
---- a/server/scripts/serverQuestSystem.lua	2026-08-31 18:49:01.074779797 +0000
-+++ b/server/scripts/serverQuestSystem.lua	2026-08-31 18:40:47.849965455 +0000
+--- a/server/scripts/serverQuestSystem.lua	2026-08-31 19:09:05.757626928 +0000
++++ b/server/scripts/serverQuestSystem.lua	2026-08-31 19:08:47.341175008 +0000
 @@ -34,7 +34,7 @@
  serverQuestSystem.validation = {}
  
@@ -1679,7 +1679,101 @@ diff -ruN --binary a/server/scripts/serverQuestSystem.lua b/server/scripts/serve
  end
  
  local function enabled()
-@@ -1717,7 +1717,7 @@
+@@ -1573,12 +1573,18 @@
+     return nil
+ end
+ 
+-local function sendDialogueResponse(pid, quest, topicId)
++-- Sends the NPC's reply. With closeChoices set, the reply carries no answers at
++-- all, which is how the player is handed back to the topic list: the dialogue
++-- window shows the topics again as soon as a RESPONSE arrives with zero
++-- choices (DialogueWindow::updateChoicePane hides the answer pane and unhides
++-- mTopicsList when the choice list is empty).
++local function sendDialogueResponse(pid, quest, topicId, closeChoices)
+     local dialogue = serverQuestSystem.GetCurrentDialogue(pid, quest.id)
+     if dialogue == nil then return end
++    local choices = closeChoices and {} or (dialogue.choices or {})
+     local fields = { quest.id, topicId, quest.giver.refId, quest.giver.cell,
+-        dialogue.text, dialogue.state, dialogue.stage, #(dialogue.choices or {}) }
+-    for _, choice in ipairs(dialogue.choices or {}) do
++        dialogue.text, dialogue.state, dialogue.stage, #choices }
++    for _, choice in ipairs(choices) do
+         table.insert(fields, choice.id)
+         table.insert(fields, choice.text)
+     end
+@@ -1630,7 +1636,9 @@
+         log(enumerations.log.WARN, "Rejected unavailable quest choice " .. tostring(choiceId) ..
+             " for " .. questId .. " from pid " .. tostring(pid))
+         if announce then
+-            sendDialogueResponse(pid, quest, topicId)
++            -- Re-offering the list the client just picked from would leave the
++            -- player clicking the same dead answer forever.
++            sendDialogueResponse(pid, quest, topicId, true)
+             serverQuestSystem.SyncPlayer(pid)
+         end
+         return false, "unavailable choice"
+@@ -1653,6 +1661,15 @@
+         ok, why = false, "Unsupported choice action"
+     end
+ 
++    -- Does the answer list stay open?
++    --
++    -- It used to, unconditionally, and that is what trapped the player: a
++    -- declined answer changes nothing, so the very same answers were sent back
++    -- and the only way out was to close the whole dialogue. A positive answer
++    -- whose requirements were not met behaved the same way. An answer that did
++    -- not move the quest forward must close the list and return to the topics.
++    local keepChoicesOpen = false
++
+     if ok then
+         serverQuestSystem.pendingChoice[pid] = nil
+ 
+@@ -1660,6 +1677,12 @@
+         if state ~= nil and state.stage ~= stageBefore then
+             notifyJournalUpdate(pid, quest, findStage(quest, state.stage))
+         end
++
++        -- Only a start/advance that genuinely moved the quest may open the next
++        -- stage's own answers, which is a legitimate chained conversation. An
++        -- action of "none" never moves anything, so it always closes.
++        keepChoicesOpen = authoritativeChoice.action ~= "none"
++            and state ~= nil and state.stage ~= stageBefore
+     else
+         log(enumerations.log.WARN, "Quest choice failed " .. questId .. ": " .. tostring(why)
+             .. (failing ~= nil and (" [" .. requirementText(pid, failing) .. "]") or ""))
+@@ -1682,12 +1705,30 @@
+                     choiceId = choiceId,
+                     time = os.time()
+                 }
++                -- This exact answer is about to be replayed against a fresh
++                -- inventory, so the list stays up for the moment that takes.
++                -- Every other failure closes it.
++                keepChoicesOpen = true
+             end
+         end
+     end
+ 
+     if announce then
+-        sendDialogueResponse(pid, quest, topicId)
++        -- Final loop guard. If the dialogue we are about to send still offers
++        -- the answer that was just applied, sending it would put the player
++        -- right back where they started no matter how the state moved.
++        --
++        -- Skipped while an inventory replay is pending: there the answers are
++        -- deliberately identical, because the very same answer is about to be
++        -- retried against fresh inventory data a moment from now.
++        if keepChoicesOpen and ok then
++            local nextDialogue = serverQuestSystem.GetCurrentDialogue(pid, questId)
++            if nextDialogue == nil or findChoice(nextDialogue.choices, choiceId) ~= nil then
++                keepChoicesOpen = false
++            end
++        end
++
++        sendDialogueResponse(pid, quest, topicId, not keepChoicesOpen)
+         serverQuestSystem.SyncPlayer(pid)
+     end
+ 
+@@ -1717,11 +1758,19 @@
  
      local ok = serverQuestSystem.ApplyChoice(pid, quest, pending.topicId, pending.choiceId, false)
      if ok then
@@ -1687,8 +1781,21 @@ diff -ruN --binary a/server/scripts/serverQuestSystem.lua b/server/scripts/serve
 +        log(enumerations.log.INFO, "replayed choice " .. tostring(pending.choiceId)
              .. " for " .. tostring(pending.questId) .. " after inventory resync (pid " .. tostring(pid) .. ")")
          sendDialogueResponse(pid, quest, pending.topicId)
-         serverQuestSystem.SyncPlayer(pid)
-@@ -3179,7 +3179,7 @@
+-        serverQuestSystem.SyncPlayer(pid)
++    else
++        -- The requirement really is unmet, not just stale. Without this the
++        -- client kept showing the answer list from the first attempt with no
++        -- reply and no way back to the topics.
++        log(enumerations.log.INFO, "replayed choice " .. tostring(pending.choiceId)
++            .. " for " .. tostring(pending.questId) .. " still fails after inventory resync (pid "
++            .. tostring(pid) .. ")")
++        sendDialogueResponse(pid, quest, pending.topicId, true)
+     end
++    serverQuestSystem.SyncPlayer(pid)
+ end
+ -- End of X048 --------------------------------------------------------------
+ 
+@@ -3179,7 +3228,7 @@
      end
  
      if shouldSync then
@@ -1697,7 +1804,7 @@ diff -ruN --binary a/server/scripts/serverQuestSystem.lua b/server/scripts/serve
              .. " in " .. tostring(cellDescription))
          serverQuestSystem.SyncPlayer(pid)
  
-@@ -3255,7 +3255,7 @@
+@@ -3255,7 +3304,7 @@
      customEventHooks.registerHandler("OnPlayerDisconnect", onPlayerDisconnectQuest)
      customEventHooks.registerValidator("OnObjectDialogueChoice", validateServerQuestDialogue)
      customEventHooks.registerHandler("OnObjectDialogueChoice", handleServerQuestDialogue)

@@ -1573,12 +1573,18 @@ local function findEligibleNextStage(pid, quest, state)
     return nil
 end
 
-local function sendDialogueResponse(pid, quest, topicId)
+-- Sends the NPC's reply. With closeChoices set, the reply carries no answers at
+-- all, which is how the player is handed back to the topic list: the dialogue
+-- window shows the topics again as soon as a RESPONSE arrives with zero
+-- choices (DialogueWindow::updateChoicePane hides the answer pane and unhides
+-- mTopicsList when the choice list is empty).
+local function sendDialogueResponse(pid, quest, topicId, closeChoices)
     local dialogue = serverQuestSystem.GetCurrentDialogue(pid, quest.id)
     if dialogue == nil then return end
+    local choices = closeChoices and {} or (dialogue.choices or {})
     local fields = { quest.id, topicId, quest.giver.refId, quest.giver.cell,
-        dialogue.text, dialogue.state, dialogue.stage, #(dialogue.choices or {}) }
-    for _, choice in ipairs(dialogue.choices or {}) do
+        dialogue.text, dialogue.state, dialogue.stage, #choices }
+    for _, choice in ipairs(choices) do
         table.insert(fields, choice.id)
         table.insert(fields, choice.text)
     end
@@ -1630,7 +1636,9 @@ function serverQuestSystem.ApplyChoice(pid, quest, topicId, choiceId, announce)
         log(enumerations.log.WARN, "Rejected unavailable quest choice " .. tostring(choiceId) ..
             " for " .. questId .. " from pid " .. tostring(pid))
         if announce then
-            sendDialogueResponse(pid, quest, topicId)
+            -- Re-offering the list the client just picked from would leave the
+            -- player clicking the same dead answer forever.
+            sendDialogueResponse(pid, quest, topicId, true)
             serverQuestSystem.SyncPlayer(pid)
         end
         return false, "unavailable choice"
@@ -1653,6 +1661,15 @@ function serverQuestSystem.ApplyChoice(pid, quest, topicId, choiceId, announce)
         ok, why = false, "Unsupported choice action"
     end
 
+    -- Does the answer list stay open?
+    --
+    -- It used to, unconditionally, and that is what trapped the player: a
+    -- declined answer changes nothing, so the very same answers were sent back
+    -- and the only way out was to close the whole dialogue. A positive answer
+    -- whose requirements were not met behaved the same way. An answer that did
+    -- not move the quest forward must close the list and return to the topics.
+    local keepChoicesOpen = false
+
     if ok then
         serverQuestSystem.pendingChoice[pid] = nil
 
@@ -1660,6 +1677,12 @@ function serverQuestSystem.ApplyChoice(pid, quest, topicId, choiceId, announce)
         if state ~= nil and state.stage ~= stageBefore then
             notifyJournalUpdate(pid, quest, findStage(quest, state.stage))
         end
+
+        -- Only a start/advance that genuinely moved the quest may open the next
+        -- stage's own answers, which is a legitimate chained conversation. An
+        -- action of "none" never moves anything, so it always closes.
+        keepChoicesOpen = authoritativeChoice.action ~= "none"
+            and state ~= nil and state.stage ~= stageBefore
     else
         log(enumerations.log.WARN, "Quest choice failed " .. questId .. ": " .. tostring(why)
             .. (failing ~= nil and (" [" .. requirementText(pid, failing) .. "]") or ""))
@@ -1682,12 +1705,30 @@ function serverQuestSystem.ApplyChoice(pid, quest, topicId, choiceId, announce)
                     choiceId = choiceId,
                     time = os.time()
                 }
+                -- This exact answer is about to be replayed against a fresh
+                -- inventory, so the list stays up for the moment that takes.
+                -- Every other failure closes it.
+                keepChoicesOpen = true
             end
         end
     end
 
     if announce then
-        sendDialogueResponse(pid, quest, topicId)
+        -- Final loop guard. If the dialogue we are about to send still offers
+        -- the answer that was just applied, sending it would put the player
+        -- right back where they started no matter how the state moved.
+        --
+        -- Skipped while an inventory replay is pending: there the answers are
+        -- deliberately identical, because the very same answer is about to be
+        -- retried against fresh inventory data a moment from now.
+        if keepChoicesOpen and ok then
+            local nextDialogue = serverQuestSystem.GetCurrentDialogue(pid, questId)
+            if nextDialogue == nil or findChoice(nextDialogue.choices, choiceId) ~= nil then
+                keepChoicesOpen = false
+            end
+        end
+
+        sendDialogueResponse(pid, quest, topicId, not keepChoicesOpen)
         serverQuestSystem.SyncPlayer(pid)
     end
 
@@ -1720,8 +1761,16 @@ local function onPlayerInventoryResync(eventStatus, pid)
         log(enumerations.log.INFO, "replayed choice " .. tostring(pending.choiceId)
             .. " for " .. tostring(pending.questId) .. " after inventory resync (pid " .. tostring(pid) .. ")")
         sendDialogueResponse(pid, quest, pending.topicId)
-        serverQuestSystem.SyncPlayer(pid)
+    else
+        -- The requirement really is unmet, not just stale. Without this the
+        -- client kept showing the answer list from the first attempt with no
+        -- reply and no way back to the topics.
+        log(enumerations.log.INFO, "replayed choice " .. tostring(pending.choiceId)
+            .. " for " .. tostring(pending.questId) .. " still fails after inventory resync (pid "
+            .. tostring(pid) .. ")")
+        sendDialogueResponse(pid, quest, pending.topicId, true)
     end
+    serverQuestSystem.SyncPlayer(pid)
 end
 -- End of X048 --------------------------------------------------------------
 
