@@ -541,6 +541,13 @@ local function installRPSystemChatFilter()
         sendToOtherPlayers = sendToOtherPlayers == true
         skipAttachedPlayer = skipAttachedPlayer == true
 
+        -- X055: Player Menu state packets are transport, not visible system chat.
+        -- Never let RP system-chat filtering swallow or defer them.
+        if type(message) == "string" and message:sub(1, 6) == "@@AMP_" then
+            systemSendMessage(pid, message, false, skipAttachedPlayer)
+            return
+        end
+
         if sendToOtherPlayers then
             -- A native broadcast cannot exclude RP recipients. Split it into
             -- localized targeted sends so RP players do not receive system chat.

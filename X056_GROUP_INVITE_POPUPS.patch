@@ -1,0 +1,292 @@
+diff -ruN a/X056_GROUP_INVITE_POPUPS_RU.md b/X056_GROUP_INVITE_POPUPS_RU.md
+--- a/X056_GROUP_INVITE_POPUPS_RU.md	1970-01-01 00:00:00.000000000 +0000
++++ b/X056_GROUP_INVITE_POPUPS_RU.md	2026-08-31 12:52:52.128184678 +0000
+@@ -0,0 +1,51 @@
++# ArenaMP X056 — приглашения группы через popup
++
++База: ArenaMP X055.
++
++## Что исправлено
++
++В X055 сервер уже хранил `pendingInvites` и вкладка «Группа» показывала кнопки «Принять/Отказаться», но приглашённый игрок не получал немедленного диалога. Поэтому приглашение легко было не заметить, пока игрок сам не откроет Player Menu → «Группа».
++
++X056 переносит полезное поведение из старого `TeamGroup.lua`, но оставляет современный `groupHelper` единственным владельцем логики группы.
++
++### Новый поток
++
++1. Лидер нажимает «Пригласить» во вкладке группы/игроков.
++2. Сервер создаёт `pendingInvite` на 120 секунд.
++3. Приглашённому сразу показывается `CustomMessageBox` с именем лидера, названием группы и кнопками `Да / Нет` (`Yes / No` для EN).
++4. `Да` вызывает тот же `acceptInvite`, который используется кнопкой Player Menu.
++5. `Нет`, закрытие диалога или другой отрицательный ответ вызывают `declineInvite`.
++6. Лидер получает отдельный `MessageBox`: игрок принял или отказался. Это не зависит от флага обычных group chat notifications.
++7. Pending invite сразу очищается после ответа.
++
++Кнопки Accept/Decline во вкладке «Группа» сохранены как резервный способ ответа.
++
++### Дополнительная защита
++
++- Активное приглашение от другой группы не перезаписывается молча новым приглашением.
++- Повторное приглашение от той же группы обновляет срок и снова показывает popup.
++- Просроченное приглашение не считается отказом и не добавляет игрока.
++- Если игрок переподключился, пока приглашение ещё действует, popup показывается снова.
++- Если игрок уже успел вступить/создать другую группу, старое приглашение очищается.
++
++## Настройка
++
++`server/scripts/config.lua`:
++
++```lua
++config.groupSystem = {
++    ["invite lifetime seconds"] = 120,
++    ["invite popups"] = true,
++    ...
++}
++```
++
++`invite popups = false` отключает немедленный CustomMessageBox, но оставляет старый pending invite и кнопки Player Menu.
++
++## Изменённые файлы
++
++- `server/scripts/groupHelper.lua`
++- `server/scripts/config.lua`
++- `X056_group_invite_harness.lua`
++
++Старый `scripts/custom/TeamGroup.lua` в проект не добавляется и подключать его одновременно с `groupHelper` не нужно.
+diff -ruN a/X056_group_invite_harness.lua b/X056_group_invite_harness.lua
+--- a/X056_group_invite_harness.lua	1970-01-01 00:00:00.000000000 +0000
++++ b/X056_group_invite_harness.lua	2026-08-31 12:53:26.743478984 +0000
+@@ -0,0 +1,57 @@
++-- ArenaMP X056 group invite popup harness.
++config = { groupSystem = { ["invite lifetime seconds"] = 120, ["invite popups"] = true, ["summon protection"] = false } }
++enumerations = { log = { INFO = 1, ERROR = 3 } }
++color = { Red = "", Turquoise = "", White = "" }
++jsonInterface = { load = function() return { version=1, nextId=1, groups={} } end, save = function() end }
++local commands, handlers = {}, {}
++customCommandHooks = { registerCommand = function(name, fn) commands[name] = fn end }
++customEventHooks = {
++    registerHandler = function(name, fn) handlers[name] = handlers[name] or {}; table.insert(handlers[name], fn) end,
++    registerValidator = function(name, fn) end
++}
++tableHelper = { concatenateFromIndex = function(t, n) local r={} for i=n,#t do r[#r+1]=t[i] end return table.concat(r, " ") end }
++local popups, boxes, sent = {}, {}, {}
++tes3mp = {
++    SendMessage = function(pid, msg) sent[#sent+1] = {pid=pid,msg=msg} end,
++    CustomMessageBox = function(pid, id, msg, buttons) popups[#popups+1] = {pid=pid,id=id,msg=msg,buttons=buttons} end,
++    MessageBox = function(pid, id, msg) boxes[#boxes+1] = {pid=pid,id=id,msg=msg} end,
++    LogMessage = function() end,
++    GetCell = function() return "Balmora" end
++}
++local function mk(pid, name, account)
++    local p = { pid=pid, name=name, accountName=account, data={ customVariables={} } }
++    function p:IsLoggedIn() return true end
++    function p:QuicksaveToDrive() end
++    return p
++end
++Players = { [0]=mk(0,"Leader","leader_acc"), [1]=mk(1,"Guest","guest_acc") }
++localization = { GetLanguage = function(pid) return pid == 1 and "RU" or "RU" end }
++
++local groupHelper = dofile("server/scripts/groupHelper.lua")
++local function cmd(pid, ...) local a={...}; commands.groupui(pid, a) end
++local function gui(pid, choice)
++    for _,fn in ipairs(handlers.OnGUIAction or {}) do fn({}, pid, 20560001, tostring(choice)) end
++end
++local failures=0
++local function check(name, value)
++    if value then print("ok   "..name) else failures=failures+1; print("FAIL "..name) end
++end
++
++cmd(0, "groupui", "create", "Test Party")
++cmd(0, "groupui", "invite", "Guest")
++check("invite creates immediate popup", #popups == 1 and popups[1].pid == 1)
++check("popup has Yes/No", popups[1] and popups[1].buttons == "Да;Нет")
++check("popup identifies leader and group", popups[1] and popups[1].msg:find("Leader",1,true) and popups[1].msg:find("Test Party",1,true))
++
++gui(1, 1)
++check("decline notifies leader by MessageBox", boxes[#boxes] and boxes[#boxes].pid == 0 and boxes[#boxes].msg:find("отказался",1,true))
++check("decline leaves guest outside group", groupHelper.GetPlayerGroup(1) == nil)
++
++cmd(0, "groupui", "invite", "Guest")
++check("second invite can be sent after decline", #popups == 2)
++gui(1, 0)
++check("accept adds guest to group", groupHelper.ArePlayersInSameGroup(0,1))
++check("accept notifies leader by MessageBox", boxes[#boxes] and boxes[#boxes].pid == 0 and boxes[#boxes].msg:find("принял",1,true))
++
++print(string.format("X056 group invite harness: %d failure(s)", failures))
++os.exit(failures == 0 and 0 or 1)
+diff -ruN a/server/scripts/config.lua b/server/scripts/config.lua
+--- a/server/scripts/config.lua	2026-08-31 12:13:41.000000000 +0000
++++ b/server/scripts/config.lua	2026-08-31 12:50:06.777303558 +0000
+@@ -107,6 +107,7 @@
+ -- only includes online group members standing in the same cell as the source.
+ config.groupSystem = {
+     ["invite lifetime seconds"] = 120,
++    ["invite popups"] = true, -- X056: immediate Yes/No dialog for the invited player
+     ["xp signal lifetime seconds"] = 8,
+     ["summon protection"] = true,
+     ["summon check interval ms"] = 2000,
+diff -ruN a/server/scripts/groupHelper.lua b/server/scripts/groupHelper.lua
+--- a/server/scripts/groupHelper.lua	2026-08-31 02:35:30.000000000 +0000
++++ b/server/scripts/groupHelper.lua	2026-08-31 12:50:49.351980721 +0000
+@@ -13,6 +13,8 @@
+ local STATE_PREFIX = "@@AMP_GROUP@@"
+ local XP_PREFIX = "@@AMP_XP@@"
+ local XP_SIGNAL_PREFIX = "amp-xp|v1|"
++local GROUP_INVITE_GUI = 20560001
++local GROUP_INVITE_NOTICE_GUI = 20560002
+ 
+ local cfg = {
+     inviteLifetime = 120,
+@@ -23,7 +25,8 @@
+     protectSummons = true,
+     summonCheckInterval = 2000,
+     summonStopCombatCooldown = 2,
+-    debugMode = false
++    debugMode = false,
++    invitePopups = true
+ }
+ 
+ if type(config.groupSystem) == "table" then
+@@ -34,6 +37,7 @@
+     cfg.maxQuestXpSignal = tonumber(config.groupSystem["max client quest xp signal"]) or cfg.maxQuestXpSignal
+     if config.groupSystem["summon protection"] ~= nil then cfg.protectSummons = config.groupSystem["summon protection"] end
+     cfg.summonCheckInterval = tonumber(config.groupSystem["summon check interval ms"]) or cfg.summonCheckInterval
++    if config.groupSystem["invite popups"] ~= nil then cfg.invitePopups = config.groupSystem["invite popups"] end
+ end
+ 
+ local data = { version = 1, nextId = 1, groups = {} }
+@@ -362,6 +366,44 @@
+     return true, "Group created: " .. name
+ end
+ 
++local function localizedGroupText(pid, ru, en)
++    if type(localization) == "table" and type(localization.GetLanguage) == "function" then
++        if tostring(localization.GetLanguage(pid) or "RU"):upper() == "EN" then return en end
++    end
++    return ru
++end
++
++local function notifyInviteResult(invite, targetPid, accepted)
++    if invite == nil then return end
++    local inviterPid = findOnlinePidByAccount(invite.inviterAccount)
++    if inviterPid == nil then return end
++
++    local targetName = isValidPid(targetPid) and displayName(targetPid) or tostring(invite.targetName or "Player")
++    local message
++    if accepted then
++        message = localizedGroupText(inviterPid,
++            targetName .. " принял приглашение в группу.",
++            targetName .. " accepted the group invitation.")
++    else
++        message = localizedGroupText(inviterPid,
++            targetName .. " отказался от приглашения в группу.",
++            targetName .. " declined the group invitation.")
++    end
++    tes3mp.MessageBox(inviterPid, GROUP_INVITE_NOTICE_GUI, message)
++end
++
++local function showInvitePopup(targetPid, invite)
++    if not cfg.invitePopups or not isValidPid(targetPid) or invite == nil then return end
++    local seconds = math.max(0, math.floor((invite.expiresAt or now()) - now()))
++    local message = localizedGroupText(targetPid,
++        tostring(invite.inviterName or invite.inviterAccount) .. " приглашает вас в группу «" .. tostring(invite.groupName or "") .. "».\n" ..
++        "Принять приглашение?\nСрок: " .. tostring(seconds) .. " сек.",
++        tostring(invite.inviterName or invite.inviterAccount) .. " invites you to group '" .. tostring(invite.groupName or "") .. "'.\n" ..
++        "Accept invitation?\nExpires in: " .. tostring(seconds) .. " sec.")
++    local buttons = localizedGroupText(targetPid, "Да;Нет", "Yes;No")
++    tes3mp.CustomMessageBox(targetPid, GROUP_INVITE_GUI, message, buttons)
++end
++
+ local function invitePlayer(pid, targetName)
+     local group = groupHelper.GetPlayerGroup(pid)
+     if group == nil then return false, "Create a group first" end
+@@ -372,21 +414,37 @@
+     if groupHelper.GetPlayerGroup(targetPid) ~= nil then return false, "That player is already in a group" end
+ 
+     local targetAccount = accountName(targetPid)
+-    pendingInvites[lower(targetAccount)] = {
++    local key = lower(targetAccount)
++    local existing = pendingInvites[key]
++    if existing ~= nil and existing.expiresAt >= now() then
++        if tostring(existing.groupId) ~= tostring(group.id) then
++            return false, localizedGroupText(pid,
++                "У игрока уже есть активное приглашение от другой группы",
++                "That player already has a pending invitation from another group")
++        end
++    end
++
++    local invite = {
+         groupId = group.id,
+         groupName = group.name,
+         inviterAccount = accountName(pid),
+         inviterName = displayName(pid),
++        targetName = displayName(targetPid),
+         expiresAt = now() + cfg.inviteLifetime
+     }
++    pendingInvites[key] = invite
+     groupHelper.SendState(targetPid)
++    showInvitePopup(targetPid, invite)
+     return true, "Invitation sent to " .. displayName(targetPid)
+ end
+ 
+ local function acceptInvite(pid)
+-    if groupHelper.GetPlayerGroup(pid) ~= nil then return false, "Leave your current group first" end
+     local key = lower(accountName(pid))
+     local invite = pendingInvites[key]
++    if groupHelper.GetPlayerGroup(pid) ~= nil then
++        pendingInvites[key] = nil
++        return false, "Leave your current group first"
++    end
+     if invite == nil or invite.expiresAt < now() then
+         pendingInvites[key] = nil
+         return false, "The invitation has expired"
+@@ -401,6 +459,7 @@
+     setPlayerGroup(pid, group.id)
+     pendingInvites[key] = nil
+     saveData()
++    notifyInviteResult(invite, pid, true)
+     broadcastState(group)
+     return true, "Joined group: " .. group.name
+ end
+@@ -409,9 +468,12 @@
+     local key = lower(accountName(pid))
+     local invite = pendingInvites[key]
+     if invite == nil then return false, "There is no pending invitation" end
+-    local inviterPid = findOnlinePidByAccount(invite.inviterAccount)
++    if invite.expiresAt < now() then
++        pendingInvites[key] = nil
++        return false, "The invitation has expired"
++    end
+     pendingInvites[key] = nil
+-    if inviterPid ~= nil then sendNotice(inviterPid, displayName(pid) .. " declined the invitation", false) end
++    notifyInviteResult(invite, pid, false)
+     return true, "Invitation declined"
+ end
+ 
+@@ -993,7 +1055,26 @@
+             if prefs.topicSync then reconcileTopicsForGroup(group) end
+         end
+         groupHelper.SendState(pid)
++        local invite = pendingInvites[lower(accountName(pid))]
++        if invite ~= nil and invite.expiresAt >= now() then showInvitePopup(pid, invite) end
++    end
++end)
++
++customEventHooks.registerHandler("OnGUIAction", function(eventStatus, pid, idGui, dataValue)
++    if idGui ~= GROUP_INVITE_GUI or not isValidPid(pid) then return end
++
++    local accepted = tonumber(dataValue) == 0
++    local ok, message
++    if accepted then
++        ok, message = acceptInvite(pid)
++    else
++        ok, message = declineInvite(pid)
+     end
++
++    if message ~= nil then sendNotice(pid, message, not ok) end
++    groupHelper.SendState(pid)
++    local group = groupHelper.GetPlayerGroup(pid)
++    if group ~= nil then broadcastState(group) end
+ end)
+ 
+ customEventHooks.registerHandler("OnPlayerDisconnect", function(eventStatus, pid)

@@ -107,6 +107,7 @@ config.arenaXpRateMultiplier = 1.0
 -- only includes online group members standing in the same cell as the source.
 config.groupSystem = {
     ["invite lifetime seconds"] = 120,
+    ["invite popups"] = true, -- X056: immediate Yes/No dialog for the invited player
     ["xp signal lifetime seconds"] = 8,
     ["summon protection"] = true,
     ["summon check interval ms"] = 2000,
@@ -515,10 +516,10 @@ config.defaultTimeTable = { year = 427, month = 7, day = 16, hour = 9,
 
 -- The chat window instructions that show up when players join the server.
 -- Keep the original compact ArenaMP/Nirn formatting here so it is easy to edit.
-config.chatWindowInstructions = color.SkyBlue .. "[Меню игрока / чат - " .. color.Turquoise .. "Y" .. color.SkyBlue .. "] [Скрыть чат - " .. color.Turquoise .. "F2" .. color.SkyBlue .. "] [Все доступные команды  - " .. color.Turquoise .. "/help" .. color.SkyBlue .. "]\n"
+config.chatWindowInstructions = color.SkyBlue .. "[" .. color.Turquoise .. "Y" .. color.SkyBlue .. ": нажмите — быстрый ввод в чат; удерживайте — меню игрока]\n"
 
 -- English equivalent used only for EN clients when per-client localization is enabled.
-config.chatWindowInstructionsEN = color.SkyBlue .. "[Player menu / chat - " .. color.Turquoise .. "Y" .. color.SkyBlue .. "] [Chat opacity - " .. color.Turquoise .. "F2" .. color.SkyBlue .. "] [All available commands  - " .. color.Turquoise .. "/help" .. color.SkyBlue .. "]\n"
+config.chatWindowInstructionsEN = color.SkyBlue .. "[" .. color.Turquoise .. "Y" .. color.SkyBlue .. ": tap — quick chat input; hold — Player Menu]\n"
 
 -- ArenaMP X049: radius in Morrowind world units for the Local channel.
 -- Local messages are also restricted to the same cell. 5000 is roughly a

@@ -78,4 +78,11 @@ end
 
 customCommandHooks.registerCommand("playerlistui", processCommand)
 
+customEventHooks.registerHandler("OnPlayerAuthentified", function(eventStatus, pid)
+    if isValidPid(pid) then
+        playerListHelper.SendState(pid)
+    end
+    return eventStatus
+end)
+
 return playerListHelper

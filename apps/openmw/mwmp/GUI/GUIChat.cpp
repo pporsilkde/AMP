@@ -38,7 +38,7 @@ namespace
     constexpr float sFadeSpeed = 4.f;
     constexpr float sGeometrySaveDebounce = 0.45f;
     constexpr float sMenuBackgroundAlpha = 0.92f;
-    constexpr int sMinimumPanelWidth = 700;
+    constexpr int sMinimumPanelWidth = 800;
     constexpr int sMinimumPanelHeight = 500;
     constexpr int sButtonPadding = 22;
     constexpr int sMinimumButtonWidth = 34;

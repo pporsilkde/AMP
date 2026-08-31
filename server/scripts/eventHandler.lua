@@ -429,6 +429,15 @@ eventHandler.InitializeDefaultHandlers = function()
 
 end
 
+local function getArenaChatInstructions(pid)
+    if localization.GetLanguage(pid) == "RU" then
+        return color.SkyBlue .. "[" .. color.Turquoise .. "Y" .. color.SkyBlue ..
+            ": нажмите — быстрый ввод в чат; удерживайте — меню игрока]\n"
+    end
+    return color.SkyBlue .. "[" .. color.Turquoise .. "Y" .. color.SkyBlue ..
+        ": tap — quick chat input; hold — Player Menu]\n"
+end
+
 local function announcePlayerJoined(pid)
     local player = Players[pid]
     if player == nil or not player:IsLoggedIn() or player.arenaJoinAnnounced == true then
@@ -773,7 +782,7 @@ eventHandler.OnGUIAction = function(pid, idGui, data)
                         Players[pid]:FinishLogin()
                         questIndexStore.OnPlayerReady(pid)
                         Players[pid]:Message(localization.Get(pid, "core", "login_success") ..
-                            localization.Get(pid, "core", "chat_instructions"))
+                            getArenaChatInstructions(pid))
 
                         if WorldInstance:HasRunStartupScripts() == false then
                             Players[pid]:Message(localization.Get(pid, "core", "startup_welcome"))
@@ -806,7 +815,7 @@ eventHandler.OnGUIAction = function(pid, idGui, data)
                         logicHandler.GetChatName(pid) .. "; starting character generation")
                     Players[pid]:Register(data)
                     Players[pid]:Message(localization.Get(pid, "core", "register_success") ..
-                        localization.Get(pid, "core", "chat_instructions"))
+                        getArenaChatInstructions(pid))
 
                     if WorldInstance:HasRunStartupScripts() == false then
                         Players[pid]:Message(localization.Get(pid, "core", "startup_welcome"))
