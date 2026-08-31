@@ -101,6 +101,33 @@ namespace
         return rawAmount * totalXpMultiplier();
     }
 
+    bool serverPartyXpEnabled()
+    {
+        return Settings::Manager::getBool("server party xp", "XP Leveling");
+    }
+
+    std::string sanitizeXpSignalField(std::string value)
+    {
+        std::replace(value.begin(), value.end(), '|', '_');
+        std::replace(value.begin(), value.end(), '\n', ' ');
+        std::replace(value.begin(), value.end(), '\r', ' ');
+        return value;
+    }
+
+    void queueServerXpSignal(const MWWorld::Ptr& player, const std::string& kind, float rawAmount,
+        const std::string& questId = std::string(), int journalIndex = 0)
+    {
+        if (player.isEmpty() || !player.getClass().isNpc() || !(rawAmount > 0.f) || !std::isfinite(rawAmount))
+            return;
+
+        static unsigned long long nonce = 0;
+        std::ostringstream key;
+        key << "amp-xp|v1|" << sanitizeXpSignalField(kind) << "|" << std::fixed << std::setprecision(6)
+            << rawAmount << "|" << sanitizeXpSignalField(questId.empty() ? "-" : questId) << "|"
+            << journalIndex << "|" << ++nonce;
+        player.getClass().getNpcStats(player).addXpRewardKey(key.str());
+    }
+
     std::string formatXp(float amount)
     {
         std::ostringstream stream;
@@ -195,12 +222,14 @@ namespace
         notifyXp(message.str());
     }
 
-    void addExperience(const MWWorld::Ptr& player, float amount, const std::string& notification)
+    void addExperienceInternal(const MWWorld::Ptr& player, float amount, const std::string& notification,
+        bool applyServerScaling)
     {
         if (!MWMechanics::XPLeveling::isEnabled() || player.isEmpty() || !player.getClass().isNpc())
             return;
 
-        amount *= totalXpMultiplier();
+        if (applyServerScaling)
+            amount *= totalXpMultiplier();
         if (!(amount > 0.f) || !std::isfinite(amount))
             return;
 
@@ -221,6 +250,11 @@ namespace
             stats.setExperience(std::max(0.f, stats.getExperience() - required));
             completeLevelUp(player);
         }
+    }
+
+    void addExperience(const MWWorld::Ptr& player, float amount, const std::string& notification)
+    {
+        addExperienceInternal(player, amount, notification, true);
     }
 
     bool awardOnce(const MWWorld::Ptr& player, const std::string& key, float amount,
@@ -323,6 +357,20 @@ namespace MWMechanics
             return Settings::Manager::getBool("enabled", "XP Leveling");
         }
 
+        void awardServer(float amount, bool scaled, const std::string& reason)
+        {
+            const MWWorld::Ptr player = MWMechanics::getPlayer();
+            if (!isEnabled() || player.isEmpty() || !player.getClass().isNpc() || !(amount > 0.f))
+                return;
+
+            const float displayed = scaled ? finalXpAmount(amount) : amount;
+            std::ostringstream message;
+            message << "+" << formatXp(displayed) << " XP";
+            if (!reason.empty())
+                message << " - " << reason;
+            addExperienceInternal(player, amount, message.str(), scaled);
+        }
+
         float getXpRequirementForLevel(int level)
         {
             return xpRequirementForLevel(level);
@@ -398,6 +446,14 @@ namespace MWMechanics
                 std::sqrt(static_cast<float>(victimLevel) / static_cast<float>(playerLevel)), 0.35f, 2.25f);
             const float xp = (base + perLevel * victimLevel) * relativeDanger;
 
+            if (serverPartyXpEnabled())
+            {
+                // X050: the server validates this against ActorDeath and decides
+                // whether the raw reward is solo or split across same-cell party members.
+                queueServerXpSignal(player, "kill", xp);
+                return;
+            }
+
             std::ostringstream message;
             message << "+" << formatXp(finalXpAmount(xp)) << " XP - " << arenaText("xp.msg.defeated") << " "
                     << victim.getClass().getName(victim);
@@ -450,6 +506,15 @@ namespace MWMechanics
 
             if (!(xp > 0.f))
                 return;
+
+            if (serverPartyXpEnabled())
+            {
+                // The normal quest-stage/completion reward keys above remain
+                // persistent; only this amp-xp key is transient and stripped by
+                // groupHelper after it validates the matching PlayerJournal event.
+                queueServerXpSignal(player, "quest", xp, questId, journalIndex);
+                return;
+            }
 
             std::ostringstream message;
             message << "+" << formatXp(finalXpAmount(xp))

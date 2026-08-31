@@ -88,6 +88,18 @@ config.arenaGlobalXpMultiplier = 1.0
 -- convenience profiles; remote servers still choose their own value.
 config.arenaXpRateMultiplier = 1.0
 
+-- X050: persistent group/party rules. Journal and topic synchronization are
+-- opt-in per member from the Player Menu; XP sharing itself is automatic and
+-- only includes online group members standing in the same cell as the source.
+config.groupSystem = {
+    ["invite lifetime seconds"] = 120,
+    ["xp signal lifetime seconds"] = 8,
+    ["summon protection"] = true,
+    ["summon check interval ms"] = 2000,
+    ["max client kill xp signal"] = 25000,
+    ["max client quest xp signal"] = 25000
+}
+
 -- X031: RAW config.lua is watched while the server is running. A successful
 -- reload is transactional and is pushed to connected players; malformed edits
 -- leave the previous working table active. Interval is clamped to 1..60 seconds.
@@ -123,6 +135,8 @@ config.xpLeveling = {
     ["kill xp per victim level"] = 20,
     ["quest base xp"] = 125,
     ["quest xp per stage"] = 30,
+    -- X050: native kill/quest rewards are validated and split by groupHelper.
+    ["server party xp"] = true,
     ["travel xp"] = 25,
     ["travel xp chance"] = 0.20,
     ["travel xp cooldown hours"] = 2.0,

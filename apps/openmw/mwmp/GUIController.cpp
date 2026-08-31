@@ -100,7 +100,13 @@ void mwmp::GUIController::setupChat()
 void mwmp::GUIController::printChatMessage(std::string &msg)
 {
     if (mChat != nullptr)
+    {
+        // X050: group state and validated party-XP controls are transported in
+        // private chat messages but never rendered into chat history.
+        if (mChat->handleServerControlMessage(msg))
+            return;
         mChat->print(msg);
+    }
 }
 
 

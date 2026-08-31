@@ -903,6 +903,16 @@ local function applyReward(pid, state, reward)
             end
             amount = amount * math.max(0, multiplier)
         end
+
+        -- X050: server quest XP uses the same same-cell party splitter as
+        -- native kill/quest XP. The amount is already server-scaled here, so
+        -- the client receives it as an exact award and only performs level-up
+        -- processing locally.
+        if groupHelper ~= nil and type(groupHelper.AwardServerQuestXp) == "function" then
+            return groupHelper.AwardServerQuestXp(pid, amount, "Server quest reward")
+        end
+
+        -- Compatibility fallback for servers that deliberately omit groupHelper.
         Players[pid].data.stats.experience = math.max(0, (Players[pid].data.stats.experience or 0) + amount)
         Players[pid]:LoadLevel()
         return true

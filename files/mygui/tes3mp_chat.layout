@@ -82,15 +82,39 @@
       <Property key="Visible" value="false"/>
     </Widget>
 
-    <!-- Extensible player-menu pages. X049 intentionally provides the shell only;
-         server-backed party/home actions can be added without replacing chat again. -->
+    <!-- X050: server-backed group page. The controls send /groupui actions
+         through the existing chat packet; state comes back as hidden control text. -->
     <Widget type="Widget" skin="MW_Box" position="10 44 600 366" align="Stretch" name="GroupPane">
       <Property key="Visible" value="false"/>
-      <Widget type="TextBox" skin="SandBrightText" position="18 18 564 28" name="GroupTitle"/>
-      <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="18 58 564 280" name="GroupInfo">
+      <Widget type="TextBox" skin="SandBrightText" position="18 10 564 26" name="GroupTitle"/>
+      <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="18 40 564 150" name="GroupInfo">
         <Property key="EditStatic" value="true"/><Property key="ReadOnly" value="true"/>
         <Property key="MultiLine" value="true"/><Property key="WordWrap" value="true"/>
+        <Property key="FontName" value="DejaVuLGCSansMono"/>
       </Widget>
+
+      <Widget type="TextBox" skin="SandText" position="18 200 96 24" name="GroupNameLabel"/>
+      <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="118 198 250 28" name="GroupNameEdit">
+        <Property key="MultiLine" value="false"/><Property key="FontName" value="DejaVuLGCSansMono"/>
+      </Widget>
+      <Widget type="Button" skin="MW_Button" position="376 198 98 28" name="GroupCreateButton"/>
+
+      <Widget type="TextBox" skin="SandText" position="18 236 96 24" name="GroupTargetLabel"/>
+      <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="118 234 250 28" name="GroupTargetEdit">
+        <Property key="MultiLine" value="false"/><Property key="FontName" value="DejaVuLGCSansMono"/>
+      </Widget>
+      <Widget type="Button" skin="MW_Button" position="376 234 66 28" name="GroupInviteButton"/>
+      <Widget type="Button" skin="MW_Button" position="446 234 62 28" name="GroupKickButton"/>
+      <Widget type="Button" skin="MW_Button" position="512 234 70 28" name="GroupLeaderButton"/>
+
+      <Widget type="Button" skin="MW_Button" position="18 270 180 28" name="GroupJournalButton"/>
+      <Widget type="Button" skin="MW_Button" position="204 270 180 28" name="GroupTopicsButton"/>
+      <Widget type="Button" skin="MW_Button" position="390 270 90 28" name="GroupLeaveButton"/>
+      <Widget type="Button" skin="MW_Button" position="486 270 96 28" name="GroupDisbandButton"/>
+
+      <Widget type="Button" skin="MW_Button" position="18 306 126 28" name="GroupAcceptButton"/>
+      <Widget type="Button" skin="MW_Button" position="150 306 126 28" name="GroupDeclineButton"/>
+      <Widget type="Button" skin="MW_Button" position="486 306 96 28" name="GroupRefreshButton"/>
     </Widget>
 
     <Widget type="Widget" skin="MW_Box" position="10 44 600 366" align="Stretch" name="HomePane">

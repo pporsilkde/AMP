@@ -1,0 +1,997 @@
+-- ArenaMP X050: server-authoritative group core integrated with the X049 player menu.
+--
+-- Responsibilities:
+--   * persistent groups, leader/member management and invitations;
+--   * independent journal/topic synchronization toggles;
+--   * same-cell XP splitting for validated kill/quest rewards;
+--   * friendly summon protection for group members;
+--   * hidden state protocol consumed by GUIChat's Group tab.
+
+local groupHelper = {}
+
+local DATA_PATH = "custom/groupHelper.json"
+local STATE_PREFIX = "@@AMP_GROUP@@"
+local XP_PREFIX = "@@AMP_XP@@"
+local XP_SIGNAL_PREFIX = "amp-xp|v1|"
+
+local cfg = {
+    inviteLifetime = 120,
+    xpSignalLifetime = 8,
+    xpEventLifetime = 8,
+    maxKillXpSignal = 25000,
+    maxQuestXpSignal = 25000,
+    protectSummons = true,
+    summonCheckInterval = 2000,
+    summonStopCombatCooldown = 2,
+    debugMode = false
+}
+
+if type(config.groupSystem) == "table" then
+    cfg.inviteLifetime = tonumber(config.groupSystem["invite lifetime seconds"]) or cfg.inviteLifetime
+    cfg.xpSignalLifetime = tonumber(config.groupSystem["xp signal lifetime seconds"]) or cfg.xpSignalLifetime
+    cfg.xpEventLifetime = cfg.xpSignalLifetime
+    cfg.maxKillXpSignal = tonumber(config.groupSystem["max client kill xp signal"]) or cfg.maxKillXpSignal
+    cfg.maxQuestXpSignal = tonumber(config.groupSystem["max client quest xp signal"]) or cfg.maxQuestXpSignal
+    if config.groupSystem["summon protection"] ~= nil then cfg.protectSummons = config.groupSystem["summon protection"] end
+    cfg.summonCheckInterval = tonumber(config.groupSystem["summon check interval ms"]) or cfg.summonCheckInterval
+end
+
+local data = { version = 1, nextId = 1, groups = {} }
+local pendingInvites = {}
+local pendingXpSignals = {}
+local recentXpEvents = {}
+local strippedSignalPids = {}
+local summonCombatStopCache = {}
+
+local function now()
+    return os.time()
+end
+
+local function log(level, message)
+    tes3mp.LogMessage(level, "[groupHelper] " .. tostring(message))
+end
+
+local function lower(value)
+    return tostring(value or ""):lower()
+end
+
+local function trim(value)
+    value = tostring(value or "")
+    return value:match("^%s*(.-)%s*$") or ""
+end
+
+local function safeToken(value, maxLength)
+    value = trim(value)
+    value = value:gsub("[%c\t]", " ")
+    value = value:gsub("[;%^]", " ")
+    value = value:gsub("%s+", " ")
+    if maxLength ~= nil and #value > maxLength then value = value:sub(1, maxLength) end
+    return value
+end
+
+local function escapeField(value)
+    value = tostring(value or "")
+    value = value:gsub("\\", "\\\\")
+    value = value:gsub("\t", "\\t")
+    value = value:gsub("\r", "")
+    value = value:gsub("\n", "\\n")
+    return value
+end
+
+local function isValidPid(pid)
+    return Players[pid] ~= nil and Players[pid]:IsLoggedIn() and Players[pid].data ~= nil
+end
+
+local function accountName(pid)
+    if not isValidPid(pid) then return nil end
+    return tostring(Players[pid].accountName or Players[pid].name or "")
+end
+
+local function displayName(pid)
+    if not isValidPid(pid) then return "?" end
+    return tostring(Players[pid].name or Players[pid].accountName or ("PID " .. tostring(pid)))
+end
+
+local function persistPlayer(pid)
+    if not isValidPid(pid) then return end
+    if type(Players[pid].QuicksaveToDrive) == "function" then
+        Players[pid]:QuicksaveToDrive()
+    elseif type(Players[pid].SaveToDrive) == "function" then
+        Players[pid]:SaveToDrive()
+    elseif type(Players[pid].Save) == "function" then
+        Players[pid]:Save()
+    end
+end
+
+local function ensurePlayerPrefs(pid)
+    if not isValidPid(pid) then return nil end
+    Players[pid].data.customVariables = Players[pid].data.customVariables or {}
+    local root = Players[pid].data.customVariables
+    root.arenampGroup = root.arenampGroup or {}
+    local prefs = root.arenampGroup
+    if prefs.journalSync == nil then prefs.journalSync = false end
+    if prefs.topicSync == nil then prefs.topicSync = false end
+    return prefs
+end
+
+local function loadData()
+    local ok, loaded = pcall(jsonInterface.load, DATA_PATH)
+    if ok and type(loaded) == "table" then
+        data = loaded
+    end
+    data.version = 1
+    data.nextId = tonumber(data.nextId) or 1
+    data.groups = type(data.groups) == "table" and data.groups or {}
+end
+
+local function saveData()
+    local ok, err = pcall(jsonInterface.save, DATA_PATH, data)
+    if not ok then log(enumerations.log.ERROR, "failed to save " .. DATA_PATH .. ": " .. tostring(err)) end
+end
+
+local function getGroupById(id)
+    if id == nil then return nil end
+    return data.groups[tostring(id)]
+end
+
+function groupHelper.GetPlayerGroupId(pid)
+    if not isValidPid(pid) then return nil end
+    local prefs = ensurePlayerPrefs(pid)
+    local id = prefs and tostring(prefs.id or "") or ""
+    if id == "" then return nil end
+    local group = getGroupById(id)
+    local account = accountName(pid)
+    if group == nil or type(group.members) ~= "table" or group.members[account] == nil then
+        prefs.id = nil
+        persistPlayer(pid)
+        return nil
+    end
+    return id
+end
+
+function groupHelper.GetPlayerGroup(pid)
+    return getGroupById(groupHelper.GetPlayerGroupId(pid))
+end
+
+function groupHelper.ArePlayersInSameGroup(pid1, pid2)
+    local a = groupHelper.GetPlayerGroupId(pid1)
+    local b = groupHelper.GetPlayerGroupId(pid2)
+    return a ~= nil and a == b
+end
+
+function groupHelper.IsLeader(pid)
+    local group = groupHelper.GetPlayerGroup(pid)
+    return group ~= nil and lower(group.leader) == lower(accountName(pid))
+end
+
+local function findOnlinePidByAccount(account)
+    account = lower(account)
+    for pid, player in pairs(Players) do
+        if player ~= nil and player:IsLoggedIn() and lower(player.accountName or player.name) == account then
+            return pid
+        end
+    end
+    return nil
+end
+
+local function findOnlinePidByName(name)
+    name = lower(trim(name))
+    if name == "" then return nil end
+    for pid, player in pairs(Players) do
+        if player ~= nil and player:IsLoggedIn() then
+            if lower(player.name) == name or lower(player.accountName) == name then return pid end
+        end
+    end
+    return nil
+end
+
+local function groupMemberCount(group)
+    local count = 0
+    for _ in pairs(group and group.members or {}) do count = count + 1 end
+    return count
+end
+
+local function onlineGroupPids(group)
+    local result = {}
+    if group == nil then return result end
+    for account in pairs(group.members or {}) do
+        local pid = findOnlinePidByAccount(account)
+        if pid ~= nil then table.insert(result, pid) end
+    end
+    return result
+end
+
+function groupHelper.GetGroupMembers(pid, sameCellOnly)
+    local group = groupHelper.GetPlayerGroup(pid)
+    if group == nil then return {} end
+    local result = {}
+    local cell = sameCellOnly and tes3mp.GetCell(pid) or nil
+    for _, memberPid in ipairs(onlineGroupPids(group)) do
+        if not sameCellOnly or tes3mp.GetCell(memberPid) == cell then table.insert(result, memberPid) end
+    end
+    table.sort(result)
+    return result
+end
+
+local function isLeader(pid, group)
+    return group ~= nil and lower(group.leader) == lower(accountName(pid))
+end
+
+local function updateMemberDisplayName(pid, group)
+    if group == nil then return end
+    local account = accountName(pid)
+    if account == nil then return end
+    group.members = group.members or {}
+    group.members[account] = group.members[account] or {}
+    group.members[account].name = displayName(pid)
+end
+
+local function setPlayerGroup(pid, id)
+    local prefs = ensurePlayerPrefs(pid)
+    if prefs == nil then return end
+    prefs.id = id
+    persistPlayer(pid)
+end
+
+local function clearPlayerGroup(pid)
+    local prefs = ensurePlayerPrefs(pid)
+    if prefs == nil then return end
+    prefs.id = nil
+    persistPlayer(pid)
+end
+
+local function generateGroupId()
+    local id = tostring(now()) .. "-" .. tostring(data.nextId)
+    data.nextId = data.nextId + 1
+    return id
+end
+
+local function sendNotice(pid, text, errorState)
+    if not isValidPid(pid) then return end
+    local prefix = errorState and color.Red or color.Turquoise
+    tes3mp.SendMessage(pid, prefix .. "[Group] " .. color.White .. tostring(text) .. "\n", false)
+end
+
+local function buildMembersField(group, viewerPid)
+    local items = {}
+    local viewerCell = isValidPid(viewerPid) and tes3mp.GetCell(viewerPid) or ""
+    local accounts = {}
+    for account in pairs(group.members or {}) do table.insert(accounts, account) end
+    table.sort(accounts, function(a, b)
+        local aLeader = lower(a) == lower(group.leader)
+        local bLeader = lower(b) == lower(group.leader)
+        if aLeader ~= bLeader then return aLeader end
+        local an = lower((group.members[a] or {}).name or a)
+        local bn = lower((group.members[b] or {}).name or b)
+        return an < bn
+    end)
+
+    for _, account in ipairs(accounts) do
+        local member = group.members[account] or {}
+        local pid = findOnlinePidByAccount(account)
+        local online = pid ~= nil
+        local sameCell = online and viewerCell ~= "" and tes3mp.GetCell(pid) == viewerCell
+        local leader = lower(account) == lower(group.leader)
+        local name = safeToken(member.name or account, 48)
+        table.insert(items, name .. "^" .. (online and "1" or "0") .. "^" .. (sameCell and "1" or "0") .. "^" .. (leader and "1" or "0"))
+    end
+    return table.concat(items, ";")
+end
+
+function groupHelper.SendState(pid)
+    if not isValidPid(pid) then return end
+    local prefs = ensurePlayerPrefs(pid)
+    local group = groupHelper.GetPlayerGroup(pid)
+    local account = accountName(pid)
+    local invite = pendingInvites[lower(account)]
+    if invite ~= nil and invite.expiresAt < now() then
+        pendingInvites[lower(account)] = nil
+        invite = nil
+    end
+
+    local fields = {
+        "STATE",
+        group ~= nil and "1" or "0",
+        group ~= nil and isLeader(pid, group) and "1" or "0",
+        prefs.journalSync and "1" or "0",
+        prefs.topicSync and "1" or "0",
+        invite ~= nil and "1" or "0",
+        group ~= nil and escapeField(group.name) or "",
+        group ~= nil and escapeField((group.members[group.leader] or {}).name or group.leader) or "",
+        group ~= nil and escapeField(buildMembersField(group, pid)) or "",
+        invite ~= nil and escapeField(invite.inviterName or invite.inviterAccount) or "",
+        invite ~= nil and escapeField(invite.groupName or "") or ""
+    }
+    tes3mp.SendMessage(pid, STATE_PREFIX .. table.concat(fields, "\t") .. "\n", false)
+end
+
+local function broadcastState(group)
+    for _, pid in ipairs(onlineGroupPids(group)) do groupHelper.SendState(pid) end
+end
+
+local function createGroup(pid, requestedName)
+    if groupHelper.GetPlayerGroup(pid) ~= nil then return false, "You are already in a group" end
+    local name = safeToken(requestedName, 32)
+    if #name < 2 then return false, "Group name must contain at least 2 characters" end
+    local id = generateGroupId()
+    local account = accountName(pid)
+    data.groups[id] = {
+        id = id,
+        name = name,
+        leader = account,
+        createdAt = now(),
+        members = { [account] = { name = displayName(pid), joinedAt = now() } }
+    }
+    setPlayerGroup(pid, id)
+    saveData()
+    return true, "Group created: " .. name
+end
+
+local function invitePlayer(pid, targetName)
+    local group = groupHelper.GetPlayerGroup(pid)
+    if group == nil then return false, "Create a group first" end
+    if not isLeader(pid, group) then return false, "Only the group leader can invite players" end
+    local targetPid = findOnlinePidByName(targetName)
+    if targetPid == nil then return false, "Player not found or offline" end
+    if targetPid == pid then return false, "You cannot invite yourself" end
+    if groupHelper.GetPlayerGroup(targetPid) ~= nil then return false, "That player is already in a group" end
+
+    local targetAccount = accountName(targetPid)
+    pendingInvites[lower(targetAccount)] = {
+        groupId = group.id,
+        groupName = group.name,
+        inviterAccount = accountName(pid),
+        inviterName = displayName(pid),
+        expiresAt = now() + cfg.inviteLifetime
+    }
+    groupHelper.SendState(targetPid)
+    return true, "Invitation sent to " .. displayName(targetPid)
+end
+
+local function acceptInvite(pid)
+    if groupHelper.GetPlayerGroup(pid) ~= nil then return false, "Leave your current group first" end
+    local key = lower(accountName(pid))
+    local invite = pendingInvites[key]
+    if invite == nil or invite.expiresAt < now() then
+        pendingInvites[key] = nil
+        return false, "The invitation has expired"
+    end
+    local group = getGroupById(invite.groupId)
+    if group == nil then
+        pendingInvites[key] = nil
+        return false, "The group no longer exists"
+    end
+    local account = accountName(pid)
+    group.members[account] = { name = displayName(pid), joinedAt = now() }
+    setPlayerGroup(pid, group.id)
+    pendingInvites[key] = nil
+    saveData()
+    broadcastState(group)
+    return true, "Joined group: " .. group.name
+end
+
+local function declineInvite(pid)
+    local key = lower(accountName(pid))
+    local invite = pendingInvites[key]
+    if invite == nil then return false, "There is no pending invitation" end
+    local inviterPid = findOnlinePidByAccount(invite.inviterAccount)
+    pendingInvites[key] = nil
+    if inviterPid ~= nil then sendNotice(inviterPid, displayName(pid) .. " declined the invitation", false) end
+    return true, "Invitation declined"
+end
+
+local function chooseNewLeader(group, excludingAccount)
+    local accounts = {}
+    for account in pairs(group.members or {}) do
+        if lower(account) ~= lower(excludingAccount) then table.insert(accounts, account) end
+    end
+    table.sort(accounts, function(a, b)
+        local aOnline = findOnlinePidByAccount(a) ~= nil
+        local bOnline = findOnlinePidByAccount(b) ~= nil
+        if aOnline ~= bOnline then return aOnline end
+        return lower(a) < lower(b)
+    end)
+    return accounts[1]
+end
+
+local function leaveGroup(pid)
+    local group = groupHelper.GetPlayerGroup(pid)
+    if group == nil then return false, "You are not in a group" end
+    local account = accountName(pid)
+    local wasLeader = isLeader(pid, group)
+    group.members[account] = nil
+    clearPlayerGroup(pid)
+
+    if groupMemberCount(group) == 0 then
+        data.groups[group.id] = nil
+    elseif wasLeader then
+        group.leader = chooseNewLeader(group, account)
+    end
+    saveData()
+    broadcastState(group)
+    groupHelper.SendState(pid)
+    return true, "You left the group"
+end
+
+local function disbandGroup(pid)
+    local group = groupHelper.GetPlayerGroup(pid)
+    if group == nil then return false, "You are not in a group" end
+    if not isLeader(pid, group) then return false, "Only the leader can disband the group" end
+    local online = onlineGroupPids(group)
+    for _, memberPid in ipairs(online) do clearPlayerGroup(memberPid) end
+    data.groups[group.id] = nil
+    saveData()
+    for _, memberPid in ipairs(online) do
+        groupHelper.SendState(memberPid)
+        sendNotice(memberPid, "The group was disbanded", false)
+    end
+    return true, nil
+end
+
+local function kickMember(pid, targetName)
+    local group = groupHelper.GetPlayerGroup(pid)
+    if group == nil then return false, "You are not in a group" end
+    if not isLeader(pid, group) then return false, "Only the leader can remove members" end
+    local targetPid = findOnlinePidByName(targetName)
+    local targetAccount = targetPid and accountName(targetPid) or nil
+    if targetAccount == nil then
+        local needle = lower(trim(targetName))
+        for account, member in pairs(group.members or {}) do
+            if lower(account) == needle or lower(member.name) == needle then targetAccount = account break end
+        end
+    end
+    if targetAccount == nil or group.members[targetAccount] == nil then return false, "Group member not found" end
+    if lower(targetAccount) == lower(group.leader) then return false, "Transfer leadership before removing the leader" end
+    local targetDisplay = (group.members[targetAccount] or {}).name or targetAccount
+    group.members[targetAccount] = nil
+    if targetPid ~= nil then
+        clearPlayerGroup(targetPid)
+        groupHelper.SendState(targetPid)
+        sendNotice(targetPid, "You were removed from " .. group.name, true)
+    end
+    saveData()
+    broadcastState(group)
+    return true, targetDisplay .. " removed from the group"
+end
+
+local function transferLeader(pid, targetName)
+    local group = groupHelper.GetPlayerGroup(pid)
+    if group == nil then return false, "You are not in a group" end
+    if not isLeader(pid, group) then return false, "Only the leader can transfer leadership" end
+    local targetPid = findOnlinePidByName(targetName)
+    local targetAccount = targetPid and accountName(targetPid) or nil
+    if targetAccount == nil or group.members[targetAccount] == nil then return false, "Choose an online group member" end
+    if targetPid == pid then return false, "You are already the leader" end
+    group.leader = targetAccount
+    updateMemberDisplayName(targetPid, group)
+    saveData()
+    broadcastState(group)
+    return true, displayName(targetPid) .. " is now the group leader"
+end
+
+local reconcileJournalForGroup
+local reconcileTopicsForGroup
+
+local function toggleSync(pid, key)
+    if groupHelper.GetPlayerGroup(pid) == nil then return false, "You are not in a group" end
+    local prefs = ensurePlayerPrefs(pid)
+    prefs[key] = not prefs[key]
+    persistPlayer(pid)
+    local group = groupHelper.GetPlayerGroup(pid)
+    if prefs[key] and group ~= nil then
+        if key == "journalSync" then reconcileJournalForGroup(group) else reconcileTopicsForGroup(group) end
+    end
+    groupHelper.SendState(pid)
+    return true, (key == "journalSync" and "Journal" or "Topics") .. " synchronization " .. (prefs[key] and "enabled" or "disabled")
+end
+
+local function journalEntryKey(entry)
+    return tostring(entry.type or "") .. "|" .. lower(entry.quest) .. "|" .. tostring(entry.index or "")
+end
+
+local function mergeJournal(targetPid, changes)
+    if not isValidPid(targetPid) or type(changes) ~= "table" then return false end
+    local targetJournal = Players[targetPid].data.journal
+    if type(targetJournal) ~= "table" then
+        targetJournal = {}
+        Players[targetPid].data.journal = targetJournal
+    end
+    local known = {}
+    for _, entry in pairs(targetJournal) do
+        if type(entry) == "table" then known[journalEntryKey(entry)] = true end
+    end
+    local changed = false
+    for _, entry in pairs(changes) do
+        if type(entry) == "table" then
+            local key = journalEntryKey(entry)
+            if not known[key] then
+                table.insert(targetJournal, tableHelper.deepCopy(entry))
+                known[key] = true
+                changed = true
+            end
+        end
+    end
+    if changed then
+        persistPlayer(targetPid)
+        Players[targetPid]:LoadJournal()
+    end
+    return changed
+end
+
+local function mergeTopics(targetPid, sourceTopics)
+    if not isValidPid(targetPid) or type(sourceTopics) ~= "table" then return false end
+    local target = Players[targetPid].data.topics
+    if type(target) ~= "table" then target = {}; Players[targetPid].data.topics = target end
+    local changed = false
+
+    if #sourceTopics > 0 then
+        for _, topic in ipairs(sourceTopics) do
+            if not tableHelper.containsValue(target, topic) then
+                table.insert(target, tableHelper.deepCopy(topic))
+                changed = true
+            end
+        end
+    else
+        for key, value in pairs(sourceTopics) do
+            if target[key] == nil then
+                target[key] = tableHelper.deepCopy(value)
+                changed = true
+            end
+        end
+    end
+
+    if changed then
+        persistPlayer(targetPid)
+        Players[targetPid]:LoadTopics()
+    end
+    return changed
+end
+
+function groupHelper.SyncJournalChanges(pid, playerPacket)
+    local group = groupHelper.GetPlayerGroup(pid)
+    local prefs = ensurePlayerPrefs(pid)
+    if group == nil or prefs == nil or not prefs.journalSync then return end
+    local changes = playerPacket and playerPacket.journal or {}
+    if type(changes) ~= "table" or next(changes) == nil then return end
+    for _, targetPid in ipairs(onlineGroupPids(group)) do
+        if targetPid ~= pid then
+            local targetPrefs = ensurePlayerPrefs(targetPid)
+            if targetPrefs ~= nil and targetPrefs.journalSync then mergeJournal(targetPid, changes) end
+        end
+    end
+end
+
+function groupHelper.SyncTopics(pid)
+    local group = groupHelper.GetPlayerGroup(pid)
+    local prefs = ensurePlayerPrefs(pid)
+    if group == nil or prefs == nil or not prefs.topicSync then return end
+    local topics = Players[pid].data.topics or {}
+    for _, targetPid in ipairs(onlineGroupPids(group)) do
+        if targetPid ~= pid then
+            local targetPrefs = ensurePlayerPrefs(targetPid)
+            if targetPrefs ~= nil and targetPrefs.topicSync then mergeTopics(targetPid, topics) end
+        end
+    end
+end
+
+reconcileJournalForGroup = function(group)
+    if group == nil then return end
+    local union, known = {}, {}
+    local eligible = {}
+    for _, memberPid in ipairs(onlineGroupPids(group)) do
+        local prefs = ensurePlayerPrefs(memberPid)
+        if prefs ~= nil and prefs.journalSync then
+            table.insert(eligible, memberPid)
+            for _, entry in pairs(Players[memberPid].data.journal or {}) do
+                if type(entry) == "table" then
+                    local key = journalEntryKey(entry)
+                    if not known[key] then
+                        known[key] = true
+                        table.insert(union, tableHelper.deepCopy(entry))
+                    end
+                end
+            end
+        end
+    end
+    for _, memberPid in ipairs(eligible) do mergeJournal(memberPid, union) end
+end
+
+reconcileTopicsForGroup = function(group)
+    if group == nil then return end
+    local union, seen = {}, {}
+    local eligible = {}
+    for _, memberPid in ipairs(onlineGroupPids(group)) do
+        local prefs = ensurePlayerPrefs(memberPid)
+        if prefs ~= nil and prefs.topicSync then
+            table.insert(eligible, memberPid)
+            local topics = Players[memberPid].data.topics or {}
+            if #topics > 0 then
+                for _, topic in ipairs(topics) do
+                    local key = lower(topic)
+                    if not seen[key] then seen[key] = true; table.insert(union, tableHelper.deepCopy(topic)) end
+                end
+            else
+                for key, value in pairs(topics) do
+                    local normalized = lower(key)
+                    if not seen[normalized] then seen[normalized] = true; union[key] = tableHelper.deepCopy(value) end
+                end
+            end
+        end
+    end
+    for _, memberPid in ipairs(eligible) do mergeTopics(memberPid, union) end
+end
+
+local function sameCellRecipients(originPid, cellDescription)
+    local result = {}
+    local group = groupHelper.GetPlayerGroup(originPid)
+    if group == nil then
+        if isValidPid(originPid) then table.insert(result, originPid) end
+        return result
+    end
+    for _, pid in ipairs(onlineGroupPids(group)) do
+        if isValidPid(pid) and tes3mp.GetCell(pid) == cellDescription then table.insert(result, pid) end
+    end
+    if #result == 0 and isValidPid(originPid) then table.insert(result, originPid) end
+    table.sort(result)
+    return result
+end
+
+local function sendXpControl(pid, amount, scaled, kind, reason)
+    if not isValidPid(pid) or amount <= 0 then return end
+    local payload = XP_PREFIX .. string.format("%.6f", amount) .. "\t" .. (scaled and "1" or "0") .. "\t" ..
+        escapeField(kind or "group") .. "\t" .. escapeField(reason or "Group reward") .. "\n"
+    tes3mp.SendMessage(pid, payload, false)
+end
+
+local function dispatchSharedXp(originPid, amount, scaled, kind, reason, recipients)
+    amount = tonumber(amount) or 0
+    if amount <= 0 or not isValidPid(originPid) then return false end
+    recipients = recipients or sameCellRecipients(originPid, tes3mp.GetCell(originPid))
+    if #recipients == 0 then recipients = { originPid } end
+    local share = amount / #recipients
+    for _, pid in ipairs(recipients) do
+        sendXpControl(pid, share, scaled, kind, reason)
+    end
+    if #recipients > 1 then
+        for _, pid in ipairs(recipients) do
+            sendNotice(pid, string.format("Shared %s XP: %.1f each (%d members in cell)", kind or "group", share, #recipients), false)
+        end
+    end
+    return true
+end
+
+function groupHelper.AwardServerQuestXp(pid, amount, reason)
+    if not isValidPid(pid) then return false end
+    return dispatchSharedXp(pid, tonumber(amount) or 0, false, "quest", reason or "Quest reward",
+        sameCellRecipients(pid, tes3mp.GetCell(pid)))
+end
+
+local function parseXpSignal(key)
+    if type(key) ~= "string" or key:sub(1, #XP_SIGNAL_PREFIX) ~= XP_SIGNAL_PREFIX then return nil end
+    local parts = {}
+    for part in key:gmatch("[^|]+") do table.insert(parts, part) end
+    -- amp-xp|v1|kind|amount|quest|index|nonce
+    if #parts < 5 or parts[1] ~= "amp-xp" or parts[2] ~= "v1" then return nil end
+    local signal = {
+        kind = parts[3],
+        amount = tonumber(parts[4]),
+        quest = tostring(parts[5] or ""),
+        index = tonumber(parts[6] or "0") or 0,
+        nonce = tostring(parts[7] or "")
+    }
+    if signal.amount == nil or signal.amount <= 0 then return nil end
+    if signal.kind == "kill" then
+        if signal.amount > cfg.maxKillXpSignal then return nil end
+    elseif signal.kind == "quest" then
+        if signal.amount > cfg.maxQuestXpSignal then return nil end
+    else
+        return nil
+    end
+    return signal
+end
+
+local function pruneList(list, lifetime)
+    local cutoff = now() - lifetime
+    local kept = {}
+    for _, item in ipairs(list or {}) do
+        if (item.time or 0) >= cutoff then table.insert(kept, item) end
+    end
+    return kept
+end
+
+local function signalMatchesEvent(signal, event)
+    if signal.kind ~= event.kind then return false end
+    if signal.kind == "quest" then
+        return lower(signal.quest) == lower(event.quest) and tonumber(signal.index) == tonumber(event.index)
+    end
+    return true
+end
+
+local function tryMatchXp(pid)
+    pendingXpSignals[pid] = pruneList(pendingXpSignals[pid], cfg.xpSignalLifetime)
+    recentXpEvents[pid] = pruneList(recentXpEvents[pid], cfg.xpEventLifetime)
+    local signals = pendingXpSignals[pid] or {}
+    local events = recentXpEvents[pid] or {}
+    if #signals == 0 or #events == 0 then return end
+
+    local remainingSignals = {}
+    for _, signal in ipairs(signals) do
+        local matchedIndex = nil
+        for index, event in ipairs(events) do
+            if not event.used and signalMatchesEvent(signal, event) then matchedIndex = index break end
+        end
+        if matchedIndex ~= nil then
+            local event = events[matchedIndex]
+            event.used = true
+            dispatchSharedXp(pid, signal.amount, true, signal.kind,
+                signal.kind == "kill" and "Defeated enemy" or ("Quest progress: " .. tostring(signal.quest)), event.recipients)
+        else
+            table.insert(remainingSignals, signal)
+        end
+    end
+    pendingXpSignals[pid] = remainingSignals
+    recentXpEvents[pid] = events
+end
+
+function groupHelper.PreprocessPlayerLevel(pid, playerPacket)
+    if not isValidPid(pid) or playerPacket == nil or playerPacket.stats == nil then return false end
+    local keys = playerPacket.stats.xpRewardKeys
+    if type(keys) ~= "table" then return false end
+    local filtered = {}
+    local consumed = false
+    for _, key in ipairs(keys) do
+        local signal = parseXpSignal(key)
+        if signal ~= nil then
+            consumed = true
+            signal.time = now()
+            pendingXpSignals[pid] = pendingXpSignals[pid] or {}
+            table.insert(pendingXpSignals[pid], signal)
+        else
+            table.insert(filtered, key)
+        end
+    end
+    if consumed then
+        playerPacket.stats.xpRewardKeys = filtered
+        strippedSignalPids[pid] = true
+    end
+    return consumed
+end
+
+function groupHelper.ProcessPendingXp(pid)
+    if not isValidPid(pid) then return end
+    tryMatchXp(pid)
+end
+
+function groupHelper.RebuildOutgoingXpKeysIfNeeded(pid)
+    if not strippedSignalPids[pid] or not isValidPid(pid) then return false end
+    tes3mp.ClearXpRewardKeys(pid)
+    for _, key in ipairs(Players[pid].data.stats.xpRewardKeys or {}) do tes3mp.AddXpRewardKey(pid, key) end
+    strippedSignalPids[pid] = nil
+    return true
+end
+
+local getSummonOwnerPid
+
+function groupHelper.RecordKillEvents(pid, cellDescription, actors)
+    for _, actor in pairs(actors or {}) do
+        local killerPid = actor.killer and actor.killer.pid or nil
+        if killerPid == nil and actor.killer ~= nil and actor.killer.uniqueIndex ~= nil and getSummonOwnerPid ~= nil then
+            killerPid = getSummonOwnerPid(cellDescription, actor.killer.uniqueIndex)
+        end
+        if killerPid ~= nil and isValidPid(killerPid) then
+            recentXpEvents[killerPid] = recentXpEvents[killerPid] or {}
+            table.insert(recentXpEvents[killerPid], {
+                kind = "kill", time = now(), cell = cellDescription,
+                recipients = sameCellRecipients(killerPid, cellDescription)
+            })
+            tryMatchXp(killerPid)
+        end
+    end
+end
+
+function groupHelper.RecordJournalEvents(pid, playerPacket)
+    if not isValidPid(pid) then return end
+    local cell = tes3mp.GetCell(pid)
+    for _, entry in pairs(playerPacket and playerPacket.journal or {}) do
+        local quest = tostring(entry.quest or "")
+        local index = tonumber(entry.index)
+        if quest ~= "" and index ~= nil and index > 0 then
+            recentXpEvents[pid] = recentXpEvents[pid] or {}
+            table.insert(recentXpEvents[pid], {
+                kind = "quest", time = now(), quest = quest, index = index, cell = cell,
+                recipients = sameCellRecipients(pid, cell)
+            })
+        end
+    end
+    tryMatchXp(pid)
+end
+
+local function makeUID(refNum, mpNum)
+    return tostring(refNum) .. "-" .. tostring(mpNum)
+end
+
+getSummonOwnerPid = function(cellDescription, uniqueIndex)
+    local cell = LoadedCells[cellDescription]
+    if cell == nil or cell.data == nil or cell.data.objectData == nil then return nil end
+    local obj = cell.data.objectData[uniqueIndex]
+    local ownerName = obj and obj.summon and obj.summon.summoner and obj.summon.summoner.playerName or nil
+    if ownerName == nil then return nil end
+    for pid, player in pairs(Players) do
+        if player ~= nil and player:IsLoggedIn() and lower(player.accountName) == lower(ownerName) then return pid end
+    end
+    return nil
+end
+
+function groupHelper.IsFriendlySummon(pid, cellDescription, uniqueIndex)
+    if not cfg.protectSummons or not isValidPid(pid) then return false end
+    local ownerPid = getSummonOwnerPid(cellDescription, uniqueIndex)
+    if ownerPid == nil then return false end
+    return ownerPid == pid or groupHelper.ArePlayersInSameGroup(pid, ownerPid)
+end
+
+local function stopSummonCombat(cellDescription, uid, targetPid)
+    if not isValidPid(targetPid) or LoadedCells[cellDescription] == nil then return false end
+    local cacheKey = cellDescription .. "|" .. uid .. "|" .. tostring(targetPid)
+    local current = now()
+    if summonCombatStopCache[cacheKey] ~= nil and current - summonCombatStopCache[cacheKey] < cfg.summonStopCombatCooldown then
+        return false
+    end
+    local split = uid:split("-")
+    if split[1] == nil or split[2] == nil then return false end
+    tes3mp.ClearObjectList()
+    tes3mp.SetObjectListPid(targetPid)
+    tes3mp.SetObjectListCell(cellDescription)
+    tes3mp.SetObjectListConsoleCommand("StopCombat")
+    tes3mp.SetObjectRefNum(tonumber(split[1]))
+    tes3mp.SetObjectMpNum(tonumber(split[2]))
+    tes3mp.AddObject()
+    tes3mp.SendConsoleCommand(false, false)
+    summonCombatStopCache[cacheKey] = current
+    return true
+end
+
+function GroupHelper_SummonTick()
+    if cfg.protectSummons then
+        for cellDescription, cell in pairs(LoadedCells) do
+            if cell ~= nil and cell.data ~= nil and type(cell.data.objectData) == "table" then
+                for uid, obj in pairs(cell.data.objectData) do
+                    if obj.summon and obj.summon.summoner and obj.summon.summoner.playerName then
+                        local ownerPid = getSummonOwnerPid(cellDescription, uid)
+                        if ownerPid ~= nil then
+                            for pid, player in pairs(Players) do
+                                if player ~= nil and player:IsLoggedIn() and tes3mp.GetCell(pid) == cellDescription and
+                                    (pid == ownerPid or groupHelper.ArePlayersInSameGroup(pid, ownerPid)) then
+                                    stopSummonCombat(cellDescription, uid, pid)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    local cutoff = now() - 10
+    for key, stamp in pairs(summonCombatStopCache) do if stamp < cutoff then summonCombatStopCache[key] = nil end end
+    tes3mp.StartTimer(tes3mp.CreateTimerEx("GroupHelper_SummonTick", cfg.summonCheckInterval, "i", 0))
+end
+
+local function reconcilePlayer(pid)
+    local prefs = ensurePlayerPrefs(pid)
+    local account = accountName(pid)
+    local group = prefs.id and getGroupById(prefs.id) or nil
+    if group ~= nil and group.members ~= nil and group.members[account] ~= nil then
+        updateMemberDisplayName(pid, group)
+        saveData()
+        return
+    end
+    -- Recover membership from the durable registry if the player-side copy was lost.
+    for id, candidate in pairs(data.groups) do
+        if candidate.members ~= nil and candidate.members[account] ~= nil then
+            prefs.id = id
+            updateMemberDisplayName(pid, candidate)
+            persistPlayer(pid)
+            saveData()
+            return
+        end
+    end
+    prefs.id = nil
+    persistPlayer(pid)
+end
+
+local function processCommand(pid, cmd)
+    if not isValidPid(pid) then return end
+    local sub = lower(cmd[2] or "state")
+    local ok, message = true, nil
+    if sub == "state" or sub == "refresh" then
+        groupHelper.SendState(pid)
+        return
+    elseif sub == "create" then
+        ok, message = createGroup(pid, tableHelper.concatenateFromIndex(cmd, 3))
+    elseif sub == "invite" then
+        ok, message = invitePlayer(pid, tableHelper.concatenateFromIndex(cmd, 3))
+    elseif sub == "accept" then
+        ok, message = acceptInvite(pid)
+    elseif sub == "decline" then
+        ok, message = declineInvite(pid)
+    elseif sub == "leave" then
+        ok, message = leaveGroup(pid)
+    elseif sub == "disband" then
+        ok, message = disbandGroup(pid)
+    elseif sub == "kick" then
+        ok, message = kickMember(pid, tableHelper.concatenateFromIndex(cmd, 3))
+    elseif sub == "leader" or sub == "promote" then
+        ok, message = transferLeader(pid, tableHelper.concatenateFromIndex(cmd, 3))
+    elseif sub == "journal" then
+        ok, message = toggleSync(pid, "journalSync")
+    elseif sub == "topics" then
+        ok, message = toggleSync(pid, "topicSync")
+    else
+        ok, message = false, "Unknown group action"
+    end
+    if message ~= nil then sendNotice(pid, message, not ok) end
+    groupHelper.SendState(pid)
+    local group = groupHelper.GetPlayerGroup(pid)
+    if group ~= nil then broadcastState(group) end
+end
+
+customCommandHooks.registerCommand("groupui", processCommand)
+customCommandHooks.registerCommand("group", processCommand)
+
+customEventHooks.registerHandler("OnServerPostInit", function(eventStatus)
+    loadData()
+    if cfg.protectSummons then
+        tes3mp.StartTimer(tes3mp.CreateTimerEx("GroupHelper_SummonTick", cfg.summonCheckInterval, "i", 0))
+    end
+    log(enumerations.log.INFO, "X050 loaded: groups, journal/topics sync, shared XP, summon protection")
+end)
+
+customEventHooks.registerHandler("OnPlayerAuthentified", function(eventStatus, pid)
+    if isValidPid(pid) then
+        reconcilePlayer(pid)
+        local group = groupHelper.GetPlayerGroup(pid)
+        local prefs = ensurePlayerPrefs(pid)
+        if group ~= nil and prefs ~= nil then
+            if prefs.journalSync then reconcileJournalForGroup(group) end
+            if prefs.topicSync then reconcileTopicsForGroup(group) end
+        end
+        groupHelper.SendState(pid)
+    end
+end)
+
+customEventHooks.registerHandler("OnPlayerDisconnect", function(eventStatus, pid)
+    pendingXpSignals[pid] = nil
+    recentXpEvents[pid] = nil
+    strippedSignalPids[pid] = nil
+end)
+
+customEventHooks.registerHandler("OnPlayerJournal", function(eventStatus, pid, playerPacket)
+    if eventStatus.validDefaultHandler and isValidPid(pid) then
+        groupHelper.RecordJournalEvents(pid, playerPacket)
+        groupHelper.SyncJournalChanges(pid, playerPacket)
+    end
+end)
+
+customEventHooks.registerHandler("OnPlayerTopic", function(eventStatus, pid)
+    if eventStatus.validDefaultHandler and isValidPid(pid) then groupHelper.SyncTopics(pid) end
+end)
+
+customEventHooks.registerHandler("OnActorDeath", function(eventStatus, pid, cellDescription, actors)
+    if eventStatus.validDefaultHandler then groupHelper.RecordKillEvents(pid, cellDescription, actors) end
+end)
+
+customEventHooks.registerValidator("OnObjectHit", function(eventStatus, pid, cellDescription)
+    if not cfg.protectSummons or not isValidPid(pid) then return end
+    tes3mp.ReadReceivedObjectList()
+    for index = 0, tes3mp.GetObjectListSize() - 1 do
+        if not tes3mp.IsObjectPlayer(index) then
+            local uid = makeUID(tes3mp.GetObjectRefNum(index), tes3mp.GetObjectMpNum(index))
+            if groupHelper.IsFriendlySummon(pid, cellDescription, uid) then
+                stopSummonCombat(cellDescription, uid, pid)
+                eventStatus.validDefaultHandler = false
+                return eventStatus
+            end
+        end
+    end
+end)
+
+return groupHelper

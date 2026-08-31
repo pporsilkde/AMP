@@ -1010,6 +1010,15 @@ eventHandler.OnPlayerLevel = function(pid)
     if Players[pid] ~= nil and Players[pid]:IsLoggedIn() then
         local playerPacket = packetReader.GetPlayerPacketTables(pid, "PlayerLevel")
 
+        -- X050: kill/quest XP is submitted as a transient reward-key signal.
+        -- groupHelper strips the private key before SaveLevel so it never becomes
+        -- persistent character state, then validates it against a recent server
+        -- ActorDeath/PlayerJournal event before distributing the reward.
+        local strippedGroupXpSignal = false
+        if groupHelper ~= nil and type(groupHelper.PreprocessPlayerLevel) == "function" then
+            strippedGroupXpSignal = groupHelper.PreprocessPlayerLevel(pid, playerPacket)
+        end
+
         -- ArenaMP C26: a reconnecting client can briefly emit the zeroed local
         -- PLAYER_LEVEL state before the server-owned profile has settled. Never
         -- allow that stale packet to erase persisted XP/SP/attribute progress.
@@ -1034,7 +1043,17 @@ eventHandler.OnPlayerLevel = function(pid)
         -- restored from the server-owned profile and sent in full.
         if Players[pid] ~= nil and Players[pid]:IsLoggedIn() then
             if eventStatus.validDefaultHandler then
+                if strippedGroupXpSignal and groupHelper ~= nil and
+                    type(groupHelper.RebuildOutgoingXpKeysIfNeeded) == "function" then
+                    groupHelper.RebuildOutgoingXpKeysIfNeeded(pid)
+                end
                 tes3mp.SendLevel(pid)
+                -- Only dispatch a validated party XP reward after the clean
+                -- server echo has removed the transient amp-xp key client-side.
+                if strippedGroupXpSignal and groupHelper ~= nil and
+                    type(groupHelper.ProcessPendingXp) == "function" then
+                    groupHelper.ProcessPendingXp(pid)
+                end
             else
                 Players[pid]:LoadLevel()
             end

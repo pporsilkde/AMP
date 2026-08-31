@@ -33,6 +33,10 @@ customEventHooks = require("customEventHooks")
 customCommandHooks = require("customCommandHooks")
 logicHandler = require("logicHandler")
 eventHandler = require("eventHandler")
+-- X050: persistent server-authoritative group system.
+groupHelper = require("groupHelper")
+-- X050a: built-in ArenaMP owner/console helper moved out of scripts/custom.
+helperAreana = require("helperAreana")
 guiHelper = require("guiHelper")
 animHelper = require("animHelper")
 speechHelper = require("speechHelper")

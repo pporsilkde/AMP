@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <sstream>
 
 #include <MyGUI_Button.h>
 #include <MyGUI_EditBox.h>
@@ -15,6 +17,7 @@
 #include "apps/openmw/mwbase/environment.hpp"
 #include "apps/openmw/mwgui/windowmanagerimp.hpp"
 #include "apps/openmw/mwinput/inputmanagerimp.hpp"
+#include "apps/openmw/mwmechanics/xpserverbridge.hpp"
 #include <components/openmw-mp/TimedLog.hpp>
 #include <components/settings/settings.hpp>
 
@@ -36,6 +39,48 @@ namespace
     std::string localizeArena(const std::string& key)
     {
         return MyGUI::LanguageManager::getInstance().replaceTags("#{arenamp=" + key + "}");
+    }
+
+    std::vector<std::string> splitControlFields(const std::string& value, char delimiter)
+    {
+        std::vector<std::string> result;
+        std::string current;
+        for (char c : value)
+        {
+            if (c == delimiter)
+            {
+                result.push_back(current);
+                current.clear();
+            }
+            else if (c != '\r' && c != '\n')
+                current.push_back(c);
+        }
+        result.push_back(current);
+        return result;
+    }
+
+    std::string unescapeControlField(const std::string& value)
+    {
+        std::string result;
+        result.reserve(value.size());
+        for (std::size_t i = 0; i < value.size(); ++i)
+        {
+            if (value[i] != '\\' || i + 1 >= value.size())
+            {
+                result.push_back(value[i]);
+                continue;
+            }
+            const char next = value[++i];
+            if (next == 'n') result.push_back('\n');
+            else if (next == 't') result.push_back('\t');
+            else result.push_back(next);
+        }
+        return result;
+    }
+
+    bool controlBool(const std::vector<std::string>& fields, std::size_t index)
+    {
+        return index < fields.size() && fields[index] == "1";
     }
 
     float moveTowards(float value, float target, float maximumDelta)
@@ -60,6 +105,11 @@ namespace mwmp
         , mEmojiBar(nullptr)
         , mGroupPane(nullptr)
         , mHomePane(nullptr)
+        , mGroupInfo(nullptr)
+        , mGroupNameLabel(nullptr)
+        , mGroupTargetLabel(nullptr)
+        , mGroupNameEdit(nullptr)
+        , mGroupTargetEdit(nullptr)
         , mTabChat(nullptr)
         , mTabGroup(nullptr)
         , mTabHome(nullptr)
@@ -76,6 +126,17 @@ namespace mwmp
         , mReturnButton(nullptr)
         , mEmojiToggleButton(nullptr)
         , mEmojiButtons{}
+        , mGroupCreateButton(nullptr)
+        , mGroupRefreshButton(nullptr)
+        , mGroupInviteButton(nullptr)
+        , mGroupLeaveButton(nullptr)
+        , mGroupDisbandButton(nullptr)
+        , mGroupKickButton(nullptr)
+        , mGroupLeaderButton(nullptr)
+        , mGroupJournalButton(nullptr)
+        , mGroupTopicsButton(nullptr)
+        , mGroupAcceptButton(nullptr)
+        , mGroupDeclineButton(nullptr)
         , windowState(CHAT_TRANSPARENT_30)
         , chatChannel(CHANNEL_DEFAULT)
         , chatStyle(STYLE_PLAIN)
@@ -83,6 +144,11 @@ namespace mwmp
         , rpMode(false)
         , stayOpenAfterSend(false)
         , emojiBarVisible(false)
+        , groupInGroup(false)
+        , groupIsLeader(false)
+        , groupJournalSync(true)
+        , groupTopicSync(true)
+        , groupPendingInvite(false)
         , editState(false)
         , historyReviewState(false)
         , mainMenuOpen(false)
@@ -198,14 +264,29 @@ namespace mwmp
         getWidget(mEmojiButtons[4], "Emoji5");
         getWidget(mEmojiButtons[5], "Emoji6");
 
+        getWidget(mGroupInfo, "GroupInfo");
+        getWidget(mGroupNameLabel, "GroupNameLabel");
+        getWidget(mGroupTargetLabel, "GroupTargetLabel");
+        getWidget(mGroupNameEdit, "GroupNameEdit");
+        getWidget(mGroupTargetEdit, "GroupTargetEdit");
+        getWidget(mGroupCreateButton, "GroupCreateButton");
+        getWidget(mGroupRefreshButton, "GroupRefreshButton");
+        getWidget(mGroupInviteButton, "GroupInviteButton");
+        getWidget(mGroupLeaveButton, "GroupLeaveButton");
+        getWidget(mGroupDisbandButton, "GroupDisbandButton");
+        getWidget(mGroupKickButton, "GroupKickButton");
+        getWidget(mGroupLeaderButton, "GroupLeaderButton");
+        getWidget(mGroupJournalButton, "GroupJournalButton");
+        getWidget(mGroupTopicsButton, "GroupTopicsButton");
+        getWidget(mGroupAcceptButton, "GroupAcceptButton");
+        getWidget(mGroupDeclineButton, "GroupDeclineButton");
+
         MyGUI::TextBox* title = nullptr;
         MyGUI::TextBox* groupTitle = nullptr;
-        MyGUI::EditBox* groupInfo = nullptr;
         MyGUI::TextBox* homeTitle = nullptr;
         MyGUI::EditBox* homeInfo = nullptr;
         getWidget(title, "PlayerMenuTitle");
         getWidget(groupTitle, "GroupTitle");
-        getWidget(groupInfo, "GroupInfo");
         getWidget(homeTitle, "HomeTitle");
         getWidget(homeInfo, "HomeInfo");
 
@@ -227,7 +308,18 @@ namespace mwmp
         mSendButton->setCaption(localizeArena("chat.send"));
 
         groupTitle->setCaption(localizeArena("chat.group.title"));
-        groupInfo->setCaption(localizeArena("chat.group.placeholder"));
+        mGroupInfo->setCaption(localizeArena("chat.group.loading"));
+        mGroupNameLabel->setCaption(localizeArena("chat.group.name"));
+        mGroupTargetLabel->setCaption(localizeArena("chat.group.target"));
+        mGroupCreateButton->setCaption(localizeArena("chat.group.create"));
+        mGroupRefreshButton->setCaption(localizeArena("chat.group.refresh"));
+        mGroupInviteButton->setCaption(localizeArena("chat.group.invite"));
+        mGroupLeaveButton->setCaption(localizeArena("chat.group.leave"));
+        mGroupDisbandButton->setCaption(localizeArena("chat.group.disband"));
+        mGroupKickButton->setCaption(localizeArena("chat.group.kick"));
+        mGroupLeaderButton->setCaption(localizeArena("chat.group.leader"));
+        mGroupAcceptButton->setCaption(localizeArena("chat.group.accept"));
+        mGroupDeclineButton->setCaption(localizeArena("chat.group.decline"));
         homeTitle->setCaption(localizeArena("chat.home.title"));
         homeInfo->setCaption(localizeArena("chat.home.placeholder"));
 
@@ -253,13 +345,26 @@ namespace mwmp
         for (int i = 0; i < 6; ++i)
             mEmojiButtons[i]->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onEmojiClicked);
 
+        mGroupCreateButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onGroupButtonClicked);
+        mGroupRefreshButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onGroupButtonClicked);
+        mGroupInviteButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onGroupButtonClicked);
+        mGroupLeaveButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onGroupButtonClicked);
+        mGroupDisbandButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onGroupButtonClicked);
+        mGroupKickButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onGroupButtonClicked);
+        mGroupLeaderButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onGroupButtonClicked);
+        mGroupJournalButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onGroupButtonClicked);
+        mGroupTopicsButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onGroupButtonClicked);
+        mGroupAcceptButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onGroupButtonClicked);
+        mGroupDeclineButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onGroupButtonClicked);
+
         mDragHandle->eventMouseButtonPressed += MyGUI::newDelegate(this, &GUIChat::onDragStart);
         mDragHandle->eventMouseDrag += MyGUI::newDelegate(this, &GUIChat::onDrag);
 
         // Keep the title bar draggable even though its label occupies part of it.
         title->setNeedMouseFocus(false);
-        groupInfo->setEditReadOnly(true);
+        mGroupInfo->setEditReadOnly(true);
         homeInfo->setEditReadOnly(true);
+        updateGroupControls();
     }
 
     void GUIChat::onOpen()
@@ -366,6 +471,45 @@ namespace mwmp
     void GUIChat::printError(const std::string &msg)
     {
         print(msg + "\n", "#FF2222");
+    }
+
+    bool GUIChat::handleServerControlMessage(const std::string& msg)
+    {
+        static const std::string groupPrefix = "@@AMP_GROUP@@";
+        static const std::string xpPrefix = "@@AMP_XP@@";
+
+        if (msg.compare(0, groupPrefix.size(), groupPrefix) == 0)
+        {
+            std::vector<std::string> fields = splitControlFields(msg.substr(groupPrefix.size()), '\t');
+            for (std::string& field : fields)
+                field = unescapeControlField(field);
+            if (!fields.empty() && fields[0] == "STATE")
+                rebuildGroupInfo(fields);
+            return true;
+        }
+
+        if (msg.compare(0, xpPrefix.size(), xpPrefix) == 0)
+        {
+            std::vector<std::string> fields = splitControlFields(msg.substr(xpPrefix.size()), '\t');
+            if (fields.size() >= 2)
+            {
+                char* end = nullptr;
+                const float amount = std::strtof(fields[0].c_str(), &end);
+                const bool scaled = fields[1] == "1";
+                std::string reason = fields.size() > 3 ? unescapeControlField(fields[3]) : std::string();
+                if (reason.empty() && fields.size() > 2)
+                {
+                    const std::string kind = fields[2];
+                    reason = kind == "kill" ? localizeArena("chat.group.xp.kill")
+                        : localizeArena("chat.group.xp.quest");
+                }
+                if (end != fields[0].c_str() && amount > 0.f)
+                    MWMechanics::XPLeveling::awardServer(amount, scaled, reason);
+            }
+            return true;
+        }
+
+        return false;
     }
 
     void GUIChat::send(const std::string &str)
@@ -791,6 +935,7 @@ namespace mwmp
         }
 
         updateToggleButtons();
+        updateGroupControls();
     }
 
     void GUIChat::selectTab(PlayerMenuTab tab, bool persist)
@@ -812,7 +957,11 @@ namespace mwmp
         if (activeTab == TAB_CHAT)
             MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
         else
+        {
             MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(nullptr);
+            if (activeTab == TAB_GROUP)
+                requestGroupState();
+        }
     }
 
     void GUIChat::updateToggleButtons()
@@ -865,6 +1014,106 @@ namespace mwmp
         Settings::Manager::setBool("stay after send", "Chat", stayOpenAfterSend);
         Settings::Manager::saveUser();
         updateToggleButtons();
+    }
+
+    void GUIChat::requestGroupState()
+    {
+        send("/groupui state");
+    }
+
+    void GUIChat::sendGroupAction(const std::string& action, const std::string& argument)
+    {
+        std::string command = "/groupui " + action;
+        if (!argument.empty())
+            command += " " + argument;
+        send(command);
+    }
+
+    void GUIChat::updateGroupControls()
+    {
+        if (mGroupCreateButton == nullptr)
+            return;
+
+        const bool leaderTools = groupInGroup && groupIsLeader;
+        mGroupNameLabel->setVisible(!groupInGroup);
+        mGroupNameEdit->setVisible(!groupInGroup);
+        mGroupCreateButton->setVisible(!groupInGroup);
+
+        mGroupTargetLabel->setVisible(leaderTools);
+        mGroupTargetEdit->setVisible(leaderTools);
+        mGroupInviteButton->setVisible(leaderTools);
+        mGroupKickButton->setVisible(leaderTools);
+        mGroupLeaderButton->setVisible(leaderTools);
+
+        mGroupJournalButton->setVisible(groupInGroup);
+        mGroupTopicsButton->setVisible(groupInGroup);
+        mGroupLeaveButton->setVisible(groupInGroup);
+        mGroupDisbandButton->setVisible(leaderTools);
+
+        mGroupAcceptButton->setVisible(!groupInGroup && groupPendingInvite);
+        mGroupDeclineButton->setVisible(!groupInGroup && groupPendingInvite);
+        mGroupRefreshButton->setVisible(true);
+
+        mGroupJournalButton->setStateSelected(groupJournalSync);
+        mGroupTopicsButton->setStateSelected(groupTopicSync);
+        mGroupJournalButton->setCaption(localizeArena("chat.group.sync_journal") + ": "
+            + localizeArena(groupJournalSync ? "chat.group.on" : "chat.group.off"));
+        mGroupTopicsButton->setCaption(localizeArena("chat.group.sync_topics") + ": "
+            + localizeArena(groupTopicSync ? "chat.group.on" : "chat.group.off"));
+    }
+
+    void GUIChat::rebuildGroupInfo(const std::vector<std::string>& fields)
+    {
+        groupInGroup = controlBool(fields, 1);
+        groupIsLeader = controlBool(fields, 2);
+        groupJournalSync = controlBool(fields, 3);
+        groupTopicSync = controlBool(fields, 4);
+        groupPendingInvite = controlBool(fields, 5);
+
+        const std::string groupName = fields.size() > 6 ? fields[6] : std::string();
+        const std::string leaderName = fields.size() > 7 ? fields[7] : std::string();
+        const std::string membersField = fields.size() > 8 ? fields[8] : std::string();
+        const std::string inviteFrom = fields.size() > 9 ? fields[9] : std::string();
+        const std::string inviteGroup = fields.size() > 10 ? fields[10] : std::string();
+
+        std::ostringstream info;
+        if (!groupInGroup)
+        {
+            info << localizeArena("chat.group.not_member");
+            if (groupPendingInvite)
+            {
+                info << "\n\n" << localizeArena("chat.group.invite_pending") << "\n"
+                     << localizeArena("chat.group.inviter") << ": " << inviteFrom << "\n"
+                     << localizeArena("chat.group.group") << ": " << inviteGroup;
+            }
+        }
+        else
+        {
+            info << localizeArena("chat.group.group") << ": " << groupName << "\n"
+                 << localizeArena("chat.group.role") << ": "
+                 << localizeArena(groupIsLeader ? "chat.group.role_leader" : "chat.group.role_member") << "\n"
+                 << localizeArena("chat.group.leader_name") << ": " << leaderName << "\n"
+                 << localizeArena("chat.group.xp_rule") << "\n\n"
+                 << localizeArena("chat.group.members") << ":";
+
+            const std::vector<std::string> members = splitControlFields(membersField, ';');
+            for (const std::string& encoded : members)
+            {
+                if (encoded.empty())
+                    continue;
+                const std::vector<std::string> member = splitControlFields(encoded, '^');
+                const std::string name = !member.empty() ? member[0] : "?";
+                const bool online = member.size() > 1 && member[1] == "1";
+                const bool sameCell = member.size() > 2 && member[2] == "1";
+                const bool leader = member.size() > 3 && member[3] == "1";
+                info << "\n" << (leader ? "* " : "- ") << name << " ["
+                     << localizeArena(!online ? "chat.group.offline" : (sameCell ? "chat.group.same_cell" : "chat.group.other_cell"))
+                     << "]";
+            }
+        }
+
+        mGroupInfo->setCaption(info.str());
+        updateGroupControls();
     }
 
     void GUIChat::onTabClicked(MyGUI::Widget* sender)
@@ -933,13 +1182,42 @@ namespace mwmp
                 continue;
 
             MyGUI::UString text = mCommandLine->getCaption();
-            text += MyGUI::UString(symbols[i]);
+            text.insert(text.size(), MyGUI::UString(symbols[i]));
             mCommandLine->setCaption(text);
             mCommandLine->setTextCursor(text.size());
             MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
             updateCommandLineLayout();
             break;
         }
+    }
+
+    void GUIChat::onGroupButtonClicked(MyGUI::Widget* sender)
+    {
+        if (sender == mGroupRefreshButton)
+            requestGroupState();
+        else if (sender == mGroupCreateButton)
+        {
+            sendGroupAction("create", mGroupNameEdit->getOnlyText());
+            mGroupNameEdit->setCaption("");
+        }
+        else if (sender == mGroupInviteButton)
+            sendGroupAction("invite", mGroupTargetEdit->getOnlyText());
+        else if (sender == mGroupKickButton)
+            sendGroupAction("kick", mGroupTargetEdit->getOnlyText());
+        else if (sender == mGroupLeaderButton)
+            sendGroupAction("leader", mGroupTargetEdit->getOnlyText());
+        else if (sender == mGroupJournalButton)
+            sendGroupAction("journal");
+        else if (sender == mGroupTopicsButton)
+            sendGroupAction("topics");
+        else if (sender == mGroupLeaveButton)
+            sendGroupAction("leave");
+        else if (sender == mGroupDisbandButton)
+            sendGroupAction("disband");
+        else if (sender == mGroupAcceptButton)
+            sendGroupAction("accept");
+        else if (sender == mGroupDeclineButton)
+            sendGroupAction("decline");
     }
 
     void GUIChat::onDragStart(MyGUI::Widget*, int, int, MyGUI::MouseButton id)

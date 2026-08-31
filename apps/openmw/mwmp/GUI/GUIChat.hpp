@@ -90,6 +90,10 @@ namespace mwmp
         void printError(const std::string &msg);
         void send(const std::string &str);
 
+        // X050: consume hidden server controls for the Group tab and
+        // server-authoritative party XP. Returns true when msg is not chat text.
+        bool handleServerControlMessage(const std::string& msg);
+
     private:
         void keyPress(MyGUI::Widget* _sender, MyGUI::KeyCode key, MyGUI::Char _char);
         void acceptCommand(MyGUI::EditBox* _sender);
@@ -121,6 +125,13 @@ namespace mwmp
         void setRpMode(bool enabled);
         void setStayOpenAfterSend(bool enabled);
 
+        // X050 group page. All actions travel through the existing ChatMessage
+        // command path (/groupui); no new network packet is required.
+        void requestGroupState();
+        void sendGroupAction(const std::string& action, const std::string& argument = std::string());
+        void updateGroupControls();
+        void rebuildGroupInfo(const std::vector<std::string>& fields);
+
         void onTabClicked(MyGUI::Widget* sender);
         void onModeClicked(MyGUI::Widget* sender);
         void onChannelClicked(MyGUI::Widget* sender);
@@ -130,6 +141,7 @@ namespace mwmp
         void onReturnClicked(MyGUI::Widget* sender);
         void onEmojiToggleClicked(MyGUI::Widget* sender);
         void onEmojiClicked(MyGUI::Widget* sender);
+        void onGroupButtonClicked(MyGUI::Widget* sender);
 
         void onDragStart(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
         void onDrag(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
@@ -143,6 +155,11 @@ namespace mwmp
         MyGUI::Widget* mEmojiBar;
         MyGUI::Widget* mGroupPane;
         MyGUI::Widget* mHomePane;
+        MyGUI::EditBox* mGroupInfo;
+        MyGUI::Widget* mGroupNameLabel;
+        MyGUI::Widget* mGroupTargetLabel;
+        MyGUI::EditBox* mGroupNameEdit;
+        MyGUI::EditBox* mGroupTargetEdit;
 
         MyGUI::Button* mTabChat;
         MyGUI::Button* mTabGroup;
@@ -160,6 +177,17 @@ namespace mwmp
         MyGUI::Button* mReturnButton;
         MyGUI::Button* mEmojiToggleButton;
         MyGUI::Button* mEmojiButtons[6];
+        MyGUI::Button* mGroupCreateButton;
+        MyGUI::Button* mGroupRefreshButton;
+        MyGUI::Button* mGroupInviteButton;
+        MyGUI::Button* mGroupLeaveButton;
+        MyGUI::Button* mGroupDisbandButton;
+        MyGUI::Button* mGroupKickButton;
+        MyGUI::Button* mGroupLeaderButton;
+        MyGUI::Button* mGroupJournalButton;
+        MyGUI::Button* mGroupTopicsButton;
+        MyGUI::Button* mGroupAcceptButton;
+        MyGUI::Button* mGroupDeclineButton;
 
         ChatWindowState windowState;
         ChatChannel chatChannel;
@@ -168,6 +196,11 @@ namespace mwmp
         bool rpMode;
         bool stayOpenAfterSend;
         bool emojiBarVisible;
+        bool groupInGroup;
+        bool groupIsLeader;
+        bool groupJournalSync;
+        bool groupTopicSync;
+        bool groupPendingInvite;
         bool editState;
         bool historyReviewState;
         bool mainMenuOpen;

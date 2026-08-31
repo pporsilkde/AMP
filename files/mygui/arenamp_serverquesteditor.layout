@@ -3,8 +3,8 @@
   <!-- X045: compact 780x500 layout (78% of the former 1000x640). Every caption
        below is a placeholder: ServerQuestEditorWindow replaces it with the
        localised string for the active interface language. -->
-  <Widget type="Window" skin="MW_Window_NoCaption" layer="Windows" position="0 0 780 500" name="_Main">
-    <Property key="MinSize" value="780 500"/>
+  <Widget type="Window" skin="MW_Window_NoCaption" layer="Windows" position="0 0 800 530" name="_Main">
+    <Property key="MinSize" value="800 530"/>
     <Property key="Sizeable" value="false"/>
     <Widget type="TextBox" skin="SandBrightText" position="8 4 764 20" name="EditorTitle">
       <Property key="TextAlign" value="Center"/>

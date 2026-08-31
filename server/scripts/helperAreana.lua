@@ -1,4 +1,4 @@
--- ArenaMP X048: first-registered-account ownership and console gating.
+-- ArenaMP helperAreana: server ownership and console gating.
 --
 -- The first account that finishes registration on a fresh server becomes the
 -- server owner: staffRank 3 and an enabled in-game console. Every other account
@@ -9,7 +9,7 @@
 -- restarts and is not tied to any player file. If the world record is wiped the
 -- next account to register claims ownership.
 
-local arenampOwnerConsole = {}
+local helperAreana = {}
 
 local OWNER_KEY = "arenampServerOwner"
 
@@ -30,7 +30,7 @@ local function saveWorld()
     end
 end
 
-function arenampOwnerConsole.GetOwnerName()
+function helperAreana.GetOwnerName()
     local variables = worldVariables()
     if variables == nil then return nil end
 
@@ -40,7 +40,7 @@ function arenampOwnerConsole.GetOwnerName()
 end
 
 local function isOwner(pid)
-    local owner = arenampOwnerConsole.GetOwnerName()
+    local owner = helperAreana.GetOwnerName()
     if owner == nil or Players[pid] == nil then return false end
     return string.lower(owner) == string.lower(tostring(Players[pid].accountName))
 end
@@ -48,7 +48,7 @@ end
 -- Claims ownership for this account if nobody holds it yet.
 local function claimOwnershipIfVacant(pid)
     if Players[pid] == nil then return false end
-    if arenampOwnerConsole.GetOwnerName() ~= nil then return false end
+    if helperAreana.GetOwnerName() ~= nil then return false end
 
     local variables = worldVariables()
     if variables == nil then return false end
@@ -56,7 +56,7 @@ local function claimOwnershipIfVacant(pid)
     variables[OWNER_KEY] = tostring(Players[pid].accountName)
     saveWorld()
 
-    tes3mp.LogMessage(enumerations.log.WARN, "[OwnerConsole] " .. tostring(Players[pid].accountName) ..
+    tes3mp.LogMessage(enumerations.log.WARN, "[helperAreana] " .. tostring(Players[pid].accountName) ..
         " is the first registered account and is now the server owner")
     return true
 end
@@ -75,7 +75,7 @@ local function applyConsoleState(pid)
         -- player file says otherwise.
         if player.data.settings.staffRank ~= 3 then
             player.data.settings.staffRank = 3
-            tes3mp.LogMessage(enumerations.log.INFO, "[OwnerConsole] restored owner rank for " ..
+            tes3mp.LogMessage(enumerations.log.INFO, "[helperAreana] restored owner rank for " ..
                 tostring(player.accountName))
         end
         player.data.settings.consoleAllowed = true
@@ -109,7 +109,7 @@ end)
 customEventHooks.registerHandler("OnPlayerFinishLogin", function(eventStatus, pid)
     -- Covers a server whose owner registered before this script was installed:
     -- an existing staffRank 3 account claims the vacant slot on next login.
-    if arenampOwnerConsole.GetOwnerName() == nil and Players[pid] ~= nil
+    if helperAreana.GetOwnerName() == nil and Players[pid] ~= nil
         and Players[pid].data.settings ~= nil and Players[pid].data.settings.staffRank == 3 then
         claimOwnershipIfVacant(pid)
     end
@@ -120,7 +120,7 @@ end)
 -- /owner shows who holds ownership. It is deliberately read-only: transferring
 -- ownership is a manual edit of the world record, not a chat command.
 customCommandHooks.registerCommand("owner", function(pid, cmd)
-    local owner = arenampOwnerConsole.GetOwnerName()
+    local owner = helperAreana.GetOwnerName()
     if owner == nil then
         tes3mp.SendMessage(pid, color.Yellow .. "Владелец сервера ещё не назначен.\n", false)
     else
@@ -128,4 +128,4 @@ customCommandHooks.registerCommand("owner", function(pid, cmd)
     end
 end)
 
-return arenampOwnerConsole
+return helperAreana
