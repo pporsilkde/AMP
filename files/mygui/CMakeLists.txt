@@ -103,13 +103,15 @@ set(MYGUI_FILES
     OpenMWResourcePlugin.xml
     skins.xml
     Ayembedt.ttf
-	Pelagiad.ttf
+    Pelagiad.ttf
+    RussoOne-Regular.ttf
     tes3mp_login.layout
     tes3mp_register.layout
     tes3mp_login.skin.xml
     tes3mp_dialog_list.layout
     tes3mp_chat.layout
     tes3mp_chat.skin.xml
+    
     # X053: generated colour emoji atlas (see tools/arenamp_make_emoji_font.py)
     ArenaMPChatColor.xml
     ArenaMPChatColor.png
