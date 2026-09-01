@@ -86,15 +86,18 @@ void Cell::removePlayer(Player *player, bool cleanPlayer)
 
 void Cell::readActorList(unsigned char packetID, const mwmp::BaseActorList *newActorList)
 {
-    for (unsigned int i = 0; i < newActorList->count; i++)
+    // Y002: iterate by const reference and resolve each actor with a single
+    // lookup. This used to deep-copy every incoming BaseActor (which owns several
+    // std::strings, two std::vectors and an Item[19] array of further strings) and
+    // then scan the cell twice - once in containsActor(), once in getActor() - for
+    // every actor of every position packet. On a busy cell that is the server's
+    // hottest loop, and its cost grows with the square of the actor count.
+    for (unsigned int i = 0; i < newActorList->count && i < newActorList->baseActors.size(); i++)
     {
-        mwmp::BaseActor newActor = newActorList->baseActors.at(i);
-        mwmp::BaseActor *cellActor;
+        const mwmp::BaseActor& newActor = newActorList->baseActors.at(i);
 
-        if (containsActor(newActor.refNum, newActor.mpNum))
+        if (mwmp::BaseActor *cellActor = getActor(newActor.refNum, newActor.mpNum))
         {
-            cellActor = getActor(newActor.refNum, newActor.mpNum);
-
             switch (packetID)
             {
             case ID_ACTOR_POSITION:
@@ -174,11 +177,12 @@ void Cell::removeActorAI(int refNum, int mpNum)
 
 bool Cell::containsActor(int refNum, int mpNum)
 {
-    for (unsigned int i = 0; i < cellActorList.baseActors.size(); i++)
+    // Y002: compare against a reference. The old body copied a whole BaseActor -
+    // strings, vectors and all - for every element it merely wanted to compare two
+    // integers against, on a path that runs for every actor of every actor packet.
+    for (const mwmp::BaseActor& actor : cellActorList.baseActors)
     {
-        mwmp::BaseActor actor = cellActorList.baseActors.at(i);
-
-        if (actor.refNum == refNum && actor.mpNum == mpNum)
+        if (static_cast<int>(actor.refNum) == refNum && static_cast<int>(actor.mpNum) == mpNum)
             return true;
     }
     return false;
@@ -186,14 +190,12 @@ bool Cell::containsActor(int refNum, int mpNum)
 
 mwmp::BaseActor *Cell::getActor(int refNum, int mpNum)
 {
-    for (unsigned int i = 0; i < cellActorList.baseActors.size(); i++)
+    for (mwmp::BaseActor& actor : cellActorList.baseActors)
     {
-        mwmp::BaseActor *actor = &cellActorList.baseActors.at(i);
-
-        if (actor->refNum == refNum && actor->mpNum == mpNum)
-            return actor;
+        if (static_cast<int>(actor.refNum) == refNum && static_cast<int>(actor.mpNum) == mpNum)
+            return &actor;
     }
-    return 0;
+    return nullptr;
 }
 
 void Cell::removeActors(const mwmp::BaseActorList *newActorList)
@@ -205,11 +207,12 @@ void Cell::removeActors(const mwmp::BaseActorList *newActorList)
 
         bool foundActor = false;
 
-        for (unsigned int i = 0; i < newActorList->count; i++)
+        for (unsigned int i = 0; i < newActorList->count && i < newActorList->baseActors.size(); i++)
         {
-            mwmp::BaseActor newActor = newActorList->baseActors.at(i);
+            // Y002: reference, not a copy (see containsActor).
+            const mwmp::BaseActor& newActor = newActorList->baseActors.at(i);
 
-            if (newActor.refNum == refNum && newActor.mpNum == mpNum)
+            if (static_cast<int>(newActor.refNum) == refNum && static_cast<int>(newActor.mpNum) == mpNum)
             {
                 removeActorAI(refNum, mpNum);
                 it = cellActorList.baseActors.erase(it);
@@ -255,22 +258,25 @@ void Cell::sendToLoaded(mwmp::ActorPacket *actorPacket, mwmp::BaseActorList *bas
     if (players.empty())
         return;
 
-    std::list <Player*> plList;
+    // Y002: no per-packet container churn.
+    //
+    // This used to allocate a std::list, fill it, sort it and unique it on every
+    // single forwarded actor packet. Cell::addPlayer() already refuses duplicates,
+    // so the deduplication was guarding against a state that cannot occur, and the
+    // sort was ordering by raw pointer value - which is not a meaningful order for
+    // anything. With twenty players in a cell each sending movement several times
+    // a second, the allocations alone were a real slice of the server tick.
+    //
+    // setActorList() is also hoisted out: it does not depend on the recipient.
+    actorPacket->setActorList(baseActorList);
 
-    for (auto pl : players)
+    for (Player *pl : players)
     {
-        if (pl != nullptr && !pl->npc.mName.empty())
-            plList.push_back(pl);
-    }
+        if (pl == nullptr || pl->npc.mName.empty())
+            continue;
 
-    plList.sort();
-    plList.unique();
-
-    for (auto pl : plList)
-    {
-        if (pl->guid == baseActorList->guid) continue;
-
-        actorPacket->setActorList(baseActorList);
+        if (pl->guid == baseActorList->guid)
+            continue;
 
         // Send the packet to this eligible guid
         actorPacket->Send(pl->guid);
@@ -302,22 +308,16 @@ void Cell::sendToLoaded(mwmp::ObjectPacket *objectPacket, mwmp::BaseObjectList *
     if (players.empty())
         return;
 
-    std::list <Player*> plList;
+    // Y002: same treatment as the actor overload above.
+    objectPacket->setObjectList(baseObjectList);
 
-    for (auto pl : players)
+    for (Player *pl : players)
     {
-        if (pl != nullptr && !pl->npc.mName.empty())
-            plList.push_back(pl);
-    }
+        if (pl == nullptr || pl->npc.mName.empty())
+            continue;
 
-    plList.sort();
-    plList.unique();
-
-    for (auto pl : plList)
-    {
-        if (pl->guid == baseObjectList->guid) continue;
-
-        objectPacket->setObjectList(baseObjectList);
+        if (pl->guid == baseObjectList->guid)
+            continue;
 
         // Send the packet to this eligible guid
         objectPacket->Send(pl->guid);

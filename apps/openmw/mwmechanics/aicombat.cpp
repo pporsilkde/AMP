@@ -1,6 +1,7 @@
 #include "aicombat.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <exception>
 #include <limits>
@@ -116,6 +117,90 @@ namespace
 
     // Minimum delay between two self-heal attempts.
     const float sHealCooldown = 6.f;
+
+    // ---------------------------------------------------------------------
+    // Y002: cached "Game" combat settings.
+    //
+    // AiCombat::execute() and everything it calls used to query
+    // Settings::Manager 28 times per actor per frame ("combat melee pressure"
+    // alone was read seven times). Each query builds a std::pair of std::strings,
+    // performs a std::map lookup and re-parses the stored text, so with a dozen
+    // NPCs fighting at once this was a measurable and entirely avoidable slice of
+    // the mechanics update - exactly the load that surfaces as sluggish AI when
+    // many players gather in one place.
+    //
+    // Values are refreshed on a one second wall-clock TTL, so the settings window
+    // still takes effect while playing; the TTL is independent of both the frame
+    // rate and the number of combatants. AiCombat only ever runs on the mechanics
+    // thread, so plain function-local statics are sufficient here.
+    // ---------------------------------------------------------------------
+    struct CombatSettings
+    {
+        bool mTacticalCombat = true;
+        bool mMeleePressure = true;
+        bool mFormationSlots = true;
+        bool mStealthSearch = true;
+        bool mThreatFlee = true;
+        bool mFleeSeekGuard = true;
+
+        float mFleeSeekGuardRadius = 0.f;
+        float mMeleeChargeMin = 0.f;
+        float mMeleeChargeMax = 0.f;
+        float mMeleeCommitTime = 0.f;
+        float mMeleeCooldownScale = 1.f;
+        float mPursuitMaxDistance = 0.f;
+        float mStealthPredictionTime = 0.f;
+        float mStealthSearchDelay = 0.f;
+        float mStealthSearchGiveUpTime = 0.f;
+        float mStealthSearchRadius = 0.f;
+        float mThreatFleeRatio = 0.f;
+
+        int mFormationMaxActors = 0;
+        int mPursuitMaxDoorTransitions = 0;
+        int mStealthSearchPoints = 0;
+    };
+
+    const CombatSettings& combatSettings()
+    {
+        using Clock = std::chrono::steady_clock;
+        namespace SM = Settings;
+
+        static CombatSettings cache;
+        static Clock::time_point refreshAt;
+        static bool initialized = false;
+
+        const Clock::time_point now = Clock::now();
+        if (!initialized || now >= refreshAt)
+        {
+            cache.mTacticalCombat = SM::Manager::getBool("tactical combat", "Game");
+            cache.mMeleePressure = SM::Manager::getBool("combat melee pressure", "Game");
+            cache.mFormationSlots = SM::Manager::getBool("combat formation slots", "Game");
+            cache.mStealthSearch = SM::Manager::getBool("combat stealth search", "Game");
+            cache.mThreatFlee = SM::Manager::getBool("combat threat flee", "Game");
+            cache.mFleeSeekGuard = SM::Manager::getBool("combat flee seek guard", "Game");
+
+            cache.mFleeSeekGuardRadius = SM::Manager::getFloat("combat flee seek guard radius", "Game");
+            cache.mMeleeChargeMin = SM::Manager::getFloat("combat melee charge min", "Game");
+            cache.mMeleeChargeMax = SM::Manager::getFloat("combat melee charge max", "Game");
+            cache.mMeleeCommitTime = SM::Manager::getFloat("combat melee commit time", "Game");
+            cache.mMeleeCooldownScale = SM::Manager::getFloat("combat melee cooldown scale", "Game");
+            cache.mPursuitMaxDistance = SM::Manager::getFloat("combat pursuit max distance", "Game");
+            cache.mStealthPredictionTime = SM::Manager::getFloat("combat stealth prediction time", "Game");
+            cache.mStealthSearchDelay = SM::Manager::getFloat("combat stealth search delay", "Game");
+            cache.mStealthSearchGiveUpTime = SM::Manager::getFloat("combat stealth search give up time", "Game");
+            cache.mStealthSearchRadius = SM::Manager::getFloat("combat stealth search radius", "Game");
+            cache.mThreatFleeRatio = SM::Manager::getFloat("combat threat flee ratio", "Game");
+
+            cache.mFormationMaxActors = SM::Manager::getInt("combat formation max actors", "Game");
+            cache.mPursuitMaxDoorTransitions = SM::Manager::getInt("combat pursuit max door transitions", "Game");
+            cache.mStealthSearchPoints = SM::Manager::getInt("combat stealth search points", "Game");
+
+            initialized = true;
+            refreshAt = now + std::chrono::seconds(1);
+        }
+
+        return cache;
+    }
 
     float healthRatio(const MWWorld::Ptr& actor)
     {
@@ -381,14 +466,14 @@ namespace MWMechanics
                 {
                     ++storage.mSearchPointsVisited;
                     const int maxPoints = std::max(0,
-                        Settings::Manager::getInt("combat stealth search points", "Game"));
+                        combatSettings().mStealthSearchPoints);
                     if (storage.mSearchPointsVisited <= maxPoints)
                     {
                         const auto world = MWBase::Environment::get().getWorld();
                         const auto navigator = world->getNavigator();
                         const auto halfExtents = world->getPathfindingHalfExtents(actor);
                         const float radius = std::max(96.f,
-                            Settings::Manager::getFloat("combat stealth search radius", "Game"));
+                            combatSettings().mStealthSearchRadius);
                         const auto point = navigator->findRandomPointAroundCircle(
                             halfExtents, storage.mLastSeenTargetPos, radius, getNavigatorFlags(actor));
                         if (point.has_value())
@@ -416,7 +501,7 @@ namespace MWMechanics
                 storage.mCurrentAction->getCombatRange(ranged);
                 const float distToTarget = MWBase::Environment::get().getWorld()->getHitDistance(actor, target);
                 const float meleeCommitRange = std::max(260.f, storage.mAttackRange * 1.45f);
-                meleePressureMovement = Settings::Manager::getBool("combat melee pressure", "Game")
+                meleePressureMovement = combatSettings().mMeleePressure
                     && !ranged && storage.mCurrentAction->isAttackingOrSpell() && storage.mLOS
                     && distToTarget <= meleeCommitRange;
 
@@ -629,11 +714,11 @@ namespace MWMechanics
         // pressure/attack instead of re-rolling lateral tactics every reaction.
         // This is intentionally not used for ranged combat.
         if (!isRangedCombat && currentAction->isAttackingOrSpell() && storage.mLOS
-            && Settings::Manager::getBool("combat melee pressure", "Game")
+            && combatSettings().mMeleePressure
             && distToTarget <= std::max(280.f, rangeAttack * 1.30f))
         {
             storage.mMeleeCommitTimer = std::max(storage.mMeleeCommitTimer,
-                Settings::Manager::getFloat("combat melee commit time", "Game"));
+                combatSettings().mMeleeCommitTime);
         }
 
         if (isRangedCombat)
@@ -702,7 +787,7 @@ namespace MWMechanics
                     // otherwise valid melee attack into panic/flee. With direct
                     // geometric LOS, keep pressure for a short distance and let
                     // the normal path builder retry on the following updates.
-                    const bool closeVisibleMelee = Settings::Manager::getBool("combat melee pressure", "Game")
+                    const bool closeVisibleMelee = combatSettings().mMeleePressure
                         && !isRangedCombat && storage.mGeometricLOS
                         && distToTarget <= std::max(420.f, rangeAttack * 1.75f);
                     if (closeVisibleMelee)
@@ -916,7 +1001,7 @@ namespace MWMechanics
             static_cast<std::size_t>(std::max(0, storage.mDoorTransitions)), routeTransitions);
         if (!engaged || !actor.getClass().isBipedal(actor)
             || transitionCount >= static_cast<std::size_t>(std::max(1,
-                Settings::Manager::getInt("combat pursuit max door transitions", "Game"))))
+                combatSettings().mPursuitMaxDoorTransitions)))
         {
             // There is no valid continuation for this cross-cell fight. Finish
             // Combat now so AiInternalTravel can return the actor home instead
@@ -1019,7 +1104,7 @@ namespace MWMechanics
         }
 
         const float maxDistance = std::max(0.f,
-            Settings::Manager::getFloat("combat pursuit max distance", "Game"));
+            combatSettings().mPursuitMaxDistance);
         if (maxDistance <= 0.f)
             return false;
 
@@ -1065,7 +1150,7 @@ namespace MWMechanics
             return;
         }
 
-        if (!Settings::Manager::getBool("tactical combat", "Game") || !storage.mCurrentAction)
+        if (!combatSettings().mTacticalCombat || !storage.mCurrentAction)
         {
             clearTacticalMovement(actor, storage);
             return;
@@ -1077,7 +1162,7 @@ namespace MWMechanics
         const bool bipedal = actor.getClass().isBipedal(actor);
         bool ranged = false;
         storage.mCurrentAction->getCombatRange(ranged);
-        const bool aggressiveMelee = Settings::Manager::getBool("combat melee pressure", "Game")
+        const bool aggressiveMelee = combatSettings().mMeleePressure
             && !ranged && storage.mCurrentAction->isAttackingOrSpell();
         const float meleeCommitRange = std::max(260.f, storage.mAttackRange * 1.45f);
         const bool meleePressureRange = aggressiveMelee && storage.mLOS && distToTarget <= meleeCommitRange;
@@ -1305,7 +1390,7 @@ namespace MWMechanics
     {
         const bool targetIsPlayer = target == MWMechanics::getPlayer()
             || mwmp::PlayerList::isDedicatedPlayer(target);
-        if (!Settings::Manager::getBool("combat stealth search", "Game")
+        if (!combatSettings().mStealthSearch
             || !targetIsPlayer)
         {
             storage.mSearchingLastKnown = false;
@@ -1328,7 +1413,7 @@ namespace MWMechanics
 
         storage.mLostSightTimer += duration;
         const float searchDelay = std::max(0.f,
-            Settings::Manager::getFloat("combat stealth search delay", "Game"));
+            combatSettings().mStealthSearchDelay);
         if (storage.mLostSightTimer < searchDelay)
             return false;
 
@@ -1336,7 +1421,7 @@ namespace MWMechanics
         if (!storage.mSearchingLastKnown)
         {
             const float predictionSeconds = std::max(0.f,
-                Settings::Manager::getFloat("combat stealth prediction time", "Game"));
+                combatSettings().mStealthPredictionTime);
             osg::Vec3f predicted = storage.mLastSeenTargetPos
                 + storage.mLastSeenTargetVelocity * predictionSeconds;
 
@@ -1364,7 +1449,7 @@ namespace MWMechanics
         }
 
         const float giveUpTime = std::max(searchDelay + 0.5f,
-            Settings::Manager::getFloat("combat stealth search give up time", "Game"));
+            combatSettings().mStealthSearchGiveUpTime);
 
         // A target may be hidden by Sneak mechanics while still physically in
         // front of the NPC. Do not declare the search over until geometric LOS
@@ -1377,7 +1462,7 @@ namespace MWMechanics
         AiCombatStorage& storage, bool ranged)
     {
         storage.mFormationUpdateTimer = std::max(0.f, storage.mFormationUpdateTimer - duration);
-        if (!Settings::Manager::getBool("combat formation slots", "Game") || !storage.mLOS
+        if (!combatSettings().mFormationSlots || !storage.mLOS
             || storage.mSearchingLastKnown || storage.mUseCustomDestination)
         {
             storage.mFormationActive = false;
@@ -1400,7 +1485,7 @@ namespace MWMechanics
             sameCell.push_back(attacker);
         }
 
-        const int maxSlots = std::max(2, Settings::Manager::getInt("combat formation max actors", "Game"));
+        const int maxSlots = std::max(2, combatSettings().mFormationMaxActors);
         if (sameCell.size() < 2)
         {
             storage.mFormationActive = false;
@@ -1454,7 +1539,7 @@ namespace MWMechanics
 
     bool AiCombat::updateThreatFlee(const MWWorld::Ptr& actor, const MWWorld::Ptr& target, AiCombatStorage& storage)
     {
-        if (!Settings::Manager::getBool("combat threat flee", "Game")
+        if (!combatSettings().mThreatFlee
             || !actor.getClass().isNpc() || actor.getClass().isClass(actor, "Guard"))
         {
             storage.mThreatFlee = false;
@@ -1509,7 +1594,7 @@ namespace MWMechanics
         const float flee = std::max(0, std::min(100,
             actorStats.getAiSetting(CreatureStats::AI_Flee).getModified())) / 100.f;
         float threshold = std::max(0.15f,
-            Settings::Manager::getFloat("combat threat flee ratio", "Game"));
+            combatSettings().mThreatFleeRatio);
         threshold += (1.f - actorHpRatio) * 0.28f + flee * 0.18f - fight * 0.16f;
 
         storage.mThreatFlee = ratio < threshold;
@@ -1541,11 +1626,11 @@ namespace MWMechanics
                         || mwmp::PlayerList::isDedicatedPlayer(target);
                     if (!storage.mFleeAskedGuard && actor.getClass().isNpc()
                         && targetIsPlayer
-                        && Settings::Manager::getBool("combat flee seek guard", "Game")
+                        && combatSettings().mFleeSeekGuard
                         && MWBase::Environment::get().getMechanicsManager()->isCombatInitiator(target, actor))
                     {
                         const float guardRadius = std::max(256.f,
-                            Settings::Manager::getFloat("combat flee seek guard radius", "Game"));
+                            combatSettings().mFleeSeekGuardRadius);
                         std::vector<MWWorld::Ptr> nearby;
                         MWBase::Environment::get().getMechanicsManager()->getActorsInRange(
                             actor.getRefData().getPosition().asVec3(), guardRadius, nearby);
@@ -1587,7 +1672,7 @@ namespace MWMechanics
                         static_cast<std::size_t>(std::max(0, storage.mDoorTransitions)), fleeRouteTransitions);
                     if (!storage.mHasFleeDoor && actor.getClass().isBipedal(actor)
                         && fleeTransitionCount < static_cast<std::size_t>(std::max(1,
-                            Settings::Manager::getInt("combat pursuit max door transitions", "Game")))
+                            combatSettings().mPursuitMaxDoorTransitions))
                         && (!mwmp::Main::isInitialized()
                             || mwmp::Main::get().getCellController()->isLocalActor(actor)))
                     {
@@ -1837,7 +1922,7 @@ namespace MWMechanics
         bool targetUsesRanged = false;
         float rangeAttackOfTarget = ActionWeapon(targetWeapon).getCombatRange(targetUsesRanged);
 
-        if (!isDistantCombat && Settings::Manager::getBool("combat melee pressure", "Game")
+        if (!isDistantCombat && combatSettings().mMeleePressure
             && mMeleeCommitTimer > 0.f)
         {
             // Commit the body to the swing: face the target and keep a modest
@@ -1906,7 +1991,7 @@ namespace MWMechanics
             if (std::abs(angleToTarget) > osg::PI / 4)
                 moveDuration = 0.2f;
             else if (distToTarget <= rangeAttackOfTarget
-                && Misc::Rng::rollClosedProbability() < (Settings::Manager::getBool("combat melee pressure", "Game") ? 0.10f : 0.25f))
+                && Misc::Rng::rollClosedProbability() < (combatSettings().mMeleePressure ? 0.10f : 0.25f))
                 moveDuration = 0.1f + 0.1f * Misc::Rng::rollClosedProbability();
             if (moveDuration > 0)
             {
@@ -1973,18 +2058,18 @@ namespace MWMechanics
                     End of tes3mp addition
                 */
                 const bool meleePressure = !distantCombat
-                    && Settings::Manager::getBool("combat melee pressure", "Game");
+                    && combatSettings().mMeleePressure;
                 if (meleePressure)
                 {
                     float minStrength = std::max(0.f, std::min(1.f,
-                        Settings::Manager::getFloat("combat melee charge min", "Game")));
+                        combatSettings().mMeleeChargeMin));
                     float maxStrength = std::max(0.f, std::min(1.f,
-                        Settings::Manager::getFloat("combat melee charge max", "Game")));
+                        combatSettings().mMeleeChargeMax));
                     if (maxStrength < minStrength)
                         std::swap(maxStrength, minStrength);
                     mStrength = minStrength + (maxStrength - minStrength) * Misc::Rng::rollClosedProbability();
                     mMeleeCommitTimer = std::max(0.15f,
-                        Settings::Manager::getFloat("combat melee commit time", "Game"));
+                        combatSettings().mMeleeCommitTime);
                 }
                 else
                     mStrength = Misc::Rng::rollClosedProbability();
@@ -2007,7 +2092,7 @@ namespace MWMechanics
                 if (meleePressure)
                 {
                     const float cooldownScale = std::max(0.2f, std::min(1.5f,
-                        Settings::Manager::getFloat("combat melee cooldown scale", "Game")));
+                        combatSettings().mMeleeCooldownScale));
                     attackCooldown *= cooldownScale;
                 }
                 mAttackCooldown = std::max(0.05f, attackCooldown);

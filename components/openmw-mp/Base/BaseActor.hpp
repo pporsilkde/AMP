@@ -23,8 +23,41 @@ namespace mwmp
     {
     public:
 
+        // Y002: every scalar member is initialized here.
+        //
+        // refNum, mpNum, movementFlags, drawState, isFlying, deathState,
+        // isFollowerCellChange and the two SimpleCreatureStats booleans were left
+        // indeterminate. A default-constructed BaseActor is used as the receive
+        // scratch buffer for every actor packet, and packet types that do not
+        // serialise a given field simply left the garbage in place - which then
+        // propagated into DedicatedActor/LocalActor state. In particular a garbage
+        // mDeathAnimationFinished makes LocalActor::update() stop sending position
+        // and animFlags for a live NPC.
         BaseActor()
         {
+            refNum = 0;
+            mpNum = 0;
+
+            // ESM::Position is a packed POD with no blank() of its own.
+            blankPosition(position);
+            blankPosition(direction);
+            blankPosition(aiCoordinates);
+            blankPosition(aiHomePosition);
+            cell.blank();
+            aiHomeCell.blank();
+
+            movementFlags = 0;
+            drawState = 0;
+            isFlying = false;
+
+            // ESM::StatState<float> zero-initializes itself, so only the two
+            // trailing booleans of SimpleCreatureStats need help here.
+            creatureStats.mDead = false;
+            creatureStats.mDeathAnimationFinished = false;
+
+            deathState = 0;
+            isFollowerCellChange = false;
+
             hasPositionData = false;
             hasStatsDynamicData = false;
             hasAiTarget = false;
@@ -34,6 +67,19 @@ namespace mwmp
             aiShouldRepeat = false;
             aiHasReturnHome = false;
         }
+
+    private:
+
+        static void blankPosition(ESM::Position& value)
+        {
+            for (int i = 0; i < 3; ++i)
+            {
+                value.pos[i] = 0.f;
+                value.rot[i] = 0.f;
+            }
+        }
+
+    public:
 
         std::string refId = "";
         unsigned int refNum;

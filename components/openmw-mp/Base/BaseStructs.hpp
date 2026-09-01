@@ -100,17 +100,24 @@ namespace mwmp
 
     struct ProjectileOrigin
     {
-        float origin[3];
-        float orientation[4];
+        // Y002: default member initializers throughout this header.
+        //
+        // These structs are the receive-side scratch storage for network packets.
+        // Serialization is conditional almost everywhere (an Attack only carries
+        // its damage block when isHit, a Cast only carries a projectile origin
+        // when hasProjectile, and so on), so any field a given packet does not
+        // write was previously read back as indeterminate memory.
+        float origin[3] = { 0.f, 0.f, 0.f };
+        float orientation[4] = { 0.f, 0.f, 0.f, 0.f };
     };
     
     struct Target
     {
-        bool isPlayer;
+        bool isPlayer = false;
 
         std::string refId;
-        unsigned int refNum;
-        unsigned int mpNum;
+        unsigned int refNum = 0;
+        unsigned int mpNum = 0;
 
         std::string name; // Remove this once the server can get names corresponding to different refIds
 
@@ -129,13 +136,13 @@ namespace mwmp
             RANGED
         };
 
-        char type;
+        char type = MELEE;
         std::string attackAnimation;
 
         std::string rangedWeaponId;
         std::string rangedAmmoId;
 
-        ESM::Position hitPosition;
+        ESM::Position hitPosition = {};
         ProjectileOrigin projectileOrigin;
 
         float damage = 0;
@@ -160,7 +167,7 @@ namespace mwmp
 
         Target target;
 
-        char type; // 0 - regular magic, 1 - item magic
+        char type = 0; // 0 - regular magic, 1 - item magic
         enum TYPE
         {
             REGULAR = 0,
@@ -173,27 +180,27 @@ namespace mwmp
         bool hasProjectile = false;
         ProjectileOrigin projectileOrigin;
 
-        bool isHit;
-        bool success;
-        bool pressed;
-        bool instant;
+        bool isHit = false;
+        bool success = false;
+        bool pressed = false;
+        bool instant = false;
 
-        bool shouldSend;
+        bool shouldSend = false;
     };
 
     struct SpellCooldown
     {
         std::string id;
-        int startTimestampDay;
-        double startTimestampHour;
+        int startTimestampDay = 0;
+        double startTimestampHour = 0.0;
     };
 
     struct ActiveSpell
     {
         std::string id;
-        bool isStackingSpell;
-        int timestampDay;
-        double timestampHour;
+        bool isStackingSpell = false;
+        int timestampDay = 0;
+        double timestampHour = 0.0;
         Target caster;
         ESM::ActiveSpells::ActiveSpellParams params;
     };
@@ -207,22 +214,22 @@ namespace mwmp
             ADD,
             REMOVE
         };
-        int action; // 0 - Clear and set in entirety, 1 - Add spell, 2 - Remove spell
+        int action = SET; // 0 - Clear and set in entirety, 1 - Add spell, 2 - Remove spell
     };
 
     struct Animation
     {
         std::string groupname;
-        int mode;
-        int count;
-        bool persist;
+        int mode = 0;
+        int count = 0;
+        bool persist = false;
     };
 
     struct SimpleCreatureStats
     {
         ESM::StatState<float> mDynamic[3];
-        bool mDead;
-        bool mDeathAnimationFinished;
+        bool mDead = false;
+        bool mDeathAnimationFinished = false;
     };
 }
 

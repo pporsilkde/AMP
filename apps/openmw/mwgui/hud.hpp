@@ -135,6 +135,10 @@ namespace MWGui
             float mAlpha = 0.f;
             float mTargetAlpha = 0.f;
             float mDisplayHealth = -1.f;
+            // Y002: last fraction actually pushed into the ProgressBar, so the
+            // widget can be repainted at any time without needing a live actor
+            // reading. -1 means "nothing valid has ever been pushed".
+            float mLastProgressFraction = -1.f;
             float mLingerTimer = 0.f;   // grace before a lost bar starts fading
 
             // X025: docking. Inside the melee radius the bar leaves the actor's head
@@ -259,6 +263,10 @@ namespace MWGui
         // result into the widget. Called for both live and fading-out slots.
         // X025: also places and fades the name caption that rides on the bar.
         void applyCombatHealthBar(CombatHealthBarState& state, float dt);
+        // Y002: single place that writes a fill into a combat bar widget, and the
+        // repaint used after a skin change (MyGUI rebuilds the track and loses it).
+        void pushCombatHealthBarProgress(CombatHealthBarState& state, float fraction);
+        void repaintCombatHealthBar(CombatHealthBarState& state);
 
         void updatePositions();
         void updateGameTimeAndCellName(float dt);

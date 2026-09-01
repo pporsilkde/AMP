@@ -209,7 +209,12 @@ void DedicatedActor::setStatsDynamic()
     MWMechanics::DynamicStat<float> value;
 
     // Resurrect this Actor if it's not supposed to be dead according to its authority
-    if (creatureStats.mDynamic[0].mCurrent > 0)
+    //
+    // Y002: only when it is actually dead locally. setStatsDynamic() runs every
+    // frame for every remote NPC, so this used to call into MechanicsManager once
+    // per remote actor per frame purely to have CreatureStats::resurrect() decide
+    // there was nothing to do. isDead() is a plain member read.
+    if (creatureStats.mDynamic[0].mCurrent > 0 && ptrCreatureStats->isDead())
         MWBase::Environment::get().getMechanicsManager()->resurrect(ptr);
 
     for (int i = 0; i < 3; ++i)

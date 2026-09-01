@@ -1140,6 +1140,9 @@ local function processCommand(pid, cmd)
     if group ~= nil then broadcastState(group) end
 end
 
+customCommandHooks.registerCommand("groupui", processCommand)
+customCommandHooks.registerCommand("group", processCommand)
+
 customEventHooks.registerHandler("OnServerPostInit", function(eventStatus)
     loadData()
     log(enumerations.log.INFO, "loaded: groups, journal/topics sync, shared XP, summon protection")

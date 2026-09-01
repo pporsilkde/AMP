@@ -1954,6 +1954,7 @@ namespace MWGui
             state.mAlpha = 0.f;
             state.mTargetAlpha = 0.f;
             state.mDisplayHealth = -1.f;
+            state.mLastProgressFraction = -1.f;
             state.mLingerTimer = 0.f;
             state.mDocked = false;
             state.mDockBlend = 0.f;
@@ -1965,6 +1966,44 @@ namespace MWGui
             if (state.mName)
                 state.mName->setVisible(false);
         }
+    }
+
+    // Y002: the one and only writer of a combat bar's fill.
+    //
+    // MyGUI::ProgressBar rebuilds its track sub-widgets inside changeWidgetSkin(),
+    // and the rebuilt track starts empty - the range and position that were pushed
+    // before the skin change are not replayed onto the new widgets. The fill was
+    // previously written only at the very end of pass 1, after a chain of early
+    // `continue`s (no line of sight, actor beyond the vanishing distance, a
+    // momentarily zero maximum health on a remote actor). A slot that changed skin
+    // and then failed to resolve in that same frame stayed visible through the
+    // linger/grace window with a freshly rebuilt, completely empty track. That is
+    // the empty bar.
+    //
+    // Caching the fraction lets any code path repaint the widget without needing a
+    // live reading from the actor.
+    void HUD::pushCombatHealthBarProgress(CombatHealthBarState& state, float fraction)
+    {
+        if (!state.mWidget)
+            return;
+
+        if (!std::isfinite(fraction))
+            fraction = state.mLastProgressFraction >= 0.f ? state.mLastProgressFraction : 1.f;
+
+        fraction = CombatBar::clamp01(fraction);
+        state.mLastProgressFraction = fraction;
+
+        state.mWidget->setProgressRange(static_cast<std::size_t>(CombatBar::sProgressResolution));
+        state.mWidget->setProgressPosition(static_cast<std::size_t>(
+            std::lround(fraction * CombatBar::sProgressResolution)));
+    }
+
+    void HUD::repaintCombatHealthBar(CombatHealthBarState& state)
+    {
+        if (!state.mWidget || state.mLastProgressFraction < 0.f)
+            return;
+
+        pushCombatHealthBarProgress(state, state.mLastProgressFraction);
     }
 
     void HUD::applyCombatHealthBar(CombatHealthBarState& state, float dt)
@@ -2211,6 +2250,7 @@ namespace MWGui
                 state.mAlpha = 0.f;
                 state.mTargetAlpha = 0.f;
                 state.mDisplayHealth = -1.f;
+                state.mLastProgressFraction = -1.f;
                 state.mLingerTimer = 0.f;
                 state.mDocked = false;
                 state.mDockBlend = 0.f;
@@ -2232,6 +2272,11 @@ namespace MWGui
                 state.mWidget->changeWidgetSkin(state.mAlly ? "MW_Progress_Green" : "MW_Progress_Red");
                 state.mWidget->setNeedMouseFocus(false);
                 state.mSkinAlly = state.mAlly;
+
+                // Y002: the new skin brought a brand new, empty track with it.
+                // Restore the fill in the same breath, so the bar can never be
+                // drawn empty while waiting for pass 1 to resolve this slot.
+                repaintCombatHealthBar(state);
             }
         }
 
@@ -2280,14 +2325,40 @@ namespace MWGui
             }
 
             MWMechanics::CreatureStats& stats = actor.getClass().getCreatureStats(actor);
-            const float maximumHealth = stats.getHealth().getModified();
-            const float currentHealth = stats.getHealth().getCurrent();
+            float maximumHealth = stats.getHealth().getModified();
+            float currentHealth = stats.getHealth().getCurrent();
+
+            // Y002: a remote actor's health is authoritative state that arrives over
+            // the network, so it can legitimately be missing or nonsensical for a
+            // few frames - before the first ActorStatsDynamic packet, or right after
+            // a drain/fortify effect is applied out of order on the authority. A
+            // non-finite reading would also poison std::lround() further down, which
+            // is undefined behaviour and produces an arbitrary progress position.
+            //
+            // Never let any of that reach the widget. Fall back to a usable pair of
+            // numbers instead of leaving the bar with an unwritten track.
+            if (!std::isfinite(maximumHealth) || maximumHealth <= 0.f)
+                maximumHealth = std::isfinite(currentHealth) && currentHealth > 0.f
+                    ? currentHealth : 0.f;
+            if (!std::isfinite(currentHealth))
+                currentHealth = maximumHealth;
+
             if (stats.isDead() || maximumHealth <= 0.f || currentHealth <= 0.f)
             {
                 // Death still fades rather than blinking, but without the grace
                 // period: there is nothing left to track.
                 state.mLingerTimer = 0.f;
                 continue;
+            }
+
+            // Y002: write the fill now, before the distance/anchor checks below can
+            // `continue` out of this iteration. A slot that stays visible through
+            // its linger window - or that just had its skin swapped, which rebuilds
+            // the MyGUI track from scratch - must never be left showing an empty bar.
+            {
+                float provisional = state.mDisplayHealth >= 0.f
+                    ? state.mDisplayHealth : currentHealth;
+                pushCombatHealthBarProgress(state, provisional / maximumHealth);
             }
 
             const float distance
@@ -2394,10 +2465,7 @@ namespace MWGui
                 state.mDisplayHealth = CombatBar::approach(
                     state.mDisplayHealth, currentHealth, CombatBar::sSmoothTauHealth, dt);
 
-            const float healthFraction = CombatBar::clamp01(state.mDisplayHealth / maximumHealth);
-            bar->setProgressRange(static_cast<std::size_t>(CombatBar::sProgressResolution));
-            bar->setProgressPosition(static_cast<std::size_t>(
-                std::lround(healthFraction * CombatBar::sProgressResolution)));
+            pushCombatHealthBarProgress(state, state.mDisplayHealth / maximumHealth);
 
             if (state.mName)
             {
