@@ -110,3 +110,6 @@ OpenMW, TES3MP, OpenMoji, and Bethesda Softworks do not endorse this fork.
 
 - **Y007 HUD event feed:** a six-slot icon feed above the stamina/combat stack shows gained items, aggregated gold and newly applied lasting effects.
 - **Y009 HUD stability:** live exact-instance effect timers, exact MP inventory-SET reseeding, pooled combat-bar parity, and actor-batch receive isolation.
+
+### Y010 HUD feed polish
+Event cards now hug the right edge with a 2 px margin, use a borderless soft shadow background, and show existing inventory totals as `+5 (10)` after pickups.
