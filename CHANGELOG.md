@@ -1,5 +1,12 @@
 # Changelog
 
+## Y016 — server build callback hotfix
+
+- Registered `OnObjectMove` and `OnObjectRotate` in `ScriptFunctions::callbacks`.
+- Fixes MSVC C2131 (`CallBackData` recursing past callback index 69) when building `tes3mp-server`.
+- Keeps the server-authoritative RP object-placement validator enabled; protocol remains 806.
+
+
 ## Y015 — custom quest chronology / journal title fix
 
 - Server-authored/custom journal entries no longer render after every vanilla JOUR entry unconditionally. Each new custom entry stores a persistent `vanillaAnchor` equal to the number of ordinary journal entries that existed when the stage was written, and the client merges both streams around that anchor.

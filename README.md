@@ -1,5 +1,7 @@
 # ArenaMP Y013 cumulative
 
+> Y016 build hotfix: `OnObjectMove` / `OnObjectRotate` are now registered in the server callback table; fixes MSVC C2131 without changing protocol 806.
+
 Y013 добавляет HUD item dedupe, remote locomotion self-heal, server-authoritative RP object placement и надёжный NPC exterior/interior return поверх полного Y012. Protocol 806.
 
 # ArenaMP

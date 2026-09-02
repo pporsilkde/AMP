@@ -237,6 +237,8 @@ public:
             {"OnObjectActivate",         Callback<unsigned short, const char*>()},
             {"OnObjectHit",              Callback<unsigned short, const char*>()},
             {"OnObjectPlace",            Callback<unsigned short, const char*>()},
+            {"OnObjectMove",             Callback<unsigned short, const char*>()},
+            {"OnObjectRotate",           Callback<unsigned short, const char*>()},
             {"OnObjectState",            Callback<unsigned short, const char*>()},
             {"OnObjectSpawn",            Callback<unsigned short, const char*>()},
             {"OnObjectDelete",           Callback<unsigned short, const char*>()},
