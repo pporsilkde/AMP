@@ -2,6 +2,40 @@
 
 This changelog consolidates the ArenaMP development notes that previously existed as separate patch, revert, manifest, and validation files. Internal patch identifiers are retained so older builds and reports can still be mapped to the current source.
 
+
+## Y009 — HUD/event-feed stability + actor packet isolation
+
+### Fixed
+- Ported the render-time pooled combat-bar Track reassertion to ArenaMW parity; ArenaMP keeps the same verified-HP-before-visible rule.
+- Removed the unnecessary fake `range=1` kick: MyGUI 3.2.2 setters already call `updateTrack()` unconditionally, so real HP is simply reasserted at the first valid visible frame.
+- Magic-effect notification durations now count down live and track the exact stacked ActiveSpells instance by id, caster and timestamp.
+- Server `InventoryChanges::SET` is detected exactly in ArenaMP and reseeds the pickup snapshot without false loot notifications.
+- Generic clear/refill detection now keys off a large loss of existing inventory kinds instead of suppressing any pickup batch larger than four kinds, so normal Take All remains visible.
+- HUD event-feed fallback coordinates are now relative to `mGameplayHud`.
+
+### Multiplayer correctness
+- `ActorPacket` now constructs a fresh `BaseActor` for every entry in a received actor batch, preventing conditional packet fields from leaking between adjacent actors.
+- Receive-side `BaseActor` and packet helper POD fields now have deterministic defaults.
+- Network protocol remains 806; no wire-format fields were added.
+
+### Reviewed but intentionally not included
+- The proposed `DedicatedActor` current-modifier preservation was rejected: in this OpenMW branch `DynamicStat::readState()` already overwrites the current-modified value from `ESM::StatState::mMod`, so pre-copying the local stat does not preserve it.
+- The one-second `AiCombat` settings cache and `Cell.cpp` allocation optimizations are valid performance ideas but are unrelated to this correctness/HUD cumulative and are deferred to a separate performance patch.
+
+## Y007 — HUD event feed
+
+### Added
+- Added a fixed six-slot RPG-style HUD event feed above the stamina/combat-bar stack.
+- Positive player-inventory deltas now show the real item icon, localized item name and gained quantity.
+- Gold gains are aggregated into one live card, so rapid rewards/pickups do not spam the HUD.
+- Newly applied lasting spells/potion effects show their first magic-effect icon and remaining duration.
+- The feed repositions above close-range docked NPC health bars instead of overlapping them.
+
+### Multiplayer safety
+- Notifications are derived only from committed local player state. ArenaMP therefore shows inventory changes only after the corresponding server-confirmed state has been applied; no new packet or protocol change is required.
+- Network protocol remains 806.
+- Y006 pooled combat-health-bar Track reassertion remains included.
+
 ## Unreleased — source distribution cleanup
 
 ### Added
@@ -27,6 +61,22 @@ This changelog consolidates the ArenaMP development notes that previously existe
 - An unreferenced, divergent shadow copy at `cmake/CMakeLists.txt`; the repository now has one authoritative root build definition.
 - The unfinished Home tab placeholder from the Player Menu.
 - Uncompiled KTX2 loader/converter files that were not referenced by CMake or runtime code. KTX2 is therefore not advertised as a current ArenaMP feature.
+
+## Y006 — combat-bar Track reset at render time
+
+- Keeps the Y005 diagnosis (pooled red/green MyGUI ProgressBar widgets) but removes the assumption that real HP is available in the same scan frame as owner/skin reassignment.
+- Added a per-slot `mNeedsTrackReset` flag set on owner reuse and enemy/ally skin changes.
+- Defers the forced alternate range until a frame has verified current/max health and the widget is about to become visible.
+- A slot waiting for that verified health remains hidden instead of exposing an empty frame.
+- Re-asserts the real 0..1000 range and current progress on every visible resolved frame; the forced alternate range is paid only after owner/skin invalidation.
+- No ActorStats, authority, packet or server routing changes; network protocol remains ArenaMP 806.
+
+## Y005 — riding rollback and multiplayer combat-bar fill stability
+
+- Rolled back the experimental Y002-Y004 riding subsystem; Y005 is based on the stable Y001 gameplay tree.
+- Fixed pooled combat health bars occasionally rendering only their frame after a red/green skin transition.
+- Re-prime MyGUI ProgressBar range/position whenever a pooled slot changes owner or switches enemy/ally skin, so the internal Track is always rebuilt.
+- No network protocol change; protocol remains ArenaMP 806.
 
 ## Y001 — launcher quality persistence and HUD FPS counter
 

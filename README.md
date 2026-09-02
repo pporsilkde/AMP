@@ -10,7 +10,7 @@ ArenaMP is an experimental multiplayer engine for *The Elder Scrolls III: Morrow
 
 | Item | Value |
 |---|---|
-| Source snapshot | Y001 |
+| Source snapshot | Y009 |
 | Engine foundation | OpenMW 0.47.0 |
 | Multiplayer heritage | TES3MP 0.8.1 |
 | ArenaMP network protocol | 806 |
@@ -98,7 +98,7 @@ bash CI/ensure-bundled-deps.sh
 
 ## Current status
 
-ArenaMP Y001 is a development snapshot, not a stable semantic release. Tactical combat, clustered lighting, ragdolls, and some advanced render paths remain experimental. Public servers should be tested with several clients and backed up before upgrading.
+ArenaMP Y009 is a development snapshot, not a stable semantic release. Tactical combat, clustered lighting, ragdolls, and some advanced render paths remain experimental. Public servers should be tested with several clients and backed up before upgrading.
 
 Android/ng-gl4es support code exists, but Android is not currently produced by the release workflow and should be treated as an unsupported development target.
 
@@ -107,3 +107,6 @@ Android/ng-gl4es support code exists, but Android is not currently produced by t
 ArenaMP retains the OpenMW and TES3MP license and contributor history. See [LICENSE](LICENSE), [AUTHORS.md](AUTHORS.md), [CREDITS.md](CREDITS.md), and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 OpenMW, TES3MP, OpenMoji, and Bethesda Softworks do not endorse this fork.
+
+- **Y007 HUD event feed:** a six-slot icon feed above the stamina/combat stack shows gained items, aggregated gold and newly applied lasting effects.
+- **Y009 HUD stability:** live exact-instance effect timers, exact MP inventory-SET reseeding, pooled combat-bar parity, and actor-batch receive isolation.

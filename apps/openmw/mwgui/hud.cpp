@@ -34,6 +34,8 @@
 */
 
 #include <components/settings/settings.hpp>
+#include <components/esm/loadmgef.hpp>
+#include <components/misc/stringops.hpp>
 #include <components/openmw-mp/TimedLog.hpp>
 
 #include "../mwbase/environment.hpp"
@@ -43,8 +45,10 @@
 
 #include "../mwworld/class.hpp"
 #include "../mwworld/esmstore.hpp"
+#include "../mwworld/containerstore.hpp"
 
 #include "../mwmechanics/creaturestats.hpp"
+#include "../mwmechanics/activespells.hpp"
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/actorutil.hpp"
 
@@ -482,12 +486,6 @@ namespace MWGui
                 "CombatHealthBar" + MyGUI::utility::toString(i));
             state.mWidget->setNeedMouseFocus(false);
             state.mWidget->setVisible(false);
-            // Y003: a freshly created MyGUI::ProgressBar has a range of zero, and a
-            // zero range draws no track at all - only the MW_Box frame child of the
-            // skin. Seed the range here so no widget in this pool can ever be in
-            // that state, whatever happens to it later.
-            state.mWidget->setProgressRange(static_cast<std::size_t>(CombatBar::sProgressResolution));
-            state.mWidget->setProgressPosition(static_cast<std::size_t>(CombatBar::sProgressResolution));
 
             // X025: one caption per slot, created here so no layout file has to
             // change. It is only shown while the bar sits in the docked stack.
@@ -502,6 +500,48 @@ namespace MWGui
             state.mName->setVisible(false);
 
             mCombatHealthBars.push_back(state);
+        }
+
+        // Arena Y007: modern RPG-style event feed above the stamina/combat stack.
+        // Widgets are allocated once; gameplay only recycles these six slots.
+        constexpr std::size_t hudNotificationPoolSize = 6;
+        mHudNotifications.reserve(hudNotificationPoolSize);
+        for (std::size_t i = 0; i < hudNotificationPoolSize; ++i)
+        {
+            HudNotificationState state;
+            state.mPanel = mGameplayHud->createWidget<MyGUI::Widget>(
+                "HUD_Box_Transparent", MyGUI::IntCoord(0, 0, 300, 38),
+                MyGUI::Align::Left | MyGUI::Align::Top,
+                "HudEventCard" + MyGUI::utility::toString(i));
+            state.mPanel->setNeedMouseFocus(false);
+            state.mPanel->setVisible(false);
+
+            state.mIcon = state.mPanel->createWidget<MyGUI::ImageBox>(
+                "ImageBox", MyGUI::IntCoord(4, 4, 30, 30), MyGUI::Align::Left | MyGUI::Align::VCenter,
+                "HudEventIcon" + MyGUI::utility::toString(i));
+            state.mIcon->setNeedMouseFocus(false);
+
+            state.mTitle = state.mPanel->createWidget<MyGUI::TextBox>(
+                "SandBrightText", MyGUI::IntCoord(40, 1, 196, 36),
+                MyGUI::Align::Left | MyGUI::Align::VCenter,
+                "HudEventTitle" + MyGUI::utility::toString(i));
+            state.mTitle->setNeedMouseFocus(false);
+            state.mTitle->setFontHeight(16);
+            state.mTitle->setTextAlign(MyGUI::Align::Left | MyGUI::Align::VCenter);
+            state.mTitle->setTextShadow(true);
+            state.mTitle->setTextShadowColour(MyGUI::Colour::Black);
+
+            state.mValue = state.mPanel->createWidget<MyGUI::TextBox>(
+                "SandBrightText", MyGUI::IntCoord(236, 1, 58, 36),
+                MyGUI::Align::Right | MyGUI::Align::VCenter,
+                "HudEventValue" + MyGUI::utility::toString(i));
+            state.mValue->setNeedMouseFocus(false);
+            state.mValue->setFontHeight(16);
+            state.mValue->setTextAlign(MyGUI::Align::Right | MyGUI::Align::VCenter);
+            state.mValue->setTextShadow(true);
+            state.mValue->setTextShadowColour(MyGUI::Colour::Black);
+
+            mHudNotifications.push_back(state);
         }
 
         getWidget(mHealthText, "HealthText");
@@ -895,6 +935,7 @@ namespace MWGui
         }
 
         updateCombatHealthBars(dt);
+        updateHudEventFeed(dt);
         updateFocusedTargetPanel(dt);
 
         const std::string npcBarMode = getNpcBarMode();
@@ -1960,7 +2001,6 @@ namespace MWGui
             state.mAlpha = 0.f;
             state.mTargetAlpha = 0.f;
             state.mDisplayHealth = -1.f;
-            state.mLastProgressFraction = -1.f;
             state.mLingerTimer = 0.f;
             state.mDocked = false;
             state.mDockBlend = 0.f;
@@ -1974,98 +2014,22 @@ namespace MWGui
         }
     }
 
-    // Y002: the one and only writer of a combat bar's fill.
-    //
-    // MyGUI::ProgressBar rebuilds its track sub-widgets inside changeWidgetSkin(),
-    // and the rebuilt track starts empty - the range and position that were pushed
-    // before the skin change are not replayed onto the new widgets. The fill was
-    // previously written only at the very end of pass 1, after a chain of early
-    // `continue`s (no line of sight, actor beyond the vanishing distance, a
-    // momentarily zero maximum health on a remote actor). A slot that changed skin
-    // and then failed to resolve in that same frame stayed visible through the
-    // linger/grace window with a freshly rebuilt, completely empty track. That is
-    // the empty bar.
-    //
-    // Caching the fraction lets any code path repaint the widget without needing a
-    // live reading from the actor.
-    void HUD::pushCombatHealthBarProgress(CombatHealthBarState& state, float fraction)
+    void HUD::pushCombatHealthBarProgress(CombatHealthBarState& state)
     {
-        if (!state.mWidget)
+        MyGUI::ProgressBar* bar = state.mWidget;
+        if (!bar || !state.mFrameHasProgress)
             return;
 
-        if (!std::isfinite(fraction))
-            fraction = state.mLastProgressFraction >= 0.f ? state.mLastProgressFraction : 1.f;
+        const std::size_t realRange = static_cast<std::size_t>(CombatBar::sProgressResolution);
+        const std::size_t realPosition = std::min(state.mFrameProgressPosition, realRange);
 
-        fraction = CombatBar::clamp01(fraction);
-        state.mLastProgressFraction = fraction;
-        state.mPaintedThisFrame = true;
-
-        state.mWidget->setProgressRange(static_cast<std::size_t>(CombatBar::sProgressResolution));
-        state.mWidget->setProgressPosition(static_cast<std::size_t>(
-            std::lround(fraction * CombatBar::sProgressResolution)));
-    }
-
-    void HUD::repaintCombatHealthBar(CombatHealthBarState& state)
-    {
-        if (!state.mWidget || state.mLastProgressFraction < 0.f)
-            return;
-
-        pushCombatHealthBarProgress(state, state.mLastProgressFraction);
-    }
-
-    // Y003: guarantee that a bar about to be drawn has a fill.
-    //
-    // Reported symptom: during a fight one player sees a normal bar over an enemy
-    // or a summon while another player sees only the frame, at random, and far
-    // more often when several players are around. Nothing about that is network
-    // state - both clients read the same health - it is entirely local to each
-    // client's widget pool.
-    //
-    // The pool holds 24 ProgressBars that are handed out and taken back as actors
-    // enter and leave the fight, and a slot changes skin whenever its new occupant
-    // has the opposite allegiance to the previous one (MW_Progress_Green for an
-    // ally such as a summon, MW_Progress_Red for an enemy). Both handing a slot to
-    // a new actor and changing its skin disturb the widget's fill, while the fill
-    // itself was only ever written at the very end of pass 1 - after four separate
-    // `continue`s that are hit constantly in normal play: no usable screen anchor
-    // (the actor is behind you or off the edge of the view), the actor beyond the
-    // vanishing distance, the actor dead, or a momentarily unusable maximum health.
-    // A slot disturbed on a frame where pass 1 bailed out stayed visible through
-    // its whole linger window showing nothing but the frame.
-    //
-    // The more participants there are, the more the pool churns, which is exactly
-    // why this is rare solo and common with several players - and why two clients
-    // disagree about the same actor.
-    //
-    // Rather than trying to enumerate every path that can disturb a widget, the
-    // fill is now reasserted here, in the single place that makes a bar visible.
-    void HUD::ensureCombatHealthBarPainted(CombatHealthBarState& state)
-    {
-        if (!state.mWidget || state.mPaintedThisFrame)
-            return;
-
-        if (state.mLastProgressFraction >= 0.f)
-        {
-            pushCombatHealthBarProgress(state, state.mLastProgressFraction);
-            return;
-        }
-
-        // Never painted, and pass 1 could not resolve the slot this frame. Derive a
-        // fill straight from the actor if it is still usable, and fall back to full
-        // rather than to an empty frame.
-        float fraction = 1.f;
-        const MWWorld::Ptr& actor = state.mActor;
-        if (!actor.isEmpty() && actor.getRefData().getCount() > 0
-            && !actor.getRefData().isDeleted() && actor.getClass().isActor())
-        {
-            const MWMechanics::CreatureStats& stats = actor.getClass().getCreatureStats(actor);
-            const float maximumHealth = stats.getHealth().getModified();
-            const float currentHealth = stats.getHealth().getCurrent();
-            if (std::isfinite(maximumHealth) && maximumHealth > 0.f && std::isfinite(currentHealth))
-                fraction = currentHealth / maximumHealth;
-        }
-
-        pushCombatHealthBarProgress(state, fraction);
+        // MyGUI 3.2.2 setProgressRange()/setProgressPosition() both call
+        // updateTrack() unconditionally. What matters after pool reuse or a skin
+        // swap is therefore not a fake intermediate numerical value, but making
+        // sure the real values are reasserted only once this frame has verified HP.
+        state.mNeedsTrackReset = false;
+        bar->setProgressRange(realRange);
+        bar->setProgressPosition(realPosition);
     }
 
     void HUD::applyCombatHealthBar(CombatHealthBarState& state, float dt)
@@ -2097,6 +2061,17 @@ namespace MWGui
             return;
         }
 
+        // Y006: a slot whose Track was invalidated must never expose a bare frame.
+        // If no verified health was resolved for the current actor this frame, keep
+        // the widget hidden and preserve mNeedsTrackReset for a later good frame.
+        if (state.mNeedsTrackReset && !state.mFrameHasProgress)
+        {
+            bar->setVisible(false);
+            if (state.mName)
+                state.mName->setVisible(false);
+            return;
+        }
+
         const int width = std::max(CombatBar::sHeadMinWidthPixels,
             static_cast<int>(std::lround(state.mWidth)));
         const int height = std::max(CombatBar::sHeadMinHeightPixels,
@@ -2105,10 +2080,9 @@ namespace MWGui
         const int top = static_cast<int>(std::lround(state.mCentreY - height * 0.5f));
 
         const float alpha = std::min(1.f, state.mAlpha);
-        // Y003: setCoord() re-runs the track layout, so paint after it, not before.
         bar->setCoord(left, top, width, height);
-        ensureCombatHealthBarPainted(state);
         bar->setAlpha(alpha);
+        pushCombatHealthBarProgress(state);
         bar->setVisible(true);
 
         // X025: the caption rides directly on top of the bar for the whole trip, so
@@ -2141,10 +2115,6 @@ namespace MWGui
     void HUD::updateCombatHealthBars(float dt)
     {
         dt = std::max(0.f, dt);
-
-        // Y003: per-frame paint bookkeeping (see ensureCombatHealthBarPainted).
-        for (CombatHealthBarState& state : mCombatHealthBars)
-            state.mPaintedThisFrame = false;
 
         const bool enabled = npcBarShowsCombat(getNpcBarMode())
             && mGameplayHud && mGameplayHud->getVisible()
@@ -2318,13 +2288,17 @@ namespace MWGui
                 state.mAlpha = 0.f;
                 state.mTargetAlpha = 0.f;
                 state.mDisplayHealth = -1.f;
-                state.mLastProgressFraction = -1.f;
                 state.mLingerTimer = 0.f;
                 state.mDocked = false;
                 state.mDockBlend = 0.f;
                 state.mDockSwitchTimer = 0.f;
                 state.mDockRow = -1;
                 state.mNameCaption.clear();
+
+                // Y006: owner reuse invalidates the pooled ProgressBar Track.
+                // Only mark it here; the reset is consumed later, at the first
+                // successful draw with real health data.
+                state.mNeedsTrackReset = true;
                 slotTaken[freeSlots[nextFree]] = true;
                 ++nextFree;
             }
@@ -2339,12 +2313,15 @@ namespace MWGui
 
                 state.mWidget->changeWidgetSkin(state.mAlly ? "MW_Progress_Green" : "MW_Progress_Red");
                 state.mWidget->setNeedMouseFocus(false);
-                state.mSkinAlly = state.mAlly;
 
-                // Y002: the new skin brought a brand new, empty track with it.
-                // Restore the fill in the same breath, so the bar can never be
-                // drawn empty while waiting for pass 1 to resolve this slot.
-                repaintCombatHealthBar(state);
+                // Y006: changeWidgetSkin() can replace the internal Track widget.
+                // Do not try to repair it here: this scan does not guarantee that
+                // the actor will have a usable anchor/range/stats later this frame.
+                // Defer the reset until applyCombatHealthBar(), immediately before
+                // the widget becomes visible with verified real health.
+                state.mNeedsTrackReset = true;
+                state.mDisplayHealth = -1.f;
+                state.mSkinAlly = state.mAlly;
             }
         }
 
@@ -2373,6 +2350,7 @@ namespace MWGui
             state.mFrameDrop = false;
             state.mFrameAlpha = 1.f;
             state.mFrameDistance = 0.f;
+            state.mFrameHasProgress = false;
 
             MyGUI::ProgressBar* bar = state.mWidget;
             if (!bar)
@@ -2393,40 +2371,14 @@ namespace MWGui
             }
 
             MWMechanics::CreatureStats& stats = actor.getClass().getCreatureStats(actor);
-            float maximumHealth = stats.getHealth().getModified();
-            float currentHealth = stats.getHealth().getCurrent();
-
-            // Y002: a remote actor's health is authoritative state that arrives over
-            // the network, so it can legitimately be missing or nonsensical for a
-            // few frames - before the first ActorStatsDynamic packet, or right after
-            // a drain/fortify effect is applied out of order on the authority. A
-            // non-finite reading would also poison std::lround() further down, which
-            // is undefined behaviour and produces an arbitrary progress position.
-            //
-            // Never let any of that reach the widget. Fall back to a usable pair of
-            // numbers instead of leaving the bar with an unwritten track.
-            if (!std::isfinite(maximumHealth) || maximumHealth <= 0.f)
-                maximumHealth = std::isfinite(currentHealth) && currentHealth > 0.f
-                    ? currentHealth : 0.f;
-            if (!std::isfinite(currentHealth))
-                currentHealth = maximumHealth;
-
+            const float maximumHealth = stats.getHealth().getModified();
+            const float currentHealth = stats.getHealth().getCurrent();
             if (stats.isDead() || maximumHealth <= 0.f || currentHealth <= 0.f)
             {
                 // Death still fades rather than blinking, but without the grace
                 // period: there is nothing left to track.
                 state.mLingerTimer = 0.f;
                 continue;
-            }
-
-            // Y002: write the fill now, before the distance/anchor checks below can
-            // `continue` out of this iteration. A slot that stays visible through
-            // its linger window - or that just had its skin swapped, which rebuilds
-            // the MyGUI track from scratch - must never be left showing an empty bar.
-            {
-                float provisional = state.mDisplayHealth >= 0.f
-                    ? state.mDisplayHealth : currentHealth;
-                pushCombatHealthBarProgress(state, provisional / maximumHealth);
             }
 
             const float distance
@@ -2533,7 +2485,10 @@ namespace MWGui
                 state.mDisplayHealth = CombatBar::approach(
                     state.mDisplayHealth, currentHealth, CombatBar::sSmoothTauHealth, dt);
 
-            pushCombatHealthBarProgress(state, state.mDisplayHealth / maximumHealth);
+            const float healthFraction = CombatBar::clamp01(state.mDisplayHealth / maximumHealth);
+            state.mFrameProgressPosition = static_cast<std::size_t>(
+                std::lround(healthFraction * CombatBar::sProgressResolution));
+            state.mFrameHasProgress = true;
 
             if (state.mName)
             {
@@ -2692,6 +2647,428 @@ namespace MWGui
         }
     }
 
+
+    HUD::HudNotificationState* HUD::pushHudNotification(HudEventKind kind, const std::string& key,
+        const std::string& icon, const std::string& title, int amount,
+        const std::string& valueText)
+    {
+        if (title.empty() || mHudNotifications.empty())
+            return nullptr;
+
+        // Pickups of the same item (especially gold) coalesce while their card is
+        // alive. This turns rapid +5/+20/+100 changes into one stable +125 card.
+        if (kind == HudEventKind::Item || kind == HudEventKind::Gold)
+        {
+            for (HudNotificationState& state : mHudNotifications)
+            {
+                if (!state.mActive || state.mKind != kind || state.mKey != key)
+                    continue;
+
+                state.mAmount += amount;
+                state.mAge = 0.f;
+                state.mSequence = ++mHudNotificationSequence;
+                if (state.mValue)
+                    state.mValue->setCaption(kind == HudEventKind::Gold
+                        ? "+" + MyGUI::utility::toString(state.mAmount)
+                        : "x" + MyGUI::utility::toString(state.mAmount));
+                return &state;
+            }
+        }
+
+        HudNotificationState* target = nullptr;
+        for (HudNotificationState& state : mHudNotifications)
+        {
+            if (!state.mActive)
+            {
+                target = &state;
+                break;
+            }
+        }
+        if (!target)
+        {
+            target = &*std::min_element(mHudNotifications.begin(), mHudNotifications.end(),
+                [](const HudNotificationState& left, const HudNotificationState& right)
+                {
+                    return left.mSequence < right.mSequence;
+                });
+        }
+
+        target->mKind = kind;
+        target->mKey = key;
+        target->mTitleText = title;
+        target->mValueText = valueText;
+        target->mAmount = std::max(1, amount);
+        target->mSpellId.clear();
+        target->mSpellCasterActorId = -1;
+        target->mSpellTimestampDay = -1;
+        target->mSpellTimestampHour = -1.f;
+        target->mAge = 0.f;
+        target->mLifetime = kind == HudEventKind::Magic ? 4.8f : 4.2f;
+        target->mSequence = ++mHudNotificationSequence;
+        target->mActive = true;
+
+        if (target->mTitle)
+            target->mTitle->setCaption(title);
+        if (target->mValue)
+        {
+            if (kind == HudEventKind::Gold)
+                target->mValue->setCaption("+" + MyGUI::utility::toString(target->mAmount));
+            else if (kind == HudEventKind::Item)
+                target->mValue->setCaption("x" + MyGUI::utility::toString(target->mAmount));
+            else
+                target->mValue->setCaption(valueText);
+        }
+        if (target->mIcon)
+        {
+            std::string resolved = icon;
+            if (resolved.empty())
+                resolved = "default icon.tga";
+            try
+            {
+                resolved = MWBase::Environment::get().getWindowManager()->correctIconPath(resolved);
+            }
+            catch (const std::exception&)
+            {
+                resolved.clear();
+            }
+            target->mIcon->setImageTexture(resolved);
+        }
+        if (target->mPanel)
+        {
+            target->mPanel->setAlpha(0.f);
+            target->mPanel->setVisible(true);
+        }
+        return target;
+    }
+
+    void HUD::scanHudEventSources()
+    {
+        const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+        if (player.isEmpty())
+            return;
+
+        struct ItemSnapshot
+        {
+            int mCount = 0;
+            std::string mName;
+            std::string mIcon;
+        };
+
+        std::map<std::string, ItemSnapshot> inventoryNow;
+        MWWorld::ContainerStore& store = player.getClass().getContainerStore(player);
+        for (MWWorld::ContainerStoreIterator it = store.begin(); it != store.end(); ++it)
+        {
+            MWWorld::Ptr item = *it;
+            const int stackCount = item.getRefData().getCount();
+            if (stackCount <= 0)
+                continue;
+
+            const bool gold = item.getClass().isGold(item);
+            const std::string key = gold ? std::string("__arena_gold__")
+                : Misc::StringUtils::lowerCase(item.getCellRef().getRefId());
+            ItemSnapshot& snapshot = inventoryNow[key];
+            if (gold)
+            {
+                snapshot.mCount += stackCount * std::max(1, item.getClass().getValue(item));
+                if (snapshot.mName.empty())
+                    snapshot.mName = item.getClass().getName(item);
+            }
+            else
+                snapshot.mCount += stackCount;
+
+            if (snapshot.mName.empty())
+                snapshot.mName = item.getClass().getName(item);
+            if (snapshot.mName.empty())
+                snapshot.mName = item.getCellRef().getRefId();
+            if (snapshot.mIcon.empty())
+                snapshot.mIcon = item.getClass().getInventoryIcon(item);
+        }
+
+        const MWMechanics::ActiveSpells& activeSpells
+            = player.getClass().getCreatureStats(player).getActiveSpells();
+        std::map<std::string, int> spellsNow;
+        std::map<std::string, int> spellOccurrence;
+
+        bool serverInventorySet = false;
+        std::uint64_t currentInventorySetGeneration = mHudInventorySetGeneration;
+        if (mwmp::Main::isInitialized() && mwmp::Main::get().getLocalPlayer())
+        {
+            currentInventorySetGeneration
+                = mwmp::Main::get().getLocalPlayer()->hudInventorySetGeneration;
+            serverInventorySet = currentInventorySetGeneration != mHudInventorySetGeneration;
+        }
+
+        // During load/new-game startup keep reseeding for a short grace period.
+        // This prevents the player's entire save inventory/effect list from being
+        // presented as newly acquired content.
+        if (!mHudEventSnapshotsReady || mHudEventWarmup > 0.f)
+        {
+            mHudInventorySnapshot.clear();
+            for (const auto& entry : inventoryNow)
+                mHudInventorySnapshot[entry.first] = entry.second.mCount;
+            mHudActiveSpellSnapshot.clear();
+            for (auto it = activeSpells.begin(); it != activeSpells.end(); ++it)
+            {
+                const std::string spellKey = Misc::StringUtils::lowerCase(it->first)
+                    + "\x1f" + it->second.mDisplayName;
+                ++mHudActiveSpellSnapshot[spellKey];
+            }
+            mHudInventorySetGeneration = currentInventorySetGeneration;
+            mHudEventSnapshotsReady = true;
+            return;
+        }
+
+        // Generic protection for clear/refill cycles: only arm it when most
+        // previously known item *kinds disappear entirely* in one scan. Mere count
+        // reductions (selling/consuming stacks) do not trigger it. Unlike a hard
+        // "more than N gained kinds" rule, this does not suppress a legitimate
+        // Take All that adds many different items at once.
+        std::size_t lostKinds = 0;
+        for (const auto& previous : mHudInventorySnapshot)
+        {
+            const auto nowIt = inventoryNow.find(previous.first);
+            if (nowIt == inventoryNow.end())
+                ++lostKinds;
+        }
+        if (mHudInventorySnapshot.size() >= sHudEventReseedMinKinds
+            && static_cast<float>(lostKinds)
+                >= static_cast<float>(mHudInventorySnapshot.size()) * sHudEventReseedLostFraction)
+        {
+            mHudInventoryReseedGrace = 0.5f;
+        }
+
+        if (serverInventorySet)
+        {
+            // A server InventoryChanges::SET is an authoritative wholesale state
+            // replacement, not a sequence of pickups. Reseed exactly on that event.
+            mHudInventorySetGeneration = currentInventorySetGeneration;
+        }
+        const bool suppressInventoryEvents = serverInventorySet || mHudInventoryReseedGrace > 0.f;
+        if (!suppressInventoryEvents)
+        {
+            for (const auto& entry : inventoryNow)
+            {
+                const auto previousIt = mHudInventorySnapshot.find(entry.first);
+                const int previous = previousIt == mHudInventorySnapshot.end() ? 0 : previousIt->second;
+                const int gained = entry.second.mCount - previous;
+                if (gained <= 0)
+                    continue;
+                pushHudNotification(entry.first == "__arena_gold__" ? HudEventKind::Gold : HudEventKind::Item,
+                    entry.first, entry.second.mIcon, entry.second.mName, gained);
+            }
+        }
+        mHudInventorySnapshot.clear();
+        for (const auto& entry : inventoryNow)
+            mHudInventorySnapshot[entry.first] = entry.second.mCount;
+
+        for (auto it = activeSpells.begin(); it != activeSpells.end(); ++it)
+        {
+            const MWMechanics::ActiveSpells::ActiveSpellParams& params = it->second;
+            const std::string spellKey = Misc::StringUtils::lowerCase(it->first)
+                + "\x1f" + params.mDisplayName;
+            const int occurrence = ++spellOccurrence[spellKey];
+            ++spellsNow[spellKey];
+
+            const auto previousIt = mHudActiveSpellSnapshot.find(spellKey);
+            const int previousCount = previousIt == mHudActiveSpellSnapshot.end() ? 0 : previousIt->second;
+            if (occurrence <= previousCount)
+                continue;
+
+            std::string icon;
+            float timeLeft = -1.f;
+            if (!params.mEffects.empty())
+            {
+                const ESM::ActiveEffect& first = params.mEffects.front();
+                const ESM::MagicEffect* effect = MWBase::Environment::get().getWorld()
+                    ->getStore().get<ESM::MagicEffect>().find(first.mEffectId);
+                if (effect)
+                    icon = effect->mIcon;
+
+                for (const ESM::ActiveEffect& active : params.mEffects)
+                    timeLeft = std::max(timeLeft, active.mTimeLeft);
+            }
+
+            const std::string duration = timeLeft > 0.f
+                ? MyGUI::utility::toString(static_cast<int>(std::ceil(timeLeft))) + "s"
+                : std::string();
+            const std::string title = params.mDisplayName.empty() ? it->first : params.mDisplayName;
+            HudNotificationState* card = pushHudNotification(HudEventKind::Magic,
+                "magic:" + spellKey, icon, title, 1, duration);
+            if (card)
+            {
+                card->mSpellId = it->first;
+                card->mSpellCasterActorId = params.mCasterActorId;
+                card->mSpellTimestampDay = params.mTimeStamp.getDay();
+                card->mSpellTimestampHour = params.mTimeStamp.getHour();
+            }
+        }
+        mHudActiveSpellSnapshot.swap(spellsNow);
+    }
+
+    void HUD::refreshHudMagicDurations()
+    {
+        bool anyMagicCard = false;
+        for (const HudNotificationState& state : mHudNotifications)
+        {
+            if (state.mActive && state.mKind == HudEventKind::Magic && !state.mSpellId.empty())
+            {
+                anyMagicCard = true;
+                break;
+            }
+        }
+        if (!anyMagicCard)
+            return;
+
+        const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+        if (player.isEmpty())
+            return;
+
+        const MWMechanics::ActiveSpells& activeSpells
+            = player.getClass().getCreatureStats(player).getActiveSpells();
+
+        for (HudNotificationState& state : mHudNotifications)
+        {
+            if (!state.mActive || state.mKind != HudEventKind::Magic || state.mSpellId.empty())
+                continue;
+            if (!state.mValue)
+                continue;
+
+            float timeLeft = -1.f;
+            for (auto it = activeSpells.begin(); it != activeSpells.end(); ++it)
+            {
+                const MWMechanics::ActiveSpells::ActiveSpellParams& params = it->second;
+                if (it->first != state.mSpellId
+                    || params.mCasterActorId != state.mSpellCasterActorId
+                    || params.mTimeStamp.getDay() != state.mSpellTimestampDay
+                    || std::abs(params.mTimeStamp.getHour() - state.mSpellTimestampHour) > 0.0001f)
+                    continue;
+
+                for (const ESM::ActiveEffect& active : params.mEffects)
+                    timeLeft = std::max(timeLeft, active.mTimeLeft);
+                break;
+            }
+
+            if (timeLeft > 0.f)
+                state.mValue->setCaption(
+                    MyGUI::utility::toString(static_cast<int>(std::ceil(timeLeft))) + "s");
+            else
+                state.mValue->setCaption(std::string());
+        }
+    }
+
+    void HUD::updateHudEventFeed(float dt)
+    {
+        dt = std::max(0.f, dt);
+        if (mHudEventWarmup > 0.f)
+            mHudEventWarmup = std::max(0.f, mHudEventWarmup - dt);
+        if (mHudInventoryReseedGrace > 0.f)
+            mHudInventoryReseedGrace = std::max(0.f, mHudInventoryReseedGrace - dt);
+
+        mHudEventScanTimer -= dt;
+        if (mHudEventScanTimer <= 0.f)
+        {
+            mHudEventScanTimer = 0.12f;
+            scanHudEventSources();
+        }
+
+        refreshHudMagicDurations();
+
+        std::vector<std::size_t> active;
+        active.reserve(mHudNotifications.size());
+        for (std::size_t i = 0; i < mHudNotifications.size(); ++i)
+        {
+            HudNotificationState& state = mHudNotifications[i];
+            if (!state.mActive)
+                continue;
+            state.mAge += dt;
+            if (state.mAge >= state.mLifetime)
+            {
+                state.mActive = false;
+                if (state.mPanel)
+                    state.mPanel->setVisible(false);
+                continue;
+            }
+            active.push_back(i);
+        }
+
+        // Newest card stays closest to the combat/stamina block; older cards grow
+        // upward. If close-range combat bars are docked, the feed automatically
+        // starts above that stack instead of covering it.
+        std::sort(active.begin(), active.end(), [this](std::size_t left, std::size_t right)
+        {
+            return mHudNotifications[left].mSequence > mHudNotifications[right].mSequence;
+        });
+
+        std::size_t dockedRows = 0;
+        for (const CombatHealthBarState& combat : mCombatHealthBars)
+        {
+            if (combat.mDocked && combat.mAlpha > 0.05f)
+                ++dockedRows;
+        }
+        dockedRows = std::min<std::size_t>(dockedRows, CombatBar::sDockMaxRows);
+
+        // Y008: the cards are children of mGameplayHud, so every anchor has to be
+        // expressed relative to it. The old fallback assigned raw screen coordinates
+        // from RenderManager, which only lined up while mGameplayHud sat at 0,0.
+        MyGUI::IntPoint origin;
+        if (mGameplayHud)
+            origin = mGameplayHud->getAbsolutePosition();
+        const MyGUI::IntSize viewSize = MyGUI::RenderManager::getInstance().getViewSize();
+        int anchorRight = viewSize.width - 10 - origin.left;
+        int anchorBottom = viewSize.height - 44 - origin.top;
+        if (mFatigueFrame)
+        {
+            const MyGUI::IntCoord frame = mFatigueFrame->getAbsoluteCoord();
+            anchorRight = frame.left + frame.width - origin.left;
+            anchorBottom = frame.top - origin.top - CombatBar::sDockGap
+                - static_cast<int>(dockedRows) * CombatBar::sDockRowStride - 8;
+        }
+
+        constexpr int cardWidth = 300;
+        constexpr int cardHeight = 38;
+        constexpr int cardGap = 4;
+        const int cardLeft = std::max(6, anchorRight - cardWidth);
+        for (std::size_t row = 0; row < active.size(); ++row)
+        {
+            HudNotificationState& state = mHudNotifications[active[row]];
+            const float fadeIn = std::min(1.f, state.mAge / 0.14f);
+            const float fadeOut = state.mAge > state.mLifetime - 0.55f
+                ? std::max(0.f, (state.mLifetime - state.mAge) / 0.55f) : 1.f;
+            const float alpha = std::min(fadeIn, fadeOut);
+            const int top = anchorBottom - cardHeight
+                - static_cast<int>(row) * (cardHeight + cardGap);
+            if (state.mPanel)
+            {
+                state.mPanel->setCoord(cardLeft, top, cardWidth, cardHeight);
+                state.mPanel->setAlpha(alpha);
+                state.mPanel->setVisible(alpha > 0.01f);
+            }
+        }
+    }
+
+    void HUD::resetHudEventFeed()
+    {
+        mHudInventorySnapshot.clear();
+        mHudActiveSpellSnapshot.clear();
+        mHudEventSnapshotsReady = false;
+        mHudEventWarmup = 1.f;
+        mHudInventoryReseedGrace = 0.f;
+        mHudEventScanTimer = 0.f;
+        for (HudNotificationState& state : mHudNotifications)
+        {
+            state.mActive = false;
+            state.mAge = 0.f;
+            state.mAmount = 0;
+            state.mKey.clear();
+            state.mSpellId.clear();
+            state.mSpellCasterActorId = -1;
+            state.mSpellTimestampDay = -1;
+            state.mSpellTimestampHour = -1.f;
+            if (state.mPanel)
+                state.mPanel->setVisible(false);
+        }
+    }
+
     void HUD::updateEnemyHealthBar()
     {
         const std::string npcBarMode = getNpcBarMode();
@@ -2838,6 +3215,7 @@ namespace MWGui
         mFocusActorPanelAlpha = 0.f;
         mTargetPanelPositionInitialized = false;
         hideCombatHealthBars();
+        resetHudEventFeed();
         if (mEnemyName)
             mEnemyName->setVisible(false);
         if (mEnemySummary)

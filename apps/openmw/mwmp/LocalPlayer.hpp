@@ -1,6 +1,7 @@
 #ifndef OPENMW_LOCALPLAYER_HPP
 #define OPENMW_LOCALPLAYER_HPP
 
+#include <cstdint>
 #include <string>
 
 #include <components/openmw-mp/Base/BasePlayer.hpp>
@@ -25,6 +26,9 @@ namespace mwmp
 
         bool isUsingBed;
         bool avoidSendingInventoryPackets;
+        // Y009: incremented after an authoritative server InventoryChanges::SET.
+        // HUD pickup notifications use it to reseed exactly instead of guessing.
+        std::uint64_t hudInventorySetGeneration = 0;
         bool isReceivingQuickKeys;
         bool isPlayingAnimation;
         bool diedSinceArrestAttempt;

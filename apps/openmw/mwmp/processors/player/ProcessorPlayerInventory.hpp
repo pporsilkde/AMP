@@ -35,7 +35,12 @@ namespace mwmp
                 else if (inventoryAction == InventoryChanges::REMOVE)
                     localPlayer.removeItems();
                 else // InventoryChanges::SET
+                {
                     localPlayer.setInventory();
+                    // Y009: mark an exact wholesale inventory replacement. The HUD
+                    // event feed will reseed its snapshot without showing fake pickups.
+                    ++localPlayer.hudInventorySetGeneration;
+                }
 
                 localPlayer.avoidSendingInventoryPackets = false;
             }

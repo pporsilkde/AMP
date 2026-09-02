@@ -1,3 +1,6 @@
 ArenaMP bundled CoreScripts v16
-Source snapshot: ArenaMP Y001
+Source snapshot: ArenaMP Y009
 Network protocol: ArenaMP 806 (matching client/server build required)
+Riding subsystem: not included
+HUD event feed: enabled
+Actor batch receive isolation: enabled

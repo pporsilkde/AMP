@@ -6,6 +6,9 @@
 
 #include "../mwworld/ptr.hpp"
 
+#include <cstdint>
+#include <map>
+#include <string>
 #include <vector>
 
 namespace MWWorld
@@ -121,6 +124,12 @@ namespace MWGui
             // clearing a slot resets mAlly but must not claim the widget went back to
             // the red skin, otherwise the next enemy inherits a green bar.
             bool mSkinAlly = false;
+            // Y006: changing owner or skin invalidates MyGUI ProgressBar's internal
+            // Track.  Do not rebuild it at scan time: an actor can fail the draw
+            // pass for several frames (no screen anchor, out of range, incomplete
+            // stats).  The reset is consumed only when real health is pushed into
+            // a bar that is actually about to be drawn.
+            bool mNeedsTrackReset = true;
 
             // X024: presentation state. The raw per-frame anchor produced by
             // getObjectScreenBounds follows the animated bounding box, so a running
@@ -135,13 +144,6 @@ namespace MWGui
             float mAlpha = 0.f;
             float mTargetAlpha = 0.f;
             float mDisplayHealth = -1.f;
-            // Y002: last fraction actually pushed into the ProgressBar, so the
-            // widget can be repainted at any time without needing a live actor
-            // reading. -1 means "nothing valid has ever been pushed".
-            float mLastProgressFraction = -1.f;
-            // Y003: set whenever a fill is written this frame, so a bar that is
-            // about to be drawn without one can be repainted.
-            bool mPaintedThisFrame = false;
             float mLingerTimer = 0.f;   // grace before a lost bar starts fading
 
             // X025: docking. Inside the melee radius the bar leaves the actor's head
@@ -160,6 +162,8 @@ namespace MWGui
             bool mFrameDrop = false;
             float mFrameDistance = 0.f;
             float mFrameAlpha = 1.f;
+            bool mFrameHasProgress = false;
+            std::size_t mFrameProgressPosition = 0;
             float mHeadCentreX = 0.f;
             float mHeadCentreY = 0.f;
             float mHeadWidth = 0.f;
@@ -170,6 +174,56 @@ namespace MWGui
         float mCombatHealthBarScanTimer = 0.f;
         // Monotonic counter handing out mDockSequence, so stack rows keep their order.
         unsigned int mCombatDockSequenceCounter = 0;
+
+
+        // Arena Y007: fixed HUD event-feed pool. The feed is intentionally local:
+        // MW observes committed player state directly, while MP observes the same
+        // state only after server-confirmed inventory/ActorStats packets have been
+        // applied. No notification is emitted from a speculative input action.
+        enum class HudEventKind
+        {
+            Item,
+            Gold,
+            Magic
+        };
+
+        struct HudNotificationState
+        {
+            MyGUI::Widget* mPanel = nullptr;
+            MyGUI::ImageBox* mIcon = nullptr;
+            MyGUI::TextBox* mTitle = nullptr;
+            MyGUI::TextBox* mValue = nullptr;
+            HudEventKind mKind = HudEventKind::Item;
+            std::string mKey;
+            std::string mTitleText;
+            std::string mValueText;
+            // Y009: exact ActiveSpells identity for a live countdown. Stacked
+            // effects may share the same spell id, so id alone is not sufficient.
+            std::string mSpellId;
+            int mSpellCasterActorId = -1;
+            int mSpellTimestampDay = -1;
+            float mSpellTimestampHour = -1.f;
+            int mAmount = 0;
+            float mAge = 0.f;
+            float mLifetime = 4.2f;
+            std::uint64_t mSequence = 0;
+            bool mActive = false;
+        };
+
+        std::vector<HudNotificationState> mHudNotifications;
+        std::map<std::string, int> mHudInventorySnapshot;
+        std::map<std::string, int> mHudActiveSpellSnapshot;
+        float mHudEventScanTimer = 0.f;
+        float mHudEventWarmup = 1.f;
+        // Y009: if most of the inventory disappears in one scan, hold pickup
+        // notifications briefly. This catches script-driven clear/refill cycles
+        // without suppressing ordinary Take All operations.
+        float mHudInventoryReseedGrace = 0.f;
+        std::uint64_t mHudNotificationSequence = 0;
+        // Incremented by LocalPlayer when a server InventoryChanges::SET is
+        // applied. The HUD reseeds its snapshot exactly on that generation.
+        std::uint64_t mHudInventorySetGeneration = 0;
+        bool mHudEventSnapshotsReady = false;
 
         MyGUI::Widget *mDrowningFrame, *mDrowningFlash;
 
@@ -262,15 +316,23 @@ namespace MWGui
         void updateFocusedTargetPanel(float dt);
         void updateCombatHealthBars(float dt);
         void hideCombatHealthBars();
+        void updateHudEventFeed(float dt);
+        void scanHudEventSources();
+        HudNotificationState* pushHudNotification(HudEventKind kind, const std::string& key,
+            const std::string& icon, const std::string& title, int amount,
+            const std::string& valueText = std::string());
+        void resetHudEventFeed();
+        void refreshHudMagicDurations();
+        // Y009: only a strong "inventory was mostly removed" signature arms the
+        // generic clear/refill guard. ArenaMP additionally uses an exact SET
+        // generation from ProcessorPlayerInventory.
+        static constexpr std::size_t sHudEventReseedMinKinds = 5;
+        static constexpr float sHudEventReseedLostFraction = 0.75f;
+        void pushCombatHealthBarProgress(CombatHealthBarState& state);
         // X024: drive one slot's opacity/geometry towards its target and push the
         // result into the widget. Called for both live and fading-out slots.
         // X025: also places and fades the name caption that rides on the bar.
         void applyCombatHealthBar(CombatHealthBarState& state, float dt);
-        // Y002: single place that writes a fill into a combat bar widget, and the
-        // repaint used after a skin change (MyGUI rebuilds the track and loses it).
-        void pushCombatHealthBarProgress(CombatHealthBarState& state, float fraction);
-        void repaintCombatHealthBar(CombatHealthBarState& state);
-        void ensureCombatHealthBarPainted(CombatHealthBarState& state);
 
         void updatePositions();
         void updateGameTimeAndCellName(float dt);
