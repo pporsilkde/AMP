@@ -482,6 +482,12 @@ namespace MWGui
                 "CombatHealthBar" + MyGUI::utility::toString(i));
             state.mWidget->setNeedMouseFocus(false);
             state.mWidget->setVisible(false);
+            // Y003: a freshly created MyGUI::ProgressBar has a range of zero, and a
+            // zero range draws no track at all - only the MW_Box frame child of the
+            // skin. Seed the range here so no widget in this pool can ever be in
+            // that state, whatever happens to it later.
+            state.mWidget->setProgressRange(static_cast<std::size_t>(CombatBar::sProgressResolution));
+            state.mWidget->setProgressPosition(static_cast<std::size_t>(CombatBar::sProgressResolution));
 
             // X025: one caption per slot, created here so no layout file has to
             // change. It is only shown while the bar sits in the docked stack.
@@ -1992,6 +1998,7 @@ namespace MWGui
 
         fraction = CombatBar::clamp01(fraction);
         state.mLastProgressFraction = fraction;
+        state.mPaintedThisFrame = true;
 
         state.mWidget->setProgressRange(static_cast<std::size_t>(CombatBar::sProgressResolution));
         state.mWidget->setProgressPosition(static_cast<std::size_t>(
@@ -2004,6 +2011,61 @@ namespace MWGui
             return;
 
         pushCombatHealthBarProgress(state, state.mLastProgressFraction);
+    }
+
+    // Y003: guarantee that a bar about to be drawn has a fill.
+    //
+    // Reported symptom: during a fight one player sees a normal bar over an enemy
+    // or a summon while another player sees only the frame, at random, and far
+    // more often when several players are around. Nothing about that is network
+    // state - both clients read the same health - it is entirely local to each
+    // client's widget pool.
+    //
+    // The pool holds 24 ProgressBars that are handed out and taken back as actors
+    // enter and leave the fight, and a slot changes skin whenever its new occupant
+    // has the opposite allegiance to the previous one (MW_Progress_Green for an
+    // ally such as a summon, MW_Progress_Red for an enemy). Both handing a slot to
+    // a new actor and changing its skin disturb the widget's fill, while the fill
+    // itself was only ever written at the very end of pass 1 - after four separate
+    // `continue`s that are hit constantly in normal play: no usable screen anchor
+    // (the actor is behind you or off the edge of the view), the actor beyond the
+    // vanishing distance, the actor dead, or a momentarily unusable maximum health.
+    // A slot disturbed on a frame where pass 1 bailed out stayed visible through
+    // its whole linger window showing nothing but the frame.
+    //
+    // The more participants there are, the more the pool churns, which is exactly
+    // why this is rare solo and common with several players - and why two clients
+    // disagree about the same actor.
+    //
+    // Rather than trying to enumerate every path that can disturb a widget, the
+    // fill is now reasserted here, in the single place that makes a bar visible.
+    void HUD::ensureCombatHealthBarPainted(CombatHealthBarState& state)
+    {
+        if (!state.mWidget || state.mPaintedThisFrame)
+            return;
+
+        if (state.mLastProgressFraction >= 0.f)
+        {
+            pushCombatHealthBarProgress(state, state.mLastProgressFraction);
+            return;
+        }
+
+        // Never painted, and pass 1 could not resolve the slot this frame. Derive a
+        // fill straight from the actor if it is still usable, and fall back to full
+        // rather than to an empty frame.
+        float fraction = 1.f;
+        const MWWorld::Ptr& actor = state.mActor;
+        if (!actor.isEmpty() && actor.getRefData().getCount() > 0
+            && !actor.getRefData().isDeleted() && actor.getClass().isActor())
+        {
+            const MWMechanics::CreatureStats& stats = actor.getClass().getCreatureStats(actor);
+            const float maximumHealth = stats.getHealth().getModified();
+            const float currentHealth = stats.getHealth().getCurrent();
+            if (std::isfinite(maximumHealth) && maximumHealth > 0.f && std::isfinite(currentHealth))
+                fraction = currentHealth / maximumHealth;
+        }
+
+        pushCombatHealthBarProgress(state, fraction);
     }
 
     void HUD::applyCombatHealthBar(CombatHealthBarState& state, float dt)
@@ -2043,7 +2105,9 @@ namespace MWGui
         const int top = static_cast<int>(std::lround(state.mCentreY - height * 0.5f));
 
         const float alpha = std::min(1.f, state.mAlpha);
+        // Y003: setCoord() re-runs the track layout, so paint after it, not before.
         bar->setCoord(left, top, width, height);
+        ensureCombatHealthBarPainted(state);
         bar->setAlpha(alpha);
         bar->setVisible(true);
 
@@ -2077,6 +2141,10 @@ namespace MWGui
     void HUD::updateCombatHealthBars(float dt)
     {
         dt = std::max(0.f, dt);
+
+        // Y003: per-frame paint bookkeeping (see ensureCombatHealthBarPainted).
+        for (CombatHealthBarState& state : mCombatHealthBars)
+            state.mPaintedThisFrame = false;
 
         const bool enabled = npcBarShowsCombat(getNpcBarMode())
             && mGameplayHud && mGameplayHud->getVisible()

@@ -219,6 +219,17 @@ void DedicatedActor::setStatsDynamic()
 
     for (int i = 0; i < 3; ++i)
     {
+        // Y003: start from the stat this client already has, instead of from a
+        // default-constructed one.
+        //
+        // Stat::readState() restores only mBase, mMod and mCurrent - it does not
+        // touch the *current modifier*, which is where active Fortify/Drain effects
+        // live. Assigning a default-constructed DynamicStat therefore zeroed that
+        // modifier on every observer, every frame, while the authority kept it.
+        // The two sides then disagreed about the same actor's effective health for
+        // as long as the effect lasted. Seeding from the existing stat keeps the
+        // locally tracked modifier and still applies the authoritative values.
+        value = ptrCreatureStats->getDynamic(i);
         value.readState(creatureStats.mDynamic[i]);
         ptrCreatureStats->setDynamic(i, value);
     }

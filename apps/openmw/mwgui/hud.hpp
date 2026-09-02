@@ -139,6 +139,9 @@ namespace MWGui
             // widget can be repainted at any time without needing a live actor
             // reading. -1 means "nothing valid has ever been pushed".
             float mLastProgressFraction = -1.f;
+            // Y003: set whenever a fill is written this frame, so a bar that is
+            // about to be drawn without one can be repainted.
+            bool mPaintedThisFrame = false;
             float mLingerTimer = 0.f;   // grace before a lost bar starts fading
 
             // X025: docking. Inside the melee radius the bar leaves the actor's head
@@ -267,6 +270,7 @@ namespace MWGui
         // repaint used after a skin change (MyGUI rebuilds the track and loses it).
         void pushCombatHealthBarProgress(CombatHealthBarState& state, float fraction);
         void repaintCombatHealthBar(CombatHealthBarState& state);
+        void ensureCombatHealthBarPainted(CombatHealthBarState& state);
 
         void updatePositions();
         void updateGameTimeAndCellName(float dt);
