@@ -102,8 +102,8 @@ config.arenaGlobalXpMultiplier = 1.0
 -- convenience profiles; remote servers still choose their own value.
 config.arenaXpRateMultiplier = 1.0
 
--- Persistent group/party rules. Journal and topic synchronization are opt-in
--- per member from the Player Menu; XP sharing itself is automatic and only
+-- Persistent group/party rules. Journal and topic synchronization default ON
+-- for new members and can still be toggled from the Player Menu; XP sharing itself is automatic and only
 -- includes online group members standing in the same cell as the source.
 config.groupSystem = {
     ["invite lifetime seconds"] = 120,
@@ -644,7 +644,7 @@ config.allowWildernessRest = true
 config.allowWait = true
 
 -- Whether journal entries should be shared across the players on the server or not
-config.shareJournal = false
+config.shareJournal = true
 
 -- Whether faction ranks should be shared across the players on the server or not
 config.shareFactionRanks = false
@@ -656,7 +656,7 @@ config.shareFactionExpulsion = false
 config.shareFactionReputation = false
 
 -- Whether dialogue topics should be shared across the players on the server or not
-config.shareTopics = false
+config.shareTopics = true
 
 -- Whether crime bounties should be shared across players on the server or not
 config.shareBounty = false
@@ -1224,9 +1224,52 @@ config.minMaxRecordSettings = { "damageChop", "damageSlash", "damageThrust" }
 config.rgbRecordSettings = { "color" }
 
 -- The types of object and actor packets stored in cell data
-config.cellPacketTypes = { "delete", "place", "spawn", "lock", "trap", "scale", "state", "miscellaneous",
+config.cellPacketTypes = { "delete", "place", "spawn", "move", "rotate", "lock", "trap", "scale", "state", "miscellaneous",
     "doorState", "clientScriptLocal", "container", "equipment", "ai", "death", "actorList", "position",
     "statsDynamic", "spellsActive", "cellChangeTo", "cellChangeFrom" }
+
+-- Y013-fix-01: minimum seconds between two quicksaves of the same destination
+-- cell triggered by an actor cell change. Interior transitions still persist
+-- promptly; exterior hops rely on the normal periodic save.
+config.actorCellChangeSaveInterval = 5
+
+-- Arena Y013 RP placement policy. ObjectMove/ObjectRotate are server-authoritative.
+-- Moderators and higher may decorate anywhere. Ordinary players must be in RP
+-- mode and may edit only their own private/house interior or a cell associated
+-- with one of their factions. factionCellOverrides is the explicit mapping for
+-- custom/modded faction locations that cannot be inferred from their names.
+config.rpObjectPlacement = {
+    enabled = true,
+    moderatorBypass = true,
+    requireRpMode = true,
+    allowOwnPrivateCell = true,
+    allowOwnHouse = true,
+    allowFactionCells = true,
+
+    -- Y013-fix-01: custom-variable names that carry the player's RP state, in
+    -- priority order. The first entry is the one placement.SetRpMode writes.
+    -- The structured chat handler mirrors the client's RP toggle into it.
+    rpModeVariables = { "RPStatus", "rpMode", "isRolePlaying" },
+
+    -- What to do when a character has never set an RP state at all (has not
+    -- sent a single structured chat message this session). false = deny.
+    allowUnknownRpMode = false,
+
+    -- Guess a faction hall from the cell name, e.g. any cell containing
+    -- "mages" for a member of the Mages Guild. This matches every such hall on
+    -- the continent, not just the local one, so it is opt-in. Explicit
+    -- factionCellOverrides below are always honoured.
+    factionNameHeuristic = false,
+
+    -- Minimum seconds between two "placement denied" popups for one player.
+    -- A held object resyncs about 20 times per second; without this the client
+    -- would be flooded with centered message boxes.
+    denyQuietSeconds = 4,
+
+    factionCellOverrides = {
+        -- ["Custom Guild Hall"] = { "my faction id" }
+    }
+}
 
 -- Whether the server should enforce that all clients connect with a specific list of data files
 -- defined in data/requiredDataFiles.json

@@ -1,3 +1,7 @@
+#include <algorithm>
+#include <cstdint>
+#include <functional>
+#include <vector>
 #include "journalviewmodel.hpp"
 
 #include <map>
@@ -332,7 +336,18 @@ struct JournalViewModelImpl : JournalViewModel
         Utf8Span timestamp () const override
         {
             if (timestamp_buffer.empty ())
-                timestamp_buffer = itr->date.empty () ? std::string ("---") : itr->date;
+            {
+                if (!itr->questName.empty ())
+                    timestamp_buffer = itr->questName;
+                if (!itr->date.empty ())
+                {
+                    if (!timestamp_buffer.empty ())
+                        timestamp_buffer += " - ";
+                    timestamp_buffer += itr->date;
+                }
+                if (timestamp_buffer.empty ())
+                    timestamp_buffer = "---";
+            }
 
             return toUtf8Span (timestamp_buffer);
         }
@@ -402,30 +417,60 @@ struct JournalViewModelImpl : JournalViewModel
                     }
                 }
             }
-        }
-        else
-        {
-            for(MWBase::Journal::TEntryIter i = journal->begin(); i != journal->end (); ++i)
-                visitor (JournalEntryImpl <MWBase::Journal::TEntryIter> (this, i));
+
+            for (const mwmp::ServerQuestState& state : mwmp::ServerQuestRegistry::get ().getQuestStates ())
+            {
+                if (!Misc::StringUtils::ciEqual (serverQuestDisplayName (state), questName))
+                    continue;
+                for (const mwmp::ServerQuestJournalEntry& entry : state.journal)
+                    visitor (ServerJournalEntryImpl (this, &entry));
+            }
+            return;
         }
 
         /*
-            Start of AMP addition (X048)
-
-            Server quest entries for the requested quest name, or all of them when the
-            caller asked for the flat "all entries" view.
+            Y015: The old implementation rendered all ESM entries first and then all
+            server-authored entries. That made every custom quest look newer forever,
+            even after the player completed another ordinary quest. Server quest
+            entries now carry the count of vanilla journal entries that existed when
+            they were created (vanillaAnchor). Merge both sources around that anchor.
         */
+        static const std::int64_t sOrderStride = 1000000000000LL;
+        struct PendingEntry
+        {
+            std::int64_t order;
+            std::function<void()> emit;
+        };
+        std::vector<PendingEntry> pending;
+
+        std::int64_t nativeCount = 0;
+        for (MWBase::Journal::TEntryIter i = journal->begin(); i != journal->end (); ++i)
+        {
+            ++nativeCount;
+            const MWBase::Journal::TEntryIter copy = i;
+            pending.push_back(PendingEntry{ nativeCount * sOrderStride,
+                [this, copy, &visitor] () { visitor (JournalEntryImpl <MWBase::Journal::TEntryIter> (this, copy)); } });
+        }
+
+        std::int64_t legacySerial = 1;
         for (const mwmp::ServerQuestState& state : mwmp::ServerQuestRegistry::get ().getQuestStates ())
         {
-            if (!questName.empty () && !Misc::StringUtils::ciEqual (serverQuestDisplayName (state), questName))
-                continue;
-
             for (const mwmp::ServerQuestJournalEntry& entry : state.journal)
-                visitor (ServerJournalEntryImpl (this, &entry));
+            {
+                const std::int64_t fallbackAnchor = nativeCount > 0 ? nativeCount - 1 : 0;
+                const std::int64_t anchor = entry.vanillaAnchor >= 0 ? entry.vanillaAnchor : fallbackAnchor;
+                std::int64_t subOrder = entry.epoch > 0 ? entry.epoch : legacySerial++;
+                subOrder = std::max<std::int64_t> (1, std::min<std::int64_t> (sOrderStride - 1, subOrder));
+                const mwmp::ServerQuestJournalEntry* copy = &entry;
+                pending.push_back(PendingEntry{ anchor * sOrderStride + subOrder,
+                    [this, copy, &visitor] () { visitor (ServerJournalEntryImpl (this, copy)); } });
+            }
         }
-        /*
-            End of AMP addition (X048)
-        */
+
+        std::stable_sort (pending.begin (), pending.end (),
+            [] (const PendingEntry& left, const PendingEntry& right) { return left.order < right.order; });
+        for (const PendingEntry& entry : pending)
+            entry.emit ();
     }
 
     void visitTopicName (TopicId topicId, std::function <void (Utf8Span)> visitor) const override

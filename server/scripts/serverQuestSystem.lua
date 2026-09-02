@@ -1164,10 +1164,30 @@ local function applyReward(pid, state, reward)
     return false, "unknown reward type " .. kind
 end
 
-local function appendJournal(state, stage)
+local function vanillaJournalEntryCount(pid)
+    local journal = nil
+    if config.shareJournal == true and WorldInstance ~= nil and WorldInstance.data ~= nil then
+        journal = WorldInstance.data.journal
+    elseif Players[pid] ~= nil and Players[pid].data ~= nil then
+        journal = Players[pid].data.journal
+    end
+
+    local count = 0
+    for _, item in pairs(journal or {}) do
+        if item.type == enumerations.journal.ENTRY then count = count + 1 end
+    end
+    return count
+end
+
+local function appendJournal(pid, state, stage)
     state.journal = state.journal or {}
     if stage.journal ~= "" then
-        table.insert(state.journal, { stage = stage.index, text = stage.journal, time = os.time() })
+        table.insert(state.journal, {
+            stage = stage.index,
+            text = stage.journal,
+            time = os.time(),
+            vanillaAnchor = vanillaJournalEntryCount(pid)
+        })
     end
 end
 
@@ -1232,7 +1252,7 @@ function serverQuestSystem.StartQuest(pid, questId, force, silent)
     if not requirementsOk and not force then return false, "Requirements failed: " .. tostring(why), failing end
 
     cv.serverQuests[questId] = state
-    appendJournal(state, stage)
+    appendJournal(pid, state, stage)
     local rewardsOk, rewardError = applyStageRewardsAtMostOnce(pid, quest, state, stage)
     if not rewardsOk then return false, "Reward error: " .. tostring(rewardError) end
     if stage.complete then state.state = "completed" elseif stage.fail then state.state = "failed" end
@@ -1274,7 +1294,7 @@ function serverQuestSystem.AdvanceQuest(pid, questId, targetStage, force, silent
     state.stage = target.index
     state.updatedAt = os.time()
     state.definitionVersion = quest.version
-    appendJournal(state, target)
+    appendJournal(pid, state, target)
     local rewardsOk, rewardError = applyStageRewardsAtMostOnce(pid, quest, state, target)
     if not rewardsOk then return false, "Reward error: " .. tostring(rewardError) end
     if target.complete then state.state = "completed" elseif target.fail then state.state = "failed" else state.state = "active" end
@@ -1373,12 +1393,33 @@ function serverQuestSystem.GetCurrentDialogue(pid, questId)
     }
 end
 
+-- Y015: Older saves predate mixed vanilla/custom journal chronology. Give those
+-- entries a one-time conservative anchor immediately before the newest vanilla
+-- entry instead of leaving them permanently forced to the end of the journal.
+local function migrateLegacyJournalAnchors(pid)
+    local cv = ensurePlayerData(pid)
+    if cv == nil then return false end
+    local fallback = math.max(0, vanillaJournalEntryCount(pid) - 1)
+    local changed = false
+    for _, state in pairs(cv.serverQuests or {}) do
+        for _, entry in ipairs(state.journal or {}) do
+            if entry.vanillaAnchor == nil then
+                entry.vanillaAnchor = fallback
+                changed = true
+            end
+        end
+    end
+    if changed and Players[pid] ~= nil then Players[pid]:QuicksaveToDrive() end
+    return changed
+end
+
 -- X036: publish the player-specific visible subset to the matching client.  The
 -- definition stays authoritative on the server; the client receives only enough
 -- data to render the green topic and the current response.
 function serverQuestSystem.SyncPlayer(pid)
     if not enabled() or Players[pid] == nil or not Players[pid]:IsLoggedIn() then return end
 
+    migrateLegacyJournalAnchors(pid)
     sendTransport(pid, "CLEAR")
     for _, id in ipairs(sortedQuestIds("published")) do
         local quest = serverQuestSystem.GetLocalizedQuest(pid, serverQuestSystem.quests[id])
@@ -1402,7 +1443,8 @@ function serverQuestSystem.SyncPlayer(pid)
                     if stage ~= nil and trim(tostring(stage.journal or "")) ~= "" then
                         text = stage.journal
                     end
-                    sendTransport(pid, transportLine("JOURNAL", quest.id, entry.stage, date, text))
+                    sendTransport(pid, transportLine("JOURNAL", quest.id, entry.stage, date, text,
+                        tonumber(entry.vanillaAnchor) or -1, tonumber(entry.time) or 0))
                 end
             end
 

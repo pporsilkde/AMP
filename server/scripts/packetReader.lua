@@ -567,6 +567,16 @@ packetReader.GetObjectPacketTables = function(packetType)
                 if object.dialogueChoiceType == enumerations.dialogueChoice.TOPIC then
                     object.dialogueTopic = tes3mp.GetObjectDialogueChoiceTopic(packetIndex)
                 end
+            elseif packetType == "ObjectMove" then
+                object.location = {
+                    posX = tes3mp.GetObjectPosX(packetIndex), posY = tes3mp.GetObjectPosY(packetIndex),
+                    posZ = tes3mp.GetObjectPosZ(packetIndex)
+                }
+            elseif packetType == "ObjectRotate" then
+                object.location = {
+                    rotX = tes3mp.GetObjectRotX(packetIndex), rotY = tes3mp.GetObjectRotY(packetIndex),
+                    rotZ = tes3mp.GetObjectRotZ(packetIndex)
+                }
             elseif packetType == "ObjectMiscellaneous" then
                 object.goldPool = tes3mp.GetObjectGoldPool(packetIndex)
                 object.lastGoldRestockHour = tes3mp.GetObjectLastGoldRestockHour(packetIndex)

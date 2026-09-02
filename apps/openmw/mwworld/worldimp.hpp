@@ -153,6 +153,17 @@ namespace MWWorld
             };
             std::vector<PhysicsObjectState> mPhysicsObjects;
 
+            // Y013-fix-01: the server validates a placement asynchronously, so a
+            // rejection can arrive after the player already released the object.
+            // cancelPhysicsGrab only touches a currently held object and would
+            // silently do nothing in that window, leaving the mover looking at an
+            // illegal transform nobody else can see. Remember the transform the
+            // last placement started from so it can still be undone.
+            MWWorld::Ptr mLastPlacementPtr;
+            osg::Vec3f mLastPlacementOrigin;
+            osg::Quat mLastPlacementRotation;
+            bool mHasLastPlacement = false;
+
             void suppressPhysicsGrabCollision(PhysicsObjectState& state);
             void restorePhysicsGrabCollision(PhysicsObjectState& state);
 
@@ -520,7 +531,8 @@ namespace MWWorld
             bool isPhysicsGrabPhysicsEnabled() const override;
             void resetPhysicsGrabTransform() override;
             void stepPhysicsGrabRotation(float horizontalSteps, float verticalSteps) override;
-            bool cancelPhysicsGrab() override;
+            bool cancelPhysicsGrab(bool synchronize = true) override;
+            bool revertLastPlacement() override;
 
             /// Returns a pointer to the object the provided object would hit (if within the
             /// specified distance), and the point where the hit occurs. This will attempt to

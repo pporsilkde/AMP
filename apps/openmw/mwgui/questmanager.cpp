@@ -57,6 +57,17 @@ namespace
         return value.compare(0, prefix.size(), prefix) == 0;
     }
 
+    const long long sQuestOrderStride = 1000000000000LL;
+
+    long long serverQuestOrder(const mwmp::ServerQuestJournalEntry& entry, long long nativeCount, long long fallbackSerial)
+    {
+        const long long fallbackAnchor = nativeCount > 0 ? nativeCount - 1 : 0;
+        const long long anchor = entry.vanillaAnchor >= 0 ? entry.vanillaAnchor : fallbackAnchor;
+        long long subOrder = entry.epoch > 0 ? entry.epoch : fallbackSerial;
+        subOrder = std::max(1LL, std::min(sQuestOrderStride - 1, subOrder));
+        return anchor * sQuestOrderStride + subOrder;
+    }
+
     bool inSet(const std::string& value, std::initializer_list<const char*> values)
     {
         for (const char* candidate : values)
@@ -918,13 +929,13 @@ namespace MWGui
             entry.mText = it->getText();
             entry.mActor = it->mActorName;
             entry.mDate = date;
-            entry.mOrder = order;
+            entry.mOrder = (static_cast<long long>(order) + 1) * sQuestOrderStride;
 
             if (groupName != idToGroup.end())
             {
                 Group& group = groups[groupName->second];
                 group.mQuest.mEntries.push_back(entry);
-                group.mQuest.mLastOrder = std::max(group.mQuest.mLastOrder, order);
+                group.mQuest.mLastOrder = std::max(group.mQuest.mLastOrder, entry.mOrder);
             }
             else
             {
@@ -975,7 +986,8 @@ namespace MWGui
         const std::vector<mwmp::ServerQuestState>& serverStates
             = mwmp::ServerQuestRegistry::get().getQuestStates();
         const MWWorld::ESMStore& esmStore = MWBase::Environment::get().getWorld()->getStore();
-        int serverOrder = 1000000;
+        long long serverSerial = 1;
+        const long long nativeEntryCount = order;
         for (const mwmp::ServerQuestState& state : serverStates)
         {
             if (state.questId.empty() || state.questName.empty())
@@ -1004,9 +1016,9 @@ namespace MWGui
                 entry.mText = serverEntry.text;
                 entry.mActor = quest.mGiver;
                 entry.mDate = serverEntry.date;
-                entry.mOrder = serverOrder++;
+                entry.mOrder = serverQuestOrder(serverEntry, nativeEntryCount, serverSerial++);
                 quest.mEntries.push_back(entry);
-                quest.mLastOrder = entry.mOrder;
+                quest.mLastOrder = std::max(quest.mLastOrder, entry.mOrder);
             }
             mQuests.push_back(quest);
         }
@@ -1014,8 +1026,11 @@ namespace MWGui
         std::stable_sort(mQuests.begin(), mQuests.end(), [](const QuestData& a, const QuestData& b)
         {
             if (a.mPinned != b.mPinned) return a.mPinned > b.mPinned;
-            if (a.mCompleted != b.mCompleted) return a.mCompleted < b.mCompleted;
+            // Y015: recency is authoritative across vanilla and server quests.
+            // Completion state is only a tie-breaker; finishing a newer ordinary
+            // quest must be allowed to move ahead of an older active custom quest.
             if (a.mLastOrder != b.mLastOrder) return a.mLastOrder > b.mLastOrder;
+            if (a.mCompleted != b.mCompleted) return a.mCompleted < b.mCompleted;
             return QuestManagerWindow::lower(a.mName) < QuestManagerWindow::lower(b.mName);
         });
 

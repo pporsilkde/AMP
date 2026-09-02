@@ -1,9 +1,5 @@
 #include "actionharvest.hpp"
 
-#include <sstream>
-
-#include <MyGUI_LanguageManager.h>
-
 /*
     Start of tes3mp addition
 
@@ -16,8 +12,6 @@
 /*
     End of tes3mp addition
 */
-
-#include <components/misc/stringops.hpp>
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/mechanicsmanager.hpp"
@@ -63,7 +57,6 @@ namespace MWWorld
         MWWorld::ContainerStore& store = target.getClass().getContainerStore (target);
         store.resolve();
         MWWorld::ContainerStore& actorStore = actor.getClass().getContainerStore(actor);
-        std::map<std::string, int> takenMap;
         for (MWWorld::ContainerStoreIterator it = store.begin(); it != store.end(); ++it)
         {
             if (!it->getClass().showsInInventory(*it))
@@ -86,7 +79,6 @@ namespace MWWorld
             */
 
             store.remove(*it, itemCount, getTarget());
-            takenMap[it->getClass().getName(*it)]+=itemCount;
         }
 
         /*
@@ -103,45 +95,8 @@ namespace MWWorld
             End of tes3mp addition
         */
 
-        // Spawn a messagebox (only for items added to player's inventory)
-        if (actor == MWBase::Environment::get().getWorld()->getPlayerPtr())
-        {
-            std::ostringstream stream;
-            int lineCount = 0;
-            const static int maxLines = 10;
-            for (auto & pair : takenMap)
-            {
-                std::string itemName = pair.first;
-                int itemCount = pair.second;
-                lineCount++;
-                if (lineCount == maxLines)
-                    stream << "\n...";
-                else if (lineCount > maxLines)
-                    break;
-
-                // The two GMST entries below expand to strings informing the player of what, and how many of it has been added to their inventory
-                std::string msgBox;
-                if (itemCount == 1)
-                {
-                    msgBox = MyGUI::LanguageManager::getInstance().replaceTags("\n#{sNotifyMessage60}");
-                    msgBox = Misc::StringUtils::format(msgBox, itemName);
-                }
-                else
-                {
-                    msgBox = MyGUI::LanguageManager::getInstance().replaceTags("\n#{sNotifyMessage61}");
-                    msgBox = Misc::StringUtils::format(msgBox, itemCount, itemName);
-                }
-
-                stream << msgBox;
-            }
-            std::string tooltip = stream.str();
-            // remove the first newline (easier this way)
-            if (tooltip.size() > 0 && tooltip[0] == '\n')
-                tooltip.erase(0, 1);
-
-            if (tooltip.size() > 0)
-                MWBase::Environment::get().getWindowManager()->messageBox(tooltip);
-        }
+        // Arena Y013: the right HUD item feed is authoritative for harvested items.
+        // Do not emit the legacy centered sNotifyMessage60/61 MessageBox as well.
 
         // Update animation object
         MWBase::Environment::get().getWorld()->disable(target);

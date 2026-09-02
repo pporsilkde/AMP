@@ -251,6 +251,28 @@ packetBuilder.AddObjectTrap = function(uniqueIndex, objectData)
     tes3mp.AddObject()
 end
 
+packetBuilder.AddObjectMove = function(uniqueIndex, objectData)
+
+    local splitIndex = uniqueIndex:split("-")
+    tes3mp.SetObjectRefNum(splitIndex[1])
+    tes3mp.SetObjectMpNum(splitIndex[2])
+    if objectData.refId ~= nil then tes3mp.SetObjectRefId(objectData.refId) end
+    local location = objectData.location or {}
+    tes3mp.SetObjectPosition(location.posX or 0, location.posY or 0, location.posZ or 0)
+    tes3mp.AddObject()
+end
+
+packetBuilder.AddObjectRotate = function(uniqueIndex, objectData)
+
+    local splitIndex = uniqueIndex:split("-")
+    tes3mp.SetObjectRefNum(splitIndex[1])
+    tes3mp.SetObjectMpNum(splitIndex[2])
+    if objectData.refId ~= nil then tes3mp.SetObjectRefId(objectData.refId) end
+    local location = objectData.location or {}
+    tes3mp.SetObjectRotation(location.rotX or 0, location.rotY or 0, location.rotZ or 0)
+    tes3mp.AddObject()
+end
+
 packetBuilder.AddObjectScale = function(uniqueIndex, objectData)
 
     local splitIndex = uniqueIndex:split("-")

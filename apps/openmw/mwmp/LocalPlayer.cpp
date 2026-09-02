@@ -864,8 +864,9 @@ void LocalPlayer::updateAnimFlags(bool forceUpdate)
 
         movementFlags = __SETFLAG(CreatureStats::Flag_Sneak, isSneaking);
         movementFlags = __SETFLAG(CreatureStats::Flag_Run, isRunning);
-        movementFlags = __SETFLAG(CreatureStats::Flag_ForceJump, isForceJumping);
-        movementFlags = __SETFLAG(CreatureStats::Flag_ForceJump, isJumping);
+        // Arena Y013: do not overwrite ForceJump with the second assignment.
+        // A current jump or explicit force-jump input must keep the same bit set.
+        movementFlags = __SETFLAG(CreatureStats::Flag_ForceJump, isForceJumping || isJumping);
         movementFlags = __SETFLAG(CreatureStats::Flag_ForceMoveJump, isForceMoveJumping);
 
 #undef __SETFLAG

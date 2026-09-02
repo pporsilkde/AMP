@@ -450,6 +450,37 @@ void DedicatedPlayer::setAnimFlags()
         world->setOnGround(ptr, true);
         wasJumping = false;
     }
+    else if (!isJumping && !isFlying && !hasTcl && !world->isOnGround(ptr))
+    {
+        // Arena Y013: a DedicatedPlayer can become visible when the observer enters
+        // its already-loaded cell without the remote player producing a fresh
+        // jump/land transition. Physics can then reactivate the Ptr as airborne
+        // while the network snapshot says it is standing, leaving the remote model
+        // stuck in a tucked-leg glide until that player jumps.
+        //
+        // Y013-fix-01: the original patch forced grounded unconditionally on every
+        // frame of this branch, which also caught a remote player who is legitimately
+        // falling without having jumped - walking off a ledge, or levitation expiring.
+        // Those players then ran on air all the way down.
+        //
+        // A stale airborne bit is distinguishable from a real fall without keeping any
+        // extra state. move() drives the body towards the last networked position with
+        // an exponential catch-up, so during a real descent the authoritative target
+        // stays clearly below the interpolated body. A body that is airborne while its
+        // own owner reports it at the same height is not falling - that is the stale
+        // bit, and only that case is healed.
+        const float networkTargetZ = position.pos[2];
+        const float bodyZ = ptr.getRefData().getPosition().pos[2];
+
+        const bool descending = networkTargetZ < bodyZ - 2.f;
+        const bool commandedJump = std::abs(direction.pos[2]) > 0.05f;
+
+        if (!descending && !commandedJump)
+        {
+            world->setOnGround(ptr, true);
+            ptr.getClass().getMovementSettings(ptr).mPosition[2] = 0.f;
+        }
+    }
 
     MWMechanics::CreatureStats *ptrCreatureStats = &ptr.getClass().getCreatureStats(ptr);
 

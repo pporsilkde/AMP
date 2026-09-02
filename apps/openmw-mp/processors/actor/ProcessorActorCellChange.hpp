@@ -81,7 +81,25 @@ namespace mwmp
                     destinationList.action = actorList.action;
                     destinationList.isValid = true;
                 }
-                destinationList.baseActors.push_back(baseActor);
+                // Arena Y013: seed the destination cache with a complete actor
+                // snapshot before the source cache is removed. ActorCellChange only
+                // serializes transition fields, so without this a destination that
+                // had no live authority could remember the route but not the actor
+                // itself; entering that interior later could then leave it missing.
+                BaseActor destinationActor = baseActor;
+                if (serverCell != nullptr)
+                {
+                    BaseActor* cachedActor = serverCell->getActor(baseActor.refNum, baseActor.mpNum);
+                    if (cachedActor != nullptr)
+                    {
+                        destinationActor = *cachedActor;
+                        destinationActor.cell = baseActor.cell;
+                        destinationActor.position = baseActor.position;
+                        destinationActor.direction = baseActor.direction;
+                        destinationActor.isFollowerCellChange = baseActor.isFollowerCellChange;
+                    }
+                }
+                destinationList.baseActors.push_back(destinationActor);
 
                 // Carry the last known AI package into the destination cell before
                 // removing the actor from the source cache. It will be replayed
@@ -92,6 +110,18 @@ namespace mwmp
                     if (serverCell->getActorAI(baseActor.refNum, baseActor.mpNum, cachedAI))
                         destinationCell->setActorAI(cachedAI);
                 }
+            }
+
+            // Publish every moved actor into its destination server cache first.
+            // This makes the move transactional: source removal can no longer leave
+            // a gap where neither cell owns the actor. readActorList with POSITION
+            // updates existing cached actors and inserts complete snapshots when the
+            // destination did not have one yet.
+            for (auto& destinationEntry : destinationLists)
+            {
+                BaseActorList& destinationList = destinationEntry.second;
+                destinationList.count = static_cast<unsigned int>(destinationList.baseActors.size());
+                destinationEntry.first->readActorList(ID_ACTOR_POSITION, &destinationList);
             }
 
             if (serverCell != nullptr)

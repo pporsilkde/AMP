@@ -357,6 +357,11 @@ namespace mwmp
                 entry.stage = std::atoi(fields[2].c_str());
                 entry.date = fields[3];
                 entry.text = fields[4];
+                entry.questName = state->questName;
+                if (fields.size() >= 6)
+                    entry.vanillaAnchor = std::atoll(fields[5].c_str());
+                if (fields.size() >= 7)
+                    entry.epoch = std::atoll(fields[6].c_str());
                 if (!entry.text.empty())
                     state->journal.push_back(entry);
             }

@@ -743,6 +743,18 @@ function OnObjectDelete(pid, cellDescription)
     eventHandler.OnObjectDelete(pid, cellDescription)
 end
 
+function OnObjectMove(pid, cellDescription)
+    tes3mp.LogMessage(enumerations.log.INFO, "Called \"OnObjectMove\" for " .. logicHandler.GetChatName(pid) ..
+        " and cell " .. cellDescription)
+    eventHandler.OnObjectMove(pid, cellDescription)
+end
+
+function OnObjectRotate(pid, cellDescription)
+    tes3mp.LogMessage(enumerations.log.INFO, "Called \"OnObjectRotate\" for " .. logicHandler.GetChatName(pid) ..
+        " and cell " .. cellDescription)
+    eventHandler.OnObjectRotate(pid, cellDescription)
+end
+
 function OnObjectLock(pid, cellDescription)
     tes3mp.LogMessage(enumerations.log.INFO, "Called \"OnObjectLock\" for " .. logicHandler.GetChatName(pid) ..
         " and cell " .. cellDescription)

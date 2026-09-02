@@ -1840,6 +1840,10 @@ namespace MWWorld
         state->mGrabStartOrigin = object.getRefData().getPosition().asVec3();
         state->mGrabStartRotation = rotation;
 
+        // Y013-fix-01: a new grab supersedes the previous revert target.
+        mHasLastPlacement = false;
+        mLastPlacementPtr = MWWorld::Ptr();
+
         // Placement is render-visible but actor-ghosted. Bounds were captured
         // before this call, so the held object no longer needs its own Bullet body.
         suppressPhysicsGrabCollision(*state);
@@ -2067,6 +2071,13 @@ namespace MWWorld
 
             if (corrected)
                 state.mPtr = moveObject(state.mPtr, origin.x(), origin.y(), origin.z(), true, false);
+
+            // Y013-fix-01: remember where this object stood before the grab, so a
+            // late server rejection can still undo the placement after release.
+            mLastPlacementPtr = state.mPtr;
+            mLastPlacementOrigin = state.mGrabStartOrigin;
+            mLastPlacementRotation = state.mGrabStartRotation;
+            mHasLastPlacement = true;
 
             state.mVelocity.set(0.f, 0.f, 0.f);
             state.mAngularVelocity.set(0.f, 0.f, 0.f);
@@ -2513,7 +2524,7 @@ namespace MWWorld
         }
     }
 
-    bool World::cancelPhysicsGrab()
+    bool World::cancelPhysicsGrab(bool synchronize)
     {
         for (PhysicsObjectState& state : mPhysicsObjects)
         {
@@ -2538,11 +2549,62 @@ namespace MWWorld
             state.mLastSafeOrigin = state.mGrabStartOrigin;
             state.mLastSafeRotation = state.mGrabStartRotation;
             restorePhysicsGrabCollision(state);
-            syncPhysicsObjectTransform(state.mPtr);
+            if (synchronize)
+                syncPhysicsObjectTransform(state.mPtr);
             state.mNetworkSyncTimer = 0.f;
+
+            mHasLastPlacement = false;
+            mLastPlacementPtr = MWWorld::Ptr();
             return true;
         }
         return false;
+    }
+
+    bool World::revertLastPlacement()
+    {
+        // Y013-fix-01: prefer the live grab. This is the common case while the
+        // player is still dragging the object and the rejection arrives quickly.
+        if (cancelPhysicsGrab(false))
+            return true;
+
+        if (!mHasLastPlacement || mLastPlacementPtr.isEmpty() || !mLastPlacementPtr.isInCell())
+        {
+            mHasLastPlacement = false;
+            return false;
+        }
+
+        const osg::Vec3f euler = objectQuatToEuler(mLastPlacementRotation);
+        rotateObject(mLastPlacementPtr, euler.x(), euler.y(), euler.z(), MWBase::RotationFlag_none);
+        mLastPlacementPtr = moveObject(mLastPlacementPtr, mLastPlacementOrigin.x(),
+            mLastPlacementOrigin.y(), mLastPlacementOrigin.z(), true, false);
+
+        // Keep the native physics pool consistent with the restored transform, or
+        // the next simulation step would drag the object back to the rejected spot.
+        for (PhysicsObjectState& state : mPhysicsObjects)
+        {
+            if (state.mPtr != mLastPlacementPtr)
+                continue;
+
+            state.mVelocity.set(0.f, 0.f, 0.f);
+            state.mAngularVelocity.set(0.f, 0.f, 0.f);
+            state.mManualHoldOffset.set(0.f, 0.f, 0.f);
+            state.mGrabbed = false;
+            state.mSleepTimer = 1.f;
+            state.mHadSurfaceContact = false;
+            state.mHasLastSafeTransform = true;
+            state.mLastSafeOrigin = mLastPlacementOrigin;
+            state.mLastSafeRotation = mLastPlacementRotation;
+            state.mNetworkSyncTimer = 0.f;
+            restorePhysicsGrabCollision(state);
+            break;
+        }
+
+        // Deliberately no syncPhysicsObjectTransform: the rejected transform was
+        // never accepted by the server, and the rollback must not be echoed back
+        // to it as a fresh ObjectMove.
+        mHasLastPlacement = false;
+        mLastPlacementPtr = MWWorld::Ptr();
+        return true;
     }
 
     osg::Matrixf World::getActorHeadTransform(const MWWorld::ConstPtr& actor) const

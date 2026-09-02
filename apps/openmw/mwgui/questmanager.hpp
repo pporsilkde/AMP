@@ -42,7 +42,7 @@ namespace MWGui
             std::string mText;
             std::string mActor;
             std::string mDate;
-            int mOrder = -1;
+            long long mOrder = -1;
         };
 
         struct QuestData
@@ -55,7 +55,7 @@ namespace MWGui
             bool mPinned = false;
             bool mHidden = false;
             int mStage = 0;
-            int mLastOrder = -1;
+            long long mLastOrder = -1;
             std::string mAddon;
             std::string mCategory;
             std::string mFaction;

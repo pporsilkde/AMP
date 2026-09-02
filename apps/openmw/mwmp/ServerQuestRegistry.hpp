@@ -45,6 +45,9 @@ namespace mwmp
         int stage = 0;
         std::string text;
         std::string date;
+        std::string questName;
+        long long vanillaAnchor = -1;
+        long long epoch = 0;
     };
 
     struct ServerQuestState

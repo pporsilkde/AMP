@@ -184,31 +184,16 @@ namespace MWScript
                         End of tes3mp change (major)
                     */
 
-                    // Spawn a messagebox (only for items added to player's inventory and if player is talking to someone)
-                    if (ptr == MWBase::Environment::get().getWorld ()->getPlayerPtr() )
-                    {
-                        // The two GMST entries below expand to strings informing the player of what, and how many of it has been added to their inventory
-                        std::string msgBox;
-                        std::string itemName = itemPtr.getClass().getName(itemPtr);
-                        if (count == 1)
-                        {
-                            msgBox = MyGUI::LanguageManager::getInstance().replaceTags("#{sNotifyMessage60}");
-                            msgBox = ::Misc::StringUtils::format(msgBox, itemName);
-                        }
-                        else
-                        {
-                            msgBox = MyGUI::LanguageManager::getInstance().replaceTags("#{sNotifyMessage61}");
-                            msgBox = ::Misc::StringUtils::format(msgBox, count, itemName);
-                        }
-                        MWBase::Environment::get().getWindowManager()->messageBox(msgBox, MWGui::ShowInDialogueMode_Only);
-                    }
+                    // Arena Y013: player AddItem changes are already shown in the
+                    // right-side item feed; suppress the legacy centered MessageBox.
                     /*
                         Start of tes3mp addition
 
                         Send an ID_CONTAINER packet every time an item is added to a Ptr
                         that doesn't belong to a DedicatedPlayer
                     */
-                    else if (mwmp::Main::get().getLocalPlayer()->isLoggedIn() &&
+                    if (ptr != MWBase::Environment::get().getWorld()->getPlayerPtr() &&
+                        mwmp::Main::get().getLocalPlayer()->isLoggedIn() &&
                         (!ptr.getClass().isActor() || !mwmp::PlayerList::isDedicatedPlayer(ptr)))
                     {
                         mwmp::ObjectList *objectList = mwmp::Main::get().getNetworking()->getObjectList();

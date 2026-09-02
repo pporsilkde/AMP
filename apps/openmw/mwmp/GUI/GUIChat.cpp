@@ -19,6 +19,7 @@
 #include <MyGUI_Widget.h>
 
 #include "apps/openmw/mwbase/environment.hpp"
+#include "apps/openmw/mwbase/world.hpp"
 #include "apps/openmw/mwgui/windowmanagerimp.hpp"
 #include "apps/openmw/mwinput/inputmanagerimp.hpp"
 #include "apps/openmw/mwmechanics/xpserverbridge.hpp"
@@ -715,6 +716,7 @@ namespace mwmp
         static const std::string xpPrefix = "@@AMP_XP@@";
         static const std::string colorPrefix = "@@AMP_COLOR@@";
         static const std::string playersPrefix = "@@AMP_PLAYERS@@";
+        static const std::string placementDenyPrefix = "@@AMP_PLACE_DENY@@";
 
         if (msg.compare(0, groupPrefix.size(), groupPrefix) == 0)
         {
@@ -743,6 +745,28 @@ namespace mwmp
             std::vector<std::string> fields = splitControlFields(msg.substr(playersPrefix.size()), '\t');
             if (!fields.empty() && fields[0] == "STATE")
                 rebuildPlayerList(fields);
+            return true;
+        }
+
+        if (msg.compare(0, placementDenyPrefix.size(), placementDenyPrefix) == 0)
+        {
+            // Arena Y013: the server rejected this RP decoration transform. Roll
+            // back to the grab-start transform without echoing that rollback as a
+            // new ObjectMove/ObjectRotate packet, then explain the policy locally.
+            //
+            // Y013-fix-01: two changes. The rollback now also works when the
+            // rejection lands after the object was released, and the explanation is
+            // shown only when the server flags this as a new attempt - a held object
+            // resyncs ~20 times a second and used to produce a wall of message boxes.
+            std::vector<std::string> fields = splitControlFields(msg.substr(placementDenyPrefix.size()), '\t');
+
+            const bool rollback = fields.empty() || fields[0] != "0";
+            const bool explain = fields.size() < 2 || fields[1] != "0";
+
+            if (rollback)
+                MWBase::Environment::get().getWorld()->revertLastPlacement();
+            if (explain)
+                MWBase::Environment::get().getWindowManager()->messageBox(localizeArena("placement.denied"));
             return true;
         }
 

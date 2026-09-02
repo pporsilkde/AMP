@@ -416,7 +416,11 @@ namespace MWBase
             /// Optional exact 15-degree horizontal/vertical self-rotation helper.
             virtual void stepPhysicsGrabRotation(float horizontalSteps, float verticalSteps) = 0;
             /// Cancel the current placement and restore the transform captured when the grab began.
-            virtual bool cancelPhysicsGrab() = 0;
+            virtual bool cancelPhysicsGrab(bool synchronize = true) = 0;
+            /// Y013-fix-01: undo the last placement this client performed, whether the
+            /// object is still held or was already released. Used when the server rejects
+            /// an RP placement after the round trip. Never echoes the rollback as a packet.
+            virtual bool revertLastPlacement() = 0;
 
             virtual float getMaxActivationDistance() = 0;
 

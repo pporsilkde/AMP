@@ -1,3 +1,7 @@
+# ArenaMP Y013 cumulative
+
+Y013 добавляет HUD item dedupe, remote locomotion self-heal, server-authoritative RP object placement и надёжный NPC exterior/interior return поверх полного Y012. Protocol 806.
+
 # ArenaMP
 
 **English** · [Русский](README_RU.md)

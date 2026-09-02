@@ -607,6 +607,32 @@ function BaseCell:SaveObjectTrapsTriggered(objects)
     end
 end
 
+function BaseCell:SaveObjectsMoved(objects)
+
+    for uniqueIndex, object in pairs(objects) do
+        self:InitializeObjectData(uniqueIndex, object.refId)
+        local stored = self.data.objectData[uniqueIndex]
+        stored.location = stored.location or {}
+        stored.location.posX = object.location.posX
+        stored.location.posY = object.location.posY
+        stored.location.posZ = object.location.posZ
+        tableHelper.insertValueIfMissing(self.data.packets.move, uniqueIndex)
+    end
+end
+
+function BaseCell:SaveObjectsRotated(objects)
+
+    for uniqueIndex, object in pairs(objects) do
+        self:InitializeObjectData(uniqueIndex, object.refId)
+        local stored = self.data.objectData[uniqueIndex]
+        stored.location = stored.location or {}
+        stored.location.rotX = object.location.rotX
+        stored.location.rotY = object.location.rotY
+        stored.location.rotZ = object.location.rotZ
+        tableHelper.insertValueIfMissing(self.data.packets.rotate, uniqueIndex)
+    end
+end
+
 function BaseCell:SaveObjectsScaled(objects)
 
     for uniqueIndex, object in pairs(objects) do
@@ -949,6 +975,10 @@ function BaseCell:SaveObjectsByPacketType(packetType, objects)
         self:SaveObjectsSpawned(objects)
     elseif packetType == "ObjectDelete" then
         self:SaveObjectsDeleted(objects)
+    elseif packetType == "ObjectMove" then
+        self:SaveObjectsMoved(objects)
+    elseif packetType == "ObjectRotate" then
+        self:SaveObjectsRotated(objects)
     elseif packetType == "ObjectLock" then
         self:SaveObjectsLocked(objects)
     elseif packetType == "ObjectMiscellaneous" then
@@ -1380,6 +1410,11 @@ function BaseCell:SaveActorCellChanges(pid)
                 end
 
                 if newCell.data.objectData[uniqueIndex] ~= nil then
+                    -- Arena Y013: the destination must own an actor-list entry even
+                    -- when no player currently has authority there. This closes the
+                    -- exterior->interior return gap where route/location persisted
+                    -- but the actor could vanish until another authority rebuild.
+                    tableHelper.insertValueIfMissing(newCell.data.packets.actorList, uniqueIndex)
                     newCell.data.objectData[uniqueIndex].location = {
                         posX = tes3mp.GetActorPosX(actorIndex),
                         posY = tes3mp.GetActorPosY(actorIndex),
@@ -1388,10 +1423,27 @@ function BaseCell:SaveActorCellChanges(pid)
                         rotY = tes3mp.GetActorRotY(actorIndex),
                         rotZ = tes3mp.GetActorRotZ(actorIndex)
                     }
-                    -- Door/cell transitions are infrequent but semantically
-                    -- important. Persist the destination immediately so a server
-                    -- restart cannot lose the newest home route breadcrumb.
-                    newCell:QuicksaveToDrive()
+                    -- Y013-fix-01: the original code quicksaved the destination on
+                    -- every actor cell change, including exterior->exterior. Wandering
+                    -- NPCs and followers cross exterior borders constantly, so on a
+                    -- populated server that turned into continuous disk I/O.
+                    --
+                    -- The breadcrumb only has to survive a restart, and the case the
+                    -- NPC-return fix exists for is the interior transition. Persist
+                    -- those immediately; let exterior hops ride the normal periodic
+                    -- save, and throttle repeats for the same cell.
+                    local isInteriorTransition = newCell.isExterior ~= true or self.isExterior ~= true
+
+                    if isInteriorTransition then
+                        local now = os.time()
+                        local minInterval = tonumber(config.actorCellChangeSaveInterval) or 5
+
+                        if newCell.lastActorCellChangeSave == nil
+                            or now - newCell.lastActorCellChangeSave >= minInterval then
+                            newCell.lastActorCellChangeSave = now
+                            newCell:QuicksaveToDrive()
+                        end
+                    end
                 end
             else
                 tes3mp.LogAppend(enumerations.log.ERROR, "-- Invalid cell change was attempted! Please report " ..
@@ -1625,6 +1677,56 @@ function BaseCell:LoadObjectTrapsTriggered(pid, objectData, uniqueIndexArray, fo
     end
 end
 
+function BaseCell:LoadObjectsMoved(pid, objectData, uniqueIndexArray, forEveryone)
+
+    local function sendTo(targetPid)
+        local objectCount = 0
+        tes3mp.ClearObjectList()
+        tes3mp.SetObjectListPid(targetPid)
+        tes3mp.SetObjectListCell(self.description)
+
+        for _, uniqueIndex in pairs(uniqueIndexArray) do
+            local data = objectData[uniqueIndex]
+            if data ~= nil and data.location ~= nil and data.location.posX ~= nil then
+                packetBuilder.AddObjectMove(uniqueIndex, data)
+                objectCount = objectCount + 1
+            end
+        end
+        if objectCount > 0 then tes3mp.SendObjectMove(false, false) end
+    end
+
+    if forEveryone then
+        for _, targetPid in ipairs(packetBuilder.GetRelevantPlayersForCell(self)) do sendTo(targetPid) end
+    else
+        sendTo(pid)
+    end
+end
+
+function BaseCell:LoadObjectsRotated(pid, objectData, uniqueIndexArray, forEveryone)
+
+    local function sendTo(targetPid)
+        local objectCount = 0
+        tes3mp.ClearObjectList()
+        tes3mp.SetObjectListPid(targetPid)
+        tes3mp.SetObjectListCell(self.description)
+
+        for _, uniqueIndex in pairs(uniqueIndexArray) do
+            local data = objectData[uniqueIndex]
+            if data ~= nil and data.location ~= nil and data.location.rotX ~= nil then
+                packetBuilder.AddObjectRotate(uniqueIndex, data)
+                objectCount = objectCount + 1
+            end
+        end
+        if objectCount > 0 then tes3mp.SendObjectRotate(false, false) end
+    end
+
+    if forEveryone then
+        for _, targetPid in ipairs(packetBuilder.GetRelevantPlayersForCell(self)) do sendTo(targetPid) end
+    else
+        sendTo(pid)
+    end
+end
+
 function BaseCell:LoadObjectsScaled(pid, objectData, uniqueIndexArray, forEveryone)
 
     local objectCount = 0
@@ -1801,6 +1903,10 @@ function BaseCell:LoadObjectsByPacketType(packetType, pid, objectData, uniqueInd
         self:LoadObjectsSpawned(pid, objectData, uniqueIndexArray, forEveryone)
     elseif packetType == "ObjectDelete" then
         self:LoadObjectsDeleted(pid, objectData, uniqueIndexArray, forEveryone)
+    elseif packetType == "ObjectMove" then
+        self:LoadObjectsMoved(pid, objectData, uniqueIndexArray, forEveryone)
+    elseif packetType == "ObjectRotate" then
+        self:LoadObjectsRotated(pid, objectData, uniqueIndexArray, forEveryone)
     elseif packetType == "ObjectLock" then
         self:LoadObjectsLocked(pid, objectData, uniqueIndexArray, forEveryone)
     elseif packetType == "ObjectMiscellaneous" then
@@ -2383,6 +2489,8 @@ function BaseCell:LoadInitialCellData(pid)
     self:LoadObjectsDeleted(pid, objectData, packets.delete)
     self:LoadObjectsPlaced(pid, objectData, packets.place)
     self:LoadObjectsSpawned(pid, objectData, packets.spawn)
+    self:LoadObjectsMoved(pid, objectData, packets.move)
+    self:LoadObjectsRotated(pid, objectData, packets.rotate)
     self:LoadObjectsLocked(pid, objectData, packets.lock)
     self:LoadObjectTrapsTriggered(pid, objectData, packets.trap)
     self:LoadObjectsScaled(pid, objectData, packets.scale)

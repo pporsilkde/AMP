@@ -126,8 +126,8 @@ local function ensurePlayerPrefs(pid)
     local root = Players[pid].data.customVariables
     root.arenampGroup = root.arenampGroup or {}
     local prefs = root.arenampGroup
-    if prefs.journalSync == nil then prefs.journalSync = false end
-    if prefs.topicSync == nil then prefs.topicSync = false end
+    if prefs.journalSync == nil then prefs.journalSync = true end
+    if prefs.topicSync == nil then prefs.topicSync = true end
     return prefs
 end
 

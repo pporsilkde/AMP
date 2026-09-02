@@ -5,6 +5,7 @@ local privateCellInstances = require("privateCellInstances")
 local questItemPhasing = require("questItemPhasing")
 local questIndexStore = require("questIndexStore")
 local positionSafetyHelper = require("positionSafetyHelper")
+local objectPlacementPermissions = require("objectPlacementPermissions")
 
 local consoleKickMessage = " has been kicked for using the console despite not having the permission to do so.\n"
 
@@ -46,6 +47,15 @@ eventHandler.InitializeDefaultValidators = function()
 
     customEventHooks.registerValidator("OnObjectPlace", defaultCreationValidator)
     customEventHooks.registerValidator("OnObjectSpawn", defaultCreationValidator)
+
+    local placementValidator = function(eventStatus, pid, cellDescription, objects)
+        if not objectPlacementPermissions.IsAllowed(pid, cellDescription) then
+            objectPlacementPermissions.Deny(pid, cellDescription)
+            return customEventHooks.makeEventStatus(false, false)
+        end
+    end
+    customEventHooks.registerValidator("OnObjectMove", placementValidator)
+    customEventHooks.registerValidator("OnObjectRotate", placementValidator)
 
     -- Don't validate scales larger than the maximum set in the config
     customEventHooks.registerValidator("OnObjectScale", function(eventStatus, pid, cellDescription, objects)
@@ -567,6 +577,10 @@ end
 
 eventHandler.OnPlayerDisconnect = function(pid)
 
+    -- Y013-fix-01: pids are reused, so the placement deny throttle must not
+    -- outlive the session that created it.
+    objectPlacementPermissions.Clear(pid)
+
     -- Keep login/CharGen disconnects silent. Only players whose successful entry
     -- was announced get a matching departure message.
     if Players[pid] ~= nil and Players[pid]:IsLoggedIn() and Players[pid].arenaJoinAnnounced == true then
@@ -949,6 +963,13 @@ local function processArenaStructuredChat(pid, rawMessage)
     text = escapeArenaChatText(text)
 
     local rpMode = rpFlag == "1"
+
+    -- Y013-fix-01: the client's RP toggle is the only RP state the server ever
+    -- receives, and it arrives once per structured chat message. Mirror it into
+    -- the player's custom variables so objectPlacementPermissions (and anything
+    -- else that needs a persistent RP flag) has something real to read.
+    objectPlacementPermissions.SetRpMode(pid, rpMode)
+
     local effectiveScope = scope
     if scope == "default" then
         -- RP actions are local by default; the player can explicitly choose
@@ -1736,6 +1757,14 @@ end
 
 eventHandler.OnObjectDelete = function(pid, cellDescription)
     eventHandler.OnGenericObjectEvent(pid, cellDescription, "ObjectDelete")
+end
+
+eventHandler.OnObjectMove = function(pid, cellDescription)
+    eventHandler.OnGenericObjectEvent(pid, cellDescription, "ObjectMove")
+end
+
+eventHandler.OnObjectRotate = function(pid, cellDescription)
+    eventHandler.OnGenericObjectEvent(pid, cellDescription, "ObjectRotate")
 end
 
 eventHandler.OnObjectLock = function(pid, cellDescription)

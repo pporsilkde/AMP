@@ -1,5 +1,5 @@
 ArenaMP bundled CoreScripts v16
-Source snapshot: ArenaMP Y012
+Source snapshot: ArenaMP Y015
 Network protocol: ArenaMP 806 (matching client/server build required)
 Riding subsystem: not included
 HUD event feed: enabled
@@ -11,3 +11,7 @@ XP penalty: full current-level XP wipe; no skill/SP/level loss
 Zero-XP death cooldown: current level * 5 seconds above base delay
 Shader-water legacy ripple fallback: disabled
 Chat input: 14 px white
+Quest/topic sync defaults: enabled
+Skill Point class cost: Major x1 / Minor x2 / Misc x3
+Custom quest chronology: mixed with vanilla journal by persistent anchor
+Custom quest journal header: quest name + date

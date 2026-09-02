@@ -1,5 +1,33 @@
 # Changelog
 
+## Y015 — custom quest chronology / journal title fix
+
+- Server-authored/custom journal entries no longer render after every vanilla JOUR entry unconditionally. Each new custom entry stores a persistent `vanillaAnchor` equal to the number of ordinary journal entries that existed when the stage was written, and the client merges both streams around that anchor.
+- A vanilla quest completed after a custom quest therefore becomes newer in both the classic Journal and Quest Manager instead of the custom quest remaining permanently last/newest.
+- Quest Manager no longer uses the artificial `serverOrder = 1000000`; pinned quests stay first, then actual recency, with completion state only as a tie-breaker.
+- Custom journal entry headers now show the localized quest name together with the recorded date instead of a bare date.
+- Existing server-quest saves without chronology metadata are migrated once to a conservative anchor immediately before the newest vanilla entry, preventing legacy custom quests from staying forced to the end forever.
+- The server transport adds optional chronology fields to the existing text transport only; ArenaMP network protocol remains 806.
+
+## Y014 — FIX_01 integration / default quest-topic sync / class-weighted SP
+
+- Integrated Arena_Y013_FIX_01: RP chat mode is mirrored server-side; private-cell helpers are guarded; faction-name heuristic stays off; placement rollback survives release; deny text is rate-limited; actor-cell quicksaves are throttled; remote grounded recovery no longer breaks real falling.
+- Server-wide journal and dialogue-topic sharing now defaults to enabled (`shareJournal=true`, `shareTopics=true`).
+- New group member preferences also default to journal/topic synchronization enabled; explicit saved per-member choices are preserved.
+- XP skill purchases keep the existing base 1/2/3/4 SP curve, multiplied by class importance: Major ×1, Minor ×2, Misc ×3. Tooltip/button and charged cost use the same calculation.
+- Protocol remains 806; no new packet format is introduced.
+
+
+## Y013 — HUD dedupe / remote locomotion / RP placement / reliable NPC return
+
+- Legacy centered added-item/harvest MessageBoxes are suppressed when the right HUD item feed already reports the inventory delta.
+- DedicatedPlayer self-heals stale airborne state when an observer enters a cell, preventing tucked-leg sliding until the remote player jumps.
+- ObjectMove/ObjectRotate are server-authoritative. Moderator+ may decorate anywhere; regular players must be in RP mode and inside their own private/house interior or an allowed faction interior. Denied grabs are rolled back client-side and never relayed.
+- Accepted object transforms are stored in cell state and routed only to the loaded-cell interest set.
+- ActorCellChange seeds the destination cache before source removal; Lua also guarantees destination actorList membership and transition coordinates, closing exterior->interior NPC disappearance races.
+- Protocol remains 806.
+
+
 ## Y012 — shader-water ripple isolation + server-authoritative XP penalties
 
 - Legacy osgParticle movement rings are disabled whenever shader water is active; disabling shader ripples no longer re-enables the old effect.
