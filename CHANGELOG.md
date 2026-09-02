@@ -3,6 +3,22 @@
 This changelog consolidates the ArenaMP development notes that previously existed as separate patch, revert, manifest, and validation files. Internal patch identifiers are retained so older builds and reports can still be mapped to the current source.
 
 
+## Y011 — unified HUD notifications + chat input readability
+
+### Changed
+- Replaced the three-band Y010 event-card shadow with one uniform medium-opacity `BlackBG` backing (`0.22` alpha), keeping the borderless right-edge presentation.
+- Arena XP gameplay rewards now use the same right-side event feed instead of transient MessageBox text. Rewards from the same reason coalesce while the card is alive and preserve fractional XP.
+- XP level/system notifications use the shared feed during gameplay; XP feedback triggered while a GUI is open keeps the original MessageBox path so it cannot expire behind menus. Vanilla/scripted game MessageBoxes are otherwise untouched.
+- ArenaMP chat input text is now 14 px and pure white; chat history, nickname colours and channel/style formatting are unchanged.
+- Network protocol remains 806.
+
+## Y010 — HUD event-feed visual polish
+
+- Moved event cards to a 2 px right-edge margin instead of inheriting the stamina bar's horizontal inset.
+- Removed the framed card skin and introduced the borderless backing later simplified by Y011.
+- Pickup and gold cards show `+delta`, appending the committed total as `+5 (10)` when the stack already existed.
+
+
 ## Y009 — HUD/event-feed stability + actor packet isolation
 
 ### Fixed

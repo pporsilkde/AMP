@@ -98,7 +98,7 @@ bash CI/ensure-bundled-deps.sh
 
 ## Current status
 
-ArenaMP Y009 is a development snapshot, not a stable semantic release. Tactical combat, clustered lighting, ragdolls, and some advanced render paths remain experimental. Public servers should be tested with several clients and backed up before upgrading.
+ArenaMP Y011 is a development snapshot, not a stable semantic release. Tactical combat, clustered lighting, ragdolls, and some advanced render paths remain experimental. Public servers should be tested with several clients and backed up before upgrading.
 
 Android/ng-gl4es support code exists, but Android is not currently produced by the release workflow and should be treated as an unsupported development target.
 
@@ -110,6 +110,9 @@ OpenMW, TES3MP, OpenMoji, and Bethesda Softworks do not endorse this fork.
 
 - **Y007 HUD event feed:** a six-slot icon feed above the stamina/combat stack shows gained items, aggregated gold and newly applied lasting effects.
 - **Y009 HUD stability:** live exact-instance effect timers, exact MP inventory-SET reseeding, pooled combat-bar parity, and actor-batch receive isolation.
+
+### Y011 unified HUD notifications
+The right-side event feed now uses one uniform medium-opacity backing instead of three shade bands. Arena XP rewards and gameplay XP status messages use the same lane; repeated rewards from the same source coalesce. GUI-triggered XP warnings keep their MessageBox fallback. ArenaMP chat input is 14 px and white while chat history colours stay unchanged.
 
 ### Y010 HUD feed polish
 Event cards now hug the right edge with a 2 px margin, use a borderless soft shadow background, and show existing inventory totals as `+5 (10)` after pickups.

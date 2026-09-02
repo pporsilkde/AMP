@@ -1,6 +1,9 @@
 ArenaMP bundled CoreScripts v16
-Source snapshot: ArenaMP Y010
+Source snapshot: ArenaMP Y011
 Network protocol: ArenaMP 806 (matching client/server build required)
 Riding subsystem: not included
 HUD event feed: enabled
 Actor batch receive isolation: enabled
+HUD notification backing: uniform medium opacity
+XP gameplay notifications: right-side event feed
+Chat input: 14 px white

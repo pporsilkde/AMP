@@ -381,6 +381,10 @@ namespace mwmp
         mHistory->setNeedKeyFocus(false);
         mHistory->setFontName(sHudFont);
         mCommandLine->setFontName(sMenuFont);
+        // Arena Y011: the text the local player is typing must stay more
+        // legible than the passive history on both desktop and Android.
+        mCommandLine->setFontHeight(14);
+        mCommandLine->setTextColour(MyGUI::Colour::White);
 
         setupPlayerMenu();
         syncSettings();
