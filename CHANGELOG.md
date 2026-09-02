@@ -1,5 +1,13 @@
 # Changelog
 
+## Y017 — combat HP readability, healing feedback, ammunition and gold weight
+
+- Kept the overhead enemy HP fill readable at long distance by clamping only the far-distance height to 4 px; close/medium presentation is unchanged.
+- Health increases now wake the auto-hidden HP HUD; Magicka and Fatigue still ignore passive increases.
+- Successful local bow/crossbow/thrown releases show `-1 <item name> (<remaining>)` in the right-side HUD feed.
+- `gold_001` has an engine-enforced weight of `0.0001` per coin.
+
+
 ## Y016 — server build callback hotfix
 
 - Registered `OnObjectMove` and `OnObjectRotate` in `ScriptFunctions::callbacks`.
