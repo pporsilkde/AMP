@@ -26,6 +26,9 @@ local cfg = {
     maxKillXpSignal = 25000,
     maxQuestXpSignal = 25000,
     protectSummons = true,
+    summonCheckInterval = 2000,
+    summonStopCombatCooldown = 2,
+    summonLegacyStopCombatTick = false,
     debugMode = false,
     invitePopups = true,
     nativeAllies = true,
@@ -40,6 +43,10 @@ if type(config.groupSystem) == "table" then
     cfg.maxKillXpSignal = tonumber(config.groupSystem["max client kill xp signal"]) or cfg.maxKillXpSignal
     cfg.maxQuestXpSignal = tonumber(config.groupSystem["max client quest xp signal"]) or cfg.maxQuestXpSignal
     if config.groupSystem["summon protection"] ~= nil then cfg.protectSummons = config.groupSystem["summon protection"] end
+    cfg.summonCheckInterval = tonumber(config.groupSystem["summon check interval ms"]) or cfg.summonCheckInterval
+    if config.groupSystem["summon legacy stopcombat tick"] ~= nil then
+        cfg.summonLegacyStopCombatTick = config.groupSystem["summon legacy stopcombat tick"]
+    end
     if config.groupSystem["invite popups"] ~= nil then cfg.invitePopups = config.groupSystem["invite popups"] end
     if config.groupSystem["native allies"] ~= nil then cfg.nativeAllies = config.groupSystem["native allies"] end
     if config.groupSystem["summon kill xp"] ~= nil then cfg.summonKillXp = config.groupSystem["summon kill xp"] end
@@ -51,6 +58,7 @@ local pendingInvites = {}
 local pendingXpSignals = {}
 local recentXpEvents = {}
 local strippedSignalPids = {}
+local summonCombatStopCache = {}
 
 local function now()
     return os.time()
@@ -835,10 +843,20 @@ local function sameCellRecipients(originPid, cellDescription)
 end
 
 local function sendXpControl(pid, amount, scaled, kind, reason)
-    if not isValidPid(pid) or amount <= 0 then return end
+    amount = tonumber(amount) or 0
+    if not isValidPid(pid) or amount == 0 then return end
     local payload = XP_PREFIX .. string.format("%.6f", amount) .. "\t" .. (scaled and "1" or "0") .. "\t" ..
-        escapeField(kind or "group") .. "\t" .. escapeField(reason or "Group reward") .. "\n"
+        escapeField(kind or "system") .. "\t" .. escapeField(reason or "") .. "\n"
     tes3mp.SendMessage(pid, payload, false)
+end
+
+-- Arena Y012: server-authoritative negative XP changes use the same hidden
+-- control channel as group rewards, so the client renders them in the XP HUD
+-- lane without duplicating the actual stat mutation locally.
+function groupHelper.SendXpAdjustment(pid, amount, kind)
+    if not isValidPid(pid) then return false end
+    sendXpControl(pid, tonumber(amount) or 0, false, kind or "system", "")
+    return true
 end
 
 local function dispatchSharedXp(originPid, amount, scaled, kind, reason, recipients)
@@ -928,8 +946,9 @@ local function tryMatchXp(pid)
         if matchedIndex ~= nil then
             local event = events[matchedIndex]
             event.used = true
-            dispatchSharedXp(pid, signal.amount, true, signal.kind,
-                signal.kind == "kill" and "Defeated enemy" or ("Quest progress: " .. tostring(signal.quest)), event.recipients)
+            -- The client localizes kill/quest reasons from the kind. Never put
+            -- raw server-authored English reason text into the HUD payload.
+            dispatchSharedXp(pid, signal.amount, true, signal.kind, "", event.recipients)
         else
             table.insert(remainingSignals, signal)
         end
@@ -1076,7 +1095,60 @@ function groupHelper.IsFriendlySummon(pid, cellDescription, uniqueIndex)
     return ownerPid == pid or groupHelper.ArePlayersInSameGroup(pid, ownerPid)
 end
 
--- Friendly summon protection is packet-only: no server-side StopCombat command is sent.
+local function stopSummonCombat(cellDescription, uid, targetPid)
+    if not isValidPid(targetPid) or LoadedCells[cellDescription] == nil then return false end
+    local cacheKey = cellDescription .. "|" .. uid .. "|" .. tostring(targetPid)
+    local current = now()
+    if summonCombatStopCache[cacheKey] ~= nil and current - summonCombatStopCache[cacheKey] < cfg.summonStopCombatCooldown then
+        return false
+    end
+    local split = uid:split("-")
+    if split[1] == nil or split[2] == nil then return false end
+    tes3mp.ClearObjectList()
+    tes3mp.SetObjectListPid(targetPid)
+    tes3mp.SetObjectListCell(cellDescription)
+    tes3mp.SetObjectListConsoleCommand("StopCombat")
+    tes3mp.SetObjectRefNum(tonumber(split[1]))
+    tes3mp.SetObjectMpNum(tonumber(split[2]))
+    tes3mp.AddObject()
+    tes3mp.SendConsoleCommand(false, false)
+    summonCombatStopCache[cacheKey] = current
+    return true
+end
+
+function GroupHelper_SummonTick()
+    -- X057: this sweep is legacy compatibility only. The client-side
+    -- MechanicsHelper protection rejects friendly summon combat before aggro is
+    -- created, while OnObjectHit below remains a reactive server backstop for
+    -- mismatched/older clients. Running this unconditionally caused an endless
+    -- StopCombat command every scan interval even when the summon was idle.
+    if not cfg.protectSummons or not cfg.summonLegacyStopCombatTick then
+        return
+    end
+
+    if cfg.protectSummons then
+        for cellDescription, cell in pairs(LoadedCells) do
+            if cell ~= nil and cell.data ~= nil and type(cell.data.objectData) == "table" then
+                for uid, obj in pairs(cell.data.objectData) do
+                    if obj.summon and obj.summon.summoner and obj.summon.summoner.playerName then
+                        local ownerPid = getSummonOwnerPid(cellDescription, uid)
+                        if ownerPid ~= nil then
+                            for pid, player in pairs(Players) do
+                                if player ~= nil and player:IsLoggedIn() and tes3mp.GetCell(pid) == cellDescription and
+                                    (pid == ownerPid or groupHelper.ArePlayersInSameGroup(pid, ownerPid)) then
+                                    stopSummonCombat(cellDescription, uid, pid)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    local cutoff = now() - 10
+    for key, stamp in pairs(summonCombatStopCache) do if stamp < cutoff then summonCombatStopCache[key] = nil end end
+    tes3mp.StartTimer(tes3mp.CreateTimerEx("GroupHelper_SummonTick", cfg.summonCheckInterval, "i", 0))
+end
 
 local function reconcilePlayer(pid)
     local prefs = ensurePlayerPrefs(pid)
@@ -1145,6 +1217,9 @@ customCommandHooks.registerCommand("group", processCommand)
 
 customEventHooks.registerHandler("OnServerPostInit", function(eventStatus)
     loadData()
+    if cfg.protectSummons and cfg.summonLegacyStopCombatTick then
+        tes3mp.StartTimer(tes3mp.CreateTimerEx("GroupHelper_SummonTick", cfg.summonCheckInterval, "i", 0))
+    end
     log(enumerations.log.INFO, "loaded: groups, journal/topics sync, shared XP, summon protection")
 end)
 
@@ -1207,7 +1282,7 @@ customEventHooks.registerHandler("OnActorDeath", function(eventStatus, pid, cell
     if eventStatus.validDefaultHandler then groupHelper.RecordKillEvents(pid, cellDescription, actors) end
 end)
 
--- Server-side packet validator for friendly damage on summons.
+-- Server-side backstop for friendly damage on summons.
 --
 -- The authoritative fix lives on the client: MechanicsHelper resolves a summon
 -- to its owning player and refuses the hit before any damage, aggro or hit
@@ -1221,7 +1296,7 @@ customEventHooks.registerValidator("OnObjectHit", function(eventStatus, pid, cel
         if not tes3mp.IsObjectPlayer(index) then
             local uid = makeUID(tes3mp.GetObjectRefNum(index), tes3mp.GetObjectMpNum(index))
             if groupHelper.IsFriendlySummon(pid, cellDescription, uid) then
-                -- Reject the friendly-hit packet without issuing a StopCombat console command.
+                stopSummonCombat(cellDescription, uid, pid)
                 eventStatus.validDefaultHandler = false
                 return eventStatus
             end

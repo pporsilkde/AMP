@@ -754,15 +754,25 @@ namespace mwmp
                 char* end = nullptr;
                 const float amount = std::strtof(fields[0].c_str(), &end);
                 const bool scaled = fields[1] == "1";
-                std::string reason = fields.size() > 3 ? unescapeControlField(fields[3]) : std::string();
-                if (reason.empty() && fields.size() > 2)
-                {
-                    const std::string kind = fields[2];
-                    reason = kind == "kill" ? localizeArena("chat.group.xp.kill")
-                        : localizeArena("chat.group.xp.quest");
-                }
+                const std::string kind = fields.size() > 2 ? fields[2] : std::string();
+                std::string reason;
+                // Arena Y012: known server event kinds are localized client-side
+                // even if an older server accidentally supplied raw English text.
+                if (kind == "kill")
+                    reason = localizeArena("xp.reason.defeated_enemy");
+                else if (kind == "quest")
+                    reason = localizeArena("xp.reason.quest_progress");
+                else if (kind == "death")
+                    reason = localizeArena("xp.msg.death");
+                else if (kind == "jail")
+                    reason = localizeArena("xp.msg.jail");
+                else if (fields.size() > 3)
+                    reason = unescapeControlField(fields[3]);
+
                 if (end != fields[0].c_str() && amount > 0.f)
                     MWMechanics::XPLeveling::awardServer(amount, scaled, reason);
+                else if (end != fields[0].c_str() && amount < 0.f)
+                    MWMechanics::XPLeveling::notifyServerAdjustment(amount, reason);
             }
             return true;
         }

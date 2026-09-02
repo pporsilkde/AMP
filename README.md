@@ -10,7 +10,7 @@ ArenaMP is an experimental multiplayer engine for *The Elder Scrolls III: Morrow
 
 | Item | Value |
 |---|---|
-| Source snapshot | Y009 |
+| Source snapshot | Y012 |
 | Engine foundation | OpenMW 0.47.0 |
 | Multiplayer heritage | TES3MP 0.8.1 |
 | ArenaMP network protocol | 806 |
@@ -98,7 +98,7 @@ bash CI/ensure-bundled-deps.sh
 
 ## Current status
 
-ArenaMP Y011 is a development snapshot, not a stable semantic release. Tactical combat, clustered lighting, ragdolls, and some advanced render paths remain experimental. Public servers should be tested with several clients and backed up before upgrading.
+ArenaMP Y012 is a development snapshot, not a stable semantic release. Tactical combat, clustered lighting, ragdolls, and some advanced render paths remain experimental. Public servers should be tested with several clients and backed up before upgrading.
 
 Android/ng-gl4es support code exists, but Android is not currently produced by the release workflow and should be treated as an unsupported development target.
 
@@ -110,6 +110,12 @@ OpenMW, TES3MP, OpenMoji, and Bethesda Softworks do not endorse this fork.
 
 - **Y007 HUD event feed:** a six-slot icon feed above the stamina/combat stack shows gained items, aggregated gold and newly applied lasting effects.
 - **Y009 HUD stability:** live exact-instance effect timers, exact MP inventory-SET reseeding, pooled combat-bar parity, and actor-batch receive isolation.
+
+### Y012 — water/XP penalty repair
+- Shader water no longer falls back to legacy particle movement rings when shader-ripple simulation is disabled.
+- XP cards are iconless and localized; positive/negative/neutral events use green/red/black semantics.
+- Death is server-authoritative: all current-level XP is wiped, but earned level, Skill Points and skills are preserved. At exactly 0 XP the server adds `level × 5s` to respawn time.
+- Jail wipes current-level XP and disables the old random skill changes while XP Leveling is enabled. Network protocol remains 806.
 
 ### Y011 unified HUD notifications
 The right-side event feed now uses one uniform medium-opacity backing instead of three shade bands. Arena XP rewards and gameplay XP status messages use the same lane; repeated rewards from the same source coalesce. GUI-triggered XP warnings keep their MessageBox fallback. ArenaMP chat input is 14 px and white while chat history colours stay unchanged.

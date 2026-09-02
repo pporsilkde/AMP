@@ -1,5 +1,13 @@
 # Changelog
 
+## Y012 — shader-water ripple isolation + server-authoritative XP penalties
+
+- Legacy osgParticle movement rings are disabled whenever shader water is active; disabling shader ripples no longer re-enables the old effect.
+- XP cards are iconless and localized. Known MP event reasons are localized client-side; gains/losses/neutral status use green/red/black presentation.
+- Server death handling wipes all current-level XP and persists it immediately without touching levels, Skill Points or skills.
+- If current XP was already zero, the server adds current level × 5 seconds to the ordinary respawn timer; otherwise XP is wiped and no extra level cooldown is added.
+- XP-mode jail wipes current-level XP and suppresses random skill changes. Protocol remains 806.
+
 This changelog consolidates the ArenaMP development notes that previously existed as separate patch, revert, manifest, and validation files. Internal patch identifiers are retained so older builds and reports can still be mapped to the current source.
 
 
