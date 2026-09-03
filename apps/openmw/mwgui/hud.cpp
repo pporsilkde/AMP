@@ -2037,8 +2037,11 @@ namespace MWGui
 
     void HUD::pushDamageNumber(float damage)
     {
+        // Y025: damage feedback is anchored to the screen centre, not to the
+        // transient visibility state of the crosshair widget. ArenaMP may hide or
+        // rebuild the reticle in the exact frame a confirmed hit arrives.
         if (damage <= 0.f || !mGameplayHud || !mGameplayHud->getVisible()
-            || !mCrosshair || !mCrosshair->getVisible() || mFloatingDamageNumbers.empty())
+            || mFloatingDamageNumbers.empty())
             return;
 
         FloatingDamageState* slot = nullptr;
@@ -2130,6 +2133,8 @@ namespace MWGui
             state.mTargetAlpha = 0.f;
             state.mDisplayHealth = -1.f;
             state.mLingerTimer = 0.f;
+            state.mHasValidHealth = false;
+            state.mFrameHealthFraction = 0.f;
             state.mDocked = false;
             state.mDockBlend = 0.f;
             state.mDockSwitchTimer = 0.f;
@@ -2152,6 +2157,19 @@ namespace MWGui
         MyGUI::Widget* fill = state.mFill;
         if (!bar || !fill)
             return;
+
+        // Y025: no owner-independent presentation. A recycled slot stays completely
+        // hidden until current/max HP have been validated for its current actor.
+        if (!state.mHasValidHealth)
+        {
+            bar->setVisible(false);
+            fill->setVisible(false);
+            if (state.mFrame)
+                state.mFrame->setVisible(false);
+            if (state.mName)
+                state.mName->setVisible(false);
+            return;
+        }
 
         const float fadeTau = state.mTargetAlpha > state.mAlpha
             ? CombatBar::sFadeInTime : CombatBar::sFadeOutTime;
@@ -2272,8 +2290,19 @@ namespace MWGui
         const MWWorld::Ptr player = world->getPlayerPtr();
         if (player.isEmpty() || !player.isInCell())
         {
+            mCombatPlayerCell = nullptr;
             hideCombatHealthBars();
             return;
+        }
+
+        // Y025: world-space combat widgets must not survive a CellStore hand-off.
+        // In particular exterior -> interior -> exterior used to preserve a docked
+        // frame while the new cell had not supplied valid actor stats yet.
+        MWWorld::CellStore* playerCell = player.getCell();
+        if (mCombatPlayerCell != playerCell)
+        {
+            hideCombatHealthBars();
+            mCombatPlayerCell = playerCell;
         }
 
         // Rebuild only the participant list at 10 Hz. Projection, distance scaling
@@ -2420,7 +2449,11 @@ namespace MWGui
                 state.mDockBlend = 0.f;
                 state.mDockSwitchTimer = 0.f;
                 state.mDockRow = -1;
+                state.mHasValidHealth = false;
+                state.mFrameHealthFraction = 0.f;
                 state.mNameCaption.clear();
+                if (state.mFill)
+                    state.mFill->setVisible(false);
                 if (state.mFrame)
                     state.mFrame->setVisible(false);
 
@@ -2596,6 +2629,7 @@ namespace MWGui
 
             const float healthFraction = CombatBar::clamp01(state.mDisplayHealth / maximumHealth);
             state.mFrameHealthFraction = healthFraction;
+            state.mHasValidHealth = healthFraction > 0.f;
 
             if (state.mName)
             {

@@ -1,3 +1,14 @@
+## Arena Y025 — combat HP cell reset / damage-number recovery
+
+- Hard reset of combat HP slots on player CellStore changes.
+- Frames/fills remain hidden until valid current/max HP is resolved for the current slot owner.
+- Damage numbers no longer depend on transient crosshair visibility or a non-empty weapon Ptr.
+- Protocol remains 806.
+
+## Y024 chat HUD
+
+Gameplay HUD chat is always a live feed with no manual scroll. Scrollable history is available only in Player Menu Chat and the in-game pause menu.
+
 ## Arena Y023 — direct combat HP fill
 
 - Combat HP no longer uses MyGUI::ProgressBar or Track state.

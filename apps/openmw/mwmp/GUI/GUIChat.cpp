@@ -690,8 +690,17 @@ namespace mwmp
         }
         else
         {
+            // Y024: the gameplay HUD is a live feed, not a history browser.
+            // Only the full Player Menu may keep a manually reviewed scroll
+            // position. When the player is already at the bottom, keep following
+            // new messages there as well.
+            const size_t previousRange = mHistory->getVScrollRange();
+            const size_t previousPosition = mHistory->getVScrollPosition();
+            const bool playerMenuHistory = editState && menuState && activeTab == TAB_CHAT && !mainMenuOpen;
+            const bool wasAtBottom = previousRange == 0 || previousPosition + 1 >= previousRange;
+
             mHistory->addText(color + msg);
-            if (!historyReviewState)
+            if (!playerMenuHistory || wasAtBottom)
                 scrollHistoryToBottom();
             LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "%s", msg.c_str());
 
@@ -1279,6 +1288,17 @@ namespace mwmp
         if (mainMenuOpen)
             return;
 
+        // Y024: never let a plain gameplay cursor turn the HUD feed into a
+        // scrollable history view. The compact HUD always tracks the newest
+        // line; manual scrolling exists only in the Player Menu (and the pause
+        // menu has its own history widget).
+        if (!menuState && !historyReviewState)
+        {
+            const size_t range = mHistory->getVScrollRange();
+            if (range > 0 && mHistory->getVScrollPosition() + 1 < range)
+                scrollHistoryToBottom();
+        }
+
         if (revealTime > 0.f && !editState && !historyReviewState)
         {
             revealTime = std::max(0.f, revealTime - dt);
@@ -1362,12 +1382,18 @@ namespace mwmp
         mCommandLine->setVisible(editorVisible);
         mHistory->setVisible(historyDisplayEnabled && (!menuVisible || chatVisible));
 
+        // Y024: the history scrollbar is an explicit Player Menu feature.
+        // Showing the ordinary game cursor must leave the HUD chat transparent
+        // to the mouse and must not expose a scrollbar.
         mHistory->setNeedMouseFocus(chatVisible);
         if (mHistoryScroll)
         {
-            mHistoryScroll->setVisible(chatVisible || historyReviewState);
-            mHistoryScroll->setNeedMouseFocus(chatVisible || historyReviewState);
+            mHistoryScroll->setVisible(chatVisible);
+            mHistoryScroll->setNeedMouseFocus(chatVisible);
         }
+
+        if (!menuVisible)
+            scrollHistoryToBottom();
 
         updateToggleButtons();
         updateGroupControls();

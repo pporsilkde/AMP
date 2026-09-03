@@ -1,5 +1,5 @@
 ArenaMP bundled CoreScripts v17
-Source snapshot: ArenaMP Y023
+Source snapshot: ArenaMP Y025
 Network protocol: ArenaMP 806 (matching client/server build required)
 Riding subsystem: not included
 HUD event feed: enabled
@@ -24,3 +24,6 @@ Y020 protected physics grab: player-dropped only for regular players; Moderator+
 Y020 gold tooltip/runtime weight: 0.0001
 Y021 floating weapon damage numbers: local confirmed weapon HP loss beside crosshair
 Y023 combat HP: direct Widget fill; no ProgressBar Track; frameless overhead; frame only in HUD
+Y024 chat HUD live feed: HUD no-scroll; Player Menu/pause history scroll only
+
+Y025 combat HP cell reset + validated fill ownership + floating damage recovery

@@ -263,12 +263,25 @@ namespace MWGui
         if (history == mLastChatHistory)
             return;
 
+        // Y024: the pause screen is one of the two places where history review
+        // is intentional. Preserve a manually scrolled position when new chat
+        // arrives; if the player was already at the bottom, continue following
+        // the newest message normally.
+        const size_t previousRange = mChatHistory->getVScrollRange();
+        const size_t previousPosition = mChatHistory->getVScrollPosition();
+        const bool wasAtBottom = previousRange == 0 || previousPosition + 1 >= previousRange;
+
         mLastChatHistory = history;
         mChatHistory->setCaption(history);
         const size_t range = mChatHistory->getVScrollRange();
-        if (range > 0)
-            mChatHistory->setVScrollPosition(range - 1);
-        mChatHistory->setTextCursor(mChatHistory->getCaption().size());
+        if (wasAtBottom)
+        {
+            if (range > 0)
+                mChatHistory->setVScrollPosition(range - 1);
+            mChatHistory->setTextCursor(mChatHistory->getCaption().size());
+        }
+        else if (range > 0)
+            mChatHistory->setVScrollPosition(std::min(previousPosition, range - 1));
     }
 
     void MainMenu::updateChatGeometry()
