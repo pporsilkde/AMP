@@ -272,6 +272,13 @@ function BasePlayer:FinishLogin()
         self:LoadMarkLocation()
         self:LoadSelectedSpell()
 
+        -- Y032: if this world previously ran with the accidental Y014 mixed
+        -- sharing defaults, merge that old shared progression into this account
+        -- before sending the now-personal journal/topics to the client.
+        if WorldInstance ~= nil and type(WorldInstance.MigrateLegacySharedProgressToPlayer) == "function" then
+            WorldInstance:MigrateLegacySharedProgressToPlayer(self)
+        end
+
         if config.shareJournal == true then
             WorldInstance:LoadJournal(self.pid)
         else
@@ -419,8 +426,15 @@ function BasePlayer:EndCharGen()
         end
     end
 
+    local migratedJournal, migratedTopics = false, false
+    if WorldInstance ~= nil and type(WorldInstance.MigrateLegacySharedProgressToPlayer) == "function" then
+        migratedJournal, migratedTopics = WorldInstance:MigrateLegacySharedProgressToPlayer(self)
+    end
+
     if config.shareJournal == true then
         WorldInstance:LoadJournal(self.pid)
+    elseif migratedJournal then
+        self:LoadJournal()
     end
 
     if config.shareFactionRanks == true then
@@ -437,6 +451,8 @@ function BasePlayer:EndCharGen()
 
     if config.shareTopics == true then
         WorldInstance:LoadTopics(self.pid)
+    elseif migratedTopics then
+        self:LoadTopics()
     end
 
     WorldInstance:LoadKills(self.pid)

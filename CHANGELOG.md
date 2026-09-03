@@ -1,3 +1,14 @@
+## Y032 — MMO personal journal/topics + Y029/Y030/Y031 merge
+
+- Consolidates the Y029 cumulative with the Y030 group-escort target fix and Y031 escort-home loop fix into one changed-files package.
+- Restores the intended MMO defaults: `shareJournal=false` and `shareTopics=false`; CO-OP can still enable shared progression from the Launcher.
+- Launcher preset detection now distinguishes exact MMO, exact CO-OP and `Custom / mixed`. A mixed ruleset can no longer be displayed as MMO merely because it is not fully CO-OP.
+- Selecting MMO explicitly writes the personal-progression flags, so the old Y014 mixed state (`journal/topics=true` with other progression flags false) cannot silently survive behind the MMO label.
+- `world.json` no longer serializes `journal` or `topics` while their global sharing options are disabled. Existing stale keys are pruned on world load in MMO mode; in-memory empty tables are retained for CoreScripts safety.
+- Before pruning a non-empty legacy shared journal/topic set, Y032 stores it in `world/legacySharedProgress.json`; each account merges that former shared progression into its personal save on login. The merge is idempotent, so offline accounts are not lost across restarts.
+- Player journal/topic events continue to save through `Players[pid]` when global sharing is disabled; optional group synchronization still merges personal player data and does not use `world.json`.
+- ArenaMP network protocol remains 806.
+
 ## Y029 — Cell actor resync + group escort
 
 - Reassert actor-relevant persistent cell state on same-session revisits.

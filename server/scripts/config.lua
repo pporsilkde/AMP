@@ -644,7 +644,9 @@ config.allowWildernessRest = true
 config.allowWait = true
 
 -- Whether journal entries should be shared across the players on the server or not
-config.shareJournal = true
+-- Y032: MMO keeps story progression personal. CO-OP can enable this through
+-- the Launcher gameplay preset.
+config.shareJournal = false
 
 -- Whether faction ranks should be shared across the players on the server or not
 config.shareFactionRanks = false
@@ -656,7 +658,8 @@ config.shareFactionExpulsion = false
 config.shareFactionReputation = false
 
 -- Whether dialogue topics should be shared across the players on the server or not
-config.shareTopics = true
+-- Y032: MMO keeps known dialogue topics personal.
+config.shareTopics = false
 
 -- Whether crime bounties should be shared across players on the server or not
 config.shareBounty = false

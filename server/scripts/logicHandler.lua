@@ -810,6 +810,23 @@ logicHandler.ReturnStrayActorsHome = function()
 
                 local home = objectData.home
 
+                -- Y031: an actor carrying an authored FOLLOW/ESCORT package is
+                -- supposed to be led out of its home cell - that is the entire
+                -- point of a quest escort. Sending it home fights the follow AI
+                -- and produces an endless loop: the follower walks to the player,
+                -- the watchdog turns it around, the follow AI brings it back, the
+                -- cell change re-arms `home`, and the whole thing repeats every
+                -- actorHomeReturnDelay seconds. Drop the marker instead, so the
+                -- watchdog stops re-arming; the actor's next cell change after
+                -- the package is cancelled will record a fresh one.
+                local authoredAi = objectData.ai
+                if home ~= nil and authoredAi ~= nil
+                    and (authoredAi.action == enumerations.ai.FOLLOW
+                        or authoredAi.action == enumerations.ai.ESCORT) then
+                    objectData.home = nil
+                    home = nil
+                end
+
                 if home ~= nil and home.cell ~= nil and home.posX ~= nil
                     and tableHelper.containsValue(cell.data.packets.actorList, uniqueIndex) then
 
@@ -866,9 +883,24 @@ logicHandler.SetAIForActor = function(cell, actorUniqueIndex, action, targetPid,
         -- to happen every time someone loads the cell
         if action ~= enumerations.ai.ACTIVATE then
 
-            cell.data.objectData[actorUniqueIndex].ai = aiData
-            tableHelper.insertValueIfMissing(cell.data.packets.ai, actorUniqueIndex)
-            cell:QuicksaveToDrive()
+            -- Y031: never let a server-issued package clobber an authored one.
+            --
+            -- The home watchdog calls this with TRAVEL, and the unconditional
+            -- assignment below overwrote the FOLLOW/ESCORT that OnActorAI had
+            -- persisted. Worse, once the actor arrived home the watchdog cleared
+            -- objectData.ai outright, deleting the quest package from the save.
+            -- The escort only appeared to survive because the client kept
+            -- re-publishing it.
+            local storedAi = cell.data.objectData[actorUniqueIndex].ai
+            local authored = storedAi ~= nil
+                and (storedAi.action == enumerations.ai.FOLLOW
+                    or storedAi.action == enumerations.ai.ESCORT)
+
+            if not (authored and action == enumerations.ai.TRAVEL) then
+                cell.data.objectData[actorUniqueIndex].ai = aiData
+                tableHelper.insertValueIfMissing(cell.data.packets.ai, actorUniqueIndex)
+                cell:QuicksaveToDrive()
+            end
         end
 
         -- Initialize the packet for the current cell authority

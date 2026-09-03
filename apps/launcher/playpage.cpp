@@ -167,6 +167,7 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     mServerModeCombo = new QComboBox(this);
     mServerModeCombo->addItem(tr("MMO (default)"), QStringLiteral("MMO"));
     mServerModeCombo->addItem(tr("CO-OP"), QStringLiteral("CO-OP"));
+    mServerModeCombo->addItem(tr("Custom / mixed"), QStringLiteral("CUSTOM"));
     mServerModeCombo->setMinimumHeight(28);
     mServerModeCombo->setToolTip(tr("MMO keeps journal, factions, topics and reputation personal. CO-OP shares story progression between players. This preset changes server gameplay only and never touches graphics settings."));
 
@@ -732,13 +733,36 @@ void Launcher::PlayPage::populateFormFromConfig(const QString& text)
 
     if (mServerModeCombo != nullptr)
     {
-        const bool coop = shareJournalCheckBox->isChecked()
+        // Y032: do not display MMO for a mixed set of server rules. Y014 made
+        // journal/topics shared by default while the other progression flags
+        // stayed personal, so the old "not fully CO-OP == MMO" test hid the
+        // mismatch and selecting the already-visible MMO row emitted no signal.
+        const bool coop = gameModeEdit->text() == QLatin1String("ArenaMP CO-OP")
+            && shareJournalCheckBox->isChecked()
             && shareFactionRanksCheckBox->isChecked()
+            && shareFactionExpulsionCheckBox->isChecked()
             && shareFactionReputationCheckBox->isChecked()
             && shareTopicsCheckBox->isChecked()
-            && shareReputationCheckBox->isChecked();
+            && !shareBountyCheckBox->isChecked()
+            && shareReputationCheckBox->isChecked()
+            && shareMapExplorationCheckBox->isChecked()
+            && shareVideosCheckBox->isChecked();
+
+        const bool mmo = gameModeEdit->text() == QLatin1String("ArenaMP MMO")
+            && !shareJournalCheckBox->isChecked()
+            && !shareFactionRanksCheckBox->isChecked()
+            && !shareFactionExpulsionCheckBox->isChecked()
+            && !shareFactionReputationCheckBox->isChecked()
+            && !shareTopicsCheckBox->isChecked()
+            && !shareBountyCheckBox->isChecked()
+            && !shareReputationCheckBox->isChecked()
+            && !shareMapExplorationCheckBox->isChecked()
+            && !shareVideosCheckBox->isChecked();
+
+        const QString preset = coop ? QStringLiteral("CO-OP")
+            : (mmo ? QStringLiteral("MMO") : QStringLiteral("CUSTOM"));
         const QSignalBlocker blocker(mServerModeCombo);
-        const int presetIndex = mServerModeCombo->findData(coop ? QStringLiteral("CO-OP") : QStringLiteral("MMO"));
+        const int presetIndex = mServerModeCombo->findData(preset);
         if (presetIndex >= 0)
             mServerModeCombo->setCurrentIndex(presetIndex);
     }
@@ -991,8 +1015,14 @@ void Launcher::PlayPage::slotEnforceRequiredToggled(bool enabled)
 
 void Launcher::PlayPage::applyServerModePreset(int index)
 {
-    const bool coop = mServerModeCombo != nullptr
-        && mServerModeCombo->itemData(index).toString() == QLatin1String("CO-OP");
+    if (mServerModeCombo == nullptr)
+        return;
+
+    const QString mode = mServerModeCombo->itemData(index).toString();
+    if (mode == QLatin1String("CUSTOM"))
+        return;
+
+    const bool coop = mode == QLatin1String("CO-OP");
     gameModeEdit->setText(coop ? QStringLiteral("ArenaMP CO-OP") : QStringLiteral("ArenaMP MMO"));
     shareJournalCheckBox->setChecked(coop);
     shareFactionRanksCheckBox->setChecked(coop);
