@@ -78,6 +78,8 @@ namespace MWGui
         void pushSystemNotification(const std::string& title, const std::string& value = std::string(),
             const std::string& icon = std::string(), const std::string& key = std::string());
         void pushExperienceNotification(float amount, const std::string& reason = std::string());
+        // Arena Y021: confirmed local weapon damage, animated beside the reticle.
+        void pushDamageNumber(float damage);
 
     private:
         MyGUI::Widget* mGameplayHud;
@@ -120,27 +122,19 @@ namespace MWGui
 
         struct CombatHealthBarState
         {
-            MyGUI::ProgressBar* mWidget = nullptr;
+            // Y023: combat HP no longer uses MyGUI::ProgressBar at all. The bar is
+            // a stable transparent container with an ordinary red child whose width
+            // is the HP fraction. This removes ProgressBar Track lifetime/range bugs.
+            MyGUI::Widget* mWidget = nullptr;
+            MyGUI::Widget* mFill = nullptr;
+            // Decorative frame is a separate child and is visible only after the
+            // bar has arrived in the docked HUD stack.
+            MyGUI::Widget* mFrame = nullptr;
             // X025: name caption. It belongs to the docked presentation only, so it
             // lives next to the bar rather than inside it and is faded in separately.
             MyGUI::TextBox* mName = nullptr;
             MWWorld::Ptr mActor;
             bool mAlly = false;
-            // Skin the widget is actually wearing right now. Kept apart from mAlly:
-            // clearing a slot resets mAlly but must not claim the widget went back to
-            // the red skin, otherwise the next enemy inherits a green bar.
-            bool mSkinAlly = false;
-            // Y020: distant overhead bars use a borderless skin for readability.
-            // Keep the actual skin mode in state so distance changes can switch skins
-            // without rebuilding the widget pool or guessing from actor allegiance.
-            bool mSkinFrameless = false;
-            // Y006: changing owner or skin invalidates MyGUI ProgressBar's internal
-            // Track.  Do not rebuild it at scan time: an actor can fail the draw
-            // pass for several frames (no screen anchor, out of range, incomplete
-            // stats).  The reset is consumed only when real health is pushed into
-            // a bar that is actually about to be drawn.
-            bool mNeedsTrackReset = true;
-
             // X024: presentation state. The raw per-frame anchor produced by
             // getObjectScreenBounds follows the animated bounding box, so a running
             // NPC made the bar jump up and down every stride. Everything below is
@@ -172,8 +166,7 @@ namespace MWGui
             bool mFrameDrop = false;
             float mFrameDistance = 0.f;
             float mFrameAlpha = 1.f;
-            bool mFrameHasProgress = false;
-            std::size_t mFrameProgressPosition = 0;
+            float mFrameHealthFraction = 0.f;
             float mHeadCentreX = 0.f;
             float mHeadCentreY = 0.f;
             float mHeadWidth = 0.f;
@@ -247,6 +240,20 @@ namespace MWGui
         // applied. The HUD reseeds its snapshot exactly on that generation.
         std::uint64_t mHudInventorySetGeneration = 0;
         bool mHudEventSnapshotsReady = false;
+
+        struct FloatingDamageState
+        {
+            MyGUI::TextBox* mWidget = nullptr;
+            float mAge = 0.f;
+            float mLifetime = 0.85f;
+            float mSide = 1.f;
+            float mLaneOffset = 0.f;
+            bool mActive = false;
+        };
+
+        std::vector<FloatingDamageState> mFloatingDamageNumbers;
+        std::uint64_t mFloatingDamageSequence = 0;
+        void updateFloatingDamageNumbers(float dt);
 
         MyGUI::Widget *mDrowningFrame, *mDrowningFlash;
 
@@ -351,7 +358,6 @@ namespace MWGui
         // generation from ProcessorPlayerInventory.
         static constexpr std::size_t sHudEventReseedMinKinds = 5;
         static constexpr float sHudEventReseedLostFraction = 0.75f;
-        void pushCombatHealthBarProgress(CombatHealthBarState& state);
         // X024: drive one slot's opacity/geometry towards its target and push the
         // result into the widget. Called for both live and fading-out slots.
         // X025: also places and fades the name caption that rides on the bar.
