@@ -270,6 +270,8 @@ int main(int argc, char *argv[])
 
         Networking networking(peer);
         networking.setServerPassword(password);
+        networking.setVoiceEnabled(mgr.getBool("enabled", "Voice"));
+        networking.setVoiceRangeMeters(mgr.getFloat("rangeMeters", "Voice"));
 
         if (mgr.getBool("enabled", "MasterServer"))
         {

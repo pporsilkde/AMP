@@ -1,3 +1,19 @@
+## Y034 — voice lip sync, protocol 806
+
+- Network protocol is **806** again. Voice uses an appended ArenaMP-only packet/channel without renumbering existing IDs.
+- Proximity voice now feeds the engine's native head talk morph, so speaking player characters visibly move/open their mouths in step with speech loudness.
+- The local player is animated too in third person while transmitting.
+- Lip sync does not start a body animation and therefore does not interfere with locomotion, combat or custom poses.
+
+## Y033 — native proximity voice (first playable layer)
+
+- Hold **V** to talk; the key can be changed in `[Voice] pushToTalkKey` in `tes3mp-client.cfg`.
+- Voice is routed only to nearby loaded players, with interior isolation and a server-authoritative default radius of 30 m.
+- Remote speech is a 3D OpenAL stream attached to the speaker head and fades with distance/direction.
+- The first transport uses dependency-free 16 kHz mono IMA ADPCM (20 ms frames); the packet carries a codec id so Opus can replace it later without redesigning routing.
+- PTT is disabled while typing in chat. Voice is realtime only and is never written to world/player saves.
+- **Network protocol: 806. Client and server must both use Y033.**
+
 ## Y028
 
 > Y029 group escort: if the authored escort target dies or leaves the loaded cell, the server immediately retargets saved FOLLOW/ESCORT to the nearest group member still in that cell; with no group member present the NPC waits without losing the saved escort package.

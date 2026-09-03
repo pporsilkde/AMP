@@ -116,9 +116,19 @@ namespace MWBase
             /// and get an average loudness value (scale [0,1]) at the current time position.
             /// If the actor is not saying anything, returns 0.
 
+            virtual void setVoiceLipSyncLevel(const MWWorld::ConstPtr& reference, float level) = 0;
+            ///< Supply realtime ArenaMP voice activity for the actor head talk morph.
+
+            virtual void clearVoiceLipSync(const MWWorld::ConstPtr& reference) = 0;
+            ///< Remove realtime ArenaMP voice activity for the actor.
+
             virtual SoundStream *playTrack(const MWSound::DecoderPtr& decoder, Type type) = 0;
             ///< Play a 2D audio track, using a custom decoder. The caller is expected to call
             /// stopTrack with the returned handle when done.
+
+            virtual SoundStream *playTrack3D(const MWSound::DecoderPtr& decoder, const osg::Vec3f& position,
+                                                   float minDistance, float maxDistance, float volume, Type type) = 0;
+            ///< Play a streamed 3D track using a custom decoder. Used by ArenaMP proximity voice.
 
             virtual void stopTrack(SoundStream *stream) = 0;
             ///< Stop the given audio track from playing

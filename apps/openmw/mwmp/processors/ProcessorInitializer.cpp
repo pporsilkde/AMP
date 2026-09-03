@@ -48,6 +48,7 @@
 #include "player/ProcessorPlayerStatsDynamic.hpp"
 #include "player/ProcessorPlayerTopic.hpp"
 #include "player/ProcessorPlayerQuestIndex.hpp"
+#include "player/ProcessorPlayerVoice.hpp"
 
 #include "ObjectProcessor.hpp"
 #include "object/ProcessorConsoleCommand.hpp"
@@ -156,6 +157,7 @@ void ProcessorInitializer()
     PlayerProcessor::AddProcessor(new ProcessorPlayerStatsDynamic());
     PlayerProcessor::AddProcessor(new ProcessorPlayerTopic());
     PlayerProcessor::AddProcessor(new ProcessorPlayerQuestIndex());
+    PlayerProcessor::AddProcessor(new ProcessorPlayerVoice());
 
     ObjectProcessor::AddProcessor(new ProcessorConsoleCommand());
     ObjectProcessor::AddProcessor(new ProcessorContainer());

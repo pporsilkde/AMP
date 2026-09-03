@@ -56,6 +56,7 @@
 #include "ObjectList.hpp"
 #include "MechanicsHelper.hpp"
 #include "RecordHelper.hpp"
+#include "VoiceChat.hpp"
 /*
     Start of AMP addition
 */
@@ -74,6 +75,11 @@ std::string Main::resourceDir = "";
 std::string Main::getResDir()
 {
     return resourceDir;
+}
+
+VoiceChat* Main::getVoiceChat() const
+{
+    return mVoiceChat;
 }
 
 
@@ -108,6 +114,7 @@ Main::Main()
     mLocalPlayer = new LocalPlayer();
     mGUIController = new GUIController();
     mCellController = new CellController();
+    mVoiceChat = new VoiceChat();
 
     // X031: never fall back to the public/vanilla TES3MP server.
     server = "localhost";
@@ -122,6 +129,9 @@ Main::~Main()
     if (mNetworking != nullptr && mLocalPlayer != nullptr && mNetworking->isConnected()
         && mLocalPlayer->isLoggedIn())
         ScriptController::flushQueuedLocalChanges(0.0f, true);
+
+    if (mVoiceChat != nullptr)
+        mVoiceChat->shutdown();
 
     // X022: DedicatedPlayers own MWWorld::Ptrs. They must be removed before the
     // cell/GUI controllers and, most importantly, before Engine destroys World.
@@ -138,6 +148,8 @@ Main::~Main()
     mCellController = nullptr;
     delete mGUIController;
     mGUIController = nullptr;
+    delete mVoiceChat;
+    mVoiceChat = nullptr;
 
     // Keep this marker truthful: reaching it now means multiplayer teardown
     // actually completed, instead of merely having started.
@@ -170,6 +182,8 @@ bool Main::init(std::vector<std::string> &content, std::vector<std::string> &gro
     loadSettings(manager);
 
     int logLevel = manager.getInt("logLevel", "General");
+    pMain->mVoiceChat->configure(manager.getBool("enabled", "Voice"),
+        manager.getString("pushToTalkKey", "Voice"), manager.getFloat("rangeMeters", "Voice"));
     TimedLog::SetLevel(logLevel);
     if (address.empty())
     {
@@ -201,6 +215,7 @@ void Main::postInit()
     environment.getStateManager()->newGame(true);
     MWBase::Environment::get().getMechanicsManager()->toggleAI();
     RecordHelper::createPlaceholderInteriorCell();
+    pMain->mVoiceChat->init();
 }
 
 bool Main::isInitialized()
@@ -219,6 +234,7 @@ void Main::destroy()
 void Main::frame(float dt)
 {
     get().getNetworking()->update();
+    get().getVoiceChat()->update(dt);
 
     PlayerList::update(dt);
     get().getCellController()->updateDedicated(dt);

@@ -260,12 +260,12 @@ static ALenum getALFormat(ChannelConfig chans, SampleType type)
 //
 class OpenAL_SoundStream
 {
-    static const ALfloat sBufferLength;
-
 private:
     ALuint mSource;
 
     std::array<ALuint,6> mBuffers;
+    float mBufferLength;
+    unsigned int mBufferCount;
     ALint mCurrentBufIdx;
 
     ALenum mFormat;
@@ -288,7 +288,7 @@ private:
     friend class OpenAL_Output;
 
 public:
-    OpenAL_SoundStream(ALuint src, DecoderPtr decoder);
+    OpenAL_SoundStream(ALuint src, DecoderPtr decoder, float bufferLength=0.125f, unsigned int bufferCount=6);
     ~OpenAL_SoundStream();
 
     bool init(bool getLoudnessData=false);
@@ -302,8 +302,6 @@ public:
     bool process();
     ALint refillQueue();
 };
-const ALfloat OpenAL_SoundStream::sBufferLength = 0.125f;
-
 
 //
 // A background streaming thread (keeps active streams processed)
@@ -346,7 +344,9 @@ struct OpenAL_Output::StreamThread
                     ++iter;
             }
 
-            mCondVar.wait_for(lock, std::chrono::milliseconds(50));
+            // Y033: 20 ms service cadence keeps three-buffer proximity voice
+            // streams from underrunning while remaining inexpensive for normal music.
+            mCondVar.wait_for(lock, std::chrono::milliseconds(20));
         }
     }
 
@@ -379,8 +379,11 @@ private:
 };
 
 
-OpenAL_SoundStream::OpenAL_SoundStream(ALuint src, DecoderPtr decoder)
-  : mSource(src), mCurrentBufIdx(0), mFormat(AL_NONE), mSampleRate(0)
+OpenAL_SoundStream::OpenAL_SoundStream(ALuint src, DecoderPtr decoder, float bufferLength, unsigned int bufferCount)
+  : mSource(src)
+  , mBufferLength(std::max(0.01f, bufferLength))
+  , mBufferCount(std::max(2u, std::min<unsigned int>(bufferCount, static_cast<unsigned int>(mBuffers.size()))))
+  , mCurrentBufIdx(0), mFormat(AL_NONE), mSampleRate(0)
   , mBufferSize(0), mFrameSize(0), mSilence(0), mDecoder(std::move(decoder))
   , mLoudnessAnalyzer(nullptr), mIsFinished(true)
 {
@@ -390,7 +393,7 @@ OpenAL_SoundStream::OpenAL_SoundStream(ALuint src, DecoderPtr decoder)
 OpenAL_SoundStream::~OpenAL_SoundStream()
 {
     if(mBuffers[0] && alIsBuffer(mBuffers[0]))
-        alDeleteBuffers(mBuffers.size(), mBuffers.data());
+        alDeleteBuffers(mBufferCount, mBuffers.data());
     alGetError();
 
     mDecoder->close();
@@ -398,7 +401,7 @@ OpenAL_SoundStream::~OpenAL_SoundStream()
 
 bool OpenAL_SoundStream::init(bool getLoudnessData)
 {
-    alGenBuffers(mBuffers.size(), mBuffers.data());
+    alGenBuffers(mBufferCount, mBuffers.data());
     ALenum err = getALError();
     if(err != AL_NO_ERROR)
         return false;
@@ -424,7 +427,7 @@ bool OpenAL_SoundStream::init(bool getLoudnessData)
     }
 
     mFrameSize = framesToBytes(1, chans, type);
-    mBufferSize = static_cast<ALuint>(sBufferLength*mSampleRate);
+    mBufferSize = static_cast<ALuint>(mBufferLength*mSampleRate);
     mBufferSize *= mFrameSize;
 
     if (getLoudnessData)
@@ -537,10 +540,10 @@ ALint OpenAL_SoundStream::refillQueue()
 
     ALint queued;
     alGetSourcei(mSource, AL_BUFFERS_QUEUED, &queued);
-    if(!mIsFinished && (ALuint)queued < mBuffers.size())
+    if(!mIsFinished && (ALuint)queued < mBufferCount)
     {
         std::vector<char> data(mBufferSize);
-        for(;!mIsFinished && (ALuint)queued < mBuffers.size();++queued)
+        for(;!mIsFinished && (ALuint)queued < mBufferCount;++queued)
         {
             size_t got = mDecoder->read(data.data(), data.size());
             if(got < data.size())
@@ -556,7 +559,7 @@ ALint OpenAL_SoundStream::refillQueue()
                 ALuint bufid = mBuffers[mCurrentBufIdx];
                 alBufferData(bufid, mFormat, data.data(), data.size(), mSampleRate);
                 alSourceQueueBuffers(mSource, 1, &bufid);
-                mCurrentBufIdx = (mCurrentBufIdx+1) % mBuffers.size();
+                mCurrentBufIdx = (mCurrentBufIdx+1) % mBufferCount;
             }
         }
     }
@@ -1279,7 +1282,8 @@ bool OpenAL_Output::streamSound(DecoderPtr decoder, Stream *sound, bool getLoudn
     return true;
 }
 
-bool OpenAL_Output::streamSound3D(DecoderPtr decoder, Stream *sound, bool getLoudnessData)
+bool OpenAL_Output::streamSound3D(DecoderPtr decoder, Stream *sound, bool getLoudnessData,
+                                      float bufferLength, unsigned int bufferCount)
 {
     if(mFreeSources.empty())
     {
@@ -1296,7 +1300,7 @@ bool OpenAL_Output::streamSound3D(DecoderPtr decoder, Stream *sound, bool getLou
     if(getALError() != AL_NO_ERROR)
         return false;
 
-    OpenAL_SoundStream *stream = new OpenAL_SoundStream(source, std::move(decoder));
+    OpenAL_SoundStream *stream = new OpenAL_SoundStream(source, std::move(decoder), bufferLength, bufferCount);
     if(!stream->init(getLoudnessData))
     {
         delete stream;

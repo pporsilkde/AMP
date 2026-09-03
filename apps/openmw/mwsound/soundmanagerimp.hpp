@@ -70,6 +70,12 @@ namespace MWSound
         SaySoundMap mSaySoundsQueue;
         SaySoundMap mActiveSaySounds;
 
+        // Non-audio state used by ArenaMP proximity voice. NpcAnimation already
+        // drives the native head talk morph through sayActive()/getSaySoundLoudness(),
+        // so feeding the realtime voice level here gives lip movement without
+        // taking ownership of the custom voice stream.
+        std::map<MWWorld::ConstPtr, float> mVoiceLipSyncLevels;
+
         typedef std::vector<StreamPtr> TrackList;
         TrackList mActiveTracks;
 
@@ -180,12 +186,18 @@ namespace MWSound
         ///< Stop an actor speaking
 
         float getSaySoundLoudness(const MWWorld::ConstPtr& reference) const override;
+        void setVoiceLipSyncLevel(const MWWorld::ConstPtr& reference, float level) override;
+        void clearVoiceLipSync(const MWWorld::ConstPtr& reference) override;
         ///< Check the currently playing say sound for this actor
         /// and get an average loudness value (scale [0,1]) at the current time position.
         /// If the actor is not saying anything, returns 0.
 
         Stream *playTrack(const DecoderPtr& decoder, Type type) override;
         ///< Play a 2D audio track, using a custom decoder
+
+        Stream *playTrack3D(const DecoderPtr& decoder, const osg::Vec3f& position,
+                            float minDistance, float maxDistance, float volume, Type type) override;
+        ///< Play a streamed 3D track, used by ArenaMP proximity voice.
 
         void stopTrack(Stream *stream) override;
         ///< Stop the given audio track from playing

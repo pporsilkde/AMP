@@ -374,14 +374,36 @@ namespace MWSound
 
     float SoundManager::getSaySoundLoudness(const MWWorld::ConstPtr &ptr) const
     {
+        float loudness = 0.f;
+        const auto voiceIt = mVoiceLipSyncLevels.find(ptr);
+        if (voiceIt != mVoiceLipSyncLevels.end())
+            loudness = std::clamp(voiceIt->second, 0.f, 1.f);
+
         SaySoundMap::const_iterator snditer = mActiveSaySounds.find(ptr);
         if(snditer != mActiveSaySounds.end())
         {
             Stream *sound = snditer->second.get();
-            return mOutput->getStreamLoudness(sound);
+            loudness = std::max(loudness, mOutput->getStreamLoudness(sound));
         }
 
-        return 0.0f;
+        return loudness;
+    }
+
+    void SoundManager::setVoiceLipSyncLevel(const MWWorld::ConstPtr& ptr, float level)
+    {
+        if (ptr.isEmpty())
+            return;
+        level = std::clamp(level, 0.f, 1.f);
+        if (level <= 0.001f)
+            mVoiceLipSyncLevels.erase(ptr);
+        else
+            mVoiceLipSyncLevels[ptr] = level;
+    }
+
+    void SoundManager::clearVoiceLipSync(const MWWorld::ConstPtr& ptr)
+    {
+        if (!ptr.isEmpty())
+            mVoiceLipSyncLevels.erase(ptr);
     }
 
     void SoundManager::say(const std::string& filename)
@@ -417,6 +439,10 @@ namespace MWSound
 
     bool SoundManager::sayActive(const MWWorld::ConstPtr &ptr) const
     {
+        const auto voiceIt = mVoiceLipSyncLevels.find(ptr);
+        if (voiceIt != mVoiceLipSyncLevels.end() && voiceIt->second > 0.001f)
+            return true;
+
         SaySoundMap::const_iterator snditer = mSaySoundsQueue.find(ptr);
         if(snditer != mSaySoundsQueue.end())
         {
@@ -467,6 +493,32 @@ namespace MWSound
             return params;
         } ());
         if(!mOutput->streamSound(decoder, track.get()))
+            return nullptr;
+
+        Stream* result = track.get();
+        const auto it = std::lower_bound(mActiveTracks.begin(), mActiveTracks.end(), track);
+        mActiveTracks.insert(it, std::move(track));
+        return result;
+    }
+
+    Stream *SoundManager::playTrack3D(const DecoderPtr& decoder, const osg::Vec3f& position,
+                                           float minDistance, float maxDistance, float volume, Type type)
+    {
+        if(!mOutput->isInitialized())
+            return nullptr;
+
+        StreamPtr track = getStreamRef();
+        track->init([&] {
+            SoundParams params;
+            params.mPos = position;
+            params.mVolume = volume;
+            params.mBaseVolume = volumeFromType(type);
+            params.mMinDistance = std::max(1.f, minDistance);
+            params.mMaxDistance = std::max(params.mMinDistance, maxDistance);
+            params.mFlags = PlayMode::NoEnv | type | Play_3D;
+            return params;
+        } ());
+        if(!mOutput->streamSound3D(decoder, track.get(), false, 0.020f, 3))
             return nullptr;
 
         Stream* result = track.get();

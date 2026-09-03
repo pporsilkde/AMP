@@ -101,6 +101,26 @@ const std::string& Networking::getStartLocation() const
     return startLocation;
 }
 
+void Networking::setVoiceEnabled(bool enabled)
+{
+    voiceEnabled = enabled;
+}
+
+bool Networking::isVoiceEnabled() const
+{
+    return voiceEnabled;
+}
+
+void Networking::setVoiceRangeMeters(float meters)
+{
+    voiceRangeMeters = std::max(3.f, std::min(100.f, meters));
+}
+
+float Networking::getVoiceRangeMeters() const
+{
+    return voiceRangeMeters;
+}
+
 void Networking::processSystemPacket(RakNet::Packet *packet)
 {
     Player *player = Players::getPlayer(packet->guid);

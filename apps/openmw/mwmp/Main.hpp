@@ -12,6 +12,7 @@ namespace mwmp
     class LocalSystem;
     class LocalPlayer;
     class Networking;
+    class VoiceChat;
 
     class Main
     {
@@ -47,6 +48,7 @@ namespace mwmp
         LocalPlayer *getLocalPlayer() const;
         GUIController *getGUIController() const;
         CellController *getCellController() const;
+        VoiceChat *getVoiceChat() const;
 
         void updateWorld(float dt) const;
 
@@ -65,6 +67,7 @@ namespace mwmp
 
         GUIController *mGUIController;
         CellController *mCellController;
+        VoiceChat *mVoiceChat;
 
         std::string server;
         unsigned short port;

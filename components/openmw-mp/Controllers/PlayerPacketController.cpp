@@ -42,6 +42,7 @@
 #include "../Packets/Player/PacketPlayerStatsDynamic.hpp"
 #include "../Packets/Player/PacketPlayerTopic.hpp"
 #include "../Packets/Player/PacketPlayerQuestIndex.hpp"
+#include "../Packets/Player/PacketPlayerVoice.hpp"
 
 #include "PlayerPacketController.hpp"
 
@@ -100,6 +101,7 @@ mwmp::PlayerPacketController::PlayerPacketController(RakNet::RakPeerInterface *p
     AddPacket<PacketPlayerStatsDynamic>(&packets, peer);
     AddPacket<PacketPlayerTopic>(&packets, peer);
     AddPacket<PacketPlayerQuestIndex>(&packets, peer);
+    AddPacket<PacketPlayerVoice>(&packets, peer);
 }
 
 

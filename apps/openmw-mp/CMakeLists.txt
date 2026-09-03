@@ -110,7 +110,7 @@ set(PROCESSORS_PLAYER
         processors/player/ProcessorPlayerSkill.hpp processors/player/ProcessorPlayerSpeech.hpp
         processors/player/ProcessorPlayerSpellbook.hpp processors/player/ProcessorPlayerSpellsActive.hpp
         processors/player/ProcessorPlayerStatsDynamic.hpp processors/player/ProcessorPlayerTopic.hpp
-        processors/player/ProcessorPlayerQuestIndex.hpp
+        processors/player/ProcessorPlayerQuestIndex.hpp processors/player/ProcessorPlayerVoice.hpp
         )
 
 source_group(tes3mp-server\\processors\\player FILES ${PROCESSORS_PLAYER})

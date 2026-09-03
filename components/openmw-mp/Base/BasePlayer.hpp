@@ -1,6 +1,9 @@
 #ifndef OPENMW_BASEPLAYER_HPP
 #define OPENMW_BASEPLAYER_HPP
 
+#include <cstddef>
+#include <cstdint>
+
 #include <components/esm/loadcell.hpp>
 #include <components/esm/loadcrea.hpp>
 #include <components/esm/loadnpc.hpp>
@@ -58,6 +61,34 @@ namespace mwmp
     struct Book
     {
         std::string bookId;
+    };
+
+    // ArenaMP Y033: realtime proximity voice payload. The codec is deliberately
+    // carried in-band so IMA ADPCM can be replaced by Opus without another
+    // transport redesign. Voice frames are never persisted.
+    struct VoiceFrame
+    {
+        enum Codec : std::uint8_t
+        {
+            CodecImaAdpcm16k = 1
+        };
+
+        enum Mode : std::uint8_t
+        {
+            ModeProximity = 0,
+            ModeWhisper = 1,
+            ModeShout = 2,
+            ModeGroup = 3
+        };
+
+        static constexpr int SampleRate = 16000;
+        static constexpr std::size_t FrameSamples = 320; // 20 ms
+        static constexpr std::size_t ImaAdpcmPayloadBytes = 164;
+
+        std::uint16_t sequence = 0;
+        std::uint8_t codec = CodecImaAdpcm16k;
+        std::uint8_t mode = ModeProximity;
+        std::vector<std::uint8_t> payload;
     };
 
     struct QuickKey
@@ -215,6 +246,7 @@ namespace mwmp
         std::vector<JournalItem> journalChanges;
         FactionChanges factionChanges;
         std::vector<Topic> topicChanges;
+        VoiceFrame voiceFrame;
 
         // ArenaMP X013/X015: payload of the last ID_PLAYER_QUEST_INDEX packet.
         QuestIndexData questIndex;

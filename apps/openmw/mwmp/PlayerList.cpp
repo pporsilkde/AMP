@@ -15,6 +15,7 @@
 #include "Main.hpp"
 #include "DedicatedPlayer.hpp"
 #include "CellController.hpp"
+#include "VoiceChat.hpp"
 #include "GUIController.hpp"
 
 
@@ -58,6 +59,9 @@ DedicatedPlayer *PlayerList::newPlayer(RakNet::RakNetGUID guid)
 
 void PlayerList::deletePlayer(RakNet::RakNetGUID guid)
 {
+    if (Main::isInitialized() && Main::get().getVoiceChat() != nullptr)
+        Main::get().getVoiceChat()->removeSpeaker(guid);
+
     const auto it = playerList.find(guid);
     if (it == playerList.end())
         return;

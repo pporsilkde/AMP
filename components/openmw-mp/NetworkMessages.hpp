@@ -114,6 +114,7 @@ enum GameMessages
     ID_WORLD_DESTINATION_OVERRIDE,
     ID_ACTOR_SPELLS_ACTIVE,
     ID_PLAYER_COOLDOWNS,
+    ID_PLAYER_VOICE,
     ID_PLACEHOLDER
 };
 
@@ -130,7 +131,11 @@ enum OrderingChannel
     // traffic. RakNet sequences packets independently per ordering channel, so
     // combat/AI/equipment bursts cannot hold back the newest position sample.
     CHANNEL_ACTOR_MOVEMENT,
-    CHANNEL_PLAYER_MOVEMENT
+    CHANNEL_PLAYER_MOVEMENT,
+
+    // Voice uses its own unreliable traffic lane. Ordering is handled per speaker
+    // by VoiceFrame::sequence, avoiding cross-speaker packet suppression.
+    CHANNEL_VOICE
 };
 
 

@@ -1,3 +1,32 @@
+## Y034 — protocol 806 + native voice lip sync
+
+### Changed
+- ArenaMP network protocol is restored to **806**. `ID_PLAYER_VOICE` and `CHANNEL_VOICE` remain appended after the existing ArenaMP IDs/channels, so existing numeric message/channel values are not renumbered.
+- Proximity voice now drives OpenMW's native head `talk:start` / `talk:stop` morph from realtime microphone/decoded voice loudness.
+- Remote players open and close their mouths according to received speech energy; the local third-person player does the same while holding PTT.
+- A small noise gate and short decay prevent microphone background noise or a missing packet from leaving the mouth stuck open.
+- Voice lip sync is an audio/head-morph state only; it does not replace or interrupt walking, combat, interaction or persistent pose animations.
+
+### Protocol
+- ArenaMP protocol remains **806**. Y034 client/server are still recommended together because older 806 builds do not implement the voice message.
+
+## Y033 — proximity voice foundation
+
+### Added
+- Native in-game push-to-talk proximity voice for ArenaMP.
+- `V` is the default PTT key and is configurable in `tes3mp-client.cfg` under `[Voice]`.
+- SDL capture accepts the microphone native frequency/format/channel count and converts it to the 16 kHz mono voice format when needed.
+- 16 kHz mono IMA ADPCM transport (~64 kbit/s payload rate) with independent 20 ms frames.
+- Dedicated `ID_PLAYER_VOICE` realtime packet on an unreliable voice channel with per-speaker sequence numbers.
+- Server-side interest filtering by loaded-player AOI, interior cell and authoritative distance.
+- 3D streamed playback attached to the remote player head with OpenAL distance attenuation.
+- PTT is suppressed while the chat edit field is active, so typing the PTT letter does not transmit.
+- Server rejects malformed voice frames and rate-limits each sender above 75 voice packets/s (normal 20 ms voice is 50 packets/s).
+- Voice traffic is transient and is never written to player/world JSON saves.
+
+### Protocol
+- ArenaMP protocol kept at 806; voice appends a new ArenaMP-only message without renumbering existing message IDs.
+
 ## Y032 — MMO personal journal/topics + Y029/Y030/Y031 merge
 
 - Consolidates the Y029 cumulative with the Y030 group-escort target fix and Y031 escort-home loop fix into one changed-files package.

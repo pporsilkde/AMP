@@ -70,6 +70,10 @@ namespace  mwmp
         bool isPassworded() const;
         void setStartLocation(const std::string& location);
         const std::string& getStartLocation() const;
+        void setVoiceEnabled(bool enabled);
+        bool isVoiceEnabled() const;
+        void setVoiceRangeMeters(float meters);
+        float getVoiceRangeMeters() const;
 
         static const Networking &get();
         static Networking *getPtr();
@@ -83,6 +87,8 @@ namespace  mwmp
         bool preInit(RakNet::Packet *packet, RakNet::BitStream &bsIn);
         std::string serverPassword;
         std::string startLocation;
+        bool voiceEnabled = true;
+        float voiceRangeMeters = 30.f;
         static Networking *sThis;
 
         RakNet::RakPeerInterface *peer;
