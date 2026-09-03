@@ -1,3 +1,10 @@
+## Y035 — Windows/MSVC proximity voice build fix
+
+### Fixed
+- Fixed `VoiceChat.cpp` failing under MSVC because the anonymous namespace referenced `VoiceFrame::SampleRate` and `VoiceFrame::FrameSamples` without the `mwmp::` qualifier.
+- The missing type caused the reported C2653/C2065 errors and the following C2131 `std::array` cascade.
+- Voice transport, native lip sync and protocol **806** are unchanged.
+
 ## Y034 — protocol 806 + native voice lip sync
 
 ### Changed

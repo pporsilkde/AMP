@@ -30,8 +30,8 @@
 
 namespace
 {
-    constexpr int sSampleRate = VoiceFrame::SampleRate;
-    constexpr std::size_t sFrameSamples = VoiceFrame::FrameSamples; // 20 ms
+    constexpr int sSampleRate = mwmp::VoiceFrame::SampleRate;
+    constexpr std::size_t sFrameSamples = mwmp::VoiceFrame::FrameSamples; // 20 ms
     constexpr std::size_t sMaxCaptureSamples = sSampleRate;
     constexpr std::size_t sMaxPlaybackSamples = sSampleRate / 2;
     constexpr float sSpeakerTimeout = 0.75f;
