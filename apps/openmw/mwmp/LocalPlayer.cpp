@@ -795,6 +795,14 @@ void LocalPlayer::updateAttackOrCast()
 {
     if (attack.shouldSend)
     {
+        // Arena Y027: this is the one MP-safe point at which the outgoing hit is
+        // guaranteed to belong to the LocalPlayer and already carries the finalized
+        // post-resistance/post-armour damage written by Npc/Creature::onHit. Showing
+        // feedback here avoids actor-authority ambiguity and prevents remote echoes
+        // from producing duplicate floating numbers.
+        if (attack.isHit && attack.success && std::isfinite(attack.damage) && attack.damage > 0.f)
+            MWBase::Environment::get().getWindowManager()->hudDamageNumber(attack.damage);
+
         getNetworking()->getPlayerPacket(ID_PLAYER_ATTACK)->setPlayer(this);
         getNetworking()->getPlayerPacket(ID_PLAYER_ATTACK)->Send();
 

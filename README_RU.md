@@ -1,3 +1,8 @@
+## Y028
+- Floating damage numbers are smaller (15 px), red, and use a negative HP format such as `-12`.
+- Hostile overhead HP is thinner (3 px near / 2 px minimum far) while the docked HUD bar remains 9 px.
+- The decorative HP frame now fades continuously with dockBlend instead of appearing at a hard threshold; Y027 fill safety is retained.
+
 ## Arena Y025 — combat HP cell reset / damage-number recovery
 
 - Hard reset of combat HP slots on player CellStore changes.
