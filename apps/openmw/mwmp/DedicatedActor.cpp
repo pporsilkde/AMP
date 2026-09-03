@@ -209,27 +209,11 @@ void DedicatedActor::setStatsDynamic()
     MWMechanics::DynamicStat<float> value;
 
     // Resurrect this Actor if it's not supposed to be dead according to its authority
-    //
-    // Y002: only when it is actually dead locally. setStatsDynamic() runs every
-    // frame for every remote NPC, so this used to call into MechanicsManager once
-    // per remote actor per frame purely to have CreatureStats::resurrect() decide
-    // there was nothing to do. isDead() is a plain member read.
-    if (creatureStats.mDynamic[0].mCurrent > 0 && ptrCreatureStats->isDead())
+    if (creatureStats.mDynamic[0].mCurrent > 0)
         MWBase::Environment::get().getMechanicsManager()->resurrect(ptr);
 
     for (int i = 0; i < 3; ++i)
     {
-        // Y003: start from the stat this client already has, instead of from a
-        // default-constructed one.
-        //
-        // Stat::readState() restores only mBase, mMod and mCurrent - it does not
-        // touch the *current modifier*, which is where active Fortify/Drain effects
-        // live. Assigning a default-constructed DynamicStat therefore zeroed that
-        // modifier on every observer, every frame, while the authority kept it.
-        // The two sides then disagreed about the same actor's effective health for
-        // as long as the effect lasted. Seeding from the existing stat keeps the
-        // locally tracked modifier and still applies the authoritative values.
-        value = ptrCreatureStats->getDynamic(i);
         value.readState(creatureStats.mDynamic[i]);
         ptrCreatureStats->setDynamic(i, value);
     }
@@ -242,54 +226,92 @@ void DedicatedActor::setEquipment()
 
     MWWorld::InventoryStore& invStore = ptr.getClass().getInventoryStore(ptr);
 
+    // Y020: ActorEquipment is a snapshot of what is equipped, not an instruction
+    // to create a new inventory object whenever durability/charge changed.  On an
+    // authority hand-off a DedicatedActor may have an empty equipment slot while
+    // the same refId is already present in its container with an older charge.
+    // The old charge-sensitive hasItem() test then added another copy.  Repeated
+    // hand-offs made those copies become real corpse loot when the authority sent
+    // its container back to the server.
+    auto findByRefId = [&](const std::string& refId, int preferredCharge)
+    {
+        MWWorld::ContainerStoreIterator fallback = invStore.end();
+
+        for (MWWorld::ContainerStoreIterator item = invStore.begin(); item != invStore.end(); ++item)
+        {
+            if (!Misc::StringUtils::ciEqual(item->getCellRef().getRefId(), refId))
+                continue;
+
+            if (fallback == invStore.end())
+                fallback = item;
+
+            if (item->getCellRef().getCharge() == preferredCharge)
+                return item;
+        }
+
+        return fallback;
+    };
+
     for (int slot = 0; slot < MWWorld::InventoryStore::Slots; ++slot)
     {
-        int count = equipmentItems[slot].count;
+        const int count = equipmentItems[slot].count;
 
         // If we've somehow received a corrupted item with a count lower than 0, ignore it
-        if (count < 0) continue;
+        if (count < 0)
+            continue;
 
-        MWWorld::ContainerStoreIterator it = invStore.getSlot(slot);
+        MWWorld::ContainerStoreIterator equipped = invStore.getSlot(slot);
 
-        const std::string &packetRefId = equipmentItems[slot].refId;
-        int packetCharge = equipmentItems[slot].charge;
-        std::string storeRefId = "";
+        const std::string& packetRefId = equipmentItems[slot].refId;
+        const int packetCharge = equipmentItems[slot].charge;
+        const float packetEnchantmentCharge = equipmentItems[slot].enchantmentCharge;
         bool equal = false;
 
-        if (it != invStore.end())
+        if (equipped != invStore.end())
         {
-            storeRefId = it->getCellRef().getRefId();
+            const std::string storeRefId = equipped->getCellRef().getRefId();
 
-            if (!Misc::StringUtils::ciEqual(storeRefId, packetRefId)) // if other item equiped
+            if (!Misc::StringUtils::ciEqual(storeRefId, packetRefId))
                 invStore.unequipSlot(slot, ptr);
             else
             {
+                // Same equipped object: update mutable state in-place.  Durability
+                // and enchantment charge changes must not create a second object.
                 equal = true;
+                equipped->getCellRef().setCharge(packetCharge);
+                equipped->getCellRef().setEnchantmentCharge(packetEnchantmentCharge);
+
                 if (!equipmentItems[slot].poisonId.empty() && equipmentItems[slot].poisonCharges > 0)
-                    it->getRefData().setPoison(equipmentItems[slot].poisonId, equipmentItems[slot].poisonCharges);
+                    equipped->getRefData().setPoison(equipmentItems[slot].poisonId, equipmentItems[slot].poisonCharges);
                 else
-                    it->getRefData().clearPoison();
+                    equipped->getRefData().clearPoison();
             }
         }
 
         if (packetRefId.empty() || equal)
             continue;
 
-        if (!hasItem(packetRefId, packetCharge))
+        // Reuse an existing copy by refId even when its old condition differs
+        // from the authoritative packet.  Only create an item if this actor truly
+        // has no such refId in its inventory.
+        MWWorld::ContainerStoreIterator item = findByRefId(packetRefId, packetCharge);
+        if (item == invStore.end())
+            item = ptr.getClass().getContainerStore(ptr).add(packetRefId, count, ptr);
+
+        if (item != invStore.end())
         {
-            ptr.getClass().getContainerStore(ptr).add(packetRefId, count, ptr);
+            item->getCellRef().setCharge(packetCharge);
+            item->getCellRef().setEnchantmentCharge(packetEnchantmentCharge);
+
+            if (!equipmentItems[slot].poisonId.empty() && equipmentItems[slot].poisonCharges > 0)
+                item->getRefData().setPoison(equipmentItems[slot].poisonId, equipmentItems[slot].poisonCharges);
+            else
+                item->getRefData().clearPoison();
         }
 
-        // Equip items silently if this is the first time equipment is being set for this character
+        // The candidate now carries the packet charge, so the existing helper
+        // resolves and equips that exact object without adding anything else.
         equipItem(packetRefId, packetCharge, !hasReceivedInitialEquipment);
-        MWWorld::ContainerStoreIterator equipped = invStore.getSlot(slot);
-        if (equipped != invStore.end())
-        {
-            if (!equipmentItems[slot].poisonId.empty() && equipmentItems[slot].poisonCharges > 0)
-                equipped->getRefData().setPoison(equipmentItems[slot].poisonId, equipmentItems[slot].poisonCharges);
-            else
-                equipped->getRefData().clearPoison();
-        }
     }
 
     hasReceivedInitialEquipment = true;

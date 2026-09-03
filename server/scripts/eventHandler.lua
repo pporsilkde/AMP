@@ -49,7 +49,7 @@ eventHandler.InitializeDefaultValidators = function()
     customEventHooks.registerValidator("OnObjectSpawn", defaultCreationValidator)
 
     local placementValidator = function(eventStatus, pid, cellDescription, objects)
-        if not objectPlacementPermissions.IsAllowed(pid, cellDescription) then
+        if not objectPlacementPermissions.IsAllowed(pid, cellDescription, objects) then
             objectPlacementPermissions.Deny(pid, cellDescription)
             return customEventHooks.makeEventStatus(false, false)
         end
@@ -577,7 +577,7 @@ end
 
 eventHandler.OnPlayerDisconnect = function(pid)
 
-    -- Y013-fix-01: pids are reused, so the placement deny throttle must not
+    -- Y020: pids are reused, so the protected-grab deny throttle must not
     -- outlive the session that created it.
     objectPlacementPermissions.Clear(pid)
 
@@ -963,12 +963,6 @@ local function processArenaStructuredChat(pid, rawMessage)
     text = escapeArenaChatText(text)
 
     local rpMode = rpFlag == "1"
-
-    -- Y013-fix-01: the client's RP toggle is the only RP state the server ever
-    -- receives, and it arrives once per structured chat message. Mirror it into
-    -- the player's custom variables so objectPlacementPermissions (and anything
-    -- else that needs a persistent RP flag) has something real to read.
-    objectPlacementPermissions.SetRpMode(pid, rpMode)
 
     local effectiveScope = scope
     if scope == "default" then

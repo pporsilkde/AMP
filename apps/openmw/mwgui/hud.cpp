@@ -189,6 +189,17 @@ namespace
         // out of existence at exactly 40 paces.
         constexpr float sFadeOutStartDistance = sVanishDistance * 0.90f;
 
+        // Y020: the overhead phase spans 10..40 paces.  The far two thirds of
+        // that span (20..40) use a borderless progress skin; the near third
+        // (10..20) restores the normal framed skin before the existing dock
+        // transition begins.  One pace of hysteresis prevents the skin from
+        // toggling when an actor hovers around the 20-pace boundary.
+        constexpr float sFramelessEnterSteps
+            = sDockEnterSteps + (sVanishSteps - sDockEnterSteps) / 3.f; // 20 paces
+        constexpr float sFramelessExitSteps = sFramelessEnterSteps - 1.f; // 19 paces
+        constexpr float sFramelessEnterDistance = sFramelessEnterSteps * sUnitsPerStep;
+        constexpr float sFramelessExitDistance = sFramelessExitSteps * sUnitsPerStep;
+
         // Overhead bar geometry at full size, and how small it is allowed to get
         // just before it disappears. Deliberately small: the overhead bar is a
         // glance-value readout, the docked stack is where the detail lives.
@@ -2327,7 +2338,10 @@ namespace MWGui
                 if (state.mActor.isEmpty() || !state.mWidget || state.mSkinAlly == state.mAlly)
                     continue;
 
-                state.mWidget->changeWidgetSkin(state.mAlly ? "MW_Progress_Green" : "MW_Progress_Red");
+                const char* skin = state.mAlly
+                    ? (state.mSkinFrameless ? "Arena_Progress_Green_Frameless" : "MW_Progress_Green")
+                    : (state.mSkinFrameless ? "Arena_Progress_Red_Frameless" : "MW_Progress_Red");
+                state.mWidget->changeWidgetSkin(skin);
                 state.mWidget->setNeedMouseFocus(false);
 
                 // Y006: changeWidgetSkin() can replace the internal Track widget.
@@ -2450,6 +2464,26 @@ namespace MWGui
 
             state.mFrameDistance = distance;
             state.mFrameResolved = true;
+
+            // Y020: far overhead health bars have no decorative frame. At long
+            // range the border occupied most of the 4 px-high widget and visually
+            // swallowed the health fill.  Switch back to the normal frame for the
+            // final third of the overhead range, before docking above stamina.
+            const bool wantsFrameless = state.mSkinFrameless
+                ? distance >= CombatBar::sFramelessExitDistance
+                : distance >= CombatBar::sFramelessEnterDistance;
+            if (wantsFrameless != state.mSkinFrameless)
+            {
+                state.mSkinFrameless = wantsFrameless;
+                const char* skin = state.mAlly
+                    ? (wantsFrameless ? "Arena_Progress_Green_Frameless" : "MW_Progress_Green")
+                    : (wantsFrameless ? "Arena_Progress_Red_Frameless" : "MW_Progress_Red");
+                state.mWidget->changeWidgetSkin(skin);
+                state.mWidget->setNeedMouseFocus(false);
+                // changeWidgetSkin replaces ProgressBar's internal Track. Reassert
+                // the verified HP immediately before the bar becomes visible.
+                state.mNeedsTrackReset = true;
+            }
 
             if (distance > CombatBar::sFadeOutStartDistance)
                 state.mFrameAlpha = CombatBar::clamp01(

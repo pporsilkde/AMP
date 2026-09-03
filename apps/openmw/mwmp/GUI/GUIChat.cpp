@@ -750,7 +750,7 @@ namespace mwmp
 
         if (msg.compare(0, placementDenyPrefix.size(), placementDenyPrefix) == 0)
         {
-            // Arena Y013: the server rejected this RP decoration transform. Roll
+            // Arena Y020: the server rejected a protected world-object grab. Roll
             // back to the grab-start transform without echoing that rollback as a
             // new ObjectMove/ObjectRotate packet, then explain the policy locally.
             //

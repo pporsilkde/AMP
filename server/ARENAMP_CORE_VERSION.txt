@@ -1,5 +1,5 @@
-ArenaMP bundled CoreScripts v16
-Source snapshot: ArenaMP Y015
+ArenaMP bundled CoreScripts v17
+Source snapshot: ArenaMP Y020
 Network protocol: ArenaMP 806 (matching client/server build required)
 Riding subsystem: not included
 HUD event feed: enabled
@@ -15,3 +15,10 @@ Quest/topic sync defaults: enabled
 Skill Point class cost: Major x1 / Minor x2 / Misc x3
 Custom quest chronology: mixed with vanilla journal by persistent anchor
 Custom quest journal header: quest name + date
+Y020 cell-load desync guard: enabled
+Y020 DedicatedActor equipment dedupe: enabled
+Y020 server actor-loot repair: enabled
+Y020 exterior actor-cache preseed: disabled
+Y020 interior actor return persistence: enabled
+Y020 protected physics grab: player-dropped only for regular players; Moderator+ bypass
+Y020 gold tooltip/runtime weight: 0.0001

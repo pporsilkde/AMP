@@ -1,5 +1,17 @@
 # Changelog
 
+## Y020 — cell-load desync / NPC AI / actor loot duplication / protected grab
+
+- Hardened `EnsurePacketTables`, `LoadObjectsMoved` and `LoadObjectsRotated`: legacy/partially upgraded cells can no longer hit `pairs(nil)` and abort `LoadInitialCellData` before ActorList/AI/position packets are delivered.
+- Removed Y013's runtime destination actor-cache pre-seed from `ProcessorActorCellChange`; exterior authority hand-offs again have one cache owner instead of briefly materializing the same NPC in both adjacent cells.
+- Destination `actorList` persistence is now limited to transitions involving an interior, preserving reliable NPC return without contaminating ordinary exterior grid hops.
+- Integrated the supplied Y019 server-side actor-loot repair for authoritative container SET, death, and lazy load; repaired legacy corpse data is persisted immediately.
+- Throttled ActorEquipment-triggered cell quicksaves to the configured interval.
+- Fixed the client-side source of new equipment duplicates in `DedicatedActor::setEquipment`: an existing item is reused by refId across authority/cell reinitialization and mutable charge state is updated in-place.
+- Replaced RP/home/faction placement permissions with a narrow physics-grab anti-grief rule: regular players may move only `droppedByPlayer` ObjectPlace items, original world references/statics are protected, Moderator+ bypasses the rule, and non-gameplay script/server transforms are untouched.
+- `gold_001` still weighs `0.0001` in real encumbrance and its tooltip now displays that enforced weight instead of reading the zero ESM base value.
+- Protocol remains 806.
+
 ## Y017 — combat HP readability, healing feedback, ammunition and gold weight
 
 - Kept the overhead enemy HP fill readable at long distance by clamping only the far-distance height to 4 px; close/medium presentation is unchanged.
@@ -388,3 +400,7 @@ Earlier work established the modern CharGen, inventory/interface changes, object
 ## Upstream history
 
 ArenaMP does not duplicate OpenMW's full historical changelog in the repository root. See the [OpenMW 0.47.0 release notes](https://openmw.org/2021/openmw-0-47-0-released/), retained [OpenMW Stage 1 design document](docs/upstream/OPENMW_STAGE1.md), and retained [TES3MP changelog](docs/upstream/TES3MP_CHANGELOG.md).
+
+## Y018 — weather fog / land optimization stability
+- Fixed weather fog flicker/popping while adaptive land optimization changes the live view distance.
+- Preserve fog depth values above 1.0 instead of clamping them to 1.0 during far-plane updates.

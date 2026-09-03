@@ -17,8 +17,8 @@ namespace mwmp
         {
             LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Received %s from %s", strPacketID.c_str(), player.npc.mName.c_str());
 
-            // Arena Y013: placement transforms must pass Lua permission/persistence
-            // validation before any other client sees them.
+            // Arena Y020: client-gameplay physics-grab transforms pass the Lua
+            // protection rule before any other client sees them.
             Script::Call<Script::CallbackIdentity("OnObjectRotate")>(player.getId(), objectList.cell.getShortDescription().c_str());
         }
     };

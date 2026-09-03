@@ -1233,42 +1233,47 @@ config.cellPacketTypes = { "delete", "place", "spawn", "move", "rotate", "lock",
 -- promptly; exterior hops rely on the normal periodic save.
 config.actorCellChangeSaveInterval = 5
 
--- Arena Y013 RP placement policy. ObjectMove/ObjectRotate are server-authoritative.
--- Moderators and higher may decorate anywhere. Ordinary players must be in RP
--- mode and may edit only their own private/house interior or a cell associated
--- with one of their factions. factionCellOverrides is the explicit mapping for
--- custom/modded faction locations that cannot be inferred from their names.
-config.rpObjectPlacement = {
+-- Y019: minimum seconds between two quicksaves of a cell triggered by incoming
+-- ActorEquipment packets. Equipment is always re-sent in full, so a throttled
+-- save cannot lose state, and a single long fight otherwise wrote the cell file
+-- to disk dozens of times per minute.
+config.actorEquipmentSaveInterval = 5
+
+-- Y019: repair of equipment-sync duplicates in actor containers.
+--
+-- A DedicatedActor can re-add an equipped item when its equipment slot is rebuilt
+-- after a cell/authority hand-off and the existing copy has an older condition or
+-- charge. On death that inflated client inventory can become the authoritative
+-- corpse. This server-side pass collapses those synchronization duplicates.
+--
+-- Only entries carrying a real condition value (charge >= 0 or enchantment
+-- charge >= 0) are ever considered, so stacked ammunition and ordinary loot are
+-- untouched.
+config.actorLootRepair = {
+    enabled = true,
+
+    -- Only repair refIds the actor actually has in an equipment slot. Leave this
+    -- true unless you are chasing duplicates that survive it: with false, any
+    -- actor container holding several charged copies of one refId is collapsed,
+    -- which would also hit an NPC legitimately carrying two damaged copies of the
+    -- same item.
+    requireEquipmentMatch = true
+}
+
+-- Arena Y020 protected physics-grab policy.
+-- Ordinary players may hold Activate/E and reposition only items that were
+-- actually dropped by a player. Original cell references/statics are protected
+-- from client-gameplay ObjectMove/ObjectRotate. Moderator+ bypasses the rule.
+-- Future house/RP-cell decoration permissions should be added as a separate,
+-- explicit allow-list layer instead of changing this safe default.
+config.objectGrabPermissions = {
     enabled = true,
     moderatorBypass = true,
-    requireRpMode = true,
-    allowOwnPrivateCell = true,
-    allowOwnHouse = true,
-    allowFactionCells = true,
+    allowPlayerDropped = true,
 
-    -- Y013-fix-01: custom-variable names that carry the player's RP state, in
-    -- priority order. The first entry is the one placement.SetRpMode writes.
-    -- The structured chat handler mirrors the client's RP toggle into it.
-    rpModeVariables = { "RPStatus", "rpMode", "isRolePlaying" },
-
-    -- What to do when a character has never set an RP state at all (has not
-    -- sent a single structured chat message this session). false = deny.
-    allowUnknownRpMode = false,
-
-    -- Guess a faction hall from the cell name, e.g. any cell containing
-    -- "mages" for a member of the Mages Guild. This matches every such hall on
-    -- the continent, not just the local one, so it is opt-in. Explicit
-    -- factionCellOverrides below are always honoured.
-    factionNameHeuristic = false,
-
-    -- Minimum seconds between two "placement denied" popups for one player.
-    -- A held object resyncs about 20 times per second; without this the client
-    -- would be flooded with centered message boxes.
-    denyQuietSeconds = 4,
-
-    factionCellOverrides = {
-        -- ["Custom Guild Hall"] = { "my faction id" }
-    }
+    -- A held object can publish transforms many times per second. Rollback is
+    -- still sent for every denial; only the explanatory popup is rate-limited.
+    denyQuietSeconds = 4
 }
 
 -- Whether the server should enforce that all clients connect with a specific list of data files

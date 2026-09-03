@@ -6,6 +6,7 @@ inventoryHelper = require("inventoryHelper")
 packetBuilder = require("packetBuilder")
 local questItemPhasing = require("questItemPhasing")
 local questIndexStore = require("questIndexStore")
+local actorLootRepair = require("actorLootRepair")
 
 local BaseCell = class("BaseCell")
 
@@ -88,11 +89,19 @@ function BaseCell:EnsurePacketTables()
 
     if self.data.packets == nil then self.data.packets = {} end
 
-    for _, packetType in pairs(config.cellPacketTypes) do
+    for _, packetType in pairs(config.cellPacketTypes or {}) do
         if self.data.packets[packetType] == nil then
             self.data.packets[packetType] = {}
         end
     end
+
+    -- Y020: move/rotate were added by the RP placement layer after many cell
+    -- save files had already been created.  A server can also accidentally run
+    -- a newer cell/base.lua with an older config.lua.  Do not let either case
+    -- abort LoadInitialCellData before actor list/AI/position packets are sent.
+    -- These arrays are mandatory for the loader regardless of config version.
+    if type(self.data.packets.move) ~= "table" then self.data.packets.move = {} end
+    if type(self.data.packets.rotate) ~= "table" then self.data.packets.rotate = {} end
 end
 
 -- Iterate through saved packets and ensure the object uniqueIndexes they refer to
@@ -927,6 +936,15 @@ function BaseCell:SaveContainers(pid)
 
         tableHelper.cleanNils(inventory)
         self.data.objectData[uniqueIndex].inventory = inventory
+
+        -- Y019: a SET is the authoritative snapshot taken from whichever client
+        -- currently owns the actor, and that client's copy of an NPC accumulates
+        -- one extra copy of the worn equipment per condition change it received.
+        -- Collapse those before the snapshot is persisted and broadcast, or the
+        -- duplicated set becomes real, lootable, shared state.
+        if action == enumerations.container.SET then
+            actorLootRepair.Repair(self, uniqueIndex)
+        end
     end
 
     -- REMOVE carries recipient semantics, so the attached player gets the
@@ -1096,7 +1114,17 @@ function BaseCell:SaveActorEquipment(actors)
         end
     end
 
-    self:QuicksaveToDrive()
+    -- Y019: one fight against a single NPC produced 91 equipment packets in this
+    -- cell, and every one of them wrote the whole cell file to disk. Equipment is
+    -- re-sent in full on every change, so losing the last few seconds of it to a
+    -- crash costs nothing; throttle the save instead.
+    local now = os.time()
+    local minInterval = tonumber(config.actorEquipmentSaveInterval) or 5
+
+    if self.lastActorEquipmentSave == nil or now - self.lastActorEquipmentSave >= minInterval then
+        self.lastActorEquipmentSave = now
+        self:QuicksaveToDrive()
+    end
 end
 
 function BaseCell:SaveActorSpellsActive(actors)
@@ -1198,6 +1226,13 @@ function BaseCell:SaveActorDeath(actors)
             end
 
             tableHelper.insertValueIfMissing(self.data.packets.death, uniqueIndex)
+
+            -- Y019: the corpse is about to become lootable. If its container was
+            -- already recorded before death, repair it now rather than waiting for
+            -- the next SET, and push the corrected contents to everyone nearby.
+            if actorLootRepair.Repair(self, uniqueIndex) > 0 then
+                packetBuilder.UpdateContainerForRelevantPlayers(self, uniqueIndex, nil)
+            end
         end
     end
 
@@ -1410,11 +1445,17 @@ function BaseCell:SaveActorCellChanges(pid)
                 end
 
                 if newCell.data.objectData[uniqueIndex] ~= nil then
-                    -- Arena Y013: the destination must own an actor-list entry even
-                    -- when no player currently has authority there. This closes the
-                    -- exterior->interior return gap where route/location persisted
-                    -- but the actor could vanish until another authority rebuild.
-                    tableHelper.insertValueIfMissing(newCell.data.packets.actorList, uniqueIndex)
+                    -- Y020: only persist an explicit destination actor-list entry for
+                    -- transitions involving an interior. Y013 did this for every
+                    -- exterior grid hop, which could leave two adjacent cells treating
+                    -- the same NPC as locally present during rapid authority hand-off.
+                    -- The interior case is the one the reliable-return fix actually
+                    -- needs; ordinary exterior movement stays on the normal authority
+                    -- and ActorCellChange path.
+                    local isInteriorTransition = newCell.isExterior ~= true or self.isExterior ~= true
+                    if isInteriorTransition then
+                        tableHelper.insertValueIfMissing(newCell.data.packets.actorList, uniqueIndex)
+                    end
                     newCell.data.objectData[uniqueIndex].location = {
                         posX = tes3mp.GetActorPosX(actorIndex),
                         posY = tes3mp.GetActorPosY(actorIndex),
@@ -1432,8 +1473,6 @@ function BaseCell:SaveActorCellChanges(pid)
                     -- NPC-return fix exists for is the interior transition. Persist
                     -- those immediately; let exterior hops ride the normal periodic
                     -- save, and throttle repeats for the same cell.
-                    local isInteriorTransition = newCell.isExterior ~= true or self.isExterior ~= true
-
                     if isInteriorTransition then
                         local now = os.time()
                         local minInterval = tonumber(config.actorCellChangeSaveInterval) or 5
@@ -1679,6 +1718,11 @@ end
 
 function BaseCell:LoadObjectsMoved(pid, objectData, uniqueIndexArray, forEveryone)
 
+    -- Y020: tolerate legacy cells or partially upgraded server configs.  Y013
+    -- called this loader unconditionally, and pairs(nil) here aborted the rest
+    -- of cell loading, including ActorList/AI/position synchronization.
+    if type(objectData) ~= "table" or type(uniqueIndexArray) ~= "table" then return end
+
     local function sendTo(targetPid)
         local objectCount = 0
         tes3mp.ClearObjectList()
@@ -1703,6 +1747,10 @@ function BaseCell:LoadObjectsMoved(pid, objectData, uniqueIndexArray, forEveryon
 end
 
 function BaseCell:LoadObjectsRotated(pid, objectData, uniqueIndexArray, forEveryone)
+
+    -- Same compatibility guard as LoadObjectsMoved.  Rotation state is optional
+    -- for old cells and must never prevent actors from being loaded.
+    if type(objectData) ~= "table" or type(uniqueIndexArray) ~= "table" then return end
 
     local function sendTo(targetPid)
         local objectCount = 0
@@ -1849,6 +1897,19 @@ function BaseCell:LoadContainers(pid, objectData, uniqueIndexArray)
         tes3mp.SetObjectMpNum(splitIndex[2])
 
         if self:ContainsObject(uniqueIndex) and objectData[uniqueIndex].inventory ~= nil then
+
+            -- Y019: heal cell data written before the duplication fix, lazily, the
+            -- first time each container is actually sent to somebody.
+            if objectData == self.data.objectData then
+                local repaired = actorLootRepair.Repair(self, uniqueIndex)
+                if repaired > 0 then
+                    -- Persist the one-time migration immediately, otherwise an
+                    -- old duplicated corpse would be repaired again after every
+                    -- server restart until some unrelated write touched the cell.
+                    self:QuicksaveToDrive()
+                end
+            end
+
             tes3mp.SetObjectRefId(objectData[uniqueIndex].refId)
 
             for itemIndex, item in pairs(objectData[uniqueIndex].inventory) do

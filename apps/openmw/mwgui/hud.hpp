@@ -130,6 +130,10 @@ namespace MWGui
             // clearing a slot resets mAlly but must not claim the widget went back to
             // the red skin, otherwise the next enemy inherits a green bar.
             bool mSkinAlly = false;
+            // Y020: distant overhead bars use a borderless skin for readability.
+            // Keep the actual skin mode in state so distance changes can switch skins
+            // without rebuilding the widget pool or guessing from actor allegiance.
+            bool mSkinFrameless = false;
             // Y006: changing owner or skin invalidates MyGUI ProgressBar's internal
             // Track.  Do not rebuild it at scan time: an actor can fail the draw
             // pass for several frames (no screen anchor, out of range, incomplete
