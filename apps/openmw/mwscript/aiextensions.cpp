@@ -1,5 +1,6 @@
 #include "aiextensions.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 
 #include <components/debug/debuglog.hpp>
@@ -128,6 +129,20 @@ namespace MWScript
                     MWMechanics::AiEscort escortPackage(actorID, static_cast<int>(duration), x, y, z);
                     ptr.getClass().getCreatureStats (ptr).getAiSequence().stack(escortPackage, ptr);
 
+                    // Y029: unlike AiFollow, stock ArenaMP never published AiEscort.
+                    // That made dialogue-authored escort packages local to whichever
+                    // client ran the script, so a different cell authority ignored them.
+                    MWWorld::Ptr target = MWBase::Environment::get().getWorld()->searchPtr(actorID, true, false);
+                    if (!target.isEmpty())
+                    {
+                        mwmp::ActorList* actorList = mwmp::Main::get().getNetworking()->getActorList();
+                        actorList->reset();
+                        actorList->cell = *ptr.getCell()->getCell();
+                        actorList->addAiEscortActor(ptr, target, static_cast<unsigned int>(std::max(0.f, duration)),
+                            x, y, z);
+                        actorList->sendAiActors();
+                    }
+
                     Log(Debug::Info) << "AiEscort: " << x << ", " << y << ", " << z << ", " << duration;
                 }
         };
@@ -169,6 +184,20 @@ namespace MWScript
 
                     MWMechanics::AiEscort escortPackage(actorID, cellID, static_cast<int>(duration), x, y, z);
                     ptr.getClass().getCreatureStats (ptr).getAiSequence().stack(escortPackage, ptr);
+
+                    // Y029: the packet format has no separate target-cell string, but it
+                    // does carry the target, duration and destination, which is enough for
+                    // the remote AiEscort reconstruction used by DedicatedActor.
+                    MWWorld::Ptr target = MWBase::Environment::get().getWorld()->searchPtr(actorID, true, false);
+                    if (!target.isEmpty())
+                    {
+                        mwmp::ActorList* actorList = mwmp::Main::get().getNetworking()->getActorList();
+                        actorList->reset();
+                        actorList->cell = *ptr.getCell()->getCell();
+                        actorList->addAiEscortActor(ptr, target, static_cast<unsigned int>(std::max(0.f, duration)),
+                            x, y, z);
+                        actorList->sendAiActors();
+                    }
 
                     Log(Debug::Info) << "AiEscort: " << x << ", " << y << ", " << z << ", " << duration;
                 }

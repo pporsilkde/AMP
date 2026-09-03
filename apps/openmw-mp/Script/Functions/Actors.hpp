@@ -71,6 +71,19 @@
     SCRIPT_API_ENTRY("DoesActorHavePosition", ActorFunctions::DoesActorHavePosition),\
     SCRIPT_API_ENTRY("DoesActorHaveStatsDynamic", ActorFunctions::DoesActorHaveStatsDynamic),\
     \
+    SCRIPT_API_ENTRY("GetActorAIAction", ActorFunctions::GetActorAIAction),\
+    SCRIPT_API_ENTRY("DoesActorHaveAITarget", ActorFunctions::DoesActorHaveAITarget),\
+    SCRIPT_API_ENTRY("DoesActorHavePlayerAITarget", ActorFunctions::DoesActorHavePlayerAITarget),\
+    SCRIPT_API_ENTRY("GetActorAITargetPid", ActorFunctions::GetActorAITargetPid),\
+    SCRIPT_API_ENTRY("GetActorAITargetRefNum", ActorFunctions::GetActorAITargetRefNum),\
+    SCRIPT_API_ENTRY("GetActorAITargetMpNum", ActorFunctions::GetActorAITargetMpNum),\
+    SCRIPT_API_ENTRY("GetActorAICoordinateX", ActorFunctions::GetActorAICoordinateX),\
+    SCRIPT_API_ENTRY("GetActorAICoordinateY", ActorFunctions::GetActorAICoordinateY),\
+    SCRIPT_API_ENTRY("GetActorAICoordinateZ", ActorFunctions::GetActorAICoordinateZ),\
+    SCRIPT_API_ENTRY("GetActorAIDistance", ActorFunctions::GetActorAIDistance),\
+    SCRIPT_API_ENTRY("GetActorAIDuration", ActorFunctions::GetActorAIDuration),\
+    SCRIPT_API_ENTRY("GetActorAIRepetition", ActorFunctions::GetActorAIRepetition),\
+    \
     SCRIPT_API_ENTRY("SetActorListCell", ActorFunctions::SetActorListCell),\
     SCRIPT_API_ENTRY("SetActorListAction", ActorFunctions::SetActorListAction),\
     \
@@ -201,7 +214,7 @@ public:
     * \return The cell description.
     */
     static const char *GetActorCell(unsigned int index) noexcept;
-    
+
     /**
     * \brief Get the refId of the actor at a certain index in the read actor list.
     *
@@ -803,6 +816,21 @@ public:
     * \param action The new action.
     * \return void
     */
+    // Y029: read received ActorAI so Lua can persist authored FOLLOW/ESCORT
+    // across authority hand-offs and empty-cell reloads.
+    static unsigned int GetActorAIAction(unsigned int index) noexcept;
+    static bool DoesActorHaveAITarget(unsigned int index) noexcept;
+    static bool DoesActorHavePlayerAITarget(unsigned int index) noexcept;
+    static int GetActorAITargetPid(unsigned int index) noexcept;
+    static unsigned int GetActorAITargetRefNum(unsigned int index) noexcept;
+    static unsigned int GetActorAITargetMpNum(unsigned int index) noexcept;
+    static double GetActorAICoordinateX(unsigned int index) noexcept;
+    static double GetActorAICoordinateY(unsigned int index) noexcept;
+    static double GetActorAICoordinateZ(unsigned int index) noexcept;
+    static unsigned int GetActorAIDistance(unsigned int index) noexcept;
+    static unsigned int GetActorAIDuration(unsigned int index) noexcept;
+    static bool GetActorAIRepetition(unsigned int index) noexcept;
+
     static void SetActorAIAction(unsigned int action) noexcept;
 
     /**

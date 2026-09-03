@@ -1,4 +1,6 @@
 ## Y028
+
+> Y029 group escort: if the authored escort target dies or leaves the loaded cell, the server immediately retargets saved FOLLOW/ESCORT to the nearest group member still in that cell; with no group member present the NPC waits without losing the saved escort package.
 - Floating damage numbers are smaller (15 px), red, and use a negative HP format such as `-12`.
 - Hostile overhead HP is thinner (3 px near / 2 px minimum far) while the docked HUD bar remains 9 px.
 - The decorative HP frame now fades continuously with dockBlend instead of appearing at a hard threshold; Y027 fill safety is retained.
@@ -163,3 +165,6 @@ The right-side event feed now uses one uniform medium-opacity backing instead of
 
 ### Y010 HUD feed polish
 Event cards now hug the right edge with a 2 px margin, use a borderless soft shadow background, and show existing inventory totals as `+5 (10)` after pickups.
+
+Y029 cell actor resync: same-session revisits reassert persistent NPC state and rebuild the native actor cache after an empty-cell reload.
+Y029 group escort: AiEscort/AiEscortCell are networked and persistent FOLLOW/ESCORT can fail over to a same-cell group member.

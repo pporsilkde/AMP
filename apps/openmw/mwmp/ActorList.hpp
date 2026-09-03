@@ -29,6 +29,9 @@ namespace mwmp
         void addEquipmentActor(BaseActor baseActor);
         void addAiActor(BaseActor baseActor);
         void addAiActor(const MWWorld::Ptr& actorPtr, const MWWorld::Ptr& targetPtr, unsigned int aiAction);
+        // Y029: authored AiEscort needs both a target and its duration/destination.
+        void addAiEscortActor(const MWWorld::Ptr& actorPtr, const MWWorld::Ptr& targetPtr,
+            unsigned int duration, float x, float y, float z);
         /// X034: publish the current combat/return-home state of a LocalActor.
         void addAiStateActor(const MWWorld::Ptr& actorPtr, unsigned int aiAction);
         void addAttackActor(BaseActor baseActor);

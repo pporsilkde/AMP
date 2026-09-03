@@ -1,5 +1,5 @@
-ArenaMP bundled CoreScripts v17
-Source snapshot: ArenaMP Y025
+ArenaMP bundled CoreScripts v18
+Source snapshot: ArenaMP Y029
 Network protocol: ArenaMP 806 (matching client/server build required)
 Riding subsystem: not included
 HUD event feed: enabled

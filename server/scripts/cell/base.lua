@@ -192,6 +192,170 @@ function BaseCell:GetVisitorCount()
     return tableHelper.getCount(self.visitors)
 end
 
+-- Y029: FOLLOW/ESCORT has one network target, but a party escort should not
+-- become inert merely because the original quest taker is not the member who
+-- currently owns/loads this cell. Prefer the authored target while it is an
+-- actual visitor of this cell; otherwise fail over to the nearest online member
+-- of the same ArenaMP group. excludedPid is used for an immediately dead/leaving
+-- player before all engine-side state has caught up.
+-- Y030: work out which ArenaMP group a saved escort belongs to, at the moment
+-- the question is actually asked.
+--
+-- packetReader stamps ai.groupId while reading the ActorAI packet, from whatever
+-- group the target player happened to be in right then. An ActorAI packet is
+-- sent once, when the quest script issues AiFollow/AiEscort, and is never
+-- reissued - so the usual order of play (take the quest, then invite a friend)
+-- leaves groupId nil forever and the whole group failover below never runs. A
+-- player who later switches group keeps a stale id for the same reason.
+--
+-- The saved id is therefore treated as a hint: if it is missing, fall back to
+-- the target player's current group.
+function BaseCell:ResolveEscortGroupId(ai)
+    if ai == nil then return nil end
+
+    if ai.groupId ~= nil then
+        return tostring(ai.groupId)
+    end
+
+    if ai.targetPlayer ~= nil and logicHandler.IsPlayerNameLoggedIn(ai.targetPlayer) then
+        local owner = logicHandler.GetPlayerByName(ai.targetPlayer)
+        local customVariables = owner ~= nil and owner.data ~= nil and owner.data.customVariables
+        local groupPrefs = customVariables and customVariables.arenampGroup
+        if groupPrefs ~= nil and groupPrefs.id ~= nil then
+            return tostring(groupPrefs.id)
+        end
+    end
+
+    return nil
+end
+
+-- Y030: returns targetPid, wantedGroupId. The second value lets the caller tell
+-- "this escort has a group and nobody from it is here" from "this escort has no
+-- group at all", which need different treatment.
+function BaseCell:ResolveSavedAITargetPid(ai, actorUniqueIndex, excludedPid)
+    if ai == nil then return nil, nil end
+
+    local function isCurrentVisitor(candidatePid)
+        return candidatePid ~= nil and candidatePid ~= excludedPid and
+            Players[candidatePid] ~= nil and Players[candidatePid]:IsLoggedIn() and
+            tableHelper.containsValue(self.visitors, candidatePid)
+    end
+
+    local originalPid = nil
+    if ai.targetPlayer ~= nil and logicHandler.IsPlayerNameLoggedIn(ai.targetPlayer) then
+        originalPid = logicHandler.GetPlayerByName(ai.targetPlayer).pid
+        if isCurrentVisitor(originalPid) then
+            return originalPid, self:ResolveEscortGroupId(ai)
+        end
+    end
+
+    local wantedGroupId = self:ResolveEscortGroupId(ai)
+    if wantedGroupId ~= nil then
+        local actorLocation = nil
+        if actorUniqueIndex ~= nil and self.data.objectData[actorUniqueIndex] ~= nil then
+            actorLocation = self.data.objectData[actorUniqueIndex].location
+        end
+
+        local bestPid = nil
+        local bestDistanceSquared = nil
+        for _, candidatePid in pairs(self.visitors) do
+            local player = Players[candidatePid]
+            if isCurrentVisitor(candidatePid) and player ~= nil then
+                local customVariables = player.data.customVariables
+                local groupPrefs = customVariables and customVariables.arenampGroup
+                if groupPrefs ~= nil and tostring(groupPrefs.id or "") == wantedGroupId then
+                    local distanceSquared = 0
+                    if actorLocation ~= nil then
+                        local dx = (tonumber(tes3mp.GetPosX(candidatePid)) or 0) - (tonumber(actorLocation.posX) or 0)
+                        local dy = (tonumber(tes3mp.GetPosY(candidatePid)) or 0) - (tonumber(actorLocation.posY) or 0)
+                        local dz = (tonumber(tes3mp.GetPosZ(candidatePid)) or 0) - (tonumber(actorLocation.posZ) or 0)
+                        distanceSquared = dx * dx + dy * dy + dz * dz
+                    end
+
+                    if bestPid == nil or distanceSquared < bestDistanceSquared or
+                        (distanceSquared == bestDistanceSquared and candidatePid < bestPid) then
+                        bestPid = candidatePid
+                        bestDistanceSquared = distanceSquared
+                    end
+                end
+            end
+        end
+
+        -- A group escort with no group member in this cell should wait here. Do
+        -- not retarget it to the original player in another cell; the saved
+        -- authored package remains intact and will be restored when the group
+        -- returns.
+        return bestPid, wantedGroupId
+    end
+
+    -- Y030: originalPid has already failed isCurrentVisitor() by this point, so
+    -- returning it would hand out a FOLLOW aimed at a player who is not in this
+    -- cell. That is the shape of desync this whole mechanism exists to avoid, so
+    -- report "no usable target" instead and let the caller skip the packet.
+    return nil, nil
+end
+
+-- Reissue saved group FOLLOW/ESCORT packages when their effective player target
+-- can change (death or visitor leaving). This is server-originated only: a
+-- temporary CANCEL makes the NPC wait but never erases the persisted authored
+-- package in objectData.
+function BaseCell:RefreshSavedGroupEscortTargets(excludedPid)
+    if tableHelper.getCount(self.visitors) == 0 or self.data.packets == nil or
+        type(self.data.packets.ai) ~= "table" then
+        return
+    end
+
+    local attachedPid = nil
+    for _, visitorPid in pairs(self.visitors) do
+        attachedPid = visitorPid
+        break
+    end
+    if attachedPid == nil then return end
+
+    local actorCount = 0
+    tes3mp.ClearActorList()
+    tes3mp.SetActorListPid(attachedPid)
+    tes3mp.SetActorListCell(self.description)
+
+    for _, uniqueIndex in pairs(self.data.packets.ai) do
+        local objectData = self.data.objectData[uniqueIndex]
+        local ai = objectData and objectData.ai
+        -- Y030: the gate is the package type, not the presence of a stored
+        -- groupId, because that id is now resolved lazily (see
+        -- ResolveEscortGroupId). Whether a group is in play is decided below.
+        if ai ~= nil and
+            (ai.action == enumerations.ai.FOLLOW or ai.action == enumerations.ai.ESCORT) then
+
+            local targetPid, wantedGroupId = self:ResolveSavedAITargetPid(ai, uniqueIndex, excludedPid)
+
+            if targetPid ~= nil then
+                packetBuilder.AddAIActor(uniqueIndex, targetPid, ai)
+                tes3mp.LogAppend(enumerations.log.INFO, "- Group escort " .. uniqueIndex ..
+                    " now follows " .. logicHandler.GetChatName(targetPid))
+                actorCount = actorCount + 1
+            elseif wantedGroupId ~= nil then
+                packetBuilder.AddAIActor(uniqueIndex, nil, {
+                    action = enumerations.ai.CANCEL,
+                    shouldRepeat = false
+                })
+                tes3mp.LogAppend(enumerations.log.INFO, "- Group escort " .. uniqueIndex ..
+                    " is waiting for a group member in " .. self.description)
+                actorCount = actorCount + 1
+            end
+            -- No group at all: this is an ordinary single-player escort whose
+            -- owner is simply walking out of the cell with the NPC in tow.
+            -- Cancelling it here would break the follower mid-transition, so the
+            -- saved package is left completely alone.
+        end
+    end
+
+    if actorCount > 0 then
+        -- Include the attached visitor as well as the rest of the cell so every
+        -- client switches target in the same server tick.
+        tes3mp.SendActorAI(true)
+    end
+end
+
 function BaseCell:AddVisitor(pid)
 
     -- Only add new visitor if we don't already have them
@@ -221,6 +385,14 @@ function BaseCell:AddVisitor(pid)
             contentFixer.FixCell(pid, self.description)
 
             self:LoadInitialCellData(pid)
+        else
+            -- Y029: the previous same-login optimization skipped every saved
+            -- persistent change when a player revisited a cell. Changes made by
+            -- another visitor while this client was away could therefore leave
+            -- one client with an alive/visible NPC and another with none. Replay
+            -- only actor-relevant persistent state here; do not resend containers
+            -- or player-placed clutter.
+            self:LoadPersistentActorState(pid)
         end
 
         self:LoadMomentaryCellData(pid)
@@ -261,6 +433,11 @@ function BaseCell:RemoveVisitor(pid)
             self.isRequestingActorList = false
             self.actorListRequestPid = nil
         end
+
+        -- Y029: if this visitor was the effective target of a persisted group
+        -- escort, immediately hand the follower to another member still in the
+        -- cell instead of waiting for an authority change or reload.
+        self:RefreshSavedGroupEscortTargets(pid)
     end
 end
 
@@ -982,6 +1159,8 @@ function BaseCell:SaveActorsByPacketType(packetType, actors)
         self:SaveActorSpellsActive(actors)
     elseif packetType == "ActorDeath" then
         self:SaveActorDeath(actors)
+    elseif packetType == "ActorAI" then
+        self:SaveActorAI(actors)
     end    
 end
 
@@ -1200,6 +1379,46 @@ function BaseCell:SaveActorSpellsActive(actors)
     end
 
     self:QuicksaveToDrive()
+end
+
+function BaseCell:SaveActorAI(actors)
+
+    if type(self.data.packets.ai) ~= "table" then self.data.packets.ai = {} end
+    local changed = false
+
+    for uniqueIndex, actor in pairs(actors or {}) do
+        local ai = actor.ai
+        if ai ~= nil and self:ContainsObject(uniqueIndex) then
+            if ai.action == enumerations.ai.FOLLOW or ai.action == enumerations.ai.ESCORT then
+                -- Persist only authored follower packages. COMBAT/COMBAT_END are
+                -- high-frequency authority heartbeats and must never become save data.
+                self.data.objectData[uniqueIndex].ai = {
+                    action = ai.action,
+                    targetPlayer = ai.targetPlayer,
+                    targetUniqueIndex = ai.targetUniqueIndex,
+                    groupId = ai.groupId,
+                    posX = ai.posX, posY = ai.posY, posZ = ai.posZ,
+                    distance = ai.distance,
+                    duration = ai.duration,
+                    shouldRepeat = ai.shouldRepeat == true
+                }
+                tableHelper.insertValueIfMissing(self.data.packets.ai, uniqueIndex)
+                changed = true
+                tes3mp.LogAppend(enumerations.log.INFO, "- Persisted authored ActorAI " ..
+                    tostring(ai.action) .. " for " .. uniqueIndex)
+            elseif ai.action == enumerations.ai.CANCEL then
+                -- An explicit cancel is the only transient client packet that should
+                -- erase an authored follower package. Combat ending uses COMBAT_END.
+                if self.data.objectData[uniqueIndex].ai ~= nil then
+                    self.data.objectData[uniqueIndex].ai = nil
+                    tableHelper.removeValue(self.data.packets.ai, uniqueIndex)
+                    changed = true
+                end
+            end
+        end
+    end
+
+    if changed then self:QuicksaveToDrive() end
 end
 
 function BaseCell:SaveActorDeath(actors)
@@ -2251,13 +2470,7 @@ function BaseCell:LoadActorAI(pid, objectData, uniqueIndexArray)
 
         if self:ContainsObject(uniqueIndex) and objectData[uniqueIndex].ai ~= nil then
             local ai = objectData[uniqueIndex].ai
-            local targetPid
-
-            if ai.targetPlayer ~= nil then
-                if logicHandler.IsPlayerNameLoggedIn(ai.targetPlayer) then
-                    targetPid = logicHandler.GetPlayerByName(ai.targetPlayer).pid
-                end
-            end
+            local targetPid = self:ResolveSavedAITargetPid(ai, uniqueIndex)
 
             local isValid = true
 
@@ -2527,6 +2740,30 @@ function BaseCell:RequestActorList(pid)
     tes3mp.SetActorListAction(3)
 
     tes3mp.SendActorList()
+end
+
+function BaseCell:LoadPersistentActorState(pid)
+
+    self:EnsurePacketTables()
+    self:EnsurePacketValidity()
+
+    local objectData = self.data.objectData
+    local packets = self.data.packets
+
+    -- ObjectSpawn is actor-only in TES3MP and is idempotent on the client by
+    -- mpNum, so replaying it restores dynamic NPCs without duplicating them.
+    self:LoadObjectsSpawned(pid, objectData, packets.spawn)
+
+    -- Scripted enable/disable and deletion are common ways quests change NPC
+    -- existence. They are safe to reassert and prevent stale same-session views.
+    self:LoadObjectsDeleted(pid, objectData, packets.delete)
+    self:LoadObjectStates(pid, objectData, packets.state)
+
+    self:LoadActorCellChanges(pid, objectData)
+    self:LoadActorDeath(pid, objectData, packets.death)
+    self:LoadActorEquipment(pid, objectData, packets.equipment)
+    self:LoadActorSpellsActive(pid, objectData, packets.spellsActive)
+    self:LoadActorAI(pid, objectData, packets.ai)
 end
 
 function BaseCell:LoadInitialCellData(pid)

@@ -1,3 +1,11 @@
+## Y029 — Cell actor resync + group escort
+
+- Reassert actor-relevant persistent cell state on same-session revisits.
+- Rehydrate native Cell actor cache from replayed position/stats snapshots.
+- Network AiEscort/AiEscortCell and persist authored FOLLOW/ESCORT packages.
+- Group-aware player target failover for persistent follower AI, including immediate nearest-member retarget on target death/cell exit and a non-destructive wait state when no group member remains nearby.
+- Fix ActorAI builder so escort target + duration + destination are serialized together.
+
 ## Y028
 - Floating damage numbers are smaller (15 px), red, and use a negative HP format such as `-12`.
 - Hostile overhead HP is thinner (3 px near / 2 px minimum far) while the docked HUD bar remains 9 px.

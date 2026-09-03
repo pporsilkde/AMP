@@ -439,6 +439,71 @@ void ActorFunctions::SetActorSpellsActiveAction(unsigned char action) noexcept
     tempActor.spellsActiveChanges.action = action;
 }
 
+unsigned int ActorFunctions::GetActorAIAction(unsigned int index) noexcept
+{
+    return readActorList->baseActors.at(index).aiAction;
+}
+
+bool ActorFunctions::DoesActorHaveAITarget(unsigned int index) noexcept
+{
+    return readActorList->baseActors.at(index).hasAiTarget;
+}
+
+bool ActorFunctions::DoesActorHavePlayerAITarget(unsigned int index) noexcept
+{
+    const BaseActor& actor = readActorList->baseActors.at(index);
+    return actor.hasAiTarget && actor.aiTarget.isPlayer;
+}
+
+int ActorFunctions::GetActorAITargetPid(unsigned int index) noexcept
+{
+    const BaseActor& actor = readActorList->baseActors.at(index);
+    if (!actor.hasAiTarget || !actor.aiTarget.isPlayer)
+        return -1;
+    Player* player = Players::getPlayer(actor.aiTarget.guid);
+    return player != nullptr ? player->getId() : -1;
+}
+
+unsigned int ActorFunctions::GetActorAITargetRefNum(unsigned int index) noexcept
+{
+    return readActorList->baseActors.at(index).aiTarget.refNum;
+}
+
+unsigned int ActorFunctions::GetActorAITargetMpNum(unsigned int index) noexcept
+{
+    return readActorList->baseActors.at(index).aiTarget.mpNum;
+}
+
+double ActorFunctions::GetActorAICoordinateX(unsigned int index) noexcept
+{
+    return readActorList->baseActors.at(index).aiCoordinates.pos[0];
+}
+
+double ActorFunctions::GetActorAICoordinateY(unsigned int index) noexcept
+{
+    return readActorList->baseActors.at(index).aiCoordinates.pos[1];
+}
+
+double ActorFunctions::GetActorAICoordinateZ(unsigned int index) noexcept
+{
+    return readActorList->baseActors.at(index).aiCoordinates.pos[2];
+}
+
+unsigned int ActorFunctions::GetActorAIDistance(unsigned int index) noexcept
+{
+    return readActorList->baseActors.at(index).aiDistance;
+}
+
+unsigned int ActorFunctions::GetActorAIDuration(unsigned int index) noexcept
+{
+    return readActorList->baseActors.at(index).aiDuration;
+}
+
+bool ActorFunctions::GetActorAIRepetition(unsigned int index) noexcept
+{
+    return readActorList->baseActors.at(index).aiShouldRepeat;
+}
+
 void ActorFunctions::SetActorAIAction(unsigned int action) noexcept
 {
     tempActor.aiAction = action;
@@ -600,18 +665,19 @@ void ActorFunctions::SendActorPosition(bool sendToOtherVisitors, bool skipAttach
     mwmp::ActorPacket *actorPacket = mwmp::Networking::get().getActorPacketController()->GetPacket(ID_ACTOR_POSITION);
     actorPacket->setActorList(&writeActorList);
 
+    // Y029: Lua can restore saved positions after a Cell object was destroyed.
+    // Re-hydrate the C++ actor cache from that authoritative server snapshot too,
+    // otherwise the next authority hand-off starts from an empty actor list.
+    Cell *serverCell = CellController::get()->getCell(&writeActorList.cell);
+    writeActorList.count = static_cast<unsigned int>(writeActorList.baseActors.size());
+    if (serverCell != nullptr)
+        serverCell->readActorList(ID_ACTOR_POSITION, &writeActorList);
+
     if (!skipAttachedPlayer)
         actorPacket->Send(writeActorList.guid);
 
-    if (sendToOtherVisitors)
-    {
-        Cell *serverCell = CellController::get()->getCell(&writeActorList.cell);
-
-        if (serverCell != nullptr)
-        {
-            serverCell->sendToLoaded(actorPacket, &writeActorList);
-        }
-    }
+    if (sendToOtherVisitors && serverCell != nullptr)
+        serverCell->sendToLoaded(actorPacket, &writeActorList);
 }
 
 void ActorFunctions::SendActorStatsDynamic(bool sendToOtherVisitors, bool skipAttachedPlayer) noexcept
@@ -619,18 +685,18 @@ void ActorFunctions::SendActorStatsDynamic(bool sendToOtherVisitors, bool skipAt
     mwmp::ActorPacket *actorPacket = mwmp::Networking::get().getActorPacketController()->GetPacket(ID_ACTOR_STATS_DYNAMIC);
     actorPacket->setActorList(&writeActorList);
 
+    // Y029: keep the reconstructed C++ actor cache in lockstep with the saved
+    // dynamic stats that Lua is replaying to a returning visitor.
+    Cell *serverCell = CellController::get()->getCell(&writeActorList.cell);
+    writeActorList.count = static_cast<unsigned int>(writeActorList.baseActors.size());
+    if (serverCell != nullptr)
+        serverCell->readActorList(ID_ACTOR_STATS_DYNAMIC, &writeActorList);
+
     if (!skipAttachedPlayer)
         actorPacket->Send(writeActorList.guid);
 
-    if (sendToOtherVisitors)
-    {
-        Cell *serverCell = CellController::get()->getCell(&writeActorList.cell);
-
-        if (serverCell != nullptr)
-        {
-            serverCell->sendToLoaded(actorPacket, &writeActorList);
-        }
-    }
+    if (sendToOtherVisitors && serverCell != nullptr)
+        serverCell->sendToLoaded(actorPacket, &writeActorList);
 }
 
 void ActorFunctions::SendActorEquipment(bool sendToOtherVisitors, bool skipAttachedPlayer) noexcept

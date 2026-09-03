@@ -1,4 +1,6 @@
 ## Y028
+
+> Y029 group escort: если исходная escort-цель погибает или покидает загруженную ячейку, сервер сразу переключает сохранённый FOLLOW/ESCORT на ближайшего участника группы в этой ячейке; если группы рядом нет, NPC ждёт, не теряя сохранённый escort.
 - Floating damage numbers are smaller (15 px), red, and use a negative HP format such as `-12`.
 - Hostile overhead HP is thinner (3 px near / 2 px minimum far) while the docked HUD bar remains 9 px.
 - The decorative HP frame now fades continuously with dockBlend instead of appearing at a hard threshold; Y027 fill safety is retained.
@@ -161,3 +163,6 @@ OpenMW, TES3MP, OpenMoji и Bethesda Softworks не являются автор�
 
 ### Y010 — оформление HUD-ленты
 Карточки теперь прижаты к правому краю с отступом 2 px, отображаются без рамки на мягкой полупрозрачной подложке и показывают общий запас после подбора в формате `+5 (10)`.
+
+Y029 cell actor resync: same-session revisits reassert persistent NPC state and rebuild the native actor cache after an empty-cell reload.
+Y029 group escort: AiEscort/AiEscortCell are networked and persistent FOLLOW/ESCORT can fail over to a same-cell group member.

@@ -167,6 +167,28 @@ void ActorList::addAiActor(const MWWorld::Ptr& actorPtr, const MWWorld::Ptr& tar
     addAiActor(baseActor);
 }
 
+void ActorList::addAiEscortActor(const MWWorld::Ptr& actorPtr, const MWWorld::Ptr& targetPtr,
+    unsigned int duration, float x, float y, float z)
+{
+    BaseActor baseActor;
+    baseActor.refNum = actorPtr.getCellRef().getRefNum().mIndex;
+    baseActor.mpNum = actorPtr.getCellRef().getMpNum();
+    baseActor.aiAction = BaseActorList::ESCORT;
+    baseActor.hasAiTarget = !targetPtr.isEmpty();
+    if (baseActor.hasAiTarget)
+        baseActor.aiTarget = MechanicsHelper::getTarget(targetPtr);
+    baseActor.aiDuration = duration;
+    baseActor.aiCoordinates.pos[0] = x;
+    baseActor.aiCoordinates.pos[1] = y;
+    baseActor.aiCoordinates.pos[2] = z;
+
+    LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO,
+        "Preparing to send ID_ACTOR_AI escort about %s %i-%i\n- duration: %u, destination: %.2f %.2f %.2f",
+        actorPtr.getCellRef().getRefId().c_str(), baseActor.refNum, baseActor.mpNum, duration, x, y, z);
+
+    addAiActor(baseActor);
+}
+
 void ActorList::addAiStateActor(const MWWorld::Ptr& actorPtr, unsigned int aiAction)
 {
     if (actorPtr.isEmpty()) return;

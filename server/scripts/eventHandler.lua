@@ -1277,6 +1277,14 @@ eventHandler.OnPlayerDeath = function(pid)
         local eventStatus = customEventHooks.triggerValidators("OnPlayerDeath", {pid})
         if eventStatus.validDefaultHandler then
             Players[pid]:ProcessDeath()
+
+            -- Y029: a dead escort target may remain registered in the cell until
+            -- respawn/teleport. Immediately fail authored group FOLLOW/ESCORT to
+            -- another group member instead of making the NPC follow a corpse.
+            local cellDescription = tes3mp.GetCell(pid)
+            if LoadedCells[cellDescription] ~= nil then
+                LoadedCells[cellDescription]:RefreshSavedGroupEscortTargets(pid)
+            end
         end
         customEventHooks.triggerHandlers("OnPlayerDeath", eventStatus, {pid})
     end
@@ -1543,9 +1551,14 @@ end
 eventHandler.OnActorAI = function(pid, cellDescription)
     if Players[pid] ~= nil and Players[pid]:IsLoggedIn() then
         if LoadedCells[cellDescription] ~= nil then
-            local eventStatus = customEventHooks.triggerValidators("OnActorAI", {pid, cellDescription})
+            tes3mp.ReadReceivedActorList()
+            local actors = packetReader.GetActorPacketTables("ActorAI").actors
+            local eventStatus = customEventHooks.triggerValidators("OnActorAI", {pid, cellDescription, actors})
             if eventStatus.validDefaultHandler then
-                tes3mp.ReadReceivedActorList()
+                -- Y029: authored FOLLOW/ESCORT must survive an authority hand-off
+                -- and a cell becoming empty. Transient COMBAT heartbeats stay in
+                -- the native C++ cache and are deliberately not written to JSON.
+                LoadedCells[cellDescription]:SaveActorAI(actors)
                 tes3mp.CopyReceivedActorListToStore()
 
                 -- Actor AI packages are currently enabled unilaterally on the client
@@ -1554,7 +1567,7 @@ eventHandler.OnActorAI = function(pid, cellDescription)
                 -- i.e. sendToOtherVisitors is true and skipAttachedPlayer is true
                 tes3mp.SendActorAI(true, true)
             end
-            customEventHooks.triggerHandlers("OnActorAI", eventStatus, {pid, cellDescription})
+            customEventHooks.triggerHandlers("OnActorAI", eventStatus, {pid, cellDescription, actors})
             
         else
             tes3mp.LogMessage(enumerations.log.WARN, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..

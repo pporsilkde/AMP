@@ -329,6 +329,37 @@ packetReader.GetActorPacketTables = function(packetType)
 
                 table.insert(actor.spellsActive[spellId], spellInstance)
             end
+        elseif packetType == "ActorAI" then
+
+            actor.ai = {
+                action = tes3mp.GetActorAIAction(packetIndex),
+                posX = tes3mp.GetActorAICoordinateX(packetIndex),
+                posY = tes3mp.GetActorAICoordinateY(packetIndex),
+                posZ = tes3mp.GetActorAICoordinateZ(packetIndex),
+                distance = tes3mp.GetActorAIDistance(packetIndex),
+                duration = tes3mp.GetActorAIDuration(packetIndex),
+                shouldRepeat = tes3mp.GetActorAIRepetition(packetIndex)
+            }
+
+            if tes3mp.DoesActorHaveAITarget(packetIndex) then
+                if tes3mp.DoesActorHavePlayerAITarget(packetIndex) then
+                    local targetPid = tes3mp.GetActorAITargetPid(packetIndex)
+                    if targetPid ~= nil and targetPid >= 0 and Players[targetPid] ~= nil then
+                        actor.ai.targetPid = targetPid
+                        actor.ai.targetPlayer = Players[targetPid].accountName
+
+                        local customVariables = Players[targetPid].data.customVariables
+                        local groupPrefs = customVariables and customVariables.arenampGroup
+                        if groupPrefs ~= nil and groupPrefs.id ~= nil then
+                            actor.ai.groupId = tostring(groupPrefs.id)
+                        end
+                    end
+                else
+                    actor.ai.targetUniqueIndex = tes3mp.GetActorAITargetRefNum(packetIndex) .. "-" ..
+                        tes3mp.GetActorAITargetMpNum(packetIndex)
+                end
+            end
+
         elseif packetType == "ActorDeath" then
 
             actor.deathState = tes3mp.GetActorDeathState(packetIndex)
