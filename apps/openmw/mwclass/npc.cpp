@@ -1497,8 +1497,8 @@ namespace MWClass
                 info.text += (russian ? u8"Архетип: " : "Archetype: ") + archetypeInfo.name;
                 if (fullHelp)
                 {
-                    info.text += "\n" + (russian ? u8"Перк: " : "Perk: ") + archetypeInfo.perk;
-                    info.text += "\n" + (russian ? u8"Компромисс: " : "Trade-off: ") + archetypeInfo.drawback;
+                    info.text += std::string("\n") + (russian ? u8"Перк: " : "Perk: ") + archetypeInfo.perk;
+                    info.text += std::string("\n") + (russian ? u8"Компромисс: " : "Trade-off: ") + archetypeInfo.drawback;
                 }
             }
         }

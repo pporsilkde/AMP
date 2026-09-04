@@ -987,6 +987,10 @@ namespace MWGui
                 }
 
                 const int potions = local->getRestoreHealthPotionCount();
+                // MyGUI::utility::toString concatenates every argument, so passing a
+                // precision to it printed a stray digit after the seconds value.
+                std::ostringstream secondsStream;
+                secondsStream << std::fixed << std::setprecision(1) << (duration * fraction);
                 mDeathRecoveryPanel->setVisible(true);
                 mDeathRecoveryXpBar->setVisible(true);
                 mDeathRecoveryXpText->setVisible(true);
@@ -994,7 +998,7 @@ namespace MWGui
                 mDeathRecoveryTitle->setCaption(arenaText("death.recovery.title"));
                 mDeathRecoveryXpText->setCaption(arenaText("death.recovery.xp") + ": "
                     + MyGUI::utility::toString(static_cast<int>(std::lround(xp))) + "  |  "
-                    + MyGUI::utility::toString(duration * fraction, 1) + " s");
+                    + secondsStream.str() + " s");
                 if (potions > 0)
                     mDeathRecoveryPrompt->setCaption(arenaText("death.recovery.self_prompt") + " ("
                         + MyGUI::utility::toString(potions) + ")");
