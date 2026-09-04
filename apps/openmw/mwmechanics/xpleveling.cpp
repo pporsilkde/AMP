@@ -686,20 +686,10 @@ namespace MWMechanics
 
         void applyDeathPenalty(const MWWorld::Ptr& player)
         {
-            if (!isEnabled() || player.isEmpty() || !player.getClass().isNpc())
-                return;
-
-            // Arena Y012: death never touches the earned character level, Skill
-            // Points or skills. Only all unbanked XP inside the current level is lost.
-            NpcStats& stats = player.getClass().getNpcStats(player);
-            const float loss = std::max(0.f, stats.getExperience());
-            if (!(loss > 0.f))
-                return;
-
-            stats.setExperience(0.f);
-            if (showNotifications())
-                MWBase::Environment::get().getWindowManager()->hudExperienceNotification(
-                    -loss, arenaText("xp.msg.death"));
+            // Y039: ArenaMP server owns the ten-second death XP decay. Keeping
+            // this client hook non-mutating prevents a one-frame local zero from
+            // racing the first authoritative PlayerLevel checkpoint.
+            (void)player;
         }
 
         void applyJailPenalty(const MWWorld::Ptr& player)
@@ -708,11 +698,14 @@ namespace MWMechanics
                 return;
 
             NpcStats& stats = player.getClass().getNpcStats(player);
-            const float loss = std::max(0.f, stats.getExperience());
+            const float currentXp = std::max(0.f, stats.getExperience());
+            const float loss = currentXp * 0.5f;
             if (!(loss > 0.f))
                 return;
 
-            stats.setExperience(0.f);
+            // Y039: ordinary imprisonment removes exactly half of the XP
+            // accumulated toward the current level, never level/SP/skills.
+            stats.setExperience(std::max(0.f, currentXp - loss));
             if (showNotifications())
                 MWBase::Environment::get().getWindowManager()->hudExperienceNotification(
                     -loss, arenaText("xp.msg.jail"));

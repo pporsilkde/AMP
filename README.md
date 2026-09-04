@@ -1,3 +1,19 @@
+## Y039 — death XP decay and in-combat recovery
+
+- Ordinary jail now removes exactly **50% of current-level XP** without touching level, Skill Points or skills.
+- Death starts a 10-second XP bar/countdown; XP fades linearly to zero and the server owns the authoritative checkpoints.
+- If the player owns a real **Restore Health** potion, the HUD offers **E** recovery: one potion is consumed, the player stands up in place at 25% health and XP decay stops.
+- A nearby party member can face the downed ally and press **E** to spend their own healing potion, or revive them with a successful **Restore Health (Touch)** cast.
+- Recovery transport is hidden from RP/local chat. No new save/network fields; protocol remains **806**.
+
+## Y038 — archetype UI and NPC parity
+
+- The Magic/Spells inventory window now shows the current archetype, perk and trade-off above the spell list.
+- Native archetype MagicEffects are exposed through the normal Active Effects icons and tooltips instead of being mechanically invisible.
+- Ordinary NPCs now use the same 28 archetypes as players, derived from their class favourite attributes and current stats. This includes regeneration, movement/capacity, hit/evasion, weapon damage, incoming-damage modifiers, spell success, Spell Absorption and Fire Warrior elemental hits.
+- NPC tooltips show the archetype; Full Help shows the perk/trade-off, and dialogue headers include the archetype name.
+- Merchant social archetypes now bargain on the NPC side too. No new save/network fields; protocol remains **806**.
+
 ## Y037 — signature mechanics for the 28 archetypes
 
 - **Thief (Agility + Speed)** gains native Chameleon only while actually Sneaking. It scales with the pair and Sneak skill, around 22 at 50/50 + Sneak 30 and capped at 40.

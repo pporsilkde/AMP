@@ -652,8 +652,14 @@ namespace MWMechanics
         int offerPrice = int(basePrice * (buying ? buyTerm : sellTerm));
         if (!useBaseStats)
         {
-            const float advantage = ClassArchetype::getBarterAdvantage(playerPtr);
-            const float multiplier = buying ? (1.f - advantage) : (1.f + advantage);
+            // Y038: social archetypes participate on both sides of a trade. A
+            // charismatic/lucky merchant negotiates against the player's own
+            // archetype advantage instead of NPC archetypes being cosmetic.
+            const float playerAdvantage = ClassArchetype::getBarterAdvantage(playerPtr);
+            const float sellerAdvantage = ClassArchetype::getBarterAdvantage(ptr);
+            const float multiplier = buying
+                ? (1.f - playerAdvantage) * (1.f + sellerAdvantage)
+                : (1.f + playerAdvantage) * (1.f - sellerAdvantage);
             offerPrice = static_cast<int>(offerPrice * multiplier);
         }
         return std::max(1, offerPrice);

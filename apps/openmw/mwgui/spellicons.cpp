@@ -11,6 +11,7 @@
 #include "../mwbase/world.hpp"
 #include "../mwbase/environment.hpp"
 #include "../mwbase/windowmanager.hpp"
+#include "../mwbase/mechanicsmanager.hpp"
 
 #include "../mwworld/class.hpp"
 #include "../mwworld/esmstore.hpp"
@@ -18,6 +19,7 @@
 
 #include "../mwmechanics/creaturestats.hpp"
 #include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/classarchetype.hpp"
 
 #include "tooltips.hpp"
 
@@ -60,6 +62,31 @@ namespace MWGui
         // now add lasting effects
         visitor.mIsPermanent = false;
         stats.getActiveSpells().visitEffectSources(visitor);
+
+        // Y038: archetype signature effects are runtime-derived, so they do not
+        // exist in Spells/ActiveSpells as ordinary sources. Mirror them into the
+        // Active Effects strip for UI only, using the exact same effect list that
+        // Actors::adjustMagicEffects injects into CreatureStats.
+        const bool russian = MWBase::Environment::get().getWindowManager()->getArenaLanguage() == "ru";
+        MWMechanics::ClassArchetype::DisplayInfo archetypeInfo;
+        if (MWMechanics::ClassArchetype::getDisplayInfo(player, russian, archetypeInfo))
+        {
+            std::vector<MWMechanics::ClassArchetype::PassiveEffect> passiveEffects;
+            const bool sneaking = MWBase::Environment::get().getMechanicsManager()->isSneaking(player);
+            MWMechanics::ClassArchetype::getPassiveMagicEffects(player, sneaking, passiveEffects);
+            const std::string sourceName = (russian ? u8"Архетип: " : "Archetype: ") + archetypeInfo.name;
+            for (const MWMechanics::ClassArchetype::PassiveEffect& passive : passiveEffects)
+            {
+                MagicEffectInfo info;
+                info.mKey = MWMechanics::EffectKey(passive.effectId);
+                info.mMagnitude = static_cast<int>(passive.magnitude);
+                info.mPermanent = true;
+                info.mRemainingTime = -1.f;
+                info.mTotalTime = -1.f;
+                info.mSource = sourceName;
+                visitor.mEffectSources[passive.effectId].push_back(info);
+            }
+        }
 
         std::map <int, std::vector<MagicEffectInfo> >& effects = visitor.mEffectSources;
 

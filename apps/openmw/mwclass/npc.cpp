@@ -7,6 +7,7 @@
 
 #include <components/debug/debuglog.hpp>
 #include <components/esm/loadmgef.hpp>
+#include <components/esm/loadclas.hpp>
 #include <components/esm/loadnpc.hpp>
 #include <components/esm/npcstate.hpp>
 #include <components/settings/settings.hpp>
@@ -1104,7 +1105,7 @@ namespace MWClass
                     }
                 }
             }
-            if (ptr == MWMechanics::getPlayer() && damage > 0.f && !godmode)
+            if (damage > 0.f && !godmode)
                 damage *= MWMechanics::ClassArchetype::getIncomingDamageMultiplier(ptr);
 
             if (damage > 0.0f)
@@ -1377,8 +1378,7 @@ namespace MWClass
         if(npcdata->mNpcStats.isWerewolf() && running && npcdata->mNpcStats.getDrawState() == MWMechanics::DrawState_Nothing)
             moveSpeed *= gmst.fWereWolfRunMult->mValue.getFloat();
 
-        if (ptr == MWMechanics::getPlayer())
-            moveSpeed *= MWMechanics::ClassArchetype::getMovementSpeedMultiplier(ptr);
+        moveSpeed *= MWMechanics::ClassArchetype::getMovementSpeedMultiplier(ptr);
 
         return moveSpeed;
     }
@@ -1481,6 +1481,28 @@ namespace MWClass
         if(fullHelp)
             info.text = MWGui::ToolTips::getMiscString(ref->mBase->mScript, "Script");
 
+        // Y038: ordinary NPCs use the same class-derived archetype system as
+        // players. Show the archetype on the world tooltip so the player can
+        // understand why an NPC may regenerate, evade, absorb magic or proc fire.
+        const ESM::Class* klass = MWBase::Environment::get().getWorld()->getStore().get<ESM::Class>().search(ref->mBase->mClass);
+        if (klass)
+        {
+            const bool russian = MWBase::Environment::get().getWindowManager()->getArenaLanguage() == "ru";
+            MWMechanics::ClassArchetype::DisplayInfo archetypeInfo;
+            if (MWMechanics::ClassArchetype::getDisplayInfo(
+                    klass->mData.mAttribute[0], klass->mData.mAttribute[1], russian, archetypeInfo))
+            {
+                if (!info.text.empty())
+                    info.text += "\n";
+                info.text += (russian ? u8"Архетип: " : "Archetype: ") + archetypeInfo.name;
+                if (fullHelp)
+                {
+                    info.text += "\n" + (russian ? u8"Перк: " : "Perk: ") + archetypeInfo.perk;
+                    info.text += "\n" + (russian ? u8"Компромисс: " : "Trade-off: ") + archetypeInfo.drawback;
+                }
+            }
+        }
+
         return info;
     }
 
@@ -1489,8 +1511,7 @@ namespace MWClass
         const MWMechanics::CreatureStats& stats = getCreatureStats (ptr);
         static const float fEncumbranceStrMult = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("fEncumbranceStrMult")->mValue.getFloat();
         float capacity = stats.getAttribute(ESM::Attribute::Strength).getModified()*fEncumbranceStrMult;
-        if (ptr == MWMechanics::getPlayer())
-            capacity *= MWMechanics::ClassArchetype::getCarryCapacityMultiplier(ptr);
+        capacity *= MWMechanics::ClassArchetype::getCarryCapacityMultiplier(ptr);
         return capacity;
     }
 

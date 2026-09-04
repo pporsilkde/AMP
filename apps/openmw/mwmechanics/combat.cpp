@@ -90,7 +90,7 @@ namespace MWMechanics
     {
         if (attacker.isEmpty() || victim.isEmpty() || object.isEmpty() || physicalDamage <= 0.f)
             return 0.f;
-        if (attacker != getPlayer() && !mwmp::PlayerList::isDedicatedPlayer(attacker))
+        if (!attacker.getClass().isNpc())
             return 0.f;
         if (!victim.getClass().isActor() || object.getTypeName() != typeid(ESM::Weapon).name())
             return 0.f;
@@ -584,9 +584,9 @@ namespace MWMechanics
 
         /// end of EncoreMP hitchance changes
 
-        if (attacker == getPlayer())
+        if (attacker.getClass().isNpc())
             attackTerm += ClassArchetype::getHitChanceBonus(attacker);
-        if (victim == getPlayer() || mwmp::PlayerList::isDedicatedPlayer(victim))
+        if (victim.getClass().isNpc())
             defenseTerm += ClassArchetype::getEvasionBonus(victim);
 
         return round(attackTerm - defenseTerm);
@@ -897,7 +897,7 @@ namespace MWMechanics
 
         // end of EncoreMP damage changes
 
-        if (attacker == getPlayer())
+        if (attacker.getClass().isNpc())
             damage *= ClassArchetype::getWeaponDamageMultiplier(attacker);
 
     }

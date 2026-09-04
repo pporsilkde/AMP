@@ -62,6 +62,7 @@
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/actorutil.hpp"
 #include "../mwmechanics/character.hpp"
+#include "../mwmechanics/classarchetype.hpp"
 
 #include "../mwrender/animation.hpp"
 
@@ -2017,8 +2018,16 @@ namespace MWGui
         const int currentHealth = std::max(0, std::min(maximumHealth,
             static_cast<int>(std::lround(stats.getHealth().getCurrent()))));
 
-        mNpcName->setCaption(mPtr.getClass().getName(mPtr) + " - "
-            + MyGUI::utility::toString(level) + " lvl");
+        std::string npcCaption = mPtr.getClass().getName(mPtr);
+        if (mPtr.getClass().isNpc())
+        {
+            const bool russian = MWBase::Environment::get().getWindowManager()->getArenaLanguage() == "ru";
+            MWMechanics::ClassArchetype::DisplayInfo archetypeInfo;
+            if (MWMechanics::ClassArchetype::getDisplayInfo(mPtr, russian, archetypeInfo))
+                npcCaption += " — " + archetypeInfo.name;
+        }
+        npcCaption += " - " + MyGUI::utility::toString(level) + " lvl";
+        mNpcName->setCaption(npcCaption);
         mNpcHealthBar->setProgressRange(static_cast<size_t>(maximumHealth));
         mNpcHealthBar->setProgressPosition(static_cast<size_t>(currentHealth));
         mNpcHealthText->setCaption(MyGUI::utility::toString(currentHealth) + " / "

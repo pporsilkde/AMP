@@ -327,7 +327,7 @@ namespace MWMechanics
 
         float castBonus = -stats.getMagicEffects().get(ESM::MagicEffect::Sound).getMagnitude();
         float castChance = baseChance + castBonus;
-        if (actor == getPlayer())
+        if (actor.getClass().isNpc())
             castChance += ClassArchetype::getSpellSuccessBonus(actor);
         castChance *= stats.getFatigueTerm();
 

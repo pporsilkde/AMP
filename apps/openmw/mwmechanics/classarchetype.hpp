@@ -2,6 +2,7 @@
 #define OPENMW_MWMECHANICS_CLASSARCHETYPE_H
 
 #include <string>
+#include <vector>
 
 namespace MWWorld
 {
@@ -20,6 +21,12 @@ namespace MWMechanics
             std::string name;
             std::string perk;
             std::string drawback;
+        };
+
+        struct PassiveEffect
+        {
+            int effectId;
+            float magnitude;
         };
 
         // There are exactly 28 unordered pairs for Morrowind's eight attributes.
@@ -43,6 +50,7 @@ namespace MWMechanics
 
         // Y037 signature mechanics. These are derived from the existing class
         // attribute pair and current stats, so no save/network fields are added.
+        void getPassiveMagicEffects(const MWWorld::Ptr& actor, bool sneaking, std::vector<PassiveEffect>& out);
         void addPassiveMagicEffects(const MWWorld::Ptr& actor, bool sneaking, MagicEffects& effects);
         float getSneakChameleonMagnitude(const MWWorld::Ptr& actor);
         float getSpellAbsorptionChance(const MWWorld::Ptr& actor);

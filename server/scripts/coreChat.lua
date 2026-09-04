@@ -436,6 +436,9 @@ local function commandAction(pid, cmd)
 end
 
 local function rawSlashValidator(eventStatus, pid, message)
+    -- Y039: hidden recovery controls are consumed by deathRecovery before the
+    -- RP/local-chat validator. Do not echo an already-claimed transport message.
+    if eventStatus ~= nil and eventStatus.validCustomHandlers == false then return end
     if not isLoggedIn(pid) then return end
 
     -- Legacy ArenaMP/Nirn user-facing slash layout. CoreScripts removes the first

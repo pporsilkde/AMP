@@ -404,6 +404,11 @@ namespace MWGui
         , mFpsBox(nullptr)
         , mEnemyName(nullptr)
         , mEnemySummary(nullptr)
+        , mDeathRecoveryPanel(nullptr)
+        , mDeathRecoveryXpBar(nullptr)
+        , mDeathRecoveryTitle(nullptr)
+        , mDeathRecoveryXpText(nullptr)
+        , mDeathRecoveryPrompt(nullptr)
         , mWeapImage(nullptr)
         , mSpellImage(nullptr)
         , mWeapStatus(nullptr)
@@ -477,6 +482,12 @@ namespace MWGui
         getWidget(mEnemyHealth, "EnemyHealth");
         getWidget(mEnemyName, "EnemyName");
         getWidget(mEnemySummary, "EnemySummary");
+        getWidget(mDeathRecoveryPanel, "DeathRecoveryPanel");
+        getWidget(mDeathRecoveryXpBar, "DeathRecoveryXpBar");
+        getWidget(mDeathRecoveryTitle, "DeathRecoveryTitle");
+        getWidget(mDeathRecoveryXpText, "DeathRecoveryXpText");
+        getWidget(mDeathRecoveryPrompt, "DeathRecoveryPrompt");
+        mDeathRecoveryXpBar->setProgressRange(1000);
 
         // X014: fixed widget pool for world-space combat health bars. Reusing
         // widgets avoids GUI allocations while fights are running.
@@ -943,6 +954,77 @@ namespace MWGui
         // child, so map/settings/autohide choices are restored correctly after login.
         if (mGameplayHud && mGameplayHud->getVisible() != loginFinished)
             mGameplayHud->setVisible(loginFinished);
+
+        // Y039: surface the recovery state without creating fake spells or save data.
+        // The server owns XP checkpoints/revive; this HUD only interpolates the visible
+        // countdown and exposes the E/touch affordance.
+        if (mDeathRecoveryPanel && loginFinished)
+        {
+            mwmp::LocalPlayer* local = mwmp::Main::get().getLocalPlayer();
+            const auto arenaText = [](const std::string& key) {
+                return MyGUI::LanguageManager::getInstance().replaceTags("#{arenamp=" + key + "}");
+            };
+            if (local && local->isDeathRecoveryActive())
+            {
+                const float duration = std::max(0.001f, local->getDeathRecoveryDurationSeconds());
+                const float remaining = std::max(0.f, local->getDeathRecoveryRemainingSeconds());
+                const float initialXp = std::max(0.f, local->getDeathRecoveryInitialXp());
+                float fraction = std::clamp(remaining / duration, 0.f, 1.f);
+                float xp = initialXp * fraction;
+
+                // Y040: the client interpolates between the server's one-second
+                // checkpoints, but the server owns the real number and its decay
+                // window is configurable. Clamp to the authoritative value so the
+                // HUD can lag behind reality but never promise XP that is gone.
+                const MWWorld::Ptr playerPtr = MWMechanics::getPlayer();
+                if (!playerPtr.isEmpty() && playerPtr.getClass().isNpc())
+                {
+                    const float serverXp = std::max(0.f,
+                        playerPtr.getClass().getNpcStats(playerPtr).getExperience());
+                    xp = std::min(xp, serverXp);
+                    if (initialXp > 0.f)
+                        fraction = std::clamp(xp / initialXp, 0.f, 1.f);
+                }
+
+                const int potions = local->getRestoreHealthPotionCount();
+                mDeathRecoveryPanel->setVisible(true);
+                mDeathRecoveryXpBar->setVisible(true);
+                mDeathRecoveryXpText->setVisible(true);
+                mDeathRecoveryXpBar->setProgressPosition(static_cast<std::size_t>(std::lround(fraction * 1000.f)));
+                mDeathRecoveryTitle->setCaption(arenaText("death.recovery.title"));
+                mDeathRecoveryXpText->setCaption(arenaText("death.recovery.xp") + ": "
+                    + MyGUI::utility::toString(static_cast<int>(std::lround(xp))) + "  |  "
+                    + MyGUI::utility::toString(duration * fraction, 1) + " s");
+                if (potions > 0)
+                    mDeathRecoveryPrompt->setCaption(arenaText("death.recovery.self_prompt") + " ("
+                        + MyGUI::utility::toString(potions) + ")");
+                else
+                    mDeathRecoveryPrompt->setCaption(arenaText("death.recovery.self_no_potion"));
+            }
+            else if (local)
+            {
+                std::string allyName;
+                if (local->getRecoverableAllyName(allyName))
+                {
+                    const int potions = local->getRestoreHealthPotionCount();
+                    mDeathRecoveryPanel->setVisible(true);
+                    mDeathRecoveryXpBar->setVisible(false);
+                    mDeathRecoveryXpText->setVisible(false);
+                    mDeathRecoveryTitle->setCaption(arenaText("death.recovery.ally_title") + ": " + allyName);
+                    if (potions > 0)
+                        mDeathRecoveryPrompt->setCaption(arenaText("death.recovery.ally_prompt") + " ("
+                            + MyGUI::utility::toString(potions) + ")\n" + arenaText("death.recovery.touch_hint"));
+                    else
+                        mDeathRecoveryPrompt->setCaption(arenaText("death.recovery.touch_hint"));
+                }
+                else
+                    mDeathRecoveryPanel->setVisible(false);
+            }
+            else
+                mDeathRecoveryPanel->setVisible(false);
+        }
+        else if (mDeathRecoveryPanel)
+            mDeathRecoveryPanel->setVisible(false);
 
         LocalMapBase::onFrame(dt);
 

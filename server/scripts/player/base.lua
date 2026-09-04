@@ -165,12 +165,24 @@ function BasePlayer:__init(pid, playerName)
     -- profile writes caused by frequent XP awards.
     self.xpLoginGuardUntil = 0
     self.xpLastQuicksaveTime = 0
+
+    -- Y039: transient death-recovery state. This is never persisted; XP itself
+    -- remains authoritative in data.stats and is saved by deathRecovery.
+    self.deathRecoveryActive = false
+    self.deathRecoveryXpTimerId = nil
+    self.deathRecoveryStartedAt = nil
+    self.deathRecoveryDuration = nil
+    self.deathRecoveryInitialXp = nil
 end
 
 function BasePlayer:Destroy()
     if self.loginTimerId ~= nil then
         tes3mp.StopTimer(self.loginTimerId)
         self.loginTimerId = nil
+    end
+
+    if deathRecovery ~= nil then
+        deathRecovery.Cancel(self, true)
     end
 
     self.loggedIn = false
@@ -612,36 +624,12 @@ function BasePlayer:ProcessDeath()
     -- Clear this player's active spell effects
     self.data.spellsActive = {}
 
-    -- Arena Y012: ArenaMP owns the death XP decision on the server. A non-zero
-    -- current-level XP pool is wiped completely. If it was already zero, the
-    -- player receives extra respawn time equal to current level * configured
-    -- seconds. Earned levels, Skill Points and skills are never changed here.
-    local extraRespawnSeconds = 0
-    local xpEnabled = config.xpLeveling ~= nil and config.xpLeveling["enabled"] ~= false
-    if xpEnabled then
-        self.data.stats.experience = math.max(0, tonumber(self.data.stats.experience) or 0)
-        local lostXp = self.data.stats.experience
-        if lostXp > 0 then
-            self.data.stats.experience = 0
-            tes3mp.SetExperience(self.pid, 0)
-            tes3mp.SendLevel(self.pid)
-            self:PersistXpProgress(true)
-
-            if groupHelper ~= nil and type(groupHelper.SendXpAdjustment) == "function" then
-                groupHelper.SendXpAdjustment(self.pid, -lostXp, "death")
-            else
-                tes3mp.SendMessage(self.pid,
-                    "@@AMP_XP@@" .. string.format("%.6f", -lostXp) .. "\t0\tdeath\t\n", false)
-            end
-        else
-            local secondsPerLevel = 5
-            if config.xpLeveling["zero xp death cooldown per level"] ~= nil then
-                secondsPerLevel = tonumber(config.xpLeveling["zero xp death cooldown per level"]) or secondsPerLevel
-            end
-            secondsPerLevel = math.max(0, secondsPerLevel)
-            local currentLevel = math.max(1, tonumber(self.data.stats.level) or 1)
-            extraRespawnSeconds = currentLevel * secondsPerLevel
-        end
+    -- Y039: death XP is no longer deleted in one frame. The server owns a
+    -- ten-second linear decay window and periodically persists checkpoints.
+    -- Earned levels, Skill Points and skills are never changed here.
+    local minimumRespawnSeconds = math.max(0, tonumber(config.deathTime) or 0)
+    if deathRecovery ~= nil then
+        minimumRespawnSeconds = math.max(minimumRespawnSeconds, deathRecovery.Begin(self))
     end
 
     local deathReason = "committed suicide"
@@ -665,7 +653,7 @@ function BasePlayer:ProcessDeath()
     tes3mp.SendMessage(self.pid, message, true)
 
     if config.playersRespawn then
-        local respawnSeconds = math.max(0, tonumber(config.deathTime) or 0) + extraRespawnSeconds
+        local respawnSeconds = minimumRespawnSeconds
         self.resurrectTimerId = tes3mp.CreateTimerEx("OnDeathTimeExpiration",
             time.seconds(respawnSeconds), "is", self.pid, self.accountName)
         tes3mp.StartTimer(self.resurrectTimerId)
@@ -675,6 +663,11 @@ function BasePlayer:ProcessDeath()
 end
 
 function BasePlayer:Resurrect()
+
+    -- Settle the exact XP remaining at the instant normal respawn begins.
+    if deathRecovery ~= nil then
+        deathRecovery.Cancel(self, true)
+    end
 
     local currentResurrectType = enumerations.resurrect.REGULAR
 

@@ -9,8 +9,22 @@
             <Widget type="Widget" skin="" position="2 1 264 20" align="Left Top Stretch" name="EffectsBox"/>
         </Widget>
 
+        <!-- Y038: persistent class-archetype summary. Runtime magic parts also
+             appear above as native Active Effect icons. -->
+        <Widget type="Widget" skin="MW_Box" position="8 38 268 100" align="Left Top HStretch">
+            <Widget type="TextBox" skin="HeaderText" position="4 3 260 18" name="ArchetypeName" align="HStretch Top">
+                <Property key="Caption" value="Archetype:"/>
+            </Widget>
+            <Widget type="TextBox" skin="NormalText" position="4 22 260 36" name="ArchetypePerk" align="HStretch Top">
+                <Property key="WordWrap" value="true"/>
+            </Widget>
+            <Widget type="TextBox" skin="NormalText" position="4 60 260 36" name="ArchetypeDrawback" align="HStretch Top">
+                <Property key="WordWrap" value="true"/>
+            </Widget>
+        </Widget>
+
         <!-- Spell list -->
-        <Widget type="SpellView" skin="MW_SpellView" position="8 38 268 490" align="Left Top Stretch" name="SpellView">
+        <Widget type="SpellView" skin="MW_SpellView" position="8 145 268 383" align="Left Top Stretch" name="SpellView">
         </Widget>
 
         <Widget type="HBox" position="8 535 268 23" align="Right Bottom HStretch">

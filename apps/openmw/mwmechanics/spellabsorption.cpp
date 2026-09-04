@@ -7,7 +7,6 @@
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
 
-#include "../mwmp/PlayerList.hpp"
 
 #include "../mwrender/animation.hpp"
 
@@ -54,8 +53,7 @@ namespace MWMechanics
             return 0;
 
         CreatureStats& stats = target.getClass().getCreatureStats(target);
-        const bool playerArchetype = target == getPlayer() || mwmp::PlayerList::isDedicatedPlayer(target);
-        const float archetypeChance = playerArchetype ? ClassArchetype::getSpellAbsorptionChance(target) : 0.f;
+        const float archetypeChance = target.getClass().isNpc() ? ClassArchetype::getSpellAbsorptionChance(target) : 0.f;
         if (stats.getMagicEffects().get(ESM::MagicEffect::SpellAbsorption).getMagnitude() <= 0.f && archetypeChance <= 0.f)
             return 0;
 

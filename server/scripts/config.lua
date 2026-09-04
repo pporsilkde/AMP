@@ -967,8 +967,32 @@ config.bannedEquipmentItems = { "helseth's ring" }
 -- Whether players should respawn when dying
 config.playersRespawn = true
 
--- Time to stay dead before being respawned, in seconds
-config.deathTime = 5
+-- Time to stay dead before being respawned, in seconds. Y039 never auto-respawns
+-- before the XP decay window below has completed.
+config.deathTime = 10
+
+-- Y039 death recovery. Current-level XP drains smoothly to zero over the first
+-- 10 seconds after death. A Restore Health potion or a nearby party member can
+-- recover the player in place before the normal respawn timer expires.
+config.deathRecovery = {
+    ["xp decay seconds"] = 10,
+    ["xp tick seconds"] = 1,
+    ["potion revive health fraction"] = 0.25,
+    ["touch revive health fraction"] = 0.10,
+    ["ally revive distance"] = 256,
+
+    -- Y040: the revive request names an inventory item, so the server checks that
+    -- the item really restores health before spending it. Custom potions are
+    -- validated against their stored record; vanilla ones against these Lua
+    -- patterns (lowercase refId). Add your own ids here when using mods.
+    ["validate potion refIds"] = true,
+    ["restore health refId patterns"] = { "^p_restore_health" }
+}
+
+-- Note: the client HUD interpolates its countdown over a fixed 10 seconds, so
+-- changing "xp decay seconds" makes the bar finish earlier or later than the real
+-- decay. The displayed XP itself is clamped to the authoritative value the server
+-- sends each tick, so it never overstates what the player still has.
 
 -- The number of days spent in jail as a penalty for dying, when respawning
 config.deathPenaltyJailDays = 2

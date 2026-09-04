@@ -421,8 +421,9 @@ namespace MWMechanics
             return scaled(actor, [](const Modifiers& m) { return m.disposition; });
         }
 
-        void addPassiveMagicEffects(const MWWorld::Ptr& actor, bool sneaking, MagicEffects& effects)
+        void getPassiveMagicEffects(const MWWorld::Ptr& actor, bool sneaking, std::vector<PassiveEffect>& out)
         {
+            out.clear();
             const Definition* definition = findDefinition(actor);
             if (!definition)
                 return;
@@ -431,14 +432,15 @@ namespace MWMechanics
             const float armorLoad = mediumHeavyArmorLoad(actor);
             const char* id = definition->id;
 
-            auto add = [&effects](int effectId, float magnitude)
+            auto add = [&out](int effectId, float magnitude)
             {
                 if (magnitude > 0.f)
-                    effects.add(EffectKey(effectId), EffectParam(magnitude));
+                    out.push_back({ effectId, magnitude });
             };
 
-            // Y037: signature mechanics intentionally reuse native Morrowind effects.
-            // They are recomputed every actor update and never enter save/ActiveSpells state.
+            // Y038: signature mechanics are shared by players and ordinary NPCs.
+            // The list is also reused by the Magic window so the UI presents the
+            // exact native effects that are being injected into CreatureStats.
             if (std::strcmp(id, "fire_warrior") == 0)
                 add(ESM::MagicEffect::ResistFire, 5.f + 10.f * power);
             else if (std::strcmp(id, "crusader") == 0)
@@ -499,6 +501,14 @@ namespace MWMechanics
                 add(ESM::MagicEffect::ResistPoison, 15.f + 25.f * power);
                 add(ESM::MagicEffect::ResistCommonDisease, 10.f + 20.f * power);
             }
+        }
+
+        void addPassiveMagicEffects(const MWWorld::Ptr& actor, bool sneaking, MagicEffects& effects)
+        {
+            std::vector<PassiveEffect> passiveEffects;
+            getPassiveMagicEffects(actor, sneaking, passiveEffects);
+            for (const PassiveEffect& passive : passiveEffects)
+                effects.add(EffectKey(passive.effectId), EffectParam(passive.magnitude));
         }
 
         float getSneakChameleonMagnitude(const MWWorld::Ptr& actor)

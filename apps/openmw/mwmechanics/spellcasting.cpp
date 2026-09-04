@@ -204,10 +204,23 @@ namespace MWMechanics
             /*
                 Start of tes3mp addition
 
-                Now that reflected effects have been handled, don't unilaterally process effects further for dedicated players
-                and actors on this client and instead expect their effects to be applied correctly through the SpellsActive
-                packets received
+                Y039: a successful Restore Health (Touch) cast from the local player
+                onto a dead party member doubles as a recovery action. The normal
+                spell cast still pays magicka and follows the ordinary success path;
+                the server validates party membership, distance and dead state.
             */
+            if (mwmp::PlayerList::isDedicatedPlayer(target)
+                && effectIt->mEffectID == ESM::MagicEffect::RestoreHealth
+                && effectIt->mRange == ESM::RT_Touch
+                && caster == getPlayer()
+                && target.getClass().getCreatureStats(target).isDead())
+            {
+                mwmp::Main::get().getLocalPlayer()->requestTouchRecovery(target);
+            }
+
+            // Now that reflected effects have been handled, don't unilaterally
+            // process effects further for dedicated players and actors on this
+            // client. Their authoritative effects arrive through SpellsActive.
             if (mwmp::PlayerList::isDedicatedPlayer(target) || mwmp::Main::get().getCellController()->isDedicatedActor(target))
                 continue;
             /*

@@ -36,6 +36,15 @@ namespace mwmp
 
         void update();
 
+        // Y039: local presentation/input for the server-authoritative death recovery window.
+        bool isDeathRecoveryActive() const { return mDeathRecoveryActive; }
+        float getDeathRecoveryRemainingSeconds() const;
+        float getDeathRecoveryDurationSeconds() const { return mDeathRecoveryDuration; }
+        float getDeathRecoveryInitialXp() const { return mDeathRecoveryInitialXp; }
+        int getRestoreHealthPotionCount(std::string* firstRefId = nullptr) const;
+        bool getRecoverableAllyName(std::string& name) const;
+        void requestTouchRecovery(const MWWorld::Ptr& target);
+
         bool processCharGen();
         bool isLoggedIn();
         void updateLanguage();
@@ -148,6 +157,17 @@ namespace mwmp
         void sendWalkAnimationState();
         void updateWalkAnimationSync(float dt);
         void updateInteractionAnimation(float dt);
+        void beginDeathRecovery();
+        void updateDeathRecovery(float dt);
+        void sendDeathRecoveryControl(const std::string& payload);
+        bool isRestoreHealthPotion(const MWWorld::Ptr& item) const;
+
+        bool mDeathRecoveryActive;
+        float mDeathRecoveryElapsed;
+        float mDeathRecoveryDuration;
+        float mDeathRecoveryInitialXp;
+        float mDeathRecoveryRequestCooldown;
+        bool mDeathRecoveryEWasDown;
 
         bool mPersistentAnimationActive;
         bool mPersistentAnimationPlaying;

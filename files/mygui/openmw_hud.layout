@@ -11,7 +11,8 @@
             <Property key="TextAlign" value="Left VCenter"/>
             <Property key="TextShadow" value="true"/>
             <Property key="TextShadowColour" value="0 0 0"/>
-            <Property key="FontHeight" value="12"/>
+            <Property key="FontName" value="Russo"/>
+            <Property key="FontHeight" value="16"/>
             <Property key="Caption" value="FPS: --"/>
         </Widget>
 
@@ -215,6 +216,34 @@
         </Widget>
 
  
+
+        <!-- Y039: death recovery / party revive panel. Hidden unless a recovery action is relevant. -->
+        <Widget type="Widget" skin="HUD_Box" position="-70 45 440 82" align="Center Center" name="DeathRecoveryPanel">
+            <Property key="Visible" value="false"/>
+            <Property key="NeedMouse" value="false"/>
+            <Widget type="TextBox" skin="SandBrightText" position="8 5 424 18" name="DeathRecoveryTitle">
+                <Property key="TextAlign" value="Center"/>
+                <Property key="TextShadow" value="true"/>
+                <Property key="TextShadowColour" value="0 0 0"/>
+                <Property key="NeedMouse" value="false"/>
+            </Widget>
+            <Widget type="ProgressBar" skin="MW_EnergyBar_Red" position="10 26 420 14" name="DeathRecoveryXpBar">
+                <Property key="NeedMouse" value="false"/>
+            </Widget>
+            <Widget type="TextBox" skin="SandText" position="10 25 420 16" name="DeathRecoveryXpText">
+                <Property key="TextAlign" value="Center"/>
+                <Property key="TextShadow" value="true"/>
+                <Property key="TextShadowColour" value="0 0 0"/>
+                <Property key="NeedMouse" value="false"/>
+            </Widget>
+            <Widget type="TextBox" skin="SandText" position="8 45 424 31" name="DeathRecoveryPrompt">
+                <Property key="TextAlign" value="Center"/>
+                <Property key="TextShadow" value="true"/>
+                <Property key="TextShadowColour" value="0 0 0"/>
+                <Property key="NeedMouse" value="false"/>
+                <Property key="WordWrap" value="true"/>
+            </Widget>
+        </Widget>
 
         <!-- Crosshair -->
         <Widget type="ImageBox" skin="HUD_Crosshair" position="118 68 64 64" align="Center Center" name="Crosshair">

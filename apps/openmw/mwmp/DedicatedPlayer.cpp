@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <exception>
+#include <map>
 #include <sstream>
 #include <boost/algorithm/clamp.hpp>
 #include <components/misc/stringops.hpp>
@@ -50,6 +52,25 @@
 
 namespace
 {
+    // Y039: how long a remote body may keep standing in a cell the server no longer
+    // believes it is in. Position packets are refused by World::moveObject while the
+    // reference and the packet disagree about the coordinate space, so a dropped or
+    // late ID_PLAYER_CELL_CHANGE used to leave a frozen twin standing in the doorway
+    // for everyone else. After this timeout the reference is hidden instead; the next
+    // valid setCell() puts it back.
+    constexpr float sMaxCellMismatchSeconds = 1.5f;
+
+    // Kept out of DedicatedPlayer.hpp so this fix is a .cpp-only change; move these
+    // into the class as plain members when integrating the next cumulative patch.
+    std::map<uint64_t, float> sCellMismatchTimers;
+    std::map<uint64_t, bool> sHiddenForCellMismatch;
+
+    void clearCellMismatchState(uint64_t guidValue)
+    {
+        sCellMismatchTimers.erase(guidValue);
+        sHiddenForCellMismatch.erase(guidValue);
+    }
+
     constexpr float sNetworkPoseTransitionSeconds = 0.18f;
     int getPlayerPoseBlendMask(const MWWorld::Ptr& ptr, int requestedMask)
     {
@@ -208,6 +229,8 @@ DedicatedPlayer::~DedicatedPlayer()
 {
     if (!ptr.isEmpty())
         clearWalkAnimationStyle(ptr);
+
+    clearCellMismatchState(guid.g);
 }
 
 void DedicatedPlayer::update(float dt)
@@ -312,8 +335,28 @@ void DedicatedPlayer::move(float dt)
             wasJumping = false;
             world->setOnGround(ptr, true);
         }
+
+        // Y039: a few frozen frames are acceptable, a permanently frozen twin is not.
+        // If the cell change never arrives, hide the reference so nobody keeps seeing
+        // a body that the owning client has long since walked away from.
+        float& mismatchTime = sCellMismatchTimers[guid.g];
+        mismatchTime += std::max(0.f, dt);
+
+        if (mismatchTime > sMaxCellMismatchSeconds && !sHiddenForCellMismatch[guid.g])
+        {
+            LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO,
+                "DedicatedPlayer %s is stuck in a cell the server does not report; hiding reference",
+                npc.mName.c_str());
+
+            world->disable(ptr);
+            removeMarker();
+            sHiddenForCellMismatch[guid.g] = true;
+        }
+
         return;
     }
+
+    clearCellMismatchState(guid.g);
 
     const float dx = position.pos[0] - refPos.pos[0];
     const float dy = position.pos[1] - refPos.pos[1];
@@ -709,6 +752,11 @@ void DedicatedPlayer::setCell()
     // no longer survive an interior transition.
     setPtr(world->moveObject(ptr, cellStore, position.pos[0], position.pos[1], position.pos[2]));
     world->enable(ptr);
+
+    // Y039: the authoritative cell is known again, so the reference is no longer a
+    // stray body. World::enable() also re-registers the actor with the mechanics
+    // manager, which is what restores its CharacterController and its animations.
+    clearCellMismatchState(guid.g);
 
     if (changesCoordinateSpace)
         world->setOnGround(ptr, true);

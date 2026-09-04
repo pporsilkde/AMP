@@ -5,7 +5,7 @@
     <Widget type="Window" skin="MW_DialogueCinematicWindow" layer="Windows" position="0 0 720 410" name="_Main">
         <Property key="MinSize" value="620 280"/>
 
-        <Widget type="TextBox" skin="SandText" position="18 6 250 25" name="NpcName" align="Left Top HStretch">
+        <Widget type="TextBox" skin="SandText" position="18 6 430 25" name="NpcName" align="Left Top HStretch">
             <Property key="TextAlign" value="Left VCenter"/>
             <Property key="FontHeight" value="18"/>
             <Property key="NeedMouse" value="false"/>

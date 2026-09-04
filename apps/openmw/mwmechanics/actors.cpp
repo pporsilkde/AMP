@@ -1655,11 +1655,10 @@ namespace MWMechanics
 
         now += creatureStats.getActiveSpells().getMagicEffects();
 
-        // Y037: player class archetype signature effects are derived at runtime.
-        // Apply them to the LocalPlayer and DedicatedPlayers only; ordinary NPCs
-        // with a vanilla class sharing the same favourite attributes must not gain
-        // player-only archetype powers.
-        if (creature == getPlayer() || mwmp::PlayerList::isDedicatedPlayer(creature))
+        // Y038: the archetype is a property of the NPC class itself. Apply the
+        // same derived signature effects to players, dedicated players and ordinary
+        // NPCs. Creatures have no NPC class and stay on the vanilla path.
+        if (creature.getClass().isNpc())
         {
             const bool sneaking = MWBase::Environment::get().getMechanicsManager()->isSneaking(creature);
             ClassArchetype::addPassiveMagicEffects(creature, sneaking, now);
@@ -1774,7 +1773,7 @@ namespace MWMechanics
         // Y036: attribute-pair archetypes can provide slow natural recovery. The
         // values scale with both favourite attributes. Combat keeps the perk useful
         // without turning it into potion-level regeneration.
-        if (ptr == getPlayer() && duration > 0.f)
+        if (ptr.getClass().isNpc() && duration > 0.f)
         {
             const bool inCombat = stats.getAiSequence().isInCombat();
 
@@ -1817,7 +1816,7 @@ namespace MWMechanics
         static const float fFatigueReturnMult = settings.find("fFatigueReturnMult")->mValue.getFloat ();
 
         float x = fFatigueReturnBase + fFatigueReturnMult * endurance;
-        if (ptr == getPlayer())
+        if (ptr.getClass().isNpc())
             x *= ClassArchetype::getFatigueRegenMultiplier(ptr);
 
         fatigue.setCurrent (fatigue.getCurrent() + duration * x);

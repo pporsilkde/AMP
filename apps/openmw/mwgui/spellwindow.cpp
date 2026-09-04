@@ -2,6 +2,7 @@
 
 #include <MyGUI_EditBox.h>
 #include <MyGUI_InputManager.h>
+#include <MyGUI_TextBox.h>
 
 #include <components/misc/stringops.hpp>
 #include <components/settings/settings.hpp>
@@ -31,6 +32,7 @@
 #include "../mwmechanics/spells.hpp"
 #include "../mwmechanics/creaturestats.hpp"
 #include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/classarchetype.hpp"
 
 #include "spellicons.hpp"
 #include "confirmationdialog.hpp"
@@ -52,6 +54,9 @@ namespace MWGui
 
         getWidget(mSpellView, "SpellView");
         getWidget(mEffectBox, "EffectsBox");
+        getWidget(mArchetypeName, "ArchetypeName");
+        getWidget(mArchetypePerk, "ArchetypePerk");
+        getWidget(mArchetypeDrawback, "ArchetypeDrawback");
         getWidget(mFilterEdit, "FilterEdit");
 
         mSpellView->eventSpellClicked += MyGUI::newDelegate(this, &SpellWindow::onModelIndexSelected);
@@ -103,6 +108,7 @@ namespace MWGui
         {
             mUpdateTimer = 0;
             mSpellView->incrementalUpdate();
+            updateArchetypeInfo();
         }
 
         // Update effects in-game too if the window is pinned
@@ -110,8 +116,26 @@ namespace MWGui
             mSpellIcons->updateWidgets(mEffectBox, false);
     }
 
+    void SpellWindow::updateArchetypeInfo()
+    {
+        const bool russian = MWBase::Environment::get().getWindowManager()->getArenaLanguage() == "ru";
+        MWMechanics::ClassArchetype::DisplayInfo info;
+        if (!MWMechanics::ClassArchetype::getDisplayInfo(MWMechanics::getPlayer(), russian, info))
+        {
+            mArchetypeName->setCaption(russian ? u8"Архетип: —" : "Archetype: —");
+            mArchetypePerk->setCaption("");
+            mArchetypeDrawback->setCaption("");
+            return;
+        }
+
+        mArchetypeName->setCaption((russian ? u8"Архетип: " : "Archetype: ") + info.name);
+        mArchetypePerk->setCaption((russian ? u8"Перк: " : "Perk: ") + info.perk);
+        mArchetypeDrawback->setCaption((russian ? u8"Компромисс: " : "Trade-off: ") + info.drawback);
+    }
+
     void SpellWindow::updateSpells()
     {
+        updateArchetypeInfo();
         mSpellIcons->updateWidgets(mEffectBox, false);
 
         mSpellView->setModel(new SpellModel(MWMechanics::getPlayer(), mFilterEdit->getCaption()));

@@ -1,3 +1,38 @@
+## Y039 — death XP countdown + potion/party recovery
+
+### Added
+- Death starts a server-authoritative 10-second current-level XP decay instead of deleting XP in one frame. The HUD shows the remaining XP, countdown and a shrinking XP bar.
+- While incapacitated, pressing **E** consumes one real Restore Health potion from the player's inventory and revives them in place at 25% health.
+- A nearby member of the same ArenaMP group can face the incapacitated player and press **E** to consume one of their own Restore Health potions and revive the ally in place.
+- A successful Restore Health **Touch** cast by a party member can also revive an incapacitated ally, using the normal spell-cast/magicka path.
+- Recovery controls are hidden transport messages and are suppressed from RP/local chat.
+
+### Changed
+- Ordinary jail now removes exactly 50% of current-level XP; level, Skill Points and skills are untouched.
+- Death XP checkpoints use the server monotonic millisecond clock and incoming PlayerLevel packets are capped to the authoritative remaining-XP ceiling while incapacitated.
+- Normal respawn never occurs before the 10-second XP decay window finishes. Potion/touch recovery cancels shrine teleport and death-jail handling and restores the player where they fell.
+
+### Multiplayer / compatibility
+- Recovery state is transient; only the already-existing XP value is persisted.
+- No new packet IDs or save fields are added. Protocol remains **806**.
+
+## Y038 — archetype UI + NPC parity
+
+### Added
+- Magic/Spells now has a persistent archetype block with the current archetype name, perk and trade-off.
+- Runtime archetype MagicEffects now appear in the normal Active Effects icon strip with `Archetype: <name>` / `Архетип: <name>` as their source.
+- Ordinary NPCs now derive the same one-of-28 archetype from their ESM class favourite attributes and receive the same regeneration, movement, combat, spell, passive-magic and damage-trade-off mechanics as players.
+- NPC world tooltips show the archetype name; Full Help also shows perk/trade-off. Dialogue headers show `NPC — Archetype - level`.
+
+### Changed
+- Fire Warrior elemental weapon damage, Spell Absorption, hit/evasion, weapon damage, incoming damage, movement, capacity, spell success and regeneration are no longer player-only.
+- Merchant archetype barter advantage is now symmetric: both the player and the NPC seller influence the final quote.
+- Sneak-only Chameleon/Night Eye remains stance-gated for NPCs as it is for players; no NPC receives free stealth merely from its class.
+
+### Multiplayer / compatibility
+- NPC archetypes are deterministic from existing class/attribute state; no new actor/player save fields or network packet fields are added.
+- Protocol remains **806**.
+
 ## Y037 — signature archetype mechanics
 
 ### Added

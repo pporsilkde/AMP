@@ -2,6 +2,10 @@
 #include <cmath>
 #include <exception>
 #include <sstream>
+#include <SDL_keyboard.h>
+#include <SDL_scancode.h>
+#include <components/esm/loadalch.hpp>
+#include <components/esm/loadmgef.hpp>
 #include <components/esm/esmwriter.hpp>
 #include <components/esm/loadbook.hpp>
 #include <components/openmw-mp/TimedLog.hpp>
@@ -210,6 +214,13 @@ LocalPlayer::LocalPlayer()
     isPlayingAnimation = false;
     diedSinceArrestAttempt = false;
 
+    mDeathRecoveryActive = false;
+    mDeathRecoveryElapsed = 0.f;
+    mDeathRecoveryDuration = 10.f;
+    mDeathRecoveryInitialXp = 0.f;
+    mDeathRecoveryRequestCooldown = 0.f;
+    mDeathRecoveryEWasDown = false;
+
     mPersistentAnimationActive = false;
     mPersistentAnimationPlaying = false;
     mPersistentAnimationBlendMask = MWRender::Animation::BlendMask_All;
@@ -252,6 +263,7 @@ MWWorld::Ptr LocalPlayer::getPlayerPtr()
 void LocalPlayer::update()
 {
     const float frameDuration = MWBase::Environment::get().getFrameDuration();
+    updateDeathRecovery(frameDuration);
     updateInteractionAnimation(frameDuration);
     updatePersistentAnimation(frameDuration);
     updateWalkAnimationSync(frameDuration);
@@ -274,6 +286,128 @@ void LocalPlayer::update()
         updateLevel();
         updateBounty();
         updateReputation();
+    }
+}
+
+float LocalPlayer::getDeathRecoveryRemainingSeconds() const
+{
+    return mDeathRecoveryActive ? std::max(0.f, mDeathRecoveryDuration - mDeathRecoveryElapsed) : 0.f;
+}
+
+bool LocalPlayer::isRestoreHealthPotion(const MWWorld::Ptr& item) const
+{
+    if (item.isEmpty() || item.getTypeName() != typeid(ESM::Potion).name())
+        return false;
+    const ESM::Potion* potion = item.get<ESM::Potion>()->mBase;
+    if (!potion)
+        return false;
+    for (const ESM::ENAMstruct& effect : potion->mEffects.mList)
+    {
+        if (effect.mEffectID == ESM::MagicEffect::RestoreHealth
+            && (effect.mMagnMin > 0 || effect.mMagnMax > 0))
+            return true;
+    }
+    return false;
+}
+
+int LocalPlayer::getRestoreHealthPotionCount(std::string* firstRefId) const
+{
+    const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+    if (player.isEmpty())
+        return 0;
+    int total = 0;
+    MWWorld::InventoryStore& inv = player.getClass().getInventoryStore(player);
+    for (MWWorld::ContainerStoreIterator it = inv.begin(); it != inv.end(); ++it)
+    {
+        if (!isRestoreHealthPotion(*it))
+            continue;
+        if (firstRefId && firstRefId->empty())
+            *firstRefId = it->getCellRef().getRefId();
+        total += std::max(0, it->getRefData().getCount());
+    }
+    return total;
+}
+
+bool LocalPlayer::getRecoverableAllyName(std::string& name) const
+{
+    name.clear();
+    MWWorld::Ptr faced = MWBase::Environment::get().getWorld()->getFacedObject();
+    if (faced.isEmpty() || !PlayerList::isDedicatedPlayer(faced))
+        return false;
+    DedicatedPlayer* target = PlayerList::getPlayer(faced);
+    if (!target || std::find(alliedPlayers.begin(), alliedPlayers.end(), target->guid) == alliedPlayers.end())
+        return false;
+    if (!faced.getClass().getCreatureStats(faced).isDead())
+        return false;
+    name = target->npc.mName;
+    return !name.empty();
+}
+
+void LocalPlayer::sendDeathRecoveryControl(const std::string& payload)
+{
+    chatMessage = "@@AMP_REVIVE@@" + payload;
+    getNetworking()->getPlayerPacket(ID_CHAT_MESSAGE)->setPlayer(this);
+    getNetworking()->getPlayerPacket(ID_CHAT_MESSAGE)->Send();
+}
+
+void LocalPlayer::requestTouchRecovery(const MWWorld::Ptr& targetPtr)
+{
+    if (targetPtr.isEmpty() || !PlayerList::isDedicatedPlayer(targetPtr)
+        || !targetPtr.getClass().getCreatureStats(targetPtr).isDead())
+        return;
+    DedicatedPlayer* target = PlayerList::getPlayer(targetPtr);
+    if (!target || std::find(alliedPlayers.begin(), alliedPlayers.end(), target->guid) == alliedPlayers.end())
+        return;
+    sendDeathRecoveryControl("TOUCH\t" + target->npc.mName);
+}
+
+void LocalPlayer::beginDeathRecovery()
+{
+    const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+    mDeathRecoveryActive = true;
+    mDeathRecoveryElapsed = 0.f;
+    mDeathRecoveryDuration = 10.f;
+    mDeathRecoveryRequestCooldown = 0.f;
+    mDeathRecoveryEWasDown = false;
+    mDeathRecoveryInitialXp = player.isEmpty() ? 0.f
+        : std::max(0.f, player.getClass().getNpcStats(player).getExperience());
+}
+
+void LocalPlayer::updateDeathRecovery(float dt)
+{
+    dt = std::max(0.f, dt);
+    if (mDeathRecoveryActive)
+        mDeathRecoveryElapsed = std::min(mDeathRecoveryDuration, mDeathRecoveryElapsed + dt);
+    mDeathRecoveryRequestCooldown = std::max(0.f, mDeathRecoveryRequestCooldown - dt);
+
+    const Uint8* keys = SDL_GetKeyboardState(nullptr);
+    const bool eDown = keys && keys[SDL_SCANCODE_E] != 0;
+    const bool ePressed = eDown && !mDeathRecoveryEWasDown;
+    mDeathRecoveryEWasDown = eDown;
+    if (!ePressed || mDeathRecoveryRequestCooldown > 0.f)
+        return;
+
+    GUIController* gui = Main::get().getGUIController();
+    MWBase::WindowManager* wm = MWBase::Environment::get().getWindowManager();
+    if ((gui && gui->getChatEditState()) || (wm && wm->isGuiMode()))
+        return;
+
+    std::string potionRefId;
+    if (getRestoreHealthPotionCount(&potionRefId) <= 0 || potionRefId.empty())
+        return;
+
+    if (mDeathRecoveryActive)
+    {
+        sendDeathRecoveryControl("SELF_POTION\t" + potionRefId);
+        mDeathRecoveryRequestCooldown = 0.75f;
+        return;
+    }
+
+    std::string allyName;
+    if (getRecoverableAllyName(allyName))
+    {
+        sendDeathRecoveryControl("ALLY_POTION\t" + allyName + "\t" + potionRefId);
+        mDeathRecoveryRequestCooldown = 0.75f;
     }
 }
 
@@ -1082,6 +1216,8 @@ void LocalPlayer::removeSpellsActive()
 
 void LocalPlayer::die()
 {
+    if (!mDeathRecoveryActive)
+        beginDeathRecovery();
     creatureStats.mDead = true;
 
     MWWorld::Ptr playerPtr = MWBase::Environment::get().getWorld()->getPlayerPtr();
@@ -1095,6 +1231,9 @@ void LocalPlayer::die()
 
 void LocalPlayer::resurrect()
 {
+    mDeathRecoveryActive = false;
+    mDeathRecoveryElapsed = 0.f;
+    mDeathRecoveryRequestCooldown = 0.f;
     creatureStats.mDead = false;
 
     MWWorld::Ptr ptrPlayer = getPlayerPtr();
@@ -1694,6 +1833,9 @@ void LocalPlayer::setSelectedSpell()
 
 void LocalPlayer::sendDeath(char newDeathState)
 {
+    if (newDeathState != 0 && !mDeathRecoveryActive)
+        beginDeathRecovery();
+
     if (MechanicsHelper::isEmptyTarget(killer))
         killer = MechanicsHelper::getTarget(getPlayerPtr());
 

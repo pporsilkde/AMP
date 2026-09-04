@@ -87,6 +87,12 @@ namespace MWGui
         MyGUI::ProgressBar *mHealth, *mMagicka, *mStamina, *mEnemyHealth, *mDrowning;
         MyGUI::TextBox *mHealthText, *mMagickaText, *mStaminaText, *mFpsBox;
         MyGUI::TextBox *mEnemyName, *mEnemySummary;
+        // Y039: death XP countdown / potion and party recovery prompt.
+        MyGUI::Widget* mDeathRecoveryPanel;
+        MyGUI::ProgressBar* mDeathRecoveryXpBar;
+        MyGUI::TextBox* mDeathRecoveryTitle;
+        MyGUI::TextBox* mDeathRecoveryXpText;
+        MyGUI::TextBox* mDeathRecoveryPrompt;
         MyGUI::Widget *mHealthFrame, *mMagickaFrame, *mFatigueFrame;
         MyGUI::Widget *mWeapBox, *mSpellBox, *mSneakBox;
         ItemWidget *mWeapImage;

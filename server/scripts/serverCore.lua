@@ -45,6 +45,8 @@ logicHandler = require("logicHandler")
 eventHandler = require("eventHandler")
 -- X050: persistent server-authoritative group system.
 groupHelper = require("groupHelper")
+-- Y039: server-authoritative 10-second death XP decay and party recovery.
+deathRecovery = require("deathRecovery")
 -- X052: nickname colour picker and the Player Menu copy of the /list roster.
 chatColorHelper = require("chatColorHelper")
 playerListHelper = require("playerListHelper")
@@ -873,6 +875,10 @@ end
 
 function OnDeathTimeExpiration(pid, accountName)
     eventHandler.OnDeathTimeExpiration(pid, accountName)
+end
+
+function OnDeathXpDecayTick(pid, accountName)
+    if deathRecovery ~= nil then deathRecovery.Tick(pid, accountName) end
 end
 
 function OnObjectLoopTimeExpiration(loopIndex)

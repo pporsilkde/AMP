@@ -1314,6 +1314,28 @@ namespace MWWorld
         }
     }
 
+    // Y039: Scene::removeObjectFromScene() unregisters an actor from the mechanics
+    // manager, but Scene::addObjectToScene() does not register it again. Every path
+    // that hides and later re-shows an actor - World::disable/enable, a remote
+    // player walking from an unloaded cell back into an active one - therefore left
+    // the actor with a scene node but without a CharacterController.
+    //
+    // Such an actor is still moved every frame by DedicatedPlayer::move(), but no
+    // controller ever selects a movement animation for it, so it slides around in
+    // the bind pose with its legs together. Re-register the actor whenever it is
+    // put back into the scene; Actors::addActor() removes any previous entry first,
+    // so this can never create a duplicate.
+    static void restoreActorMechanics (const Ptr& reference)
+    {
+        if (reference.isEmpty() || !reference.getClass().isActor())
+            return;
+
+        if (!reference.getRefData().getBaseNode() || !reference.getRefData().getCount())
+            return;
+
+        MWBase::Environment::get().getMechanicsManager()->add (reference);
+    }
+
     void World::enable (const Ptr& reference)
     {
         // enable is a no-op for items in containers
@@ -1325,7 +1347,10 @@ namespace MWWorld
             reference.getRefData().enable();
 
             if(mWorldScene->getActiveCells().find (reference.getCell()) != mWorldScene->getActiveCells().end() && reference.getRefData().getCount())
+            {
                 mWorldScene->addObjectToScene (reference);
+                restoreActorMechanics (reference);
+            }
 
             if (reference.getCellRef().getRefNum().hasContentFile())
             {
@@ -2784,6 +2809,13 @@ namespace MWWorld
                 {
                     newPtr = currCell->moveTo(ptr, newCell);
                     mWorldScene->addObjectToScene(newPtr);
+
+                    // Y039: the reference has a fresh LiveCellRef in the new cell, so
+                    // any mechanics entry that still exists is keyed by the old, now
+                    // dangling Ptr. This is the path a remote player takes when they
+                    // walk back into a cell we have loaded; without this the returning
+                    // body has no CharacterController and never animates again.
+                    restoreActorMechanics(newPtr);
 
                     std::string script = newPtr.getClass().getScript(newPtr);
                     if (!script.empty())
