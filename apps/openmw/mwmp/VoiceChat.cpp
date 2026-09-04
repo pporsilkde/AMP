@@ -24,6 +24,7 @@
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/soundmanager.hpp"
+#include "../mwbase/windowmanager.hpp"
 #include "../mwbase/world.hpp"
 #include "../mwsound/sound.hpp"
 #include "../mwsound/sound_decoder.hpp"
@@ -260,6 +261,12 @@ namespace mwmp
         std::unordered_map<std::uint64_t, Speaker> speakers;
         float localLipLevel = 0.f;
         float localLipAge = 1.f;
+
+        // Y041: diagnostics for a push-to-talk key that appears to do nothing.
+        float initRetryTimer = 0.f;
+        int initAttempts = 0;
+        bool notifiedUnavailable = false;
+        bool loggedDisabled = false;
     };
 
     namespace
@@ -371,27 +378,73 @@ namespace mwmp
 
         SDL_PauseAudioDevice(mImpl->captureDevice, 1);
         mAvailable = true;
+        mImpl->notifiedUnavailable = false;
         LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Voice: proximity PTT ready (%s, %.1f m)",
             SDL_GetScancodeName(mImpl->pushToTalk), mRangeMeters);
     }
 
+    void VoiceChat::notifyUnavailable(const std::string& reason)
+    {
+        if (mImpl->notifiedUnavailable)
+            return;
+        mImpl->notifiedUnavailable = true;
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "Voice: push-to-talk ignored - %s", reason.c_str());
+        MWBase::WindowManager* windowManager = MWBase::Environment::get().getWindowManager();
+        if (windowManager != nullptr)
+            windowManager->messageBox(reason);
+    }
+
     void VoiceChat::update(float dt)
     {
-        if (!mEnabled)
-            return;
-        if (!mAvailable)
-            init();
-        if (!mAvailable)
-            return;
-
+        // Y041: the key is sampled before the availability checks so that a player
+        // pressing push-to-talk on a client with voice disabled or without a usable
+        // microphone gets told why nothing happens, instead of silence.
         LocalPlayer* local = Main::get().getLocalPlayer();
         const Uint8* keys = SDL_GetKeyboardState(nullptr);
         GUIController* gui = Main::get().getGUIController();
         const bool chatEditing = gui != nullptr && gui->getChatEditState();
-        const bool pressed = local != nullptr && local->isLoggedIn() && !chatEditing
+        const bool wantsToTalk = local != nullptr && local->isLoggedIn() && !chatEditing
             && keys != nullptr && keys[mImpl->pushToTalk];
+
+        if (!mEnabled)
+        {
+            if (!mImpl->loggedDisabled)
+            {
+                mImpl->loggedDisabled = true;
+                LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "%s",
+                    "Voice: disabled by [Voice] enabled=false in tes3mp-client.cfg");
+            }
+            if (wantsToTalk)
+                notifyUnavailable("Voice chat is disabled in tes3mp-client.cfg ([Voice] enabled).");
+            return;
+        }
+
+        if (!mAvailable)
+        {
+            // Retrying SDL_OpenAudioDevice every single frame hammered the audio
+            // backend and filled the log. Once every five seconds is enough to pick
+            // up a microphone that is plugged in while the game is running.
+            mImpl->initRetryTimer -= std::max(0.f, dt);
+            if (mImpl->initRetryTimer <= 0.f)
+            {
+                mImpl->initRetryTimer = 5.f;
+                ++mImpl->initAttempts;
+                init();
+            }
+        }
+
+        if (!mAvailable)
+        {
+            if (wantsToTalk)
+                notifyUnavailable("Voice chat has no usable microphone. Check the system default recording device and microphone permissions.");
+            return;
+        }
+
+        const bool pressed = wantsToTalk;
         if (pressed != mTransmitting)
         {
+            LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Voice: push-to-talk %s (%s)",
+                pressed ? "pressed" : "released", SDL_GetScancodeName(mImpl->pushToTalk));
             // Pause first so the capture callback cannot race the frame/converter
             // reset. This also guarantees that a new PTT press never replays the
             // tail of the previous transmission.

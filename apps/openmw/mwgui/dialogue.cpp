@@ -2021,10 +2021,13 @@ namespace MWGui
         std::string npcCaption = mPtr.getClass().getName(mPtr);
         if (mPtr.getClass().isNpc())
         {
-            const bool russian = MWBase::Environment::get().getWindowManager()->getArenaLanguage() == "ru";
             MWMechanics::ClassArchetype::DisplayInfo archetypeInfo;
-            if (MWMechanics::ClassArchetype::getDisplayInfo(mPtr, russian, archetypeInfo))
-                npcCaption += " — " + archetypeInfo.name;
+            if (MWMechanics::ClassArchetype::getDisplayInfo(mPtr, false, archetypeInfo))
+            {
+                const std::string name = MyGUI::LanguageManager::getInstance().replaceTags(
+                    "#{arenamp=archetype." + archetypeInfo.id + ".name}");
+                npcCaption += " — " + name;
+            }
         }
         npcCaption += " - " + MyGUI::utility::toString(level) + " lvl";
         mNpcName->setCaption(npcCaption);

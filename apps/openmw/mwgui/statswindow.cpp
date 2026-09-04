@@ -1,5 +1,6 @@
 #include "statswindow.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <MyGUI_Window.h>
 #include <MyGUI_Button.h>
@@ -22,6 +23,7 @@
 
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/classarchetype.hpp"
 #include "../mwmechanics/xpleveling.hpp"
 
 #include "tooltips.hpp"
@@ -40,11 +42,34 @@ namespace MWGui
         {
             return MyGUI::LanguageManager::getInstance().replaceTags("#{arenamp=" + key + "}");
         }
+
+        std::string archetypeText(const MWMechanics::ClassArchetype::DisplayInfo& info, const std::string& field)
+        {
+            return arenaText("archetype." + info.id + "." + field);
+        }
+
+        std::string attributeName(int attribute)
+        {
+            return MWBase::Environment::get().getWindowManager()->getGameSettingString(
+                ESM::Attribute::sGmstAttributeIds[attribute], ESM::Attribute::sGmstAttributeIds[attribute]);
+        }
+
+        void setArchetypeTooltip(MyGUI::Widget* widget, const std::string& text)
+        {
+            if (!widget)
+                return;
+            widget->setUserString("ToolTipType", "Layout");
+            widget->setUserString("ToolTipLayout", "TextToolTip");
+            widget->setUserString("Caption_Text", text);
+        }
     }
 
     StatsWindow::StatsWindow (DragAndDrop* drag)
       : WindowPinnableBase("openmw_stats_window.layout")
       , NoDrop(drag, mMainWidget)
+      , mArchetypeText(nullptr)
+      , mArchetypePowerBar(nullptr)
+      , mArchetypePowerText(nullptr)
       , mSkillView(nullptr)
       , mMajorSkills()
       , mMinorSkills()
@@ -84,6 +109,10 @@ namespace MWGui
         getWidget(mSkillView, "SkillView");
         getWidget(mLeftPane, "LeftPane");
         getWidget(mRightPane, "RightPane");
+        getWidget(mArchetypeText, "ArchetypeText");
+        getWidget(mArchetypePowerBar, "ArchetypePowerBar");
+        getWidget(mArchetypePowerText, "ArchetypePowerText");
+        mArchetypePowerBar->setProgressRange(100);
 
         // The compact statistics window uses one continuous scroll area. Relay the
         // mouse wheel from every static child (attributes, status bars, race/class)
@@ -459,6 +488,7 @@ namespace MWGui
 
         MWWorld::Ptr player = MWMechanics::getPlayer();
         const MWMechanics::NpcStats &PCstats = player.getClass().getNpcStats(player);
+        updateArchetypeInfo();
 
         // Level progress. XP Leveling completely replaces the vanilla sleep-based
         // LPRO counter while keeping the same tooltip/progress-bar layout.
@@ -527,6 +557,64 @@ namespace MWGui
 
         if (mChanged)
             updateSkillArea();
+    }
+
+    void StatsWindow::updateArchetypeInfo()
+    {
+        const MWWorld::Ptr player = MWMechanics::getPlayer();
+        MWMechanics::ClassArchetype::DisplayInfo info;
+        MWMechanics::ClassArchetype::RuntimeState state;
+        const bool sneaking = MWBase::Environment::get().getMechanicsManager()->isSneaking(player);
+        if (!MWMechanics::ClassArchetype::getDisplayInfo(player, false, info)
+            || !MWMechanics::ClassArchetype::getRuntimeState(player, sneaking, state))
+        {
+            mArchetypeText->setCaption("—");
+            mArchetypePowerBar->setProgressPosition(0);
+            mArchetypePowerText->setCaption(arenaText("archetype.power") + ": 0%");
+            return;
+        }
+
+        const MWMechanics::CreatureStats& stats = player.getClass().getCreatureStats(player);
+        const int value0 = static_cast<int>(std::lround(stats.getAttribute(state.attribute0).getModified()));
+        const int value1 = static_cast<int>(std::lround(stats.getAttribute(state.attribute1).getModified()));
+        const int powerPercent = std::clamp(static_cast<int>(std::lround(state.power * 100.f)), 0, 100);
+        const std::string name = archetypeText(info, "name");
+        mArchetypeText->setCaption(name);
+        mArchetypePowerBar->setProgressPosition(static_cast<std::size_t>(powerPercent));
+        mArchetypePowerText->setCaption(arenaText("archetype.power") + ": "
+            + MyGUI::utility::toString(powerPercent) + "%");
+
+        std::string tooltip = arenaText("archetype.label") + ": " + name;
+        tooltip += "\n" + arenaText("archetype.attributes") + ": "
+            + attributeName(state.attribute0) + " " + MyGUI::utility::toString(value0) + " + "
+            + attributeName(state.attribute1) + " " + MyGUI::utility::toString(value1);
+        tooltip += "\n" + arenaText("archetype.power") + ": "
+            + MyGUI::utility::toString(powerPercent) + "%";
+        tooltip += "\n\n" + arenaText("archetype.buff") + ": " + archetypeText(info, "buff");
+        tooltip += "\n" + arenaText("archetype.state") + ": " + arenaText("archetype.active");
+        if (state.hasConditionalBuff)
+        {
+            const std::string conditionKey = info.id == "monk"
+                ? "archetype.condition.unarmored" : "archetype.condition.sneak";
+            tooltip += "\n" + arenaText("archetype.conditional_bonus") + ": "
+                + arenaText(state.conditionalBuffActive ? "archetype.active" : "archetype.inactive")
+                + " — " + arenaText(conditionKey);
+        }
+        tooltip += "\n\n" + arenaText("archetype.debuff") + ": " + archetypeText(info, "debuff");
+        tooltip += "\n" + arenaText("archetype.state") + ": "
+            + arenaText(state.conditionalDrawbackActive ? "archetype.active" : "archetype.inactive");
+        if (state.hasConditionalDrawback)
+            tooltip += "\n" + arenaText("archetype.conditional_penalty") + ": "
+                + arenaText(state.conditionalDrawbackActive ? "archetype.active" : "archetype.inactive")
+                + " — " + arenaText("archetype.condition.armor");
+        tooltip += "\n\n" + arenaText("archetype.growth_hint");
+
+        MyGUI::Widget* archetypeLabel = nullptr;
+        getWidget(archetypeLabel, "Archetype_str");
+        setArchetypeTooltip(archetypeLabel, tooltip);
+        setArchetypeTooltip(mArchetypeText, tooltip);
+        setArchetypeTooltip(mArchetypePowerBar, tooltip);
+        setArchetypeTooltip(mArchetypePowerText, tooltip);
     }
 
     void StatsWindow::setFactions (const FactionList& factions)

@@ -33,6 +33,8 @@ namespace mwmp
         struct Impl;
 
     private:
+        void notifyUnavailable(const std::string& reason);
+
         std::unique_ptr<Impl> mImpl;
         bool mEnabled = true;
         bool mAvailable = false;

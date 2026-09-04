@@ -409,6 +409,8 @@ namespace MWGui
         , mDeathRecoveryTitle(nullptr)
         , mDeathRecoveryXpText(nullptr)
         , mDeathRecoveryPrompt(nullptr)
+        , mDeathRecoveryAction(nullptr)
+        , mDeathRecoveryBlinkTimer(0.f)
         , mWeapImage(nullptr)
         , mSpellImage(nullptr)
         , mWeapStatus(nullptr)
@@ -487,6 +489,7 @@ namespace MWGui
         getWidget(mDeathRecoveryTitle, "DeathRecoveryTitle");
         getWidget(mDeathRecoveryXpText, "DeathRecoveryXpText");
         getWidget(mDeathRecoveryPrompt, "DeathRecoveryPrompt");
+        getWidget(mDeathRecoveryAction, "DeathRecoveryAction");
         mDeathRecoveryXpBar->setProgressRange(1000);
 
         // X014: fixed widget pool for world-space combat health bars. Reusing
@@ -947,6 +950,7 @@ namespace MWGui
         const bool loginFinished = mwmp::Main::isInitialized()
             && mwmp::Main::get().getLocalPlayer()
             && mwmp::Main::get().getLocalPlayer()->isLoggedIn();
+        mDeathRecoveryBlinkTimer += std::max(0.f, dt);
 
         // LocalPlayer::isLoggedIn() becomes true only after an existing character has
         // been received or after the complete new-character registration sequence.
@@ -1000,10 +1004,17 @@ namespace MWGui
                     + MyGUI::utility::toString(static_cast<int>(std::lround(xp))) + "  |  "
                     + secondsStream.str() + " s");
                 if (potions > 0)
-                    mDeathRecoveryPrompt->setCaption(arenaText("death.recovery.self_prompt") + " ("
-                        + MyGUI::utility::toString(potions) + ")");
+                {
+                    mDeathRecoveryPrompt->setCaption(arenaText("death.recovery.self_prompt") + "\n"
+                        + arenaText("death.recovery.potions") + ": " + MyGUI::utility::toString(potions));
+                    mDeathRecoveryAction->setCaption(arenaText("death.recovery.action"));
+                    mDeathRecoveryAction->setVisible(true);
+                }
                 else
+                {
                     mDeathRecoveryPrompt->setCaption(arenaText("death.recovery.self_no_potion"));
+                    mDeathRecoveryAction->setVisible(false);
+                }
             }
             else if (local)
             {
@@ -1016,19 +1027,43 @@ namespace MWGui
                     mDeathRecoveryXpText->setVisible(false);
                     mDeathRecoveryTitle->setCaption(arenaText("death.recovery.ally_title") + ": " + allyName);
                     if (potions > 0)
-                        mDeathRecoveryPrompt->setCaption(arenaText("death.recovery.ally_prompt") + " ("
-                            + MyGUI::utility::toString(potions) + ")\n" + arenaText("death.recovery.touch_hint"));
+                    {
+                        mDeathRecoveryPrompt->setCaption(arenaText("death.recovery.ally_prompt") + "\n"
+                            + arenaText("death.recovery.potions") + ": " + MyGUI::utility::toString(potions));
+                        mDeathRecoveryAction->setCaption(arenaText("death.recovery.action"));
+                        mDeathRecoveryAction->setVisible(true);
+                    }
                     else
+                    {
                         mDeathRecoveryPrompt->setCaption(arenaText("death.recovery.touch_hint"));
+                        mDeathRecoveryAction->setVisible(false);
+                    }
                 }
                 else
+                {
                     mDeathRecoveryPanel->setVisible(false);
+                    mDeathRecoveryAction->setVisible(false);
+                }
             }
             else
+            {
                 mDeathRecoveryPanel->setVisible(false);
+                mDeathRecoveryAction->setVisible(false);
+            }
         }
         else if (mDeathRecoveryPanel)
+        {
             mDeathRecoveryPanel->setVisible(false);
+            if (mDeathRecoveryAction)
+                mDeathRecoveryAction->setVisible(false);
+        }
+
+        if (mDeathRecoveryAction && mDeathRecoveryAction->getVisible())
+        {
+            const float pulse = 0.5f + 0.5f * std::sin(mDeathRecoveryBlinkTimer * 7.f);
+            mDeathRecoveryAction->setTextColour(MyGUI::Colour(1.f, 0.12f + 0.35f * pulse, 0.12f + 0.35f * pulse));
+            mDeathRecoveryAction->setAlpha(0.62f + 0.38f * pulse);
+        }
 
         LocalMapBase::onFrame(dt);
 

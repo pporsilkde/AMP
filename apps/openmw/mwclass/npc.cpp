@@ -2,6 +2,8 @@
 
 #include <memory>
 
+#include <MyGUI_LanguageManager.h>
+
 #include <components/misc/constants.hpp>
 #include <components/misc/rng.hpp>
 
@@ -1487,18 +1489,23 @@ namespace MWClass
         const ESM::Class* klass = MWBase::Environment::get().getWorld()->getStore().get<ESM::Class>().search(ref->mBase->mClass);
         if (klass)
         {
-            const bool russian = MWBase::Environment::get().getWindowManager()->getArenaLanguage() == "ru";
             MWMechanics::ClassArchetype::DisplayInfo archetypeInfo;
             if (MWMechanics::ClassArchetype::getDisplayInfo(
-                    klass->mData.mAttribute[0], klass->mData.mAttribute[1], russian, archetypeInfo))
+                    klass->mData.mAttribute[0], klass->mData.mAttribute[1], false, archetypeInfo))
             {
+                auto arenaText = [](const std::string& key) {
+                    return MyGUI::LanguageManager::getInstance().replaceTags("#{arenamp=" + key + "}");
+                };
+                const std::string archetypeName = arenaText("archetype." + archetypeInfo.id + ".name");
                 if (!info.text.empty())
                     info.text += "\n";
-                info.text += (russian ? u8"Архетип: " : "Archetype: ") + archetypeInfo.name;
+                info.text += arenaText("archetype.label") + ": " + archetypeName;
                 if (fullHelp)
                 {
-                    info.text += std::string("\n") + (russian ? u8"Перк: " : "Perk: ") + archetypeInfo.perk;
-                    info.text += std::string("\n") + (russian ? u8"Компромисс: " : "Trade-off: ") + archetypeInfo.drawback;
+                    info.text += "\n" + arenaText("archetype.buff") + ": "
+                        + arenaText("archetype." + archetypeInfo.id + ".buff");
+                    info.text += "\n" + arenaText("archetype.debuff") + ": "
+                        + arenaText("archetype." + archetypeInfo.id + ".debuff");
                 }
             }
         }

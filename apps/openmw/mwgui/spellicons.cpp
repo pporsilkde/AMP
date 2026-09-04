@@ -4,6 +4,7 @@
 #include <iomanip>
 
 #include <MyGUI_ImageBox.h>
+#include <MyGUI_LanguageManager.h>
 
 #include <components/esm/loadmgef.hpp>
 #include <components/settings/settings.hpp>
@@ -67,14 +68,15 @@ namespace MWGui
         // exist in Spells/ActiveSpells as ordinary sources. Mirror them into the
         // Active Effects strip for UI only, using the exact same effect list that
         // Actors::adjustMagicEffects injects into CreatureStats.
-        const bool russian = MWBase::Environment::get().getWindowManager()->getArenaLanguage() == "ru";
         MWMechanics::ClassArchetype::DisplayInfo archetypeInfo;
-        if (MWMechanics::ClassArchetype::getDisplayInfo(player, russian, archetypeInfo))
+        if (MWMechanics::ClassArchetype::getDisplayInfo(player, false, archetypeInfo))
         {
             std::vector<MWMechanics::ClassArchetype::PassiveEffect> passiveEffects;
             const bool sneaking = MWBase::Environment::get().getMechanicsManager()->isSneaking(player);
             MWMechanics::ClassArchetype::getPassiveMagicEffects(player, sneaking, passiveEffects);
-            const std::string sourceName = (russian ? u8"Архетип: " : "Archetype: ") + archetypeInfo.name;
+            const std::string sourceName = MyGUI::LanguageManager::getInstance().replaceTags("#{arenamp=archetype.label}")
+                + ": " + MyGUI::LanguageManager::getInstance().replaceTags(
+                    "#{arenamp=archetype." + archetypeInfo.id + ".name}");
             for (const MWMechanics::ClassArchetype::PassiveEffect& passive : passiveEffects)
             {
                 MagicEffectInfo info;

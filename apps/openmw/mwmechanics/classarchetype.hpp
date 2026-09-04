@@ -29,11 +29,29 @@ namespace MWMechanics
             float magnitude;
         };
 
+        // Y043: compact runtime state for UI. The same values are derived from
+        // the mechanics table, so the displayed power/state cannot drift away
+        // from the actual archetype bonuses and drawbacks.
+        struct RuntimeState
+        {
+            int attribute0 = -1;
+            int attribute1 = -1;
+            float power = 0.f;
+            float armorLoad = 0.f;
+            bool hasConditionalBuff = false;
+            bool conditionalBuffActive = true;
+            bool hasConditionalDrawback = false;
+            bool conditionalDrawbackActive = true;
+        };
+
         // There are exactly 28 unordered pairs for Morrowind's eight attributes.
         // A class archetype is derived from the two favourite attributes, so no
         // extra save or network state is required.
         bool getDisplayInfo(int attribute0, int attribute1, bool russian, DisplayInfo& out);
         bool getDisplayInfo(const MWWorld::Ptr& actor, bool russian, DisplayInfo& out);
+        float getPairPower(const MWWorld::Ptr& actor);
+        float getPairPower(const MWWorld::Ptr& actor, int attribute0, int attribute1);
+        bool getRuntimeState(const MWWorld::Ptr& actor, bool sneaking, RuntimeState& out);
 
         float getHealthRegenFractionPerSecond(const MWWorld::Ptr& actor);
         float getMagickaRegenFractionPerSecond(const MWWorld::Ptr& actor);

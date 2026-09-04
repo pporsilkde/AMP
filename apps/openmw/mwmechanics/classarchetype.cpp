@@ -285,12 +285,20 @@ namespace
         return findDefinition(klass->mData.mAttribute[0], klass->mData.mAttribute[1]);
     }
 
+    float pairPowerForAttributes(const MWWorld::Ptr& actor, int attribute0, int attribute1)
+    {
+        if (actor.isEmpty() || !actor.getClass().isActor())
+            return 0.f;
+
+        const MWMechanics::CreatureStats& stats = actor.getClass().getCreatureStats(actor);
+        const float a = stats.getAttribute(attribute0).getModified();
+        const float b = stats.getAttribute(attribute1).getModified();
+        return std::clamp((a + b) / 200.f, 0.f, 1.f);
+    }
+
     float pairPower(const MWWorld::Ptr& actor, const Definition& definition)
     {
-        const MWMechanics::CreatureStats& stats = actor.getClass().getCreatureStats(actor);
-        const float a = stats.getAttribute(definition.a).getModified();
-        const float b = stats.getAttribute(definition.b).getModified();
-        return std::clamp((a + b) / 200.f, 0.f, 1.f);
+        return pairPowerForAttributes(actor, definition.a, definition.b);
     }
 
     float mediumHeavyArmorLoad(const MWWorld::Ptr& actor)
@@ -347,6 +355,50 @@ namespace MWMechanics
             if (!definition)
                 return false;
             return getDisplayInfo(definition->a, definition->b, russian, out);
+        }
+
+        float getPairPower(const MWWorld::Ptr& actor)
+        {
+            const Definition* definition = findDefinition(actor);
+            return definition ? pairPower(actor, *definition) : 0.f;
+        }
+
+        float getPairPower(const MWWorld::Ptr& actor, int attribute0, int attribute1)
+        {
+            if (!findDefinition(attribute0, attribute1))
+                return 0.f;
+            return pairPowerForAttributes(actor, attribute0, attribute1);
+        }
+
+        bool getRuntimeState(const MWWorld::Ptr& actor, bool sneaking, RuntimeState& out)
+        {
+            out = RuntimeState();
+            const Definition* definition = findDefinition(actor);
+            if (!definition)
+                return false;
+
+            out.attribute0 = definition->a;
+            out.attribute1 = definition->b;
+            out.power = pairPower(actor, *definition);
+            out.armorLoad = mediumHeavyArmorLoad(actor);
+
+            const char* id = definition->id;
+            if (std::strcmp(id, "nightblade") == 0 || std::strcmp(id, "thief") == 0
+                || std::strcmp(id, "rogue") == 0)
+            {
+                out.hasConditionalBuff = true;
+                out.conditionalBuffActive = sneaking;
+            }
+            else if (std::strcmp(id, "monk") == 0)
+            {
+                out.hasConditionalBuff = true;
+                out.conditionalBuffActive = out.armorLoad < 0.05f;
+            }
+
+            const Modifiers& m = definition->modifiers;
+            out.hasConditionalDrawback = m.armorMovePenalty > 0.f || m.armorFatiguePenalty > 0.f;
+            out.conditionalDrawbackActive = !out.hasConditionalDrawback || out.armorLoad > 0.01f;
+            return true;
         }
 
         float getHealthRegenFractionPerSecond(const MWWorld::Ptr& actor)

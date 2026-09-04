@@ -1,3 +1,12 @@
+## Y043 — archetype presentation, localisation and recovery HUD
+
+- Added a clear selected-archetype card and 0–100% power bar to preset/custom class creation.
+- Moved the persistent archetype presentation from Spellbook to Statistics, directly below Class, with detailed Buff/Debuff runtime tooltip.
+- Added complete EN/RU l10n entries for all 28 archetype names, buffs and debuffs; Russian Nightblade is displayed as «Клинок ночи».
+- Preserved native archetype Active Effect icons while removing the oversized Spellbook description block.
+- Reworked death recovery into a frameless multiline lower-HUD prompt with shadowed text and a blinking red Apply (E) action.
+- Protocol remains 806.
+
 ## Y039 — death XP countdown + potion/party recovery
 
 ### Added

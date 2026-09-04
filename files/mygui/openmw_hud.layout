@@ -217,31 +217,39 @@
 
  
 
-        <!-- Y039: death recovery / party revive panel. Hidden unless a recovery action is relevant. -->
-        <Widget type="Widget" skin="HUD_Box" position="-70 45 440 82" align="Center Center" name="DeathRecoveryPanel">
+        <!-- Y043: frameless, multiline recovery HUD below screen centre. -->
+        <Widget type="Widget" skin="" position="-70 -132 440 116" align="Center Bottom" name="DeathRecoveryPanel">
             <Property key="Visible" value="false"/>
             <Property key="NeedMouse" value="false"/>
-            <Widget type="TextBox" skin="SandBrightText" position="8 5 424 18" name="DeathRecoveryTitle">
-                <Property key="TextAlign" value="Center"/>
+            <Widget type="TextBox" skin="SandBrightText" position="0 0 440 19" name="DeathRecoveryTitle">
+                <Property key="TextAlign" value="Center VCenter"/>
                 <Property key="TextShadow" value="true"/>
                 <Property key="TextShadowColour" value="0 0 0"/>
                 <Property key="NeedMouse" value="false"/>
             </Widget>
-            <Widget type="ProgressBar" skin="MW_EnergyBar_Red" position="10 26 420 14" name="DeathRecoveryXpBar">
+            <Widget type="ProgressBar" skin="MW_EnergyBar_Red" position="10 22 420 14" name="DeathRecoveryXpBar">
                 <Property key="NeedMouse" value="false"/>
             </Widget>
-            <Widget type="TextBox" skin="SandText" position="10 25 420 16" name="DeathRecoveryXpText">
-                <Property key="TextAlign" value="Center"/>
+            <Widget type="TextBox" skin="SandBrightText" position="10 21 420 16" name="DeathRecoveryXpText">
+                <Property key="TextAlign" value="Center VCenter"/>
                 <Property key="TextShadow" value="true"/>
                 <Property key="TextShadowColour" value="0 0 0"/>
                 <Property key="NeedMouse" value="false"/>
             </Widget>
-            <Widget type="TextBox" skin="SandText" position="8 45 424 31" name="DeathRecoveryPrompt">
-                <Property key="TextAlign" value="Center"/>
+            <Widget type="TextBox" skin="SandText" position="0 41 440 54" name="DeathRecoveryPrompt">
+                <Property key="TextAlign" value="Center Top"/>
                 <Property key="TextShadow" value="true"/>
                 <Property key="TextShadowColour" value="0 0 0"/>
                 <Property key="NeedMouse" value="false"/>
+                <Property key="MultiLine" value="true"/>
                 <Property key="WordWrap" value="true"/>
+            </Widget>
+            <Widget type="TextBox" skin="SandBrightText" position="0 98 440 18" name="DeathRecoveryAction">
+                <Property key="Visible" value="false"/>
+                <Property key="TextAlign" value="Center VCenter"/>
+                <Property key="TextShadow" value="true"/>
+                <Property key="TextShadowColour" value="0 0 0"/>
+                <Property key="NeedMouse" value="false"/>
             </Widget>
         </Widget>
 

@@ -30,13 +30,9 @@ namespace MWGui
 
     protected:
         MyGUI::Widget* mEffectBox;
-        MyGUI::TextBox* mArchetypeName;
-        MyGUI::TextBox* mArchetypePerk;
-        MyGUI::TextBox* mArchetypeDrawback;
 
         std::string mSpellToDelete;
 
-        void updateArchetypeInfo();
         void onEnchantedItemSelected(MWWorld::Ptr item, bool alreadyEquipped);
         void onSpellSelected(const std::string& spellId);
         void onModelIndexSelected(SpellModel::ModelIndex index);

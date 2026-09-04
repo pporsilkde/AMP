@@ -4,6 +4,17 @@ local BaseWorld = require("world.base")
 
 local World = class("World", BaseWorld)
 
+-- Y042: jsonInterface.load() hands the path straight to io2.open(), which prints
+--   io2.open(): io2.file.new(): Cannot open .../world/<file> in mode "r"
+-- for a file that simply does not exist yet. Optional world files must therefore
+-- be probed before they are loaded, not loaded and then checked for nil.
+local function dataFileExists(relativePath)
+    local file = io.open((config.dataPath or ".") .. "/" .. relativePath, "r")
+    if file == nil then return false end
+    file:close()
+    return true
+end
+
 function World:__init()
     BaseWorld.__init(self)
 
@@ -13,14 +24,9 @@ function World:__init()
     self.legacySharedProgress = nil
 
     if self.hasEntry == nil then
-        local home = config.dataPath .. "/world/"
-        local file = io.open(home .. self.worldFile, "r")
-        if file ~= nil then
-            io.close()
-            self.hasEntry = true
-        else
-            self.hasEntry = false
-        end
+        -- Y042: the old probe called io.close() with no argument, which closes the
+        -- default OUTPUT file rather than the handle it had just opened.
+        self.hasEntry = dataFileExists("world/" .. self.worldFile)
     end
 end
 
@@ -95,7 +101,14 @@ end
 
 function World:LoadLegacySharedProgress()
     if self.legacySharedProgress ~= nil then return end
-    local loaded = jsonInterface.load("world/" .. self.legacySharedProgressFile)
+
+    -- The backup file only exists on servers that actually ran the Y014 mixed
+    -- state. On every other server it is absent by design, so its absence must be
+    -- silent instead of an io2 error line during startup.
+    local loaded = nil
+    if dataFileExists("world/" .. self.legacySharedProgressFile) then
+        loaded = jsonInterface.load("world/" .. self.legacySharedProgressFile)
+    end
     if type(loaded) ~= "table" then loaded = {} end
     if type(loaded.journal) ~= "table" then loaded.journal = {} end
     if type(loaded.topics) ~= "table" then loaded.topics = {} end
@@ -103,12 +116,19 @@ function World:LoadLegacySharedProgress()
 end
 
 function World:BackupLegacySharedProgress(journal, topics)
+    local hasJournal = type(journal) == "table" and next(journal) ~= nil
+    local hasTopics = type(topics) == "table" and next(topics) ~= nil
+
+    -- Called unconditionally from LoadFromDrive(). With nothing to back up there is
+    -- no reason to touch the backup file at all.
+    if not hasJournal and not hasTopics then return end
+
     self:LoadLegacySharedProgress()
     local changed = false
-    if type(journal) == "table" and next(journal) ~= nil then
+    if hasJournal then
         changed = mergeJournal(self.legacySharedProgress.journal, journal) or changed
     end
-    if type(topics) == "table" and next(topics) ~= nil then
+    if hasTopics then
         changed = mergeTopics(self.legacySharedProgress.topics, topics) or changed
     end
     if changed then

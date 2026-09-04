@@ -93,6 +93,8 @@ namespace MWGui
         MyGUI::TextBox* mDeathRecoveryTitle;
         MyGUI::TextBox* mDeathRecoveryXpText;
         MyGUI::TextBox* mDeathRecoveryPrompt;
+        MyGUI::TextBox* mDeathRecoveryAction;
+        float mDeathRecoveryBlinkTimer;
         MyGUI::Widget *mHealthFrame, *mMagickaFrame, *mFatigueFrame;
         MyGUI::Widget *mWeapBox, *mSpellBox, *mSneakBox;
         ItemWidget *mWeapImage;
