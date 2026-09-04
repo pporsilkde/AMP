@@ -661,6 +661,12 @@ namespace MWClass
             }
         }
 
+        // Y037: derive signature elemental weapon damage separately from the
+        // physical attack packet so native elemental resistance/weakness remains
+        // meaningful without changing protocol 806.
+        if (successful && ishealth && !object.isEmpty() && damage > 0.f)
+            MWMechanics::applyClassArchetypeElementalHit(attacker, ptr, object, damage, hitPosition);
+
         /*
             Start of tes3mp addition
 

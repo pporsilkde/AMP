@@ -1,3 +1,19 @@
+## Y037 — signature mechanics for the 28 archetypes
+
+- **Thief (Agility + Speed)** gains native Chameleon only while actually Sneaking. It scales with the pair and Sneak skill, around 22 at 50/50 + Sneak 30 and capped at 40.
+- **Nightblade** gains Sneak-only Night Eye plus weaker Chameleon; **Rogue** receives a light Sneak veil.
+- **Fire Warrior (Strength + Intelligence)** keeps Magicka regeneration and its medium/heavy-armour burden, while successful weapon hits now add scaling Fire Damage that respects native fire resistance/weakness and uses the native hit VFX/sound.
+- Sorcerer gains Spell Absorption, Monk gains unarmoured Sanctuary, Templar gains Resist Magicka, and several hunting/mystic archetypes gain Detect and thematic resistances.
+- Everything is derived from existing class attributes with no new save or packet fields; protocol remains **806**.
+
+## Y036 — 28 class archetypes from attribute pairs
+
+- Any two favourite attributes map to one of 28 unique archetypes.
+- The custom-class editor auto-replaces the stock Adventurer name unless the player typed a custom name.
+- Perk and trade-off are shown directly below the skill grid and scale with both selected attributes.
+- Effects are wired into regeneration, movement, capacity, combat, spell success and social economy.
+- No new save/network state; protocol remains **806**.
+
 ## Y034 — voice lip sync, protocol 806
 
 - Network protocol is **806** again. Voice uses an appended ArenaMP-only packet/channel without renumbering existing IDs.

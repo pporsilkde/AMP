@@ -9,6 +9,7 @@
 #include "../mwbase/windowmanager.hpp"
 
 #include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/classarchetype.hpp"
 
 #include "../mwworld/esmstore.hpp"
 
@@ -434,6 +435,9 @@ namespace MWGui
 
         setText("LabelT", MWBase::Environment::get().getWindowManager()->getGameSettingString("sName", ""));
         getWidget(mEditName, "EditName");
+        getWidget(mArchetypeName, "ArchetypeName");
+        getWidget(mArchetypePerk, "ArchetypePerk");
+        getWidget(mArchetypeDrawback, "ArchetypeDrawback");
 
         // Make sure the edit box has focus
         MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mEditName);
@@ -489,6 +493,37 @@ namespace MWGui
 
         ToolTips::createAttributeToolTip(mFavoriteAttribute0, mFavoriteAttribute0->getAttributeId());
         ToolTips::createAttributeToolTip(mFavoriteAttribute1, mFavoriteAttribute1->getAttributeId());
+        updateArchetypePreview();
+    }
+
+    void CreateClassDialog::updateArchetypePreview()
+    {
+        const bool russian = MWBase::Environment::get().getWindowManager()->getArenaLanguage() == "ru";
+        MWMechanics::ClassArchetype::DisplayInfo info;
+        if (!MWMechanics::ClassArchetype::getDisplayInfo(
+                mFavoriteAttribute0->getAttributeId(), mFavoriteAttribute1->getAttributeId(), russian, info))
+        {
+            mArchetypeName->setCaption(russian ? u8"Архетип: —" : "Archetype: —");
+            mArchetypePerk->setCaption("");
+            mArchetypeDrawback->setCaption("");
+            return;
+        }
+
+        mArchetypeName->setCaption((russian ? u8"Архетип: " : "Archetype: ") + info.name);
+        mArchetypePerk->setCaption((russian ? u8"Перк: " : "Perk: ") + info.perk);
+        mArchetypeDrawback->setCaption((russian ? u8"Компромисс: " : "Trade-off: ") + info.drawback);
+
+        // Replace only the stock "Adventurer"/previous auto-name. A player who
+        // typed a custom class name keeps it while experimenting with attributes.
+        const std::string stockName = MWBase::Environment::get().getWindowManager()->getGameSettingString(
+            "sCustomClassName", "Adventurer");
+        const std::string currentName = mEditName->getCaption();
+        if (currentName.empty() || Misc::StringUtils::ciEqual(currentName, stockName)
+            || (!mLastAutoClassName.empty() && Misc::StringUtils::ciEqual(currentName, mLastAutoClassName)))
+        {
+            mEditName->setCaption(info.name);
+        }
+        mLastAutoClassName = info.name;
     }
 
     std::string CreateClassDialog::getName() const

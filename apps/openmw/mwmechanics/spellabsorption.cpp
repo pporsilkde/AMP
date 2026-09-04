@@ -1,9 +1,13 @@
 #include "spellabsorption.hpp"
+#include "classarchetype.hpp"
 
+#include <algorithm>
 #include <components/misc/rng.hpp>
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/world.hpp"
+
+#include "../mwmp/PlayerList.hpp"
 
 #include "../mwrender/animation.hpp"
 
@@ -50,7 +54,9 @@ namespace MWMechanics
             return 0;
 
         CreatureStats& stats = target.getClass().getCreatureStats(target);
-        if (stats.getMagicEffects().get(ESM::MagicEffect::SpellAbsorption).getMagnitude() <= 0.f)
+        const bool playerArchetype = target == getPlayer() || mwmp::PlayerList::isDedicatedPlayer(target);
+        const float archetypeChance = playerArchetype ? ClassArchetype::getSpellAbsorptionChance(target) : 0.f;
+        if (stats.getMagicEffects().get(ESM::MagicEffect::SpellAbsorption).getMagnitude() <= 0.f && archetypeChance <= 0.f)
             return 0;
 
         GetAbsorptionProbability check;
@@ -59,7 +65,11 @@ namespace MWMechanics
         if (target.getClass().hasInventoryStore(target))
             target.getClass().getInventoryStore(target).visitEffectSources(check);
 
-        return check.mProbability * 100;
+        float probability = check.mProbability;
+        if (archetypeChance > 0.f)
+            probability = 1.f - (1.f - probability) * (1.f - archetypeChance / 100.f);
+
+        return std::clamp(probability * 100.f, 0.f, 100.f);
     }
 
     void absorbSpell (const std::string& spellId, const MWWorld::Ptr& caster, const MWWorld::Ptr& target)

@@ -309,15 +309,20 @@ namespace MWGui
         void setSpecialization(int id);
 
         void update();
+        void updateArchetypePreview();
 
     private:
         MyGUI::EditBox*                   mEditName;
         MyGUI::TextBox*                  mSpecializationName;
+        MyGUI::TextBox*                  mArchetypeName;
+        MyGUI::TextBox*                  mArchetypePerk;
+        MyGUI::TextBox*                  mArchetypeDrawback;
         Widgets::MWAttributePtr          mFavoriteAttribute0, mFavoriteAttribute1;
         Widgets::MWSkillPtr              mMajorSkill[5];
         Widgets::MWSkillPtr              mMinorSkill[5];
         std::vector<Widgets::MWSkillPtr> mSkills;
         std::string                      mDescription;
+        std::string                      mLastAutoClassName;
 
         SelectSpecializationDialog       *mSpecDialog;
         SelectAttributeDialog            *mAttribDialog;

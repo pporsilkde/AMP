@@ -17,6 +17,11 @@ namespace MWMechanics
 bool applyOnStrikeEnchantment(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim, const MWWorld::Ptr& object, const osg::Vec3f& hitPosition,
                               const bool fromProjectile=false);
 
+// Y037: applies a derived archetype elemental component separately from physical
+// armour mitigation. Returns the actual elemental damage dealt.
+float applyClassArchetypeElementalHit(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim,
+    const MWWorld::Ptr& object, float physicalDamage, const osg::Vec3f& hitPosition);
+
 /// @return can we block the attack?
 bool blockMeleeAttack (const MWWorld::Ptr& attacker, const MWWorld::Ptr& blocker, const MWWorld::Ptr& weapon, float damage, float attackStrength);
 

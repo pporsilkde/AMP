@@ -46,6 +46,7 @@
 #include "../mwmechanics/difficultyscaling.hpp"
 #include "../mwmechanics/weapontype.hpp"
 #include "../mwmechanics/actorutil.hpp"
+#include "../mwmechanics/classarchetype.hpp"
 #include "../mwmechanics/xpleveling.hpp"
 
 #include "../mwworld/ptr.hpp"
@@ -1103,6 +1104,9 @@ namespace MWClass
                     }
                 }
             }
+            if (ptr == MWMechanics::getPlayer() && damage > 0.f && !godmode)
+                damage *= MWMechanics::ClassArchetype::getIncomingDamageMultiplier(ptr);
+
             if (damage > 0.0f)
             {
                 sndMgr->playSound3D(ptr, "Health Damage", 1.0f, 1.0f);
@@ -1151,6 +1155,12 @@ namespace MWClass
                 stats.setFatigue(fatigue);
             }
         }
+
+        // Y037: signature elemental weapon damage is not folded into the physical
+        // packet damage. Every client derives it from the attacker's class pair,
+        // so protocol 806 remains unchanged and armour does not mitigate Fire.
+        if (successful && ishealth && !object.isEmpty() && damage > 0.f)
+            MWMechanics::applyClassArchetypeElementalHit(attacker, ptr, object, damage, hitPosition);
 
         if (!wasDead && getCreatureStats(ptr).isDead())
         {
@@ -1367,6 +1377,9 @@ namespace MWClass
         if(npcdata->mNpcStats.isWerewolf() && running && npcdata->mNpcStats.getDrawState() == MWMechanics::DrawState_Nothing)
             moveSpeed *= gmst.fWereWolfRunMult->mValue.getFloat();
 
+        if (ptr == MWMechanics::getPlayer())
+            moveSpeed *= MWMechanics::ClassArchetype::getMovementSpeedMultiplier(ptr);
+
         return moveSpeed;
     }
 
@@ -1475,7 +1488,10 @@ namespace MWClass
     {
         const MWMechanics::CreatureStats& stats = getCreatureStats (ptr);
         static const float fEncumbranceStrMult = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find("fEncumbranceStrMult")->mValue.getFloat();
-        return stats.getAttribute(ESM::Attribute::Strength).getModified()*fEncumbranceStrMult;
+        float capacity = stats.getAttribute(ESM::Attribute::Strength).getModified()*fEncumbranceStrMult;
+        if (ptr == MWMechanics::getPlayer())
+            capacity *= MWMechanics::ClassArchetype::getCarryCapacityMultiplier(ptr);
+        return capacity;
     }
 
     float Npc::getEncumbrance (const MWWorld::Ptr& ptr) const

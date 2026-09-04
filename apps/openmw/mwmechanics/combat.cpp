@@ -1,8 +1,13 @@
 #include "combat.hpp"
+#include "classarchetype.hpp"
 #include "poison.hpp"
 
+#include <algorithm>
 #include <components/misc/rng.hpp>
 #include <components/settings/settings.hpp>
+
+#include <components/esm/loadmgef.hpp>
+#include <components/esm/loadstat.hpp>
 
 #include <components/sceneutil/positionattitudetransform.hpp>
 
@@ -30,6 +35,8 @@
 #include "../mwworld/class.hpp"
 #include "../mwworld/inventorystore.hpp"
 #include "../mwworld/esmstore.hpp"
+
+#include "../mwrender/animation.hpp"
 
 #include "npcstats.hpp"
 #include "movement.hpp"
@@ -76,6 +83,58 @@ namespace MWMechanics
             }
         }
         return false;
+    }
+
+    float applyClassArchetypeElementalHit(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim,
+        const MWWorld::Ptr& object, float physicalDamage, const osg::Vec3f& /*hitPosition*/)
+    {
+        if (attacker.isEmpty() || victim.isEmpty() || object.isEmpty() || physicalDamage <= 0.f)
+            return 0.f;
+        if (attacker != getPlayer() && !mwmp::PlayerList::isDedicatedPlayer(attacker))
+            return 0.f;
+        if (!victim.getClass().isActor() || object.getTypeName() != typeid(ESM::Weapon).name())
+            return 0.f;
+        if (!MechanicsHelper::isFriendlyFireAllowed(attacker, victim))
+            return 0.f;
+        if (victim == getPlayer() && MWBase::Environment::get().getWorld()->getGodModeState())
+            return 0.f;
+
+        int effectId = -1;
+        float rawDamage = 0.f;
+        if (!ClassArchetype::getWeaponElementalBonus(attacker, physicalDamage, effectId, rawDamage))
+            return 0.f;
+
+        CreatureStats& victimStats = victim.getClass().getCreatureStats(victim);
+        float resistance = getEffectResistanceAttribute(static_cast<short>(effectId), &victimStats.getMagicEffects());
+        const float multiplier = std::clamp(1.f - resistance / 100.f, 0.f, 2.f);
+        const float elementalDamage = std::max(0.f, rawDamage * multiplier);
+        if (elementalDamage <= 0.f)
+            return 0.f;
+
+        DynamicStat<float> health = victimStats.getHealth();
+        health.setCurrent(health.getCurrent() - elementalDamage);
+        victimStats.setHealth(health);
+
+        // Reuse the native magic-effect presentation, but do not create an
+        // ActiveSpell: this is a deterministic weapon proc, not persistent state.
+        const MWWorld::ESMStore& store = MWBase::Environment::get().getWorld()->getStore();
+        const ESM::MagicEffect* effect = store.get<ESM::MagicEffect>().find(effectId);
+        if (effect)
+        {
+            MWBase::SoundManager* sound = MWBase::Environment::get().getSoundManager();
+            sound->playSound3D(victim, effect->mHitSound.empty() ? "destruction hit" : effect->mHitSound, 1.f, 1.f);
+
+            const ESM::Static* hitStatic = nullptr;
+            if (!effect->mHit.empty())
+                hitStatic = store.get<ESM::Static>().search(effect->mHit);
+            if (!hitStatic)
+                hitStatic = store.get<ESM::Static>().search("VFX_DefaultHit");
+            MWRender::Animation* animation = MWBase::Environment::get().getWorld()->getAnimation(victim);
+            if (animation && hitStatic && !hitStatic->mModel.empty())
+                animation->addEffect("meshes\\" + hitStatic->mModel, effect->mIndex, false, "", effect->mParticle);
+        }
+
+        return elementalDamage;
     }
 
     bool blockMeleeAttack(const MWWorld::Ptr &attacker, const MWWorld::Ptr &blocker, const MWWorld::Ptr &weapon, float damage, float attackStrength)
@@ -525,6 +584,11 @@ namespace MWMechanics
 
         /// end of EncoreMP hitchance changes
 
+        if (attacker == getPlayer())
+            attackTerm += ClassArchetype::getHitChanceBonus(attacker);
+        if (victim == getPlayer() || mwmp::PlayerList::isDedicatedPlayer(victim))
+            defenseTerm += ClassArchetype::getEvasionBonus(victim);
+
         return round(attackTerm - defenseTerm);
     }
 
@@ -832,6 +896,9 @@ namespace MWMechanics
         }
 
         // end of EncoreMP damage changes
+
+        if (attacker == getPlayer())
+            damage *= ClassArchetype::getWeaponDamageMultiplier(attacker);
 
     }
 

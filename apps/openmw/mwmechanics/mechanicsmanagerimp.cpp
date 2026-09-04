@@ -1,4 +1,5 @@
 #include "mechanicsmanagerimp.hpp"
+#include "classarchetype.hpp"
 
 #include <osg/Stats>
 
@@ -591,6 +592,9 @@ namespace MWMechanics
         if(addTemporaryDispositionChange)
           x += MWBase::Environment::get().getDialogueManager()->getTemporaryDispositionChange();
 
+        if (!useBaseStats)
+            x += ClassArchetype::getDispositionBonus(playerPtr);
+
         int effective_disposition = std::max(0,std::min(int(x),100));//, normally clamped to [0..100] when used
         return effective_disposition;
     }
@@ -646,6 +650,12 @@ namespace MWMechanics
         float buyTerm = 0.01f * (100 - 0.5f * (pcTerm - npcTerm));
         float sellTerm = 0.01f * (50 - 0.5f * (npcTerm - pcTerm));
         int offerPrice = int(basePrice * (buying ? buyTerm : sellTerm));
+        if (!useBaseStats)
+        {
+            const float advantage = ClassArchetype::getBarterAdvantage(playerPtr);
+            const float multiplier = buying ? (1.f - advantage) : (1.f + advantage);
+            offerPrice = static_cast<int>(offerPrice * multiplier);
+        }
         return std::max(1, offerPrice);
     }
 

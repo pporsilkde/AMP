@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <MyGUI type="Layout">
-    <Widget type="Window" skin="MW_Dialog" layer="Windows" position="0 0 498 198" align="Center" name="_Main">
+    <Widget type="Window" skin="MW_Dialog" layer="Windows" position="0 0 498 286" align="Center" name="_Main">
 
         <!-- Class name -->
         <Widget type="TextBox" skin="NormalText" position="8 8 52 23" name="LabelT" align="Left Top">
@@ -73,8 +73,27 @@
 
         </Widget>
 
+        <!-- Y036: attribute-pair archetype preview. The same pair drives the actual
+             mechanics, so this is not a cosmetic class description. -->
+        <Widget type="Widget" skin="" position="8 158 480 82" align="HStretch Top">
+            <Widget type="TextBox" skin="HeaderText" position="0 0 480 20" name="ArchetypeName" align="HStretch Top">
+                <Property key="Caption" value="Archetype:"/>
+                <Property key="TextAlign" value="Left VCenter"/>
+            </Widget>
+            <Widget type="TextBox" skin="NormalText" position="0 22 480 28" name="ArchetypePerk" align="HStretch Top">
+                <Property key="MultiLine" value="true"/>
+                <Property key="WordWrap" value="true"/>
+                <Property key="TextColour" value="0.62 0.86 0.56"/>
+            </Widget>
+            <Widget type="TextBox" skin="NormalText" position="0 51 480 31" name="ArchetypeDrawback" align="HStretch Top">
+                <Property key="MultiLine" value="true"/>
+                <Property key="WordWrap" value="true"/>
+                <Property key="TextColour" value="0.90 0.58 0.50"/>
+            </Widget>
+        </Widget>
+
         <!-- Dialog buttons -->
-        <Widget type="HBox" position="0 158 482 28">
+        <Widget type="HBox" position="0 246 482 28">
             <Widget type="Spacer"/>
             <Widget type="AutoSizedButton" skin="MW_Button" name="DescriptionButton">
                 <Property key="Caption" value="#{sCreateClassMenu1}"/>

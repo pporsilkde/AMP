@@ -1,3 +1,30 @@
+## Y037 — signature archetype mechanics
+
+### Added
+- **Thief** now gains native Chameleon only while genuinely Sneaking; magnitude scales with Agility + Speed and Sneak skill and is capped at 40.
+- **Nightblade** gains Sneak-only Night Eye plus a lighter Chameleon veil; **Rogue** gains a smaller Sneak-only Chameleon effect.
+- Strength + Intelligence becomes **Fire Warrior**: weapon hits add deterministic scaling Fire Damage, respect native fire resistance/weakness and use native hit VFX/sound, while retaining Magicka regeneration and the medium/heavy-armour burden.
+- Added native passive signatures to multiple other archetypes: Spell Absorption, Sanctuary, Resist Magicka/Fire/Paralysis/Poison/Disease and Detect Animal/Key/Enchantment.
+- Passive signatures are derived in realtime for LocalPlayer/DedicatedPlayer only and never create persistent ActiveSpell/save records.
+
+### Multiplayer / compatibility
+- Fire Warrior elemental damage remains outside the physical `PlayerAttack.damage` field and is deterministically re-derived from existing synchronized class/attribute/attack data.
+- No new save fields or packet fields were added; ArenaMP protocol remains **806**.
+
+## Y036 — 28 attribute-pair class archetypes
+
+### Added
+- The two favourite class attributes now select one of exactly 28 archetypes (`C(8,2)`), with EN/RU names, a strong perk and a visible trade-off.
+- Custom class creation replaces the stock `Adventurer` name with the pair archetype while preserving a name typed manually by the player.
+- The class editor shows the archetype, perk and drawback directly under the major/minor skill grid.
+- Archetype strength scales continuously with the current values of both favourite attributes; no new save field or network packet is used.
+- Perks can affect realtime Health/Magicka/Fatigue recovery, movement, carrying capacity, weapon damage, hit/evasion, spell success, incoming damage, barter and disposition.
+- Medium/heavy armour load is available as a real mechanical drawback for hybrid/mobile archetypes.
+
+### Compatibility
+- Existing classes and saves automatically derive their archetype from their two stored favourite attributes.
+- ArenaMP protocol remains **806**.
+
 ## Y035 — Windows/MSVC proximity voice build fix
 
 ### Fixed
