@@ -28,6 +28,8 @@ namespace Config
         int formatVersion;
         QString buildName;
         QString dataPath;
+        QString url;
+        bool urlSpecified;
         QString language;
         bool languageSpecified;
         QString serverAddress;

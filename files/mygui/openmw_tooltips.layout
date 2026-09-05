@@ -29,6 +29,31 @@
             </Widget>
         </Widget>
 
+
+        <!-- Y045: compact archetype tooltip. The UI itself shows only the archetype
+             name; power and all explanatory information live here. -->
+        <Widget type="VBox" skin="HUD_Box_NoTransp" position="0 0 430 0" align="Stretch" name="ArchetypeToolTip">
+            <Property key="AutoResize" value="true"/>
+            <Property key="Padding" value="8"/>
+            <Property key="Spacing" value="6"/>
+            <Widget type="AutoSizedTextBox" skin="SandBrightText" position="8 8 414 20" align="Left Top" name="ArchetypeTitle">
+                <Property key="TextAlign" value="Center VCenter"/>
+                <UserString key="HStretch" value="true"/>
+            </Widget>
+            <Widget type="ProgressBar" skin="MW_Progress_Green" position="8 34 414 16" align="HStretch Top" name="ArchetypePowerBar">
+                <Property key="ProgressRange" value="100"/>
+                <Widget type="TextBox" skin="ProgressText" position="0 0 414 16" name="ArchetypePowerText" align="Stretch">
+                    <Property key="NeedMouse" value="false"/>
+                    <Property key="TextAlign" value="Center VCenter"/>
+                </Widget>
+            </Widget>
+            <Widget type="AutoSizedEditBox" skin="SandText" position="8 56 414 0" align="Left Top" name="ArchetypeDetails">
+                <Property key="MultiLine" value="true"/>
+                <Property key="WordWrap" value="true"/>
+                <Property key="TextAlign" value="Left Top"/>
+            </Widget>
+        </Widget>
+
         <!-- Faction tooltip -->
         <Widget type="VBox" skin="HUD_Box_NoTransp" position="0 0 0 0" align="Stretch" name="FactionToolTip">
             <Property key="AutoResize" value="true"/>

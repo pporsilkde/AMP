@@ -124,6 +124,153 @@ function contentFixer.AdjustWorldCorprusVariables(journal)
     return madeAdjustment
 end
 
+
+
+-- ArenaMP Y043: MFR.esm compatibility ---------------------------------------
+-- MFR ships a single-player startup selector. In multiplayer its one-shot
+-- choice is not authoritative and can leave an old world in Start1/Start2,
+-- hiding entire quest branches. Mirror Start3 on the server and route the
+-- quest-exclusive interiors through the existing per-player instance layer.
+
+local function appendCaseInsensitiveUnique(target, value)
+    if type(target) ~= "table" or type(value) ~= "string" or value == "" then
+        return false
+    end
+    for _, current in ipairs(target) do
+        if type(current) == "string" and string.lower(current) == string.lower(value) then
+            return false
+        end
+    end
+    table.insert(target, value)
+    return true
+end
+
+local function isMfrLoaded()
+    local mfr = config.mfrCompatibility
+    if type(mfr) ~= "table" or mfr.enabled == false then
+        return false
+    end
+    local dataFile = mfr.dataFile or "MFR.esm"
+    return type(clientDataFiles) == "table" and tableHelper.containsCaseInsensitiveString(clientDataFiles, dataFile)
+end
+
+local function ensureMfrPrivateInstances(mfr)
+    if mfr.privateQuestInstances == false or type(mfr.privateQuestCells) ~= "table" then
+        return 0
+    end
+    config.privateCellInstances = config.privateCellInstances or {}
+
+    local knownCells = {}
+    for _, definition in pairs(config.privateCellInstances) do
+        if type(definition) == "table" and type(definition.baseCellDescription) == "string" then
+            knownCells[string.lower(definition.baseCellDescription)] = true
+        end
+    end
+
+    local added = 0
+    for index, cellDescription in ipairs(mfr.privateQuestCells) do
+        if type(cellDescription) == "string" and cellDescription ~= "" and not knownCells[string.lower(cellDescription)] then
+            local key = string.format("mfrQuest%02d", index)
+            while config.privateCellInstances[key] ~= nil do
+                key = key .. "x"
+            end
+            config.privateCellInstances[key] = {
+                enabled = true,
+                baseCellDescription = cellDescription,
+                instanceSuffix = " - Instance for ",
+                neverReset = true,
+                noticeEveryEntry = false
+            }
+            knownCells[string.lower(cellDescription)] = true
+            added = added + 1
+        end
+    end
+    return added
+end
+
+local function enforceMfrFullContentGlobals(mfr)
+    if mfr.forceFullContent == false or type(mfr.fullContentGlobals) ~= "table" or WorldInstance == nil then
+        return 0
+    end
+
+    WorldInstance.data.clientVariables = WorldInstance.data.clientVariables or {}
+    WorldInstance.data.clientVariables.globals = WorldInstance.data.clientVariables.globals or {}
+
+    local changed = 0
+    for _, definition in ipairs(mfr.fullContentGlobals) do
+        if type(definition) == "table" and type(definition.id) == "string" then
+            local key = string.lower(definition.id)
+            local variable
+            if definition.type == "float" then
+                variable = { variableType = enumerations.variableType.FLOAT, floatValue = tonumber(definition.value) or 0 }
+            elseif definition.type == "long" then
+                variable = { variableType = enumerations.variableType.LONG, intValue = math.floor(tonumber(definition.value) or 0) }
+            else
+                variable = { variableType = enumerations.variableType.SHORT, intValue = math.floor(tonumber(definition.value) or 0) }
+            end
+
+            local old = WorldInstance.data.clientVariables.globals[key]
+            local differs = type(old) ~= "table" or old.variableType ~= variable.variableType
+            if variable.floatValue ~= nil then
+                differs = differs or old.floatValue ~= variable.floatValue
+            else
+                differs = differs or old.intValue ~= variable.intValue
+            end
+            if differs then
+                WorldInstance.data.clientVariables.globals[key] = variable
+                changed = changed + 1
+            end
+        end
+    end
+
+    if changed > 0 then
+        WorldInstance:QuicksaveToDrive()
+    end
+    return changed
+end
+
+function contentFixer.ConfigureMfrCompatibility()
+    if not isMfrLoaded() then
+        return false
+    end
+
+    local mfr = config.mfrCompatibility
+    local disabledAdded, synchronizedAdded, startupAdded = 0, 0, 0
+
+    if type(mfr.disabledScripts) == "table" then
+        for _, scriptId in ipairs(mfr.disabledScripts) do
+            if (scriptId ~= "al_mistScript" or mfr.disableWaterMist ~= false) and
+                (string.sub(string.lower(scriptId), 1, 9) ~= "al_option" or mfr.disableOptionMenu ~= false) then
+                if appendCaseInsensitiveUnique(config.disabledClientScriptIds, scriptId) then disabledAdded = disabledAdded + 1 end
+            end
+        end
+    end
+
+    if type(mfr.synchronizedScripts) == "table" then
+        for _, scriptId in ipairs(mfr.synchronizedScripts) do
+            if appendCaseInsensitiveUnique(config.synchronizedClientScriptIds, scriptId) then synchronizedAdded = synchronizedAdded + 1 end
+        end
+    end
+
+    if type(mfr.playerStartupScripts) == "table" then
+        for _, scriptId in ipairs(mfr.playerStartupScripts) do
+            if appendCaseInsensitiveUnique(config.playerStartupScripts, scriptId) then startupAdded = startupAdded + 1 end
+        end
+    end
+
+    local instanceAdded = ensureMfrPrivateInstances(mfr)
+    local globalsChanged = enforceMfrFullContentGlobals(mfr)
+
+    tes3mp.LogMessage(enumerations.log.INFO, string.format(
+        "[ArenaMP MFR] active: full-content globals=%d, private instances=%d, sync scripts=%d, disabled scripts=%d, startup scripts=%d",
+        globalsChanged, instanceAdded, synchronizedAdded, disabledAdded, startupAdded))
+    return true
+end
+
+customEventHooks.registerHandler("OnServerPostInit", function(eventStatus)
+    contentFixer.ConfigureMfrCompatibility()
+end)
+
 customEventHooks.registerHandler("OnPlayerJournal", function(eventStatus, pid, playerPacket)
     if config.shareJournal == true then
         local madeAdjustment = contentFixer.AdjustWorldCorprusVariables(playerPacket.journal)

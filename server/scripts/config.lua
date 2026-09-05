@@ -615,6 +615,97 @@ config.serverQuestVanillaJournalWhitelist = {}
 -- Exactly as in the old server: keep this effectively empty so no second startup banner is printed.
 config.startupScriptsInstructions = color.SkyBlue .. " \n"
 
+
+-- ArenaMP Y043: MFR.esm compatibility policy.
+-- The server detects MFR.esm at OnServerPostInit; these values are inert when
+-- MFR is not loaded. The full-content profile reproduces MFR al_OptionStart3.
+config.mfrCompatibility = {
+    enabled = true,
+    forceFullContent = true,
+    privateQuestInstances = true,
+    disableWaterMist = true,
+    disableOptionMenu = true,
+    dataFile = "MFR.esm",
+    playerStartupScripts = { "aL_LoadGameMFR", "SW_UpdatePCRep" },
+    disabledScripts = {
+        -- 904 activators in 73 exterior cells run al_mistScript distance/weather/time logic.
+        -- Blank it to remove the heavy scripted water-mist controller.
+        "al_mistScript",
+        -- ArenaMP owns the MFR content profile; prevent a later local menu from
+        -- switching the world back to Start1/Start2 or rewriting the same globals.
+        "al_OptionInitialize", "al_OptionStart1", "al_OptionStart2", "al_OptionStart3",
+        "al_VanillaScript01", "al_VanillaScript02"
+    },
+    fullContentGlobals = {
+        { id = "al_MFRGlobal", type = "short", value = 1 },
+        { id = "al_mpregen_check", type = "short", value = 1 },
+        { id = "al_DifficultyMod", type = "float", value = 1.5 },
+        { id = "al_travGlobal", type = "short", value = 1 },
+        { id = "aL_Retroactive", type = "short", value = 0 },
+        { id = "al_CraftGlobal", type = "short", value = 1 },
+        { id = "al_QuestFalmer", type = "short", value = 0 },
+        { id = "al_QuestGMCald", type = "short", value = 0 },
+        { id = "al_QuestPelagiad", type = "short", value = 0 },
+        { id = "al_QuestCent", type = "short", value = 0 },
+        { id = "al_QuestClagius", type = "short", value = 0 },
+        { id = "al_QuestNirnroot", type = "short", value = 0 },
+        { id = "al_QuestHeladren", type = "short", value = 0 },
+        { id = "al_QuestCalia1", type = "short", value = 0 },
+        { id = "al_QuestCalia2", type = "short", value = 0 },
+        { id = "al_QuestEndyne", type = "short", value = 0 },
+        { id = "al_QuestFireAnud", type = "short", value = 0 },
+        { id = "al_QuestArena", type = "short", value = 0 },
+        { id = "al_QuestSkyrim", type = "short", value = 0 },
+        { id = "al_QuestTelMora", type = "short", value = 0 },
+        { id = "al_LocGDR", type = "short", value = 0 },
+        { id = "al_LowerLevels", type = "short", value = 0 },
+    },
+    privateQuestCells = {
+        "Vivec, Arena Pit",
+        "Vivec, Arena Blue Team's Bloodworks",
+        "Vivec, Arena Red Team's Bloodworks",
+        "Нрингмарт, Ледяные туннели",
+        "Нрингмарт, Зал кондесации",
+        "Нрингмарт, Зал Рудного Эха",
+        "Хижина Калии",
+        "Marandus, Dome",
+        "Сейда Нин, Дом Эндина",
+        "Форт Легиона Лунной Бабочки, Шахта",
+        "Аркнтанд, Галерея четырех лун",
+        "Аркнтанд, Эбонитовые залежи",
+        "Ашир-Дан, глубины",
+        "Забытые Своды Ануднабии",
+        "Akimaes Grotto",
+        "Тель Мора, Подземная Башня",
+    },
+    synchronizedScripts = {
+        "fal_falmersAttackScript", "al_falmer_wall_1", "al_Fal_FirePlace_01", "al_fal_FireIce",
+        "al_Fal_BM_rock_04", "Fal_ActObvalScript", "mfr_doorPass01", "mfr_doorPass02",
+        "al_fal_dwrv_load00clScr", "al_moonmothCaveDoor", "al_in_mudcave_rock_3_actFM", "al_moonmoth_cave_In",
+        "al_moonRuinDisable", "al_door_buttonbox_broken", "al_dwrv_arkntCrank1", "al_moonmoth_brennan",
+        "al_brennanJournal", "al_moonCaveJournal_85", "al_ashirDun_hpMinus", "al_chest_Ahir-Dan",
+        "al_HinabiDoor", "al_HinabiRock", "al_ClagiusADdisable", "al_ClagiusADdisable2",
+        "al_ClagiusADdisableRM", "al_moonCollisionDisable", "al_MoonGhorkDisable", "compCaliaScript",
+        "compCaliaStartScript", "al_calia_sword_sc", "al_CaliaDoor", "al_EndyneClothing",
+        "al_EndyneScriptAct", "al_EndyneStEnDis", "al_bookBetTreddur", "al_GMCaldDisable",
+        "al_mg_AnvilOfBoetia", "al_mg_book_script01", "al_mg_FAJournal01", "al_mg_FAJournal02",
+        "al_mg_chestofornsomaren", "al_mg_door_anudnabia", "al_PelagiadWelldoor", "al_PelagiadWelldoor2",
+        "al_PelagiadWellTopic", "al_cent_shock_remoteScr", "al_cent_shock_scr", "al_cent_shock_scr2",
+        "al_cent_shock_scr3", "al_cent_shock_scr4", "Arena_Dealer_script", "Arena_Master_Script",
+        "Arena_Grand_champion_Script", "Arena_Partner_Script", "Arena_Partner_R_Script", "Arena_Pit_door",
+        "Arena_PlaceChampions_script", "Arena_PlaceChamps_team_script", "Arena_PlaceFighters_script", "Arena_PlaceFighters_R_script",
+        "Arena_PlaceMonsters_script", "Arena_Monster_check_script", "Arena_FinalBattle_music_script", "Arena_Garding_dead_check_Script",
+        "Arena_Mods_dead_check_Script", "Arena_Bolvyn_Dead_Check_Script", "Arena_Rothis_dead_check_Script", "Arena_Trebon_Dead_Check_Script",
+        "Arena_Vatini_Dead_Check_Script", "Arena_bet_BlueFighter_Script", "Arena_bet_RedFighter_Script", "Arena_guard_script",
+        "Arena_options_stone_script", "Arena_spikes_colission", "Arena_spikes_damage", "arena_invisiblewall_script",
+        "Arena_safespot_block_script", "OAAB_script_TMora_redjinx", "OAAB_script_TMora_trapShock", "OAAB_script_TMora_vampcount",
+        "OAAB_script_TMora_vampstalker", "OAAB_script_TMora_whitejinx", "OAAB_script_TMora_goldkanet", "OAAB_script_TMora_index",
+        "OAAB_script_TMora_memstone_01", "OAAB_script_TMora_memstone_02", "OAAB_script_TMora_memstone_03", "OAAB_script_TMora_memstone_04",
+        "OAAB_script_TMora_timsa", "OAAB_script_TMora_tramaroot", "OAAB_script_TMora_webtrap", "al_dwrv_lava_GDR",
+        "al_GDRDisable", "al_GDRDisable2", "al_odr_Ladder_dn_ScrGDR", "al_odr_Ladder_ScriptGDR",
+    }
+}
+
 -- Which ingame startup scripts should be run via the /runstartup command
 -- Note: These affect the world and must not be run for every player who joins.
 config.worldStartupScripts = {"Startup", "BMStartUpScript"}

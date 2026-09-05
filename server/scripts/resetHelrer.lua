@@ -188,28 +188,42 @@ local cellResetTimers = loadCellResetTimersFile()
 local merchantCells = {}
 local startupCommandsHaveRun = false
 
--- ArenaMP C18: permanent personal instance for Caius Cosades' house.
--- Read the definition from server config when available so the reset script and
--- the core private-cell router always agree on the exact generated cell name.
-local privateCaiusBaseCell = "Balmora, Caius Cosades' House"
-local privateCaiusInstanceSuffix = " - Instance for "
-if config and config.privateCellInstances and config.privateCellInstances.caiusHouse then
-    local caiusConfig = config.privateCellInstances.caiusHouse
-    if type(caiusConfig.baseCellDescription) == "string" and caiusConfig.baseCellDescription ~= "" then
-        privateCaiusBaseCell = caiusConfig.baseCellDescription
+-- ArenaMP Y043: protect every configured persistent private instance, not only
+-- Caius. MFR adds several quest-exclusive interiors using the same dynamic CELL
+-- mechanism, so resetall/hourly/soft/full reset must never delete their state.
+local function getProtectedPrivateInstanceDefinition(cellDescription)
+    if type(cellDescription) ~= "string" or type(config) ~= "table" or
+        type(config.privateCellInstances) ~= "table" then
+        return nil, nil
     end
-    if type(caiusConfig.instanceSuffix) == "string" and caiusConfig.instanceSuffix ~= "" then
-        privateCaiusInstanceSuffix = caiusConfig.instanceSuffix
-    end
-end
 
-local function isPrivateCaiusInstance(cellDescription)
-    if type(cellDescription) ~= "string" then return false end
-    local prefix = string.lower(privateCaiusBaseCell .. privateCaiusInstanceSuffix)
     local current = string.lower(cellDescription)
-    return string.sub(current, 1, #prefix) == prefix
+    for key, definition in pairs(config.privateCellInstances) do
+        if type(definition) == "table" and definition.enabled ~= false and definition.neverReset == true and
+            type(definition.baseCellDescription) == "string" and definition.baseCellDescription ~= "" then
+            local suffix = definition.instanceSuffix
+            if type(suffix) ~= "string" or suffix == "" then suffix = " - Instance for " end
+            local prefix = string.lower(definition.baseCellDescription .. suffix)
+            if string.sub(current, 1, #prefix) == prefix then
+                return key, definition
+            end
+        end
+    end
+    return nil, nil
 end
 
+local function isProtectedPrivateInstance(cellDescription)
+    return getProtectedPrivateInstanceDefinition(cellDescription) ~= nil
+end
+
+-- Backward-compatible exported name for older addons; now true only for the
+-- configured Caius definition and kept separately from the generalized guard.
+local function isPrivateCaiusInstance(cellDescription)
+    local key = getProtectedPrivateInstanceDefinition(cellDescription)
+    return key == "caiusHouse"
+end
+
+periodicCellResets.isProtectedPrivateInstance = isProtectedPrivateInstance
 periodicCellResets.isPrivateCaiusInstance = isPrivateCaiusInstance
 
 -- ============================================================================
@@ -686,7 +700,7 @@ local function isCellEligibleForReset(cellDescription)
     -- Персональный дом Кая никогда не сбрасывается. Остальные generated
     -- instances используют обычный часовой таймер, если не внесены в явные
     -- исключения сервера.
-    if isPrivateCaiusInstance(cellDescription) then
+    if isProtectedPrivateInstance(cellDescription) then
         return false
     end
 
@@ -807,7 +821,7 @@ periodicCellResets.cleanUnownedHouses = cleanUnownedHouses
 local function safeResetUnloadedCell(cellDescription)
     -- Final safety gate for timer/admin paths and stale timer JSON from older
     -- versions: never allow a private Caius instance to reach reset code.
-    if isPrivateCaiusInstance(cellDescription) then
+    if isProtectedPrivateInstance(cellDescription) then
         cellResetTimers[cellDescription] = nil
         return false
     end
@@ -851,9 +865,9 @@ end
 -- doCellReset — ИСПРАВЛЕНО
 -- ============================================================================
 local doCellReset = function(pid, cellDescription)
-    if isPrivateCaiusInstance(cellDescription) then
+    if isProtectedPrivateInstance(cellDescription) then
         tes3mp.SendMessage(pid, color.Yellow .. "[Сброс Ячеек]: " .. color.Error ..
-            "Личный инстанс дома Кая Косадеса не сбрасывается.\n")
+            "Личный квестовый инстанс не сбрасывается.\n")
         return
     end
 
@@ -935,7 +949,7 @@ customCommandHooks.registerCommand("resett", periodicCellResets.ResetThisCell)
 -- ResetCell — ИСПРАВЛЕНО
 -- ============================================================================
 periodicCellResets.ResetCell = function(cellDescription)
-    if isPrivateCaiusInstance(cellDescription) then
+    if isProtectedPrivateInstance(cellDescription) then
         return
     end
 
@@ -973,9 +987,9 @@ end
 -- ResetHome — ИСПРАВЛЕНО
 -- ============================================================================
 periodicCellResets.ResetHome = function(cellDescription)
-    if isPrivateCaiusInstance(cellDescription) then
+    if isProtectedPrivateInstance(cellDescription) then
         tes3mp.LogAppend(enumerations.log.INFO,
-            "[ArenaMP Core] Пропуск личного инстанса дома Кая: " .. cellDescription)
+            "[ArenaMP Core] Пропуск защищённого личного инстанса: " .. cellDescription)
         return
     end
 
@@ -1537,8 +1551,8 @@ end
 -- МЯГКИЙ СБРОС (ОБНОВЛЕНИЕ МОБОВ) — ИСПРАВЛЕНО
 -- ===========================================================================================
 periodicCellResets.softResetCell = function(cellDescription)
-    if isPrivateCaiusInstance(cellDescription) then
-        return false, "Личный инстанс дома Кая Косадеса не сбрасывается."
+    if isProtectedPrivateInstance(cellDescription) then
+        return false, "Личный квестовый инстанс не сбрасывается."
     end
 
     local cellData = getHouseCellData(cellDescription)
@@ -1620,8 +1634,8 @@ end
 -- ПОЛНЫЙ СБРОС ЯЧЕЙКИ — ИСПРАВЛЕНО
 -- ===========================================================================================
 periodicCellResets.fullResetCell = function(cellDescription)
-    if isPrivateCaiusInstance(cellDescription) then
-        return false, "Личный инстанс дома Кая Косадеса не сбрасывается."
+    if isProtectedPrivateInstance(cellDescription) then
+        return false, "Личный квестовый инстанс не сбрасывается."
     end
 
     local cellData = getHouseCellData(cellDescription)

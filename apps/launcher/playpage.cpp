@@ -1,5 +1,6 @@
 #include "playpage.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <exception>
@@ -19,6 +20,7 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QLabel>
+#include <QUrl>
 #include <QNetworkInterface>
 #include <QHostAddress>
 #include <QHBoxLayout>
@@ -126,6 +128,7 @@ namespace
 Launcher::PlayPage::PlayPage(QWidget *parent)
     : QWidget(parent)
     , mEmbeddedServerConsole(nullptr)
+    , mBuildUrlLabel(nullptr)
     , mSyncingServerSettingsTabs(false)
     , mSyncingXpControls(false)
     , mHostInterfaceLabel(nullptr)
@@ -177,6 +180,18 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     mResetServerButton->setMinimumHeight(28);
     mClearCellsButton->setToolTip(tr("Delete saved cell state while keeping player accounts and world data."));
     mResetServerButton->setToolTip(tr("Delete all persistent gameplay data. The data-file manifest and ban list are preserved."));
+
+    // Optional project/community URL from build.ini. Keep it on the Play page
+    // rather than mixing it with the server address field.
+    mBuildUrlLabel = new QLabel(this);
+    mBuildUrlLabel->setObjectName(QStringLiteral("buildUrlLabel"));
+    mBuildUrlLabel->setTextFormat(Qt::RichText);
+    mBuildUrlLabel->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    mBuildUrlLabel->setOpenExternalLinks(true);
+    mBuildUrlLabel->setAlignment(Qt::AlignHCenter | Qt::AlignVCenter);
+    mBuildUrlLabel->setStyleSheet(QStringLiteral("font-size: 11pt;"));
+    mBuildUrlLabel->hide();
+    playTabLayout->insertWidget(std::max(0, playTabLayout->count() - 1), mBuildUrlLabel, 0, Qt::AlignHCenter);
 
     serverConnectionLayout->removeWidget(autoStartServerCheckBox);
     QHBoxLayout* hostModeLayout = new QHBoxLayout();
@@ -365,6 +380,32 @@ bool Launcher::PlayPage::saveXpProgressionSettings()
 void Launcher::PlayPage::setBuildName(const QString& name)
 {
     buildNameEdit->setText(name.trimmed().isEmpty() ? QStringLiteral("ArenaMP") : name.trimmed());
+}
+
+void Launcher::PlayPage::setBuildUrl(const QString& url)
+{
+    if (mBuildUrlLabel == nullptr)
+        return;
+
+    const QString display = url.trimmed();
+    if (display.isEmpty())
+    {
+        mBuildUrlLabel->clear();
+        mBuildUrlLabel->hide();
+        return;
+    }
+
+    QString target = display;
+    const QUrl parsed = QUrl::fromUserInput(target);
+    if (parsed.isValid() && !parsed.scheme().isEmpty())
+        target = parsed.toString();
+    else if (!target.contains(QLatin1String("://")))
+        target.prepend(QStringLiteral("https://"));
+
+    mBuildUrlLabel->setText(QStringLiteral("<a href=\"%1\">%2</a>")
+        .arg(target.toHtmlEscaped(), display.toHtmlEscaped()));
+    mBuildUrlLabel->setToolTip(tr("Open project/community link: %1").arg(display));
+    mBuildUrlLabel->show();
 }
 
 QString Launcher::PlayPage::buildName() const

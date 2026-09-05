@@ -1380,4 +1380,87 @@ if tableHelper.containsCaseInsensitiveString(clientDataFiles, "TR_Mainland.ESM")
     tableHelper.merge(clientVariableScopes, c21VariableScopes, true)
 end
 
+
+
+-- ArenaMP Y043: MFR.esm variable scopes.
+-- Only persistent player/quest/world state is synchronized. Volatile MFR timers
+-- stay unsynchronized to avoid the packet spam that a blanket 303-GLOB import
+-- would create.
+if tableHelper.containsCaseInsensitiveString(clientDataFiles, "MFR.esm") then
+    local mfrVariableScopes = {
+        globals = {
+            ignored = {
+                "al_target_active", "trav_viv_out", "al_CraftTemp", "al_CraftUnluck",
+                "al_OptionStep", "al_CustomStart", "ab01debug", "CG_Temp",
+                "CG_TempQ", "al_BoneGameTemp", "al_SorterGlobal", "al_MFRGlobal",
+                "al_mpregen_check", "al_DifficultyMod", "al_travGlobal", "aL_Retroactive",
+                "al_CraftGlobal", "al_QuestFalmer", "al_QuestGMCald", "al_QuestPelagiad",
+                "al_QuestCent", "al_QuestClagius", "al_QuestNirnroot", "al_QuestHeladren",
+                "al_QuestCalia1", "al_QuestCalia2", "al_QuestEndyne", "al_QuestFireAnud",
+                "al_QuestArena", "al_QuestSkyrim", "al_QuestTelMora", "al_LocGDR",
+                "al_LowerLevels",
+            },
+            personal = {
+                "CREL_VanillaStart", "CREL_isRandom", "CREL_overallState", "CREL_uniqueText",
+                "CREL_setVvaScen", "CREL_setSolScen", "CREL_setMorScen", "CREL_uTextMor",
+                "CREL_uTextSol", "CREL_uTextVva", "CREL_setCyrScen", "CREL_setSkyScen",
+                "CREL_itemEdRand", "CREL_spellEdRand", "CREL_randStart", "CREL_quickChoice",
+                "CREL_compEdRand", "CREL_compWeapon", "CREL_compArmor", "CREL_compMagic",
+                "CREL_setCompanion", "CREL_compMagicB", "CREL_compLongbl", "CREL_compShortb",
+                "CREL_compBluntw", "CREL_compAxe", "CREL_compSpear", "CREL_compMarks",
+                "CREL_compHandto", "CREL_compHeavya", "CREL_compMedium", "CREL_compLighta",
+                "CREL_compIllus", "CREL_compAlter", "CREL_compConju", "CREL_compDestr",
+                "CREL_compMysti", "CREL_compResto", "CREL_compStren", "CREL_compSpeed",
+                "CREL_compIntel", "CREL_compEndur", "CREL_compWillP", "CREL_compPerso",
+                "CREL_compAgili", "CREL_compLuck", "CREL_compHealth", "CREL_compMagicka",
+                "CREL_compFatigue", "CREL_compStatus", "CREL_compStart", "CREL_compLevel",
+                "CREL_compPet", "CREL_noShirt", "CREL_noPants", "CREL_petStren",
+                "CREL_petSpeed", "CREL_petIntel", "CREL_petEndur", "CREL_petWillP",
+                "CREL_petPerso", "CREL_petAgili", "CREL_petLuck", "CREL_petHealth",
+                "CREL_petMagicka", "CREL_petFatigue", "CREL_itemEdWeapon", "CREL_itemEdArmor",
+                "CREL_itemEdClothes", "CREL_itemEdClothesB", "CREL_factionEdRand", "CREL_factionChosen",
+                "CREL_compHealer", "CREL_setVampWere", "CREL_hostileScen", "CREL_compUnarm",
+                "KPCMagickaMultiplier", "KPCMagickaReturnBase", "KPCMagickaReturnMult", "KPCMagickaRegenEnabled",
+                "al_craft_armorer", "al_craft_jewerly", "al_craft_clothier", "al_craft_weapon",
+                "al_Clothier", "al_Jewerly", "al_WeaponCraft", "al_ArmorCraft",
+                "SW_PCRep", "CompCaliaLost", "GuarOwner", "GuarKMove",
+                "GuarKtempHealth", "GuarKtempHealthRatio", "GuarNotWarping", "Rent_Seyda_Neen_Arille",
+                "Rent_Khuul_Thongar", "Rent_Suran_Desele", "Rent_Dagonfel_End", "Rent_Gnisis_Madach",
+                "Rent_Suran_Trade", "Rent_Molagmar_Hostel", "Rent_Molagmar_Pilgrim", "Rent_Druegh-jiggers_Rest",
+                "Rent_Ald_Velothi",
+            },
+            quest = {
+                "al_mg_soul", "al_mg_thing", "al_mg_armor", "al_mg_error",
+                "al_mg_stage", "al_pir_gl", "al_ClanPotSteal", "al_bk_ajira1",
+                "al_bk_ajira2", "al_alchemy_BLM_count", "al_alchemy_BLM_npc", "al_alchemy_BLM_item",
+                "al_alchemy_BLM", "CraftQuestNpc", "CraftQuestIron", "CraftIronItem",
+                "CraftIronCount", "CraftIronMake", "CraftIronMakeCount", "CraftResourse",
+                "Room_fg_balm", "Room_hlaalu_balm", "Room_redoran_ald", "Room_telv_sadr",
+                "Room_ic_ebon", "Room_il_gnis", "Room_gm_cald", "Room_gm_balm",
+                "Room_mt_vivec", "Room_gt_balm", "Room_temple_ald", "al_Nartise",
+                "al_TribTransport", "mbgCalDisp", "mbgAcq", "mbgCaliaGreet",
+                "mbgCaliaFull", "OAAB_global_TMora_grown", "OAAB_global_TMora_stalkersdead", "OAAB_global_TMora_memstones",
+                "clangerGlobal", "ArenaGrandChampion", "ArenaWeek", "ArenaChampRandom",
+                "ArenaChampDead", "Arena_BattleNumber", "Arena_Bet_Disable", "Arena_Partner_Global",
+                "Arena_werewolf", "ArenaCompanionFollowing", "Arena_GrandDead", "Arena_SpectatorDisable",
+                "Arena_CuirassChange", "Arena_MonsterNumber", "Arena_MonsterCount", "Arena_MonsterDead",
+                "Arena_MonsterKills", "ArenaMWeek", "Arena_StorePrepare", "Arena_TM_R",
+                "Arena_TM_B", "Arena_TM_F", "Arena_TM_V", "Arena_TM_D",
+                "Arena_TM_H", "Arena_TM_A", "Arena_challenged_once", "Arena_Team_Partner",
+                "Arena_Team_Champ", "Arena_HardMode", "Arena_FinalMusic", "Arena_NoCuirass",
+                "Arena_Gore",
+            },
+            worldwide = {
+                "AB_LevitationDisabled", "AB_TeleportDisabled", "al_mzuleft_01_wall", "al_mzuleft_02_gateup",
+                "al_mzuleft_broke_valve", "al_rockwall_state", "al_dno_lift_state", "al_dnv_isdown",
+                "al_dnv_aredown", "al_dnv_rolled", "al_dnv_ifdown", "al_dn_creature_on",
+                "al_dn_creature_ison", "al_force_cage_on", "al_dn_dagoth_wake", "al_akul_lava_rise",
+                "al_dno_lava_down", "al_dn_dagoth_rest", "al_portal_active", "al_dnv_cagedown",
+                "al_dnv_forceslide", "al_dno_pitdoor",
+            }
+        }
+    }
+    tableHelper.merge(clientVariableScopes, mfrVariableScopes, true)
+end
+
 return clientVariableScopes

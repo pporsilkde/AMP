@@ -96,6 +96,8 @@ void Config::BuildManifest::clear()
     formatVersion = 1;
     buildName = QStringLiteral("ArenaMP");
     dataPath.clear();
+    url.clear();
+    urlSpecified = false;
     language = QStringLiteral("English");
     languageSpecified = false;
     serverAddress = QStringLiteral("127.0.0.1");
@@ -158,6 +160,13 @@ bool Config::BuildManifest::read(const QString& filePath, QString* errorMessage)
         else if (isBuildSection(section)
             && (key == QLatin1String("data") || key == QLatin1String("data-path") || key == QLatin1String("datafiles")))
             dataPath = value;
+        else if (isBuildSection(section)
+            && (key == QLatin1String("url") || key == QLatin1String("website")
+                || key == QLatin1String("link") || key == QLatin1String("project-url")))
+        {
+            url = value.trimmed();
+            urlSpecified = !url.isEmpty();
+        }
         else if (key == QLatin1String("language") || key == QLatin1String("locale")
             || ((section == QLatin1String("language") || section == QLatin1String("locale"))
                 && (key == QLatin1String("value") || key == QLatin1String("name")
@@ -235,6 +244,8 @@ bool Config::BuildManifest::write(const QString& filePath, QString* errorMessage
     stream << "name=" << encodeValue(buildName.trimmed().isEmpty() ? QStringLiteral("ArenaMP") : buildName.trimmed()) << "\n";
     stream << "data-path=" << encodeValue(dataPath) << "\n";
     stream << "language=" << encodeValue(canonicalLanguage(language)) << "\n";
+    if (urlSpecified && !url.trimmed().isEmpty())
+        stream << "url=" << encodeValue(url.trimmed()) << "\n";
     stream << "complete=" << (complete ? "true" : "false") << "\n\n";
 
     stream << "[Server]\n";
