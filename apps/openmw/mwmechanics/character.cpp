@@ -24,6 +24,8 @@
 #include <components/misc/mathutil.hpp>
 #include <components/misc/rng.hpp>
 
+#include <components/esm/loadclas.hpp>
+
 #include <components/settings/settings.hpp>
 
 #include <components/sceneutil/positionattitudetransform.hpp>
@@ -71,6 +73,19 @@ namespace
 {
 
 constexpr float sDynamicMovementTransitionSeconds = 0.12f;
+
+// ArenaMP: Stealth-specialized classes (localized as "Бродяга" in the
+// Arena class UI) do not pay the passive sneak fatigue upkeep.  Compare the
+// specialization enum rather than any localized class/specialization text.
+bool hasStealthSpecialization(const MWWorld::Ptr& actor, MWBase::World* world)
+{
+    if (!actor.getClass().isNpc())
+        return false;
+
+    const ESM::NPC* npc = actor.get<ESM::NPC>()->mBase;
+    const ESM::Class* klass = world->getStore().get<ESM::Class>().search(npc->mClass);
+    return klass && klass->mData.mSpecialization == ESM::Class::Stealth;
+}
 
 std::string getBestAttack (const ESM::Weapon* weapon)
 {
@@ -2412,12 +2427,19 @@ void CharacterController::update(float duration)
         static const float fFatigueSneakBase = gmst.find("fFatigueSneakBase")->mValue.getFloat();
         static const float fFatigueSneakMult = gmst.find("fFatigueSneakMult")->mValue.getFloat();
 
+        const bool stealthSpecialization = isPlayer && hasStealthSpecialization(mPtr, world);
+        const float encumbrance = cls.getEncumbrance(mPtr) <= cls.getCapacity(mPtr)
+            ? cls.getNormalizedEncumbrance(mPtr)
+            : 1.f;
+
         if (cls.getEncumbrance(mPtr) <= cls.getCapacity(mPtr))
         {
-            const float encumbrance = cls.getNormalizedEncumbrance(mPtr);
-            if (sneak)
+            // The player sneak upkeep is handled separately below so it also drains while
+            // standing still, can stop exactly at 1 fatigue, and can exempt the Stealth
+            // specialization ("Бродяга"). NPC behaviour stays unchanged.
+            if (sneak && !isPlayer)
                 fatigueLoss = fFatigueSneakBase + encumbrance * fFatigueSneakMult;
-            else
+            else if (!sneak)
             {
                 if (inwater)
                 {
@@ -2437,6 +2459,43 @@ void CharacterController::update(float duration)
         if (!godmode)
         {
             fatigue.setCurrent(fatigue.getCurrent() - fatigueLoss, fatigue.getCurrent() < 0);
+
+            // ArenaMP stamina upkeep while sneaking. This is intentionally independent
+            // of movement speed: simply holding Sneak costs stamina for every player
+            // except the Stealth specialization. The upkeep itself can never reduce
+            // fatigue below 1, so Sneak alone cannot knock the player out.
+            if (isPlayer && sneak && !stealthSpecialization && fatigue.getCurrent() > 1.f)
+            {
+                const float vanillaSneakRate = fFatigueSneakBase + encumbrance * fFatigueSneakMult;
+                const float sneakRate = std::max(1.f, vanillaSneakRate);
+                fatigue.setCurrent(std::max(1.f, fatigue.getCurrent() - sneakRate * duration));
+            }
+
+            // ArenaMP charged-attack upkeep. Melee wind-up/hold and bow/crossbow/
+            // thrown-weapon draw now consume fatigue continuously, in addition to the
+            // normal one-off fatigue cost when the attack is finally released.
+            if (isPlayer && isAttackPreparing() && cls.hasInventoryStore(mPtr))
+            {
+                MWWorld::InventoryStore& inventory = cls.getInventoryStore(mPtr);
+                MWWorld::ContainerStoreIterator weapon = inventory.getSlot(MWWorld::InventoryStore::Slot_CarriedRight);
+                if (weapon != inventory.end() && weapon.getType() == MWWorld::ContainerStore::Type_Weapon)
+                {
+                    static const float fFatigueAttackBase = gmst.find("fFatigueAttackBase")->mValue.getFloat();
+                    static const float fFatigueAttackMult = gmst.find("fFatigueAttackMult")->mValue.getFloat();
+                    static const float fWeaponFatigueMult = gmst.find("fWeaponFatigueMult")->mValue.getFloat();
+
+                    float holdRate = fFatigueAttackBase + encumbrance * fFatigueAttackMult;
+                    const float charge = std::max(0.1f, std::min(1.f, mAttackStrength));
+                    holdRate += weapon->getClass().getWeight(*weapon) * charge * fWeaponFatigueMult;
+
+                    // Some content sets the vanilla attack-fatigue GMSTs very low or to
+                    // zero. Keep a small guaranteed upkeep so holding a charged attack
+                    // always has a gameplay cost as intended by ArenaMP.
+                    holdRate = std::max(1.f, holdRate);
+                    fatigue.setCurrent(fatigue.getCurrent() - holdRate * duration, fatigue.getCurrent() < 0);
+                }
+            }
+
             cls.getCreatureStats(mPtr).setFatigue(fatigue);
         }
 

@@ -157,13 +157,13 @@ namespace MWGui
         else if (canRest == MWBase::World::Rest_Allowed && !mwmp::Main::get().getLocalPlayer()->wildernessRestAllowed &&
             !mwmp::Main::get().getLocalPlayer()->isUsingBed)
         {
-            MWBase::Environment::get().getWindowManager()->messageBox("You are not allowed to rest without a bed.");
+            // Server rule: silently close the rest menu. The legacy TES3MP text
+            // here was hardcoded English and bypassed ArenaMP localization.
             MWBase::Environment::get().getWindowManager()->popGuiMode();
         }
         else if (canRest == MWBase::World::Rest_OnlyWaiting && !mwmp::Main::get().getLocalPlayer()->waitAllowed &&
             !mwmp::Main::get().getLocalPlayer()->isUsingBed)
         {
-            MWBase::Environment::get().getWindowManager()->messageBox("You are not allowed to wait.");
             MWBase::Environment::get().getWindowManager()->popGuiMode();
         }
         /*

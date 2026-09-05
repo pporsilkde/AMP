@@ -227,6 +227,49 @@ periodicCellResets.isProtectedPrivateInstance = isProtectedPrivateInstance
 periodicCellResets.isPrivateCaiusInstance = isPrivateCaiusInstance
 
 -- ============================================================================
+-- ЗАНЯТОСТЬ ЯЧЕЙКИ — ИСПРАВЛЕНО (Y-fix: cell reset timer)
+-- Раньше занятость определялась как LoadedCells[cell] ~= nil. Но ядро сервера
+-- НЕ удаляет ячейку из LoadedCells, когда её покидает последний игрок
+-- (logicHandler.UnloadCellForPlayer только снимает visitor'а). В результате
+-- любая посещённая хотя бы раз ячейка навсегда считалась "занятой игроками" и
+-- по таймеру никогда не сбрасывалась.
+--
+-- Теперь занятость = есть ли онлайн-игрок, у которого эта ячейка реально
+-- загружена (cellsLoaded) или в которой он сейчас находится.
+-- ============================================================================
+local function getCellOccupantCount(cellDescription)
+    local count = 0
+
+    for pid, player in pairs(Players) do
+        if player and player:IsLoggedIn() then
+            local occupies = false
+
+            if player.cellsLoaded and tableHelper.containsValue(player.cellsLoaded, cellDescription) then
+                occupies = true
+            else
+                local ok, currentCell = pcall(tes3mp.GetCell, pid)
+                if ok and currentCell == cellDescription then
+                    occupies = true
+                end
+            end
+
+            if occupies then
+                count = count + 1
+            end
+        end
+    end
+
+    return count
+end
+
+local function isCellOccupied(cellDescription)
+    return getCellOccupantCount(cellDescription) > 0
+end
+
+periodicCellResets.getCellOccupantCount = getCellOccupantCount
+periodicCellResets.isCellOccupied = isCellOccupied
+
+-- ============================================================================
 -- БЕЗОПАСНАЯ ФУНКЦИЯ ОТПРАВКИ СБРОСА ЯЧЕЙКИ
 -- Отправляет пакеты ТОЛЬКО игрокам, у которых ячейка загружена
 -- ============================================================================
@@ -785,7 +828,7 @@ local function cleanUnownedHouses()
             -- Проверяем наличие владельца через актуальный API
             local ownerName = getHouseOwnerName(houseName)
             if not ownerName then
-                if LoadedCells[cellDescription] then
+                if isCellOccupied(cellDescription) then
                     -- В ячейке кто-то есть — пропустим до следующей проверки
                     skipped = skipped + 1
                     tes3mp.LogAppend(enumerations.log.WARN,
@@ -834,10 +877,14 @@ local function safeResetUnloadedCell(cellDescription)
         end
     end
 
-    local unloadAtEnd = false
+    -- Ячейка может уже висеть в LoadedCells без единого игрока внутри — это
+    -- нормальное состояние ядра. Сбрасываем её так же, как незагруженную.
+    if isCellOccupied(cellDescription) then
+        return false
+    end
+
     if not LoadedCells[cellDescription] then
         logicHandler.LoadCell(cellDescription)
-        unloadAtEnd = true
     end
 
     if not LoadedCells[cellDescription] then
@@ -851,9 +898,11 @@ local function safeResetUnloadedCell(cellDescription)
     safeSendObjectDelete(cellDescription)
     safeSendCellReset(cellDescription)
 
-    if unloadAtEnd then
-        logicHandler.UnloadCell(cellDescription)
-    end
+    -- Записываем очищенные данные на диск и выгружаем ячейку: внутри никого
+    -- нет, а следующий вход перечитает её уже пустой из JSON. Без этого
+    -- очистка жила только в памяти до ближайшего Quicksave.
+    LoadedCells[cellDescription]:Save()
+    logicHandler.UnloadCell(cellDescription)
 
     cellResetTimers[cellDescription] = nil
     removeCustomRecordsFromResetCell(cellDescription)
@@ -1051,7 +1100,7 @@ local pushCellResetsEarly = function(pid, cmd)
                     doSave = true
                 end
                 if not skip and markTime >= cellResetTime then
-                    if not LoadedCells[cellDescription] then
+                    if not isCellOccupied(cellDescription) then
                         table.insert(cellsToReset, cellDescription)
                     else
                         cellLoaded = cellLoaded + 1
@@ -1118,7 +1167,7 @@ local pushResetAllCells = function(pid, cmd)
                     doSave = true
                 end
                 if not skip then
-                    if not LoadedCells[cellDescription] then
+                    if not isCellOccupied(cellDescription) then
                         table.insert(cellsToReset, cellDescription)
                     else
                         -- Ячейка занята игроками — запланируем повторную попытку
@@ -1171,8 +1220,7 @@ local pushResetAllCells = function(pid, cmd)
         if doSave then
             SaveCellResetTimers(true)
             -- Перезапускаем таймер с оптимальной задержкой после перепланирования
-            tes3mp.StopTimer(GlobalCellResetTimer)
-            tes3mp.StartTimer(GlobalCellResetTimer, time.seconds(nextTimerDelay()))
+            tes3mp.RestartTimer(GlobalCellResetTimer, time.seconds(nextTimerDelay()))
         end
     end
 end
@@ -1206,8 +1254,11 @@ local checkMerchantCell = function()
     -- Собираем ключи заранее чтобы не изменять таблицу в цикле итерации
     local toRemove = {}
     for cellDescription, daySaved in pairs(merchantCells) do
-        if not LoadedCells[cellDescription] and daySaved and currentDay >= daySaved then
+        if not isCellOccupied(cellDescription) and daySaved and currentDay >= daySaved then
             cellResetTimers[cellDescription] = 0
+            -- Без heapPush запись с временем 0 не попадала в планировщик и
+            -- ячейка торговца ждала сброса до перезапуска сервера.
+            heapPush(0, cellDescription)
             table.insert(toRemove, cellDescription)
             doSave = true
         end
@@ -1240,8 +1291,9 @@ customEventHooks.registerHandler("OnPlayerCellChange", function(eventStatus, pid
                 -- Дебаунс: не пишем JSON при каждой смене ячейки каждым игроком
                 SaveCellResetTimers()
                 -- Перезапускаем таймер с оптимальной задержкой
-                tes3mp.StopTimer(GlobalCellResetTimer)
-                tes3mp.StartTimer(GlobalCellResetTimer, time.seconds(nextTimerDelay()))
+                -- StartTimer принимает только id таймера: период из второго
+                -- аргумента молча игнорировался. Нужен RestartTimer.
+                tes3mp.RestartTimer(GlobalCellResetTimer, time.seconds(nextTimerDelay()))
             end
             specificCellFunctionsToAlwaysRun(pid, cellDescription)
         end
@@ -1299,7 +1351,7 @@ periodicCellResets.UpdateResetTimers = function()
                 -- Ячейку нельзя сбросить пока в ней игроки. Раньше запись просто
                 -- исчезала из heap и могла больше никогда не сброситься. Теперь
                 -- занятая ячейка получает новую попытку через cellResetTimeCheck.
-                elseif not LoadedCells[top.cell] then
+                elseif not isCellOccupied(top.cell) then
                     table.insert(cellsToReset, top.cell)
                 else
                     local retryTime = markTime + cellResetTimeCheck

@@ -531,6 +531,7 @@ namespace MWGui
 
     void DialogueWindow::onTradeComplete()
     {
+        mTradeCompletedThisDialogue = true;
         addResponse("", MyGUI::LanguageManager::getInstance().replaceTags("#{sBarterDialog5}"));
     }
 
@@ -1597,8 +1598,16 @@ namespace MWGui
         {
             MWBase::DialogueManager* dialogueManager = MWBase::Environment::get().getDialogueManager();
 
-            if (dialogueChoiceType == mwmp::DialogueChoiceType::BARTER && !dialogueManager->checkServiceRefused(mCallback.get(), MWBase::DialogueManager::Barter))
-                MWBase::Environment::get().getWindowManager()->pushGuiMode(GM_Barter, mPtr);
+            if (dialogueChoiceType == mwmp::DialogueChoiceType::BARTER)
+            {
+                if (mTradeCompletedThisDialogue)
+                {
+                    MWBase::Environment::get().getWindowManager()->messageBox(
+                        "#{arenamp=dialogue.trade_exhausted}");
+                }
+                else if (!dialogueManager->checkServiceRefused(mCallback.get(), MWBase::DialogueManager::Barter))
+                    MWBase::Environment::get().getWindowManager()->pushGuiMode(GM_Barter, mPtr);
+            }
             else if (dialogueChoiceType == mwmp::DialogueChoiceType::SPELLS && !dialogueManager->checkServiceRefused(mCallback.get(), MWBase::DialogueManager::Spells))
                 MWBase::Environment::get().getWindowManager()->pushGuiMode(GM_SpellBuying, mPtr);
             else if (dialogueChoiceType == mwmp::DialogueChoiceType::TRAVEL && !dialogueManager->checkServiceRefused(mCallback.get(), MWBase::DialogueManager::Travel))
@@ -1658,6 +1667,8 @@ namespace MWGui
         mPtr = actor;
         mGoodbye = false;
         mPersuasionMode = false;
+        // setPtr starts a new conversation even when the actor is the same NPC.
+        mTradeCompletedThisDialogue = false;
         mPersuasionChoices.clear();
         mTopicsList->setEnabled(true);
 

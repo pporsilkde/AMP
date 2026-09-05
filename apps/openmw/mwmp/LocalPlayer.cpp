@@ -335,7 +335,13 @@ bool LocalPlayer::getRecoverableAllyName(std::string& name) const
     if (faced.isEmpty() || !PlayerList::isDedicatedPlayer(faced))
         return false;
     DedicatedPlayer* target = PlayerList::getPlayer(faced);
-    if (!target || std::find(alliedPlayers.begin(), alliedPlayers.end(), target->guid) == alliedPlayers.end())
+    const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+    // Group ally packets can arrive one side at a time. The old check only looked
+    // at LocalPlayer::alliedPlayers, so a perfectly valid party member could not
+    // be offered for recovery while the reverse ally packet was already present.
+    // MechanicsHelper::areAllied deliberately checks both directions. The server
+    // still authoritatively verifies actual group membership before reviving.
+    if (!target || player.isEmpty() || !MechanicsHelper::areAllied(player, faced))
         return false;
     if (!faced.getClass().getCreatureStats(faced).isDead())
         return false;
@@ -356,7 +362,8 @@ void LocalPlayer::requestTouchRecovery(const MWWorld::Ptr& targetPtr)
         || !targetPtr.getClass().getCreatureStats(targetPtr).isDead())
         return;
     DedicatedPlayer* target = PlayerList::getPlayer(targetPtr);
-    if (!target || std::find(alliedPlayers.begin(), alliedPlayers.end(), target->guid) == alliedPlayers.end())
+    const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+    if (!target || player.isEmpty() || !MechanicsHelper::areAllied(player, targetPtr))
         return;
     sendDeathRecoveryControl("TOUCH\t" + target->npc.mName);
 }

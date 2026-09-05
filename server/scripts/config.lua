@@ -728,8 +728,9 @@ config.allowConsole = false
 -- Whether players should be allowed to rest in bed by default
 config.allowBedRest = true
 
--- Whether players should be allowed to rest in the wilderness by default
-config.allowWildernessRest = true
+-- Whether players should be allowed to rest in the wilderness by default.
+-- ArenaMP default: beds are required; outdoor rest/sleep is disabled.
+config.allowWildernessRest = false
 
 -- Whether players should be allowed to wait by default
 config.allowWait = false

@@ -229,6 +229,9 @@ namespace MWGui
         std::vector<int> mPersuasionChoices;
         bool mGoodbye;
         bool mPersuasionMode;
+        // After a successful barter, the same conversation cannot immediately
+        // reopen the merchant window. Starting a fresh dialogue resets this.
+        bool mTradeCompletedThisDialogue = false;
 
         struct PendingLocalTopic
         {

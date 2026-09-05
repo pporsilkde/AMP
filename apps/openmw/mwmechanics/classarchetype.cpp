@@ -291,8 +291,12 @@ namespace
             return 0.f;
 
         const MWMechanics::CreatureStats& stats = actor.getClass().getCreatureStats(actor);
-        const float a = stats.getAttribute(attribute0).getModified();
-        const float b = stats.getAttribute(attribute1).getModified();
+        // MP fix: archetype strength is character progression, not equipment power.
+        // Fortify Attribute, enchanted gear, spells and other temporary modifiers must
+        // not increase (or decrease) the archetype pair. Attribute damage is likewise
+        // ignored here; only the permanent/base attribute values drive the archetype.
+        const float a = stats.getAttribute(attribute0).getBase();
+        const float b = stats.getAttribute(attribute1).getBase();
         return std::clamp((a + b) / 200.f, 0.f, 1.f);
     }
 
