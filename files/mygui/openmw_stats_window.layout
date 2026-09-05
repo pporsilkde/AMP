@@ -104,6 +104,13 @@
                         <Property key="TextAlign" value="Right Top" />
                     </Widget>
                 </Widget>
+                <Widget type="ProgressBar" skin="MW_Progress_Green" position="4 81 204 14" name="ArchetypePowerBar" align="Top HStretch">
+                    <Property key="Visible" value="false" />
+                    <Widget type="TextBox" skin="ProgressText" position="0 0 204 14" name="ArchetypePowerText" align="Stretch">
+                        <Property key="NeedMouse" value="false" />
+                        <Property key="TextAlign" value="Center VCenter" />
+                    </Widget>
+                </Widget>
             </Widget>
             <Widget type="Widget" skin="MW_Box" position="8 168 212 152" align="Top HStretch" name="AttributesBox">
                 <Widget type="Widget" skin="" position="4 4 204 144" align="Left Top Stretch" name="AttributeView">

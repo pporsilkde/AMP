@@ -4,6 +4,11 @@
 #include "statswatcher.hpp"
 #include "windowpinnablebase.hpp"
 
+namespace MyGUI
+{
+    class ProgressBar;
+}
+
 namespace MWGui
 {
     class StatsWindow : public WindowPinnableBase, public NoDrop, public StatsListener
@@ -55,6 +60,8 @@ namespace MWGui
             MyGUI::Widget* mLeftPane;
             MyGUI::Widget* mRightPane;
             MyGUI::TextBox* mArchetypeText;
+            MyGUI::ProgressBar* mArchetypePowerBar;
+            MyGUI::TextBox* mArchetypePowerText;
 
             MyGUI::ScrollView* mSkillView;
 

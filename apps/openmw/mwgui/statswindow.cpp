@@ -14,8 +14,6 @@
 #include <components/settings/settings.hpp>
 
 #include "../mwbase/environment.hpp"
-#include "../mwbase/mechanicsmanager.hpp"
-#include "../mwbase/statemanager.hpp"
 #include "../mwbase/world.hpp"
 #include "../mwbase/windowmanager.hpp"
 
@@ -23,7 +21,6 @@
 #include "../mwworld/player.hpp"
 #include "../mwworld/esmstore.hpp"
 
-#include "../mwmechanics/creaturestats.hpp"
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/actorutil.hpp"
 #include "../mwmechanics/classarchetype.hpp"
@@ -77,6 +74,8 @@ namespace MWGui
       : WindowPinnableBase("openmw_stats_window.layout")
       , NoDrop(drag, mMainWidget)
       , mArchetypeText(nullptr)
+      , mArchetypePowerBar(nullptr)
+      , mArchetypePowerText(nullptr)
       , mSkillView(nullptr)
       , mMajorSkills()
       , mMinorSkills()
@@ -117,6 +116,9 @@ namespace MWGui
         getWidget(mLeftPane, "LeftPane");
         getWidget(mRightPane, "RightPane");
         getWidget(mArchetypeText, "ArchetypeText");
+        getWidget(mArchetypePowerBar, "ArchetypePowerBar");
+        getWidget(mArchetypePowerText, "ArchetypePowerText");
+        mArchetypePowerBar->setProgressRange(100);
 
         // The compact statistics window uses one continuous scroll area. Relay the
         // mouse wheel from every static child (attributes, status bars, race/class)
@@ -565,58 +567,28 @@ namespace MWGui
 
     void StatsWindow::updateArchetypeInfo()
     {
-        // Y045c: this runs from onFrame, and a pinned Stats window is updated by
-        // WindowManager::update() before the "game running" guard. At that point
-        // the player object can exist without being placed in a cell yet, which
-        // is exactly the startup window between content load and the first area
-        // load. Everything below must therefore be safe for a cell-less player.
-        const auto clearArchetype = [this]() {
-            mArchetypeText->setCaption("—");
-            mArchetypeText->setUserString("ToolTipType", "");
-        };
-
-        MWBase::World* world = MWBase::Environment::get().getWorld();
-        MWBase::StateManager* stateManager = MWBase::Environment::get().getStateManager();
-        if (!world || !stateManager || stateManager->getState() == MWBase::StateManager::State_NoGame)
-        {
-            clearArchetype();
-            return;
-        }
-
-        const MWWorld::Ptr player = world->getPlayerPtr();
-        if (player.isEmpty() || !player.isInCell())
-        {
-            clearArchetype();
-            return;
-        }
-
+        const MWWorld::Ptr player = MWMechanics::getPlayer();
         MWMechanics::ClassArchetype::DisplayInfo info;
-        if (!MWMechanics::ClassArchetype::getDisplayInfo(player, false, info))
+        MWMechanics::ClassArchetype::RuntimeState state;
+        const bool sneaking = MWBase::Environment::get().getMechanicsManager()->isSneaking(player);
+        if (!MWMechanics::ClassArchetype::getDisplayInfo(player, false, info)
+            || !MWMechanics::ClassArchetype::getRuntimeState(player, sneaking, state))
         {
-            clearArchetype();
+            mArchetypeText->setCaption("—");
+            mArchetypePowerBar->setProgressPosition(0);
+            mArchetypePowerText->setCaption(arenaText("archetype.power") + ": 0%");
             return;
         }
 
         const MWMechanics::CreatureStats& stats = player.getClass().getCreatureStats(player);
-
-        // Do not call MechanicsManager::isSneaking() here. It resolves the actor
-        // through the physics system and the current cell (isOnGround/isSwimming),
-        // neither of which is guaranteed while the world is still initialising.
-        // The sneak stance itself is plain CreatureStats data and is always safe.
-        const bool sneaking = stats.getStance(MWMechanics::CreatureStats::Stance_Sneak);
-
-        MWMechanics::ClassArchetype::RuntimeState state;
-        if (!MWMechanics::ClassArchetype::getRuntimeState(player, sneaking, state))
-        {
-            clearArchetype();
-            return;
-        }
-
         const int value0 = static_cast<int>(std::lround(stats.getAttribute(state.attribute0).getModified()));
         const int value1 = static_cast<int>(std::lround(stats.getAttribute(state.attribute1).getModified()));
         const int powerPercent = std::clamp(static_cast<int>(std::lround(state.power * 100.f)), 0, 100);
         const std::string name = archetypeText(info, "name");
         mArchetypeText->setCaption(name);
+        mArchetypePowerBar->setProgressPosition(static_cast<std::size_t>(powerPercent));
+        mArchetypePowerText->setCaption(arenaText("archetype.power") + ": "
+            + MyGUI::utility::toString(powerPercent) + "%");
 
         const std::string tooltipTitle = arenaText("archetype.label") + ": " + name;
         std::string tooltip = arenaText("archetype.attributes") + ": "
@@ -645,6 +617,8 @@ namespace MWGui
         getWidget(archetypeLabel, "Archetype_str");
         setArchetypeTooltip(archetypeLabel, tooltipTitle, tooltip, powerPercent);
         setArchetypeTooltip(mArchetypeText, tooltipTitle, tooltip, powerPercent);
+        setArchetypeTooltip(mArchetypePowerBar, tooltipTitle, tooltip, powerPercent);
+        setArchetypeTooltip(mArchetypePowerText, tooltipTitle, tooltip, powerPercent);
     }
 
     void StatsWindow::setFactions (const FactionList& factions)

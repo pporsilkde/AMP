@@ -21,7 +21,6 @@ namespace Launcher
         explicit PlayPage(QWidget *parent = nullptr);
 
         void setBuildName(const QString& name);
-        void setBuildUrl(const QString& url);
         void setServerAddress(const QString& addr);
         void setServerPort(const QString& port);
         void setServerConsoleWidget(QWidget* widget);
@@ -89,7 +88,6 @@ namespace Launcher
         void updateHostModeUi(bool enabled);
         void applyServerModePreset(int index);
         QWidget* mEmbeddedServerConsole;
-        QLabel* mBuildUrlLabel;
         bool mSyncingServerSettingsTabs;
         QLabel* mHostInterfaceLabel;
         QComboBox* mHostInterfaceCombo;

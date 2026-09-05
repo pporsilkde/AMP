@@ -9,7 +9,6 @@
         </Widget>
         <Widget type="EditBox" skin="MW_TextEdit" position="72 8 410 23" name="EditName" align="HStretch Top">
             <Property key="Caption" value="#{sCustomClassName}"/>
-            <Property key="Static" value="true"/>
         </Widget>
 
         <Widget type="Widget" skin="" position="8 38 480 116" align="Stretch">
@@ -74,8 +73,34 @@
 
         </Widget>
 
-        <!-- Y045: no duplicate archetype card. The former Adventurer name field
-             above is the live archetype name and owns the complete tooltip. -->
+        <!-- Y046 SAFE UI: the class-name field above displays the live archetype.
+             Keep the former card hidden instead of deleting its named children;
+             this preserves the working C++ getWidget contract exactly. -->
+        <Widget type="Widget" skin="MW_Box" position="8 158 480 140" align="HStretch Top">
+            <Property key="Visible" value="false"/>
+            <Widget type="TextBox" skin="SandBrightText" position="4 3 472 20" name="ArchetypeName" align="HStretch Top">
+                <Property key="TextAlign" value="Center VCenter"/>
+            </Widget>
+            <Widget type="TextBox" skin="SandText" position="4 23 472 18" name="ArchetypePair" align="HStretch Top">
+                <Property key="TextAlign" value="Center VCenter"/>
+            </Widget>
+            <Widget type="ProgressBar" skin="MW_Progress_Green" position="4 42 472 14" name="ArchetypePowerBar" align="HStretch Top">
+                <Widget type="TextBox" skin="ProgressText" position="0 0 472 14" name="ArchetypePowerText" align="Stretch">
+                    <Property key="NeedMouse" value="false"/>
+                    <Property key="TextAlign" value="Center VCenter"/>
+                </Widget>
+            </Widget>
+            <Widget type="TextBox" skin="NormalText" position="6 61 468 36" name="ArchetypePerk" align="HStretch Top">
+                <Property key="MultiLine" value="true"/>
+                <Property key="WordWrap" value="true"/>
+                <Property key="TextColour" value="0.62 0.86 0.56"/>
+            </Widget>
+            <Widget type="TextBox" skin="NormalText" position="6 100 468 36" name="ArchetypeDrawback" align="HStretch Top">
+                <Property key="MultiLine" value="true"/>
+                <Property key="WordWrap" value="true"/>
+                <Property key="TextColour" value="0.90 0.58 0.50"/>
+            </Widget>
+        </Widget>
 
         <!-- Dialog buttons -->
         <Widget type="HBox" position="0 164 482 28">

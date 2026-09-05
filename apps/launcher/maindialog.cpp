@@ -108,7 +108,6 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     , mWatermarkLabel(nullptr)
     , mBuildManifestLoaded(false)
     , mBuildName(QStringLiteral("ArenaMP"))
-    , mBuildUrl()
     , mBuildServerAddress(QStringLiteral("127.0.0.1"))
     , mBuildServerPort(QStringLiteral("25565"))
     , mBuildServerAddressSpecified(false)
@@ -224,7 +223,6 @@ void Launcher::MainDialog::createPages()
 
     mPlayPage = new PlayPage(this);
     mPlayPage->setBuildName(mBuildName);
-    mPlayPage->setBuildUrl(mBuildUrl);
     mDataFilesPage = new DataFilesPage(mCfgMgr, mGameSettings, mLauncherSettings, this);
     mGraphicsPage = new GraphicsPage(mLauncherSettings, this);
     mSettingsPage = new SettingsPage(mCfgMgr, mGameSettings, mLauncherSettings, this);
@@ -655,7 +653,6 @@ bool Launcher::MainDialog::loadBuildManifest()
     mBuildManifestPath.clear();
     mBuildName = mLauncherSettings.value(QStringLiteral("General/Build/name"), QStringLiteral("ArenaMP"));
     mBuildDataPath = primaryDataDirectory();
-    mBuildUrl.clear();
     mBuildServerAddress = QStringLiteral("127.0.0.1");
     mBuildServerPort = QStringLiteral("25565");
     mBuildServerAddressSpecified = false;
@@ -749,7 +746,6 @@ bool Launcher::MainDialog::loadBuildManifest()
     mBuildManifestLoaded = true;
     mBuildManifestPath = manifestPath;
     mBuildName = effectiveBuildName;
-    mBuildUrl = manifest.urlSpecified ? manifest.url.trimmed() : QString();
     mBuildServerAddress = manifest.serverAddress.trimmed().isEmpty()
         ? QStringLiteral("127.0.0.1") : manifest.serverAddress.trimmed();
     mBuildServerPort = manifest.serverPort.trimmed().isEmpty()
@@ -762,7 +758,6 @@ bool Launcher::MainDialog::loadBuildManifest()
     if (mPlayPage != nullptr)
     {
         mPlayPage->setBuildName(mBuildName);
-        mPlayPage->setBuildUrl(mBuildUrl);
         mPlayPage->setServerAddress(mBuildServerAddress);
         mPlayPage->setServerPort(mBuildServerPort);
         mPlayPage->setBuildManifestComplete(mBuildComplete);
@@ -823,17 +818,7 @@ bool Launcher::MainDialog::writeBuildManifest()
     const bool localServerModeSelected = mPlayPage != nullptr
         && mPlayPage->autoStartServer();
 
-    if (existingManifestRead && manifest.complete)
-    {
-        // complete=true is a locked distributed build. Never rewrite the
-        // advertised endpoint when the local host toggles Host mode.
-        manifest.serverAddress = storedServerAddress;
-        manifest.serverAddressSpecified = storedServerAddressSpecified;
-        manifest.serverPort = storedServerPort;
-        manifest.serverPortSpecified = storedServerPortSpecified;
-        manifest.vanillaServerCompatibility = false;
-    }
-    else if (localServerModeSelected && existingManifestRead)
+    if (localServerModeSelected && existingManifestRead)
     {
         // Host mode is a launcher choice. Do not replace the distributed remote
         // endpoint in build.ini with this machine's LAN address and local port.
@@ -863,11 +848,6 @@ bool Launcher::MainDialog::writeBuildManifest()
         manifest.vanillaServerCompatibility = false;
     }
     manifest.complete = mBuildComplete;
-    if (!mBuildUrl.trimmed().isEmpty())
-    {
-        manifest.url = mBuildUrl.trimmed();
-        manifest.urlSpecified = true;
-    }
     manifest.contentFiles = mGameSettings.getContentList();
     manifest.groundcoverFiles = mGameSettings.getGroundcoverList();
     manifest.archives = Config::LauncherSettings::reverse(
@@ -885,7 +865,6 @@ bool Launcher::MainDialog::writeBuildManifest()
     mBuildManifestPath = manifestPath;
     mBuildName = manifest.buildName;
     mBuildDataPath = dataDir;
-    mBuildUrl = manifest.urlSpecified ? manifest.url.trimmed() : QString();
     mBuildServerAddress = manifest.serverAddress;
     mBuildServerPort = manifest.serverPort;
     mBuildServerAddressSpecified = manifest.serverAddressSpecified;
@@ -1113,10 +1092,13 @@ bool Launcher::MainDialog::writeSettings()
     saveSettings();
     mDataFilesPage->saveSettings();
 
-    // Do not copy the Launcher's in-memory graphics/advanced controls back to
-    // settings.cfg here. The game may have changed that file while the
-    // Launcher remained open. Graphics quality is written only by the
-    // explicit Apply preset button; the Wizard performs its one initial pass.
+    // Y001: GraphicsPage performs a merge-safe save: it first captures only
+    // controls changed relative to the page snapshot, then reloads settings.cfg
+    // and replays just those keys. This makes manual Water/Terrain/PBR/shadow
+    // changes apply on Play without overwriting unrelated in-game settings.
+    if (!mGraphicsPage->saveSettings())
+        return false;
+
     mSettingsPage->saveSettings();
     if (!mPlayPage->saveServerSettings())
         return false;
@@ -1254,9 +1236,7 @@ void Launcher::MainDialog::play()
         if (!mServerDialog->isRunning())
         {
             QString bindError;
-            const QString hostBindAddress = mBuildComplete
-                ? QStringLiteral("0.0.0.0") : mPlayPage->hostBindAddress();
-            if (!mServerDialog->setConfiguredLocalAddress(hostBindAddress, &bindError))
+            if (!mServerDialog->setConfiguredLocalAddress(mPlayPage->hostBindAddress(), &bindError))
             {
                 QMessageBox::warning(this, tr("Invalid server interface"), bindError);
                 mPendingClientAddress.clear();
@@ -1277,8 +1257,7 @@ void Launcher::MainDialog::play()
         // The host's own client must use a local endpoint. The value in the
         // Server Address field may intentionally be a public WAN address and
         // may not support NAT loopback on the user's router.
-        mPendingClientAddress = mBuildComplete
-            ? QStringLiteral("127.0.0.1") : mServerDialog->localConnectAddress();
+        mPendingClientAddress = mServerDialog->localConnectAddress();
         mPendingClientPort = mServerDialog->configuredPort();
         writeClientEndpoint(mPendingClientAddress, mPendingClientPort);
 
@@ -1340,9 +1319,7 @@ void Launcher::MainDialog::runServer()
     if (!mServerDialog->isRunning())
     {
         QString bindError;
-        const QString hostBindAddress = mBuildComplete
-            ? QStringLiteral("0.0.0.0") : mPlayPage->hostBindAddress();
-        if (!mServerDialog->setConfiguredLocalAddress(hostBindAddress, &bindError))
+        if (!mServerDialog->setConfiguredLocalAddress(mPlayPage->hostBindAddress(), &bindError))
         {
             QMessageBox::warning(this, tr("Invalid server interface"), bindError);
             return;

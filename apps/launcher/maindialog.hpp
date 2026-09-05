@@ -118,7 +118,6 @@ namespace Launcher
         QString mBuildManifestPath;
         QString mBuildName;
         QString mBuildDataPath;
-        QString mBuildUrl;
         QString mBuildServerAddress;
         QString mBuildServerPort;
         bool mBuildServerAddressSpecified;

@@ -2,11 +2,6 @@
 
 <MyGUI type="Resource" version="1.1">
     <!-- Progress bar track, various colors -->
-    <!-- Arena Y044: the framed progress skins below have an 8 px Client area
-         (2 px border on a 12 px base skin).  The old 14/16 px track geometry
-         overflowed that Client and MyGUI clipped the coloured fill vertically,
-         most visibly in the Statistics/Information tooltips.  Keep the track
-         native height identical to the Client and stretch it with the widget. -->
     <Resource type="ResourceSkin" name="MW_Track_Red" size="16 8" texture="textures\menu_bar_gray.dds" >
         <Property key="Colour" value="#{fontcolour=health}"/>
         <BasisSkin type="MainSkin" offset="0 0 16 8" align="Stretch">
