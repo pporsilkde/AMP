@@ -11,20 +11,20 @@
             <Widget type="ImageBox" skin="ImageBox" position="2 2 261 134" name="ClassImage" align="Left Top"/>
         </Widget>
 
-        <!-- Y046 SAFE UI: only the current archetype name is visible. The pair
-             and power widgets stay present but hidden so the proven C++ widget
-             contract is unchanged. Full information is in the hover tooltip. -->
+        <!-- Y043: make the selected attribute-pair archetype obvious before accepting the class. -->
         <Widget type="Widget" skin="MW_Box" position="8 152 467 28" align="Left Top HStretch">
-            <Widget type="TextBox" skin="SandBrightText" position="4 4 459 20" name="ArchetypeName" align="HStretch Top">
+            <Widget type="TextBox" skin="SandBrightText" position="4 3 459 19" name="ArchetypeName" align="HStretch Top">
                 <Property key="TextAlign" value="Center VCenter"/>
             </Widget>
             <Widget type="TextBox" skin="SandText" position="4 22 459 18" name="ArchetypePair" align="HStretch Top">
                 <Property key="Visible" value="false"/>
+                <Property key="TextAlign" value="Center VCenter"/>
             </Widget>
             <Widget type="ProgressBar" skin="MW_Progress_Green" position="4 40 459 14" name="ArchetypePowerBar" align="HStretch Top">
                 <Property key="Visible" value="false"/>
                 <Widget type="TextBox" skin="ProgressText" position="0 0 459 14" name="ArchetypePowerText" align="Stretch">
                     <Property key="NeedMouse" value="false"/>
+                    <Property key="TextAlign" value="Center VCenter"/>
                 </Widget>
             </Widget>
         </Widget>

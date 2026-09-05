@@ -45,34 +45,33 @@ namespace
         return attributeName(attribute0) + " + " + attributeName(attribute1);
     }
 
-    std::string archetypeTooltipDetails(const MWMechanics::ClassArchetype::DisplayInfo& info,
-        int attribute0, int attribute1)
+    std::string archetypePowerScale(int powerPercent)
     {
-        std::string text = arenaText("archetype.attributes") + ": " + archetypePairText(attribute0, attribute1);
+        const int filled = std::clamp((powerPercent + 5) / 10, 0, 10);
+        return "[" + std::string(static_cast<std::size_t>(filled), '#')
+            + std::string(static_cast<std::size_t>(10 - filled), '-') + "] ";
+    }
+
+    std::string archetypePreviewTooltip(const MWMechanics::ClassArchetype::DisplayInfo& info,
+        int attribute0, int attribute1, int powerPercent)
+    {
+        std::string text = arenaText("archetype.label") + ": " + archetypeText(info, "name");
+        text += "\n" + arenaText("archetype.attributes") + ": " + archetypePairText(attribute0, attribute1);
+        text += "\n" + arenaText("archetype.power") + ": " + archetypePowerScale(powerPercent)
+            + MyGUI::utility::toString(powerPercent) + "%";
         text += "\n\n" + arenaText("archetype.buff") + ": " + archetypeText(info, "buff");
         text += "\n" + arenaText("archetype.debuff") + ": " + archetypeText(info, "debuff");
         text += "\n\n" + arenaText("archetype.growth_hint");
         return text;
     }
 
-    // Uses the same Range/RangePosition tooltip properties that the stable
-    // Skill/Level tooltips already use. No player lifecycle or update-loop
-    // dependency is introduced here: the caller supplies the already computed
-    // percentage.
-    void setArchetypeTooltip(MyGUI::Widget* widget, const MWMechanics::ClassArchetype::DisplayInfo& info,
-        int attribute0, int attribute1, int powerPercent)
+    void setTextTooltip(MyGUI::Widget* widget, const std::string& text)
     {
         if (!widget)
             return;
         widget->setUserString("ToolTipType", "Layout");
-        widget->setUserString("ToolTipLayout", "ArchetypeToolTip");
-        widget->setUserString("Caption_ArchetypeTitle",
-            arenaText("archetype.label") + ": " + archetypeText(info, "name"));
-        widget->setUserString("Range_ArchetypePowerBar", "100");
-        widget->setUserString("RangePosition_ArchetypePowerBar", MyGUI::utility::toString(powerPercent));
-        widget->setUserString("Caption_ArchetypePowerText",
-            arenaText("archetype.power") + ": " + MyGUI::utility::toString(powerPercent) + "%");
-        widget->setUserString("Caption_ArchetypeDetails", archetypeTooltipDetails(info, attribute0, attribute1));
+        widget->setUserString("ToolTipLayout", "TextToolTip");
+        widget->setUserString("Caption_Text", text);
     }
 
     bool sortClasses(const std::pair<std::string, std::string>& left, const std::pair<std::string, std::string>& right)
@@ -348,14 +347,12 @@ namespace MWGui
             mArchetypePowerBar->setProgressPosition(static_cast<std::size_t>(powerPercent));
             mArchetypePowerText->setCaption(arenaText("archetype.power") + ": "
                 + MyGUI::utility::toString(powerPercent) + "%");
-            setArchetypeTooltip(mArchetypeName, archetypeInfo,
+            const std::string tooltip = archetypePreviewTooltip(archetypeInfo,
                 klass->mData.mAttribute[0], klass->mData.mAttribute[1], powerPercent);
-            setArchetypeTooltip(mArchetypePair, archetypeInfo,
-                klass->mData.mAttribute[0], klass->mData.mAttribute[1], powerPercent);
-            setArchetypeTooltip(mArchetypePowerBar, archetypeInfo,
-                klass->mData.mAttribute[0], klass->mData.mAttribute[1], powerPercent);
-            setArchetypeTooltip(mArchetypePowerText, archetypeInfo,
-                klass->mData.mAttribute[0], klass->mData.mAttribute[1], powerPercent);
+            setTextTooltip(mArchetypeName, tooltip);
+            setTextTooltip(mArchetypePair, tooltip);
+            setTextTooltip(mArchetypePowerBar, tooltip);
+            setTextTooltip(mArchetypePowerText, tooltip);
         }
     }
 
@@ -603,6 +600,7 @@ namespace MWGui
         const float power = MWMechanics::ClassArchetype::getPairPower(player, attribute0, attribute1);
         const int powerPercent = std::clamp(static_cast<int>(std::lround(power * 100.f)), 0, 100);
         const std::string localizedName = archetypeText(info, "name");
+        const std::string tooltip = archetypePreviewTooltip(info, attribute0, attribute1, powerPercent);
 
         mArchetypeName->setCaption(arenaText("archetype.selected") + ": " + localizedName);
         mArchetypePair->setCaption(archetypePairText(attribute0, attribute1));
@@ -611,19 +609,17 @@ namespace MWGui
             + MyGUI::utility::toString(powerPercent) + "%");
         mArchetypePerk->setCaption(arenaText("archetype.buff") + ": " + archetypeText(info, "buff"));
         mArchetypeDrawback->setCaption(arenaText("archetype.debuff") + ": " + archetypeText(info, "debuff"));
-        setArchetypeTooltip(mEditName, info, attribute0, attribute1, powerPercent);
-        setArchetypeTooltip(mArchetypeName, info, attribute0, attribute1, powerPercent);
-        setArchetypeTooltip(mArchetypePair, info, attribute0, attribute1, powerPercent);
-        setArchetypeTooltip(mArchetypePowerBar, info, attribute0, attribute1, powerPercent);
-        setArchetypeTooltip(mArchetypePowerText, info, attribute0, attribute1, powerPercent);
-        setArchetypeTooltip(mArchetypePerk, info, attribute0, attribute1, powerPercent);
-        setArchetypeTooltip(mArchetypeDrawback, info, attribute0, attribute1, powerPercent);
+        setTextTooltip(mArchetypeName, tooltip);
+        setTextTooltip(mArchetypePair, tooltip);
+        setTextTooltip(mArchetypePowerBar, tooltip);
+        setTextTooltip(mArchetypePowerText, tooltip);
+        setTextTooltip(mArchetypePerk, tooltip);
+        setTextTooltip(mArchetypeDrawback, tooltip);
 
-        // The stock Adventurer field is the live archetype display in ArenaMP.
-        // Set it unconditionally during the existing update() pass so tag timing
-        // or a localized sCustomClassName can never leave "Adventurer" stuck.
-        // No new event/update hook is introduced.
+        // ArenaMP uses this field as the live archetype name. Keep the update in
+        // the existing dialog refresh path; no new event, timer or player-lifecycle hook.
         mEditName->setCaption(localizedName);
+        setTextTooltip(mEditName, tooltip);
         mLastAutoClassName = localizedName;
     }
 
