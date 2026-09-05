@@ -216,7 +216,7 @@ LocalPlayer::LocalPlayer()
 
     mDeathRecoveryActive = false;
     mDeathRecoveryElapsed = 0.f;
-    mDeathRecoveryDuration = 10.f;
+    mDeathRecoveryDuration = 30.f;
     mDeathRecoveryInitialXp = 0.f;
     mDeathRecoveryRequestCooldown = 0.f;
     mDeathRecoveryEWasDown = false;
@@ -366,7 +366,7 @@ void LocalPlayer::beginDeathRecovery()
     const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
     mDeathRecoveryActive = true;
     mDeathRecoveryElapsed = 0.f;
-    mDeathRecoveryDuration = 10.f;
+    mDeathRecoveryDuration = 30.f;
     mDeathRecoveryRequestCooldown = 0.f;
     mDeathRecoveryEWasDown = false;
     mDeathRecoveryInitialXp = player.isEmpty() ? 0.f

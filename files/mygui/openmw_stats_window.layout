@@ -97,10 +97,10 @@
                     </Widget>
                 </Widget>
                 <Widget type="Widget" position="4 60 204 18" align="Top HStretch">
-                    <Widget type="AutoSizedTextBox" skin="NormalText" position="0 0 88 18" name="Archetype_str" align="Left Top">
+                    <Widget type="AutoSizedTextBox" skin="NormalText" position="0 0 70 18" name="Archetype_str" align="Left Top">
                         <Property key="Caption" value="#{arenamp=archetype.label}" />
                     </Widget>
-                    <Widget type="TextBox" skin="SandTextRight" position="91 0 113 18" name="ArchetypeText" align="Left Top HStretch">
+                    <Widget type="TextBox" skin="SandTextRight" position="73 0 131 18" name="ArchetypeText" align="Left Top HStretch">
                         <Property key="TextAlign" value="Right Top" />
                     </Widget>
                 </Widget>

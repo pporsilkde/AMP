@@ -1060,13 +1060,13 @@ config.playersRespawn = true
 
 -- Time to stay dead before being respawned, in seconds. Y039 never auto-respawns
 -- before the XP decay window below has completed.
-config.deathTime = 10
+config.deathTime = 30
 
 -- Y039 death recovery. Current-level XP drains smoothly to zero over the first
--- 10 seconds after death. A Restore Health potion or a nearby party member can
+-- 30 seconds after death. A Restore Health potion or a nearby party member can
 -- recover the player in place before the normal respawn timer expires.
 config.deathRecovery = {
-    ["xp decay seconds"] = 10,
+    ["xp decay seconds"] = 30,
     ["xp tick seconds"] = 1,
     ["potion revive health fraction"] = 0.25,
     ["touch revive health fraction"] = 0.10,

@@ -1006,6 +1006,7 @@ namespace MWGui
                 if (potions > 0)
                 {
                     mDeathRecoveryPrompt->setCaption(arenaText("death.recovery.self_prompt") + "\n"
+                        + arenaText("death.recovery.self_status") + "  |  "
                         + arenaText("death.recovery.potions") + ": " + MyGUI::utility::toString(potions));
                     mDeathRecoveryAction->setCaption(arenaText("death.recovery.action"));
                     mDeathRecoveryAction->setVisible(true);
@@ -1029,6 +1030,7 @@ namespace MWGui
                     if (potions > 0)
                     {
                         mDeathRecoveryPrompt->setCaption(arenaText("death.recovery.ally_prompt") + "\n"
+                            + arenaText("death.recovery.ally_status") + "  |  "
                             + arenaText("death.recovery.potions") + ": " + MyGUI::utility::toString(potions));
                         mDeathRecoveryAction->setCaption(arenaText("death.recovery.action"));
                         mDeathRecoveryAction->setVisible(true);

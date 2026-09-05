@@ -55,20 +55,23 @@ namespace MWGui
                 ESM::Attribute::sGmstAttributeIds[attribute], ESM::Attribute::sGmstAttributeIds[attribute]);
         }
 
-        std::string archetypePowerScale(int powerPercent)
-        {
-            const int filled = std::clamp((powerPercent + 5) / 10, 0, 10);
-            return "[" + std::string(static_cast<std::size_t>(filled), '#')
-                + std::string(static_cast<std::size_t>(10 - filled), '-') + "] ";
-        }
-
-        void setArchetypeTooltip(MyGUI::Widget* widget, const std::string& text)
+        // Y046c: the archetype tooltip carries a real MyGUI ProgressBar again.
+        // Range/RangePosition are the same dynamic-property names the existing
+        // SkillToolTip and LevelToolTip already use, so no new tooltip mechanism
+        // is introduced -- only the ArchetypeToolTip layout is new.
+        void setArchetypeTooltip(MyGUI::Widget* widget, const std::string& title,
+            const std::string& details, int powerPercent)
         {
             if (!widget)
                 return;
             widget->setUserString("ToolTipType", "Layout");
-            widget->setUserString("ToolTipLayout", "TextToolTip");
-            widget->setUserString("Caption_Text", text);
+            widget->setUserString("ToolTipLayout", "ArchetypeToolTip");
+            widget->setUserString("Caption_ArchetypeTitle", title);
+            widget->setUserString("Range_ArchetypePowerBar", "100");
+            widget->setUserString("RangePosition_ArchetypePowerBar", MyGUI::utility::toString(powerPercent));
+            widget->setUserString("Caption_ArchetypePowerText", arenaText("archetype.power") + ": "
+                + MyGUI::utility::toString(powerPercent) + "%");
+            widget->setUserString("Caption_ArchetypeDetails", details);
         }
     }
 
@@ -592,12 +595,10 @@ namespace MWGui
         mArchetypePowerText->setCaption(arenaText("archetype.power") + ": "
             + MyGUI::utility::toString(powerPercent) + "%");
 
-        std::string tooltip = arenaText("archetype.label") + ": " + name;
-        tooltip += "\n" + arenaText("archetype.attributes") + ": "
+        const std::string tooltipTitle = arenaText("archetype.label") + ": " + name;
+        std::string tooltip = arenaText("archetype.attributes") + ": "
             + attributeName(state.attribute0) + " " + MyGUI::utility::toString(value0) + " + "
             + attributeName(state.attribute1) + " " + MyGUI::utility::toString(value1);
-        tooltip += "\n" + arenaText("archetype.power") + ": " + archetypePowerScale(powerPercent)
-            + MyGUI::utility::toString(powerPercent) + "%";
         tooltip += "\n\n" + arenaText("archetype.buff") + ": " + archetypeText(info, "buff");
         tooltip += "\n" + arenaText("archetype.state") + ": " + arenaText("archetype.active");
         if (state.hasConditionalBuff)
@@ -619,10 +620,23 @@ namespace MWGui
 
         MyGUI::Widget* archetypeLabel = nullptr;
         getWidget(archetypeLabel, "Archetype_str");
-        setArchetypeTooltip(archetypeLabel, tooltip);
-        setArchetypeTooltip(mArchetypeText, tooltip);
-        setArchetypeTooltip(mArchetypePowerBar, tooltip);
-        setArchetypeTooltip(mArchetypePowerText, tooltip);
+        setArchetypeTooltip(archetypeLabel, tooltipTitle, tooltip, powerPercent);
+        setArchetypeTooltip(mArchetypeText, tooltipTitle, tooltip, powerPercent);
+        setArchetypeTooltip(mArchetypePowerBar, tooltipTitle, tooltip, powerPercent);
+        setArchetypeTooltip(mArchetypePowerText, tooltipTitle, tooltip, powerPercent);
+
+        // Existing characters created by the old generator may still have the
+        // generic custom-class caption (usually Adventurer). Only replace that
+        // generic presentation; real premade/custom names remain untouched.
+        MyGUI::TextBox* classText = nullptr;
+        getWidget(classText, "ClassText");
+        const std::string genericClassName = MWBase::Environment::get().getWindowManager()->getGameSettingString(
+            "sCustomClassName", "Adventurer");
+        if (classText->getCaption() == genericClassName || classText->getCaption() == "Adventurer")
+        {
+            classText->setCaption(name);
+            setArchetypeTooltip(classText, tooltipTitle, tooltip, powerPercent);
+        }
     }
 
     void StatsWindow::setFactions (const FactionList& factions)

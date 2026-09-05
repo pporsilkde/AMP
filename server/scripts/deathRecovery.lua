@@ -50,7 +50,7 @@ end
 
 local function exactRemainingXp(player, atTime)
     local initial = math.max(0, tonumber(player.deathRecoveryInitialXp) or 0)
-    local duration = math.max(0.1, tonumber(player.deathRecoveryDuration) or 10)
+    local duration = math.max(0.1, tonumber(player.deathRecoveryDuration) or 30)
     local started = tonumber(player.deathRecoveryStartedAt) or atTime
     local elapsed = math.max(0, atTime - started)
     local fraction = math.max(0, 1 - elapsed / duration)
@@ -82,11 +82,11 @@ local function scheduleTick(player)
 end
 
 function deathRecovery.Begin(player)
-    if player == nil then return 10 end
+    if player == nil then return 30 end
 
     deathRecovery.Cancel(player, false)
 
-    local duration = clamp(cfgNumber("xp decay seconds", 10), 3, 30)
+    local duration = clamp(cfgNumber("xp decay seconds", 30), 3, 30)
     local currentXp = math.max(0, tonumber(player.data.stats.experience) or 0)
 
     player.deathRecoveryActive = true
