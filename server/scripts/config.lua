@@ -723,7 +723,7 @@ config.nightStartHour = 20
 config.nightEndHour = 6
 
 -- Whether players should be allowed to use the ingame tilde (~) console by default
-config.allowConsole = true
+config.allowConsole = false
 
 -- Whether players should be allowed to rest in bed by default
 config.allowBedRest = true
@@ -732,7 +732,7 @@ config.allowBedRest = true
 config.allowWildernessRest = true
 
 -- Whether players should be allowed to wait by default
-config.allowWait = true
+config.allowWait = false
 
 -- Whether journal entries should be shared across the players on the server or not
 -- Y032: MMO keeps story progression personal. CO-OP can enable this through
