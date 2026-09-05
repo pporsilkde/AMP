@@ -102,7 +102,6 @@
                     </Widget>
                     <Widget type="TextBox" skin="SandTextRight" position="91 0 113 18" name="ArchetypeText" align="Left Top HStretch">
                         <Property key="TextAlign" value="Right Top" />
-                        <Property key="HStretch" value="true" />
                     </Widget>
                 </Widget>
             </Widget>

@@ -63,8 +63,8 @@ namespace MWGui
             widget->setUserString("ToolTipType", "Layout");
             widget->setUserString("ToolTipLayout", "ArchetypeToolTip");
             widget->setUserString("Caption_ArchetypeTitle", title);
-            widget->setUserString("ProgressRange_ArchetypePowerBar", "100");
-            widget->setUserString("ProgressPosition_ArchetypePowerBar", MyGUI::utility::toString(powerPercent));
+            widget->setUserString("Range_ArchetypePowerBar", "100");
+            widget->setUserString("RangePosition_ArchetypePowerBar", MyGUI::utility::toString(powerPercent));
             widget->setUserString("Caption_ArchetypePowerText", arenaText("archetype.power") + ": "
                 + MyGUI::utility::toString(powerPercent) + "%");
             widget->setUserString("Caption_ArchetypeDetails", details);
@@ -563,12 +563,27 @@ namespace MWGui
 
     void StatsWindow::updateArchetypeInfo()
     {
-        const MWWorld::Ptr player = MWMechanics::getPlayer();
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        MWBase::MechanicsManager* mechanics = MWBase::Environment::get().getMechanicsManager();
+        if (!world || !mechanics)
+        {
+            mArchetypeText->setCaption("—");
+            mArchetypeText->setUserString("ToolTipType", "");
+            return;
+        }
+
+        const MWWorld::Ptr player = world->getPlayerPtr();
         MWMechanics::ClassArchetype::DisplayInfo info;
+        if (!MWMechanics::ClassArchetype::getDisplayInfo(player, false, info))
+        {
+            mArchetypeText->setCaption("—");
+            mArchetypeText->setUserString("ToolTipType", "");
+            return;
+        }
+
         MWMechanics::ClassArchetype::RuntimeState state;
-        const bool sneaking = MWBase::Environment::get().getMechanicsManager()->isSneaking(player);
-        if (!MWMechanics::ClassArchetype::getDisplayInfo(player, false, info)
-            || !MWMechanics::ClassArchetype::getRuntimeState(player, sneaking, state))
+        const bool sneaking = mechanics->isSneaking(player);
+        if (!MWMechanics::ClassArchetype::getRuntimeState(player, sneaking, state))
         {
             mArchetypeText->setCaption("—");
             mArchetypeText->setUserString("ToolTipType", "");

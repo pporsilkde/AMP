@@ -311,10 +311,19 @@ namespace MWGui
                         if (!w)
                             continue;
 
-                        if (type == "Property")
-                            w->setProperty(key, userStringPair.second);
-                        else if (type == "UserData")
-                            w->setUserString(key, userStringPair.second);
+                        try
+                        {
+                            if (type == "Property")
+                                w->setProperty(key, userStringPair.second);
+                            else if (type == "UserData")
+                                w->setUserString(key, userStringPair.second);
+                        }
+                        catch (const std::exception&)
+                        {
+                            // A bad dynamic tooltip property is presentation-only.
+                            // Never let it terminate the client update loop.
+                            continue;
+                        }
                     }
 
                     tooltipSize = tooltip->getSize();

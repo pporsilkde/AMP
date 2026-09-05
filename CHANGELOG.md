@@ -1,11 +1,39 @@
-## Y043 — archetype presentation, localisation and recovery HUD
+## Y045b — post-content startup / archetype tooltip safety
 
-- Added a clear selected-archetype card and 0–100% power bar to preset/custom class creation.
-- Moved the persistent archetype presentation from Spellbook to Statistics, directly below Class, with detailed Buff/Debuff runtime tooltip.
-- Added complete EN/RU l10n entries for all 28 archetype names, buffs and debuffs; Russian Nightblade is displayed as «Клинок ночи».
-- Preserved native archetype Active Effect icons while removing the oversized Spellbook description block.
-- Reworked death recovery into a frameless multiline lower-HUD prompt with shadowed text and a blinking red Apply (E) action.
-- Protocol remains 806.
+- Fixed a client crash path after content loading while MyGUI/WindowManager is coming up. Character-class archetype previews no longer require a live Player object during dialog construction.
+- Dynamic archetype progress-bar tooltip keys now use the same `Range` / `RangePosition` properties as the existing Skill/Level tooltips.
+- Layout tooltip property application is exception-safe: a malformed presentation-only property can no longer escape the GUI update loop and terminate the client.
+- Removed the invalid `HStretch` widget property from `ArchetypeText`; horizontal stretch remains provided by the normal `align` flag.
+- Y045a grass rollback, MFR compatibility, `complete=true` host loopback, `url=` and protocol **806** are unchanged.
+
+## Y045a — grass auto-detection rollback
+
+- Reverted only the Y045 Wizard/Launcher automatic grass/groundcover discovery and content-to-groundcover reclassification.
+- Groundcover handling is back to Y044 behavior: no directory scan and no automatic recovery of a missing dedicated groundcover list.
+- Existing Y045 host protections (`complete=true`, local `127.0.0.1`, server bind `0.0.0.0`) and the clickable `url=` field remain enabled.
+- A one-time cleanup helper is included for builds where Y045 already wrote auto-detected `groundcover=` entries into `build.ini`. Protocol remains **806**.
+
+## Y045 — archetype tooltip / groundcover / complete-host manifest
+
+- Class creation no longer falls back to `Adventurer`: the former name field is the live localized archetype name derived from the two favourite attributes. Only the name remains visible; archetype strength, attribute pair, buff/debuff and conditional state are shown in a dedicated hover tooltip with the progress bar inside the tooltip.
+- Restored the complete EN/RU 28-archetype localization and the Y043 NPC/dialogue/HUD presentation branch that had been dropped by the later MFR branch merge.
+- Wizard now detects installed `grass` / `groundcover` ESM/ESP/OMW plug-ins and enables them as groundcover. Launcher also repairs older Wizard manifests that omitted or misclassified those files.
+- `build.ini` supports `url=` and shows it as a clickable community/project link at the bottom of Play. The value survives Launcher saves.
+- With `complete=true`, Host mode never rewrites the distributed server address/port in `build.ini`; the host client uses `127.0.0.1` for that launch while the server listens on `0.0.0.0`. Protocol remains **806**.
+
+## Y044 — framed progress-bar clipping fix
+
+- Corrected the native geometry of `MW_Track_Red`, `MW_Track_Blue` and `MW_Track_Green` from the oversized 14/16 px track to the 8 px client height used by framed `MW_Progress_*` skins.
+- Statistics/Information level-XP and skill progress fills now occupy the full inner bar instead of being vertically clipped by the frame.
+- HUD/combat energy bars are unchanged because they use the separate `MW_BarTrack_*` skins.
+
+## Y043 — MFR content compatibility
+
+- Detects `MFR.esm` and enforces its full-content `al_OptionStart3` startup profile server-side, including upgrades of existing worlds.
+- Adds personal persistent instances for MFR quest-exclusive Arena/Falmer/Calia/Endyne/Clagius/Anudnabia/Tel Mora interiors.
+- Synchronizes curated MFR quest/mechanism scripts and persistent globals without blanket-syncing volatile timers.
+- Disables `al_mistScript`, the controller used by 904 `act_mistNightWeather` activators in 73 exterior cells, and makes the MFR option menu server-authoritative.
+- Generalizes reset protection from Caius-only to every configured `neverReset` private instance.
 
 ## Y039 — death XP countdown + potion/party recovery
 

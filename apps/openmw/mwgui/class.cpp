@@ -54,6 +54,23 @@ namespace
         return text;
     }
 
+    int safeArchetypePowerPercent(int attribute0, int attribute1)
+    {
+        // Character-generation dialogs are constructed while the GUI is still being
+        // created. Do not require a live Player object at that stage: onOpen/update
+        // will refresh the value once the world/player is available.
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        if (!world)
+            return 0;
+
+        const MWWorld::Ptr player = world->getPlayerPtr();
+        if (!player.isInCell())
+            return 0;
+
+        const float power = MWMechanics::ClassArchetype::getPairPower(player, attribute0, attribute1);
+        return std::clamp(static_cast<int>(std::lround(power * 100.f)), 0, 100);
+    }
+
     void setArchetypeTooltip(MyGUI::Widget* widget, const MWMechanics::ClassArchetype::DisplayInfo& info,
         int attribute0, int attribute1, int powerPercent)
     {
@@ -63,8 +80,8 @@ namespace
         widget->setUserString("ToolTipLayout", "ArchetypeToolTip");
         widget->setUserString("Caption_ArchetypeTitle",
             arenaText("archetype.label") + ": " + archetypeText(info, "name"));
-        widget->setUserString("ProgressRange_ArchetypePowerBar", "100");
-        widget->setUserString("ProgressPosition_ArchetypePowerBar", MyGUI::utility::toString(powerPercent));
+        widget->setUserString("Range_ArchetypePowerBar", "100");
+        widget->setUserString("RangePosition_ArchetypePowerBar", MyGUI::utility::toString(powerPercent));
         widget->setUserString("Caption_ArchetypePowerText",
             arenaText("archetype.power") + ": " + MyGUI::utility::toString(powerPercent) + "%");
         widget->setUserString("Caption_ArchetypeDetails", archetypeTooltipDetails(info, attribute0, attribute1));
@@ -330,10 +347,8 @@ namespace MWGui
         if (MWMechanics::ClassArchetype::getDisplayInfo(
                 klass->mData.mAttribute[0], klass->mData.mAttribute[1], false, archetypeInfo))
         {
-            const MWWorld::Ptr player = MWMechanics::getPlayer();
-            const float power = MWMechanics::ClassArchetype::getPairPower(
-                player, klass->mData.mAttribute[0], klass->mData.mAttribute[1]);
-            const int powerPercent = std::clamp(static_cast<int>(std::lround(power * 100.f)), 0, 100);
+            const int powerPercent = safeArchetypePowerPercent(
+                klass->mData.mAttribute[0], klass->mData.mAttribute[1]);
             mArchetypeName->setCaption(archetypeText(archetypeInfo, "name"));
             setArchetypeTooltip(mArchetypeName, archetypeInfo,
                 klass->mData.mAttribute[0], klass->mData.mAttribute[1], powerPercent);
@@ -544,6 +559,12 @@ namespace MWGui
         delete mDescDialog;
     }
 
+    void CreateClassDialog::onOpen()
+    {
+        WindowModal::onOpen();
+        update();
+    }
+
     void CreateClassDialog::update()
     {
         for (int i = 0; i < 5; ++i)
@@ -569,9 +590,7 @@ namespace MWGui
             return;
         }
 
-        const MWWorld::Ptr player = MWMechanics::getPlayer();
-        const float power = MWMechanics::ClassArchetype::getPairPower(player, attribute0, attribute1);
-        const int powerPercent = std::clamp(static_cast<int>(std::lround(power * 100.f)), 0, 100);
+        const int powerPercent = safeArchetypePowerPercent(attribute0, attribute1);
         const std::string localizedName = archetypeText(info, "name");
 
         // The class name is the current archetype. This removes the stale localized

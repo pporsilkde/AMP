@@ -30,3 +30,5 @@ Y025 combat HP cell reset + validated fill ownership + floating damage recovery
 Y043 MFR content compatibility: Start3 profile + quest instances + MFR script/global sync + water-mist blacklist
 Y044 framed information progress bars: full-height fill; no vertical clipping
 Y045 archetype tooltip + grass autoload + complete host loopback + build URL
+Y045a grass auto-detection rollback: Y044 groundcover behavior restored; complete host/url retained
+Y045b post-content startup: safe archetype tooltip properties + no early Player dependency

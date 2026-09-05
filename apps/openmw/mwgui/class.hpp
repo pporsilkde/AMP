@@ -279,6 +279,7 @@ namespace MWGui
         std::vector<ESM::Skill::SkillEnum> getMinorSkills() const;
 
         void setNextButtonShow(bool shown);
+        void onOpen() override;
 
         // Events
         typedef MyGUI::delegates::CMultiDelegate0 EventHandle_Void;

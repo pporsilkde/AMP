@@ -41,7 +41,6 @@
                 <UserString key="HStretch" value="true"/>
             </Widget>
             <Widget type="ProgressBar" skin="MW_Progress_Green" position="8 34 414 16" align="HStretch Top" name="ArchetypePowerBar">
-                <Property key="ProgressRange" value="100"/>
                 <Widget type="TextBox" skin="ProgressText" position="0 0 414 16" name="ArchetypePowerText" align="Stretch">
                     <Property key="NeedMouse" value="false"/>
                     <Property key="TextAlign" value="Center VCenter"/>
