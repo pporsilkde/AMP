@@ -15,6 +15,7 @@
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/mechanicsmanager.hpp"
+#include "../mwbase/statemanager.hpp"
 #include "../mwbase/world.hpp"
 #include "../mwbase/windowmanager.hpp"
 
@@ -22,6 +23,7 @@
 #include "../mwworld/player.hpp"
 #include "../mwworld/esmstore.hpp"
 
+#include "../mwmechanics/creaturestats.hpp"
 #include "../mwmechanics/npcstats.hpp"
 #include "../mwmechanics/actorutil.hpp"
 #include "../mwmechanics/classarchetype.hpp"
@@ -563,34 +565,53 @@ namespace MWGui
 
     void StatsWindow::updateArchetypeInfo()
     {
-        MWBase::World* world = MWBase::Environment::get().getWorld();
-        MWBase::MechanicsManager* mechanics = MWBase::Environment::get().getMechanicsManager();
-        if (!world || !mechanics)
-        {
+        // Y045c: this runs from onFrame, and a pinned Stats window is updated by
+        // WindowManager::update() before the "game running" guard. At that point
+        // the player object can exist without being placed in a cell yet, which
+        // is exactly the startup window between content load and the first area
+        // load. Everything below must therefore be safe for a cell-less player.
+        const auto clearArchetype = [this]() {
             mArchetypeText->setCaption("—");
             mArchetypeText->setUserString("ToolTipType", "");
+        };
+
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        MWBase::StateManager* stateManager = MWBase::Environment::get().getStateManager();
+        if (!world || !stateManager || stateManager->getState() == MWBase::StateManager::State_NoGame)
+        {
+            clearArchetype();
             return;
         }
 
         const MWWorld::Ptr player = world->getPlayerPtr();
-        MWMechanics::ClassArchetype::DisplayInfo info;
-        if (!MWMechanics::ClassArchetype::getDisplayInfo(player, false, info))
+        if (player.isEmpty() || !player.isInCell())
         {
-            mArchetypeText->setCaption("—");
-            mArchetypeText->setUserString("ToolTipType", "");
+            clearArchetype();
             return;
         }
 
-        MWMechanics::ClassArchetype::RuntimeState state;
-        const bool sneaking = mechanics->isSneaking(player);
-        if (!MWMechanics::ClassArchetype::getRuntimeState(player, sneaking, state))
+        MWMechanics::ClassArchetype::DisplayInfo info;
+        if (!MWMechanics::ClassArchetype::getDisplayInfo(player, false, info))
         {
-            mArchetypeText->setCaption("—");
-            mArchetypeText->setUserString("ToolTipType", "");
+            clearArchetype();
             return;
         }
 
         const MWMechanics::CreatureStats& stats = player.getClass().getCreatureStats(player);
+
+        // Do not call MechanicsManager::isSneaking() here. It resolves the actor
+        // through the physics system and the current cell (isOnGround/isSwimming),
+        // neither of which is guaranteed while the world is still initialising.
+        // The sneak stance itself is plain CreatureStats data and is always safe.
+        const bool sneaking = stats.getStance(MWMechanics::CreatureStats::Stance_Sneak);
+
+        MWMechanics::ClassArchetype::RuntimeState state;
+        if (!MWMechanics::ClassArchetype::getRuntimeState(player, sneaking, state))
+        {
+            clearArchetype();
+            return;
+        }
+
         const int value0 = static_cast<int>(std::lround(stats.getAttribute(state.attribute0).getModified()));
         const int value1 = static_cast<int>(std::lround(stats.getAttribute(state.attribute1).getModified()));
         const int powerPercent = std::clamp(static_cast<int>(std::lround(state.power * 100.f)), 0, 100);

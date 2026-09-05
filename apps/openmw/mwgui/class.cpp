@@ -9,6 +9,7 @@
 #include <cmath>
 
 #include "../mwbase/environment.hpp"
+#include "../mwbase/statemanager.hpp"
 #include "../mwbase/world.hpp"
 #include "../mwbase/windowmanager.hpp"
 
@@ -60,11 +61,14 @@ namespace
         // created. Do not require a live Player object at that stage: onOpen/update
         // will refresh the value once the world/player is available.
         MWBase::World* world = MWBase::Environment::get().getWorld();
-        if (!world)
+        MWBase::StateManager* stateManager = MWBase::Environment::get().getStateManager();
+        if (!world || !stateManager || stateManager->getState() == MWBase::StateManager::State_NoGame)
             return 0;
 
+        // World::getPlayerPtr() dereferences the Player object, which only exists
+        // after World::setupPlayer(). State_NoGame is the only reliable guard.
         const MWWorld::Ptr player = world->getPlayerPtr();
-        if (!player.isInCell())
+        if (player.isEmpty() || !player.isInCell())
             return 0;
 
         const float power = MWMechanics::ClassArchetype::getPairPower(player, attribute0, attribute1);
