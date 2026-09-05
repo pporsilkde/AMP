@@ -686,48 +686,19 @@ bool Wizard::MainWizard::loadBuildManifest(const QString& dataFilesPath)
         manifest.vanillaServerCompatibility ? QStringLiteral("true") : QStringLiteral("false"));
     writeClientEndpoint(mBuildServerAddress, mBuildServerPort);
 
-    // Y045: build.ini remains authoritative for ordinary content, but old Wizard
-    // revisions could accidentally save grass/groundcover as ordinary content or
-    // omit the dedicated groundcover list entirely. Repair only that category.
-    QStringList orderedContent;
-    QStringList recoveredGroundcover = manifest.groundcoverFiles;
-    for (const QString& fileName : manifest.contentFiles)
-    {
-        if (isGroundcoverCandidate(fileName))
-        {
-            if (!recoveredGroundcover.contains(fileName, Qt::CaseInsensitive))
-                recoveredGroundcover.append(fileName);
-        }
-        else
-            orderedContent.append(fileName);
-    }
-    if (recoveredGroundcover.isEmpty())
-    {
-        const QDir dataDir(mBuildDataPath);
-        const QStringList installed = dataDir.entryList(
-            QStringList() << QStringLiteral("*.esm") << QStringLiteral("*.esp")
-                          << QStringLiteral("*.omwgame") << QStringLiteral("*.omwaddon"),
-            QDir::Files | QDir::Readable, QDir::Name | QDir::IgnoreCase);
-        for (const QString& fileName : installed)
-        {
-            if (isGroundcoverCandidate(fileName)
-                && !recoveredGroundcover.contains(fileName, Qt::CaseInsensitive))
-                recoveredGroundcover.append(fileName);
-        }
-    }
-    std::sort(recoveredGroundcover.begin(), recoveredGroundcover.end(), [](const QString& left, const QString& right) {
-        return QString::localeAwareCompare(left.toLower(), right.toLower()) < 0;
-    });
+    // The mere presence of build.ini is authoritative, including an
+    // intentionally empty plug-in list. Never fall back to scanning every ESP.
+    const QStringList orderedContent = manifest.contentFiles;
     mGameSettings.setContentList(orderedContent);
-    mGameSettings.setGroundcoverList(recoveredGroundcover);
+    mGameSettings.setGroundcoverList(manifest.groundcoverFiles);
     mGameSettings.remove(QStringLiteral("fallback-archive"));
     for (const QString& archive : manifest.archives)
         mGameSettings.setMultiValue(QStringLiteral("fallback-archive"), archive);
 
     QStringList profileFiles = orderedContent;
-    profileFiles.append(recoveredGroundcover);
-    mLauncherSettings.setContentList(mBuildName, profileFiles, recoveredGroundcover,
-        !recoveredGroundcover.isEmpty());
+    profileFiles.append(manifest.groundcoverFiles);
+    mLauncherSettings.setContentList(mBuildName, profileFiles, manifest.groundcoverFiles,
+        !manifest.groundcoverFiles.isEmpty());
     mLauncherSettings.setCurrentContentListName(mBuildName);
 
     addLogText(tr("Loaded build manifest: %1").arg(manifestPath));
@@ -867,18 +838,6 @@ void Wizard::MainWizard::configureDataFiles(const QString& path)
     }
 
     QStringList groundcover;
-    const QStringList installedContent = dir.entryList(
-        QStringList() << QStringLiteral("*.esm") << QStringLiteral("*.esp")
-                      << QStringLiteral("*.omwgame") << QStringLiteral("*.omwaddon"),
-        QDir::Files | QDir::Readable, QDir::Name | QDir::IgnoreCase);
-    for (const QString& fileName : installedContent)
-    {
-        if (isGroundcoverCandidate(fileName) && !groundcover.contains(fileName, Qt::CaseInsensitive))
-            groundcover.append(fileName);
-    }
-    std::sort(groundcover.begin(), groundcover.end(), [](const QString& left, const QString& right) {
-        return QString::localeAwareCompare(left.toLower(), right.toLower()) < 0;
-    });
 
     mGameSettings.setContentList(content);
     mGameSettings.setGroundcoverList(groundcover);

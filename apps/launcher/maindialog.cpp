@@ -708,40 +708,6 @@ bool Launcher::MainDialog::loadBuildManifest()
         }
     }
 
-    // Y045: recover groundcover state produced by older Wizard revisions.
-    QStringList recoveredContent;
-    QStringList recoveredGroundcover = manifest.groundcoverFiles;
-    auto isGroundcoverCandidate = [](const QString& fileName)
-    {
-        const QString lowered = fileName.toLower();
-        return lowered.contains(QLatin1String("groundcover")) || lowered.contains(QLatin1String("grass"));
-    };
-    for (const QString& fileName : manifest.contentFiles)
-    {
-        if (isGroundcoverCandidate(fileName))
-        {
-            if (!recoveredGroundcover.contains(fileName, Qt::CaseInsensitive))
-                recoveredGroundcover.append(fileName);
-        }
-        else
-            recoveredContent.append(fileName);
-    }
-    if (recoveredGroundcover.isEmpty())
-    {
-        const QDir dataDir(mBuildDataPath);
-        const QStringList installed = dataDir.entryList(
-            QStringList() << QStringLiteral("*.esm") << QStringLiteral("*.esp")
-                          << QStringLiteral("*.omwgame") << QStringLiteral("*.omwaddon"),
-            QDir::Files | QDir::Readable, QDir::Name | QDir::IgnoreCase);
-        for (const QString& fileName : installed)
-        {
-            if (isGroundcoverCandidate(fileName))
-                recoveredGroundcover.append(fileName);
-        }
-    }
-    manifest.contentFiles = recoveredContent;
-    manifest.groundcoverFiles = recoveredGroundcover;
-
     const QString effectiveBuildName = manifest.buildName.trimmed().isEmpty()
         ? QStringLiteral("ArenaMP") : manifest.buildName.trimmed();
     // A present build.ini always owns the enabled plug-in list, including an
