@@ -50,8 +50,16 @@
                 <Property key="TextAlign" value="Center"/>
             </Widget>
 
-            <Widget type="ProgressBar" skin="MW_Progress_Green" position="0 0 420 18" align="HCenter Top" name="ArchetypePowerBar">
-                <Widget type="TextBox" skin="ProgressText" position="0 0 420 18" align="Stretch" name="ArchetypePowerText">
+            <!-- Y046e: thicker bar. The caption widget is a child of the skin's
+                 "Client" area, which MW_Progress_Green insets by 2 px on every side
+                 (Client offset "2 2 60 8" in a 64x12 skin). Sizing the caption to the
+                 full bar rectangle therefore pushes it 2 px below the visual centre,
+                 so the caption is 4 px smaller than the bar in both axes.
+                 Keep align="HCenter Top" on the bar itself: a stretching align on a
+                 non-AutoSized child of an AutoResize VBox reintroduces the endless
+                 Gui::VBox::align() recursion (STATUS_STACK_OVERFLOW). -->
+            <Widget type="ProgressBar" skin="MW_Progress_Green" position="0 0 420 24" align="HCenter Top" name="ArchetypePowerBar">
+                <Widget type="TextBox" skin="ProgressText" position="0 0 416 20" align="Stretch" name="ArchetypePowerText">
                     <Property key="NeedMouse" value="false"/>
                     <Property key="TextAlign" value="Center"/>
                 </Widget>
