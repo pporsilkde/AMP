@@ -755,13 +755,17 @@ function commandHandler.ProcessCommand(pid, cmd)
             local currentTime = os.time()
             if Players[pid].data.timestamps.lastFixMe == nil or
                 currentTime >= Players[pid].data.timestamps.lastFixMe + config.fixmeInterval then
-                -- Y049: FIX is an emergency home return. The private-cell
-                -- system redirects the template Caius cell to this account's copy.
-                logicHandler.RunConsoleCommandOnPlayer(pid, 'coc "Balmora, Caius Cosades\' House"')
+                -- Y055: FIX uses the proven Nirn_FixAPI recovery point only.
+                -- Do not reuse this destination for unrelated emergency recovery paths.
+                tes3mp.SetCell(pid, "Balmora, Temple")
+                tes3mp.SendCell(pid)
+                tes3mp.SetPos(pid, 4700.0, 4700.0, 15000.0)
+                tes3mp.SetRot(pid, 0.0, 0.0)
+                tes3mp.SendPos(pid)
                 Players[pid].data.timestamps.lastFixMe = currentTime
                 local isRu = tostring(Players[pid].language or "EN"):upper() == "RU"
-                tes3mp.SendMessage(pid, isRu and "FIX: возвращение в дом Кая Косадеса.\n"
-                    or "FIX: returning you to Caius Cosades' house.\n", false)
+                tes3mp.SendMessage(pid, isRu and "FIX: возвращение в Храм Балморы.\n"
+                    or "FIX: returning you to Balmora Temple.\n", false)
             else
                 local remainingSeconds = Players[pid].data.timestamps.lastFixMe + config.fixmeInterval - currentTime
                 local isRu = tostring(Players[pid].language or "EN"):upper() == "RU"
