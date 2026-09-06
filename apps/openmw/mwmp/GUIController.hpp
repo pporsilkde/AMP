@@ -10,6 +10,13 @@
 #include "GUI/TextInputDialog.hpp"
 #include "GUI/GUILogin.hpp"
 
+namespace MyGUI
+{
+    class Widget;
+    class ProgressBar;
+    class TextBox;
+}
+
 namespace MWGui
 {
     class LocalMapBase;
@@ -84,6 +91,11 @@ namespace mwmp
         // Player Menu.
         void updateSayKeyHold(float dt);
 
+        // Y050: hidden server restart control envelope and borderless HUD overlay.
+        bool handleEmbeddedRestartControl(const std::string& message);
+        void ensureEmbeddedRestartHud();
+        void destroyEmbeddedRestartHud();
+
         GUIChat *mChat;
         int keySay;
         int keyChatMode;
@@ -98,6 +110,12 @@ namespace mwmp
         GUIDialogList *mListBox;
         ServerQuestEditorWindow *mServerQuestEditor;
         bool mPreLoginPasswordAutoSubmitted;
+
+        MyGUI::Widget* mEmbeddedRestartHud;
+        MyGUI::ProgressBar* mEmbeddedRestartProgress;
+        MyGUI::TextBox* mEmbeddedRestartTitle;
+        MyGUI::TextBox* mEmbeddedRestartMessage;
+        int mEmbeddedRestartTotalSeconds;
         void onInputBoxDone(MWGui::WindowBase* parWindow);
         void onAccountLoginDone(MWGui::WindowBase* parWindow);
         void submitInputReply(const std::string& rawText);

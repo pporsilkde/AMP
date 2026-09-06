@@ -76,6 +76,7 @@ namespace MWGui
             MyGUI::Widget* mBottomPane;
             MyGUI::Button* mViewModeButton;
             MyGUI::ImageBox* mViewModeIcon;
+            MyGUI::Button* mSingleTransferButton;
 
             MyGUI::Button* mMaxSaleButton;
             MyGUI::Button* mCancelButton;
@@ -102,6 +103,8 @@ namespace MWGui
 
             void onFilterChanged(MyGUI::Widget* _sender);
             void onViewModeClicked(MyGUI::Widget* _sender);
+            void onSingleTransferClicked(MyGUI::Widget* _sender);
+            void updateSingleTransferButton();
             void onNameFilterChanged(MyGUI::EditBox* _sender);
             void onOfferButtonClicked(MyGUI::Widget* _sender);
             void onAccept(MyGUI::EditBox* sender);

@@ -666,33 +666,36 @@ int Networking::mainLoop()
             break;
         for (packet=peer->Receive(); packet; peer->DeallocatePacket(packet), packet=peer->Receive())
         {
-            if (getMasterClient()->Process(packet))
+            // ArenaMP Y052: mclient only exists when [MasterServer] enabled is
+            // true. The dedicated-server default ships with it disabled, so this
+            // used to dereference a null pointer for every incoming packet.
+            if (getMasterClient() != nullptr && getMasterClient()->Process(packet))
                 continue;
 
             switch (packet->data[0])
             {
                 case ID_REMOTE_DISCONNECTION_NOTIFICATION:
-                    LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "Client at %s has disconnected", packet->systemAddress.ToString());
+                    LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Client at %s has disconnected", packet->systemAddress.ToString());
                     break;
                 case ID_REMOTE_CONNECTION_LOST:
                     LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "Client at %s has lost connection", packet->systemAddress.ToString());
                     break;
                 case ID_REMOTE_NEW_INCOMING_CONNECTION:
-                    LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "Client at %s has connected", packet->systemAddress.ToString());
+                    LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Client at %s has connected", packet->systemAddress.ToString());
                     break;
                 case ID_CONNECTION_REQUEST_ACCEPTED:    // client to server
                 {
-                    LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "Our connection request has been accepted");
+                    LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Our connection request has been accepted");
                     break;
                 }
                 case ID_NEW_INCOMING_CONNECTION:
-                    LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "A connection is incoming from %s", packet->systemAddress.ToString());
+                    LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "A connection is incoming from %s", packet->systemAddress.ToString());
                     break;
                 case ID_NO_FREE_INCOMING_CONNECTIONS:
                     LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "The server is full");
                     break;
                 case ID_DISCONNECTION_NOTIFICATION:
-                    LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,  "Client at %s has disconnected", packet->systemAddress.ToString());
+                    LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO,  "Client at %s has disconnected", packet->systemAddress.ToString());
                     disconnectPlayer(packet->guid);
                     break;
                 case ID_CONNECTION_LOST:

@@ -997,9 +997,21 @@ function BaseCell:SaveContainers(pid)
             if action == enumerations.container.REMOVE then
 
                 if foundIndex == nil then
-                    tes3mp.LogAppend(enumerations.log.WARN, "- Attempt to remove count of " .. actionCount ..
-                        " from non-existent item " .. itemRefId)
-                    tes3mp.SetContainerItemActionCountByIndex(objectIndex, itemIndex, 0)
+                    -- Y050: scripted REMOVE is idempotent. MFR local scripts can
+                    -- legitimately replay the same removal after authority/cell
+                    -- synchronization. Rejecting it with actionCount=0 leaves the
+                    -- client believing the operation failed and it retries every
+                    -- frame (the log showed >22k helm_ash_msk_01 retries). If the
+                    -- authoritative server state already has no such item, ACK a
+                    -- CLIENT_SCRIPT_LOCAL removal as already satisfied. Gameplay
+                    -- takes remain rejected.
+                    if packetOrigin == enumerations.packetOrigin.CLIENT_SCRIPT_LOCAL then
+                        tes3mp.SetContainerItemActionCountByIndex(objectIndex, itemIndex, actionCount)
+                        tes3mp.LogAppend(enumerations.log.INFO, "- Idempotent scripted REMOVE already satisfied for " .. itemRefId)
+                    else
+                        tes3mp.LogAppend(enumerations.log.INFO, "- Rejected stale container REMOVE for missing " .. itemRefId)
+                        tes3mp.SetContainerItemActionCountByIndex(objectIndex, itemIndex, 0)
+                    end
                 else
                     local item = inventory[foundIndex]
                     local requested = actionCount
@@ -1032,7 +1044,7 @@ function BaseCell:SaveContainers(pid)
                     tes3mp.SetContainerItemActionCountByIndex(objectIndex, itemIndex, accepted)
 
                     if accepted < requested then
-                        tes3mp.LogAppend(enumerations.log.WARN, "- Clamped container REMOVE for " .. itemRefId ..
+                        tes3mp.LogAppend(enumerations.log.INFO, "- Clamped container REMOVE for " .. itemRefId ..
                             " from " .. requested .. " to " .. accepted .. " (personal phase/shared availability)")
                     end
 
@@ -1704,8 +1716,13 @@ function BaseCell:SaveActorCellChanges(pid)
                     end
                 end
             else
-                tes3mp.LogAppend(enumerations.log.ERROR, "-- Invalid cell change was attempted! Please report " ..
-                    "this to a developer")
+                -- Y050: this is a stale authority hand-off, not a corrupt cell.
+                -- The actor may already have been moved by a newer packet from
+                -- another authority. Never fabricate it in the source cell; just
+                -- ignore the obsolete move. This removes the repeated false ERROR
+                -- seen during busy exterior transitions.
+                tes3mp.LogAppend(enumerations.log.INFO, "- Ignored stale ActorCellChange for missing actor " ..
+                    uniqueIndex .. " from " .. self.description .. " to " .. newCellDescription)
             end
         end
     end

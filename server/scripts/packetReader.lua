@@ -311,7 +311,7 @@ packetReader.GetActorPacketTables = function(packetType)
                     end
                 else
                     spellInstance.caster.uniqueIndex = tes3mp.GetActorSpellsActiveCasterRefNum(packetIndex, spellIndex) ..
-                        "-" .. tes3mp.GetSpellsActiveCasterMpNum(packetIndex, spellIndex)
+                        "-" .. tes3mp.GetActorSpellsActiveCasterMpNum(packetIndex, spellIndex)
                     spellInstance.caster.refId = tes3mp.GetActorSpellsActiveCasterRefId(packetIndex, spellIndex)
                 end
 

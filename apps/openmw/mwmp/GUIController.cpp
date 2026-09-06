@@ -1,3 +1,6 @@
+#include <algorithm>
+#include <string>
+
 #include <components/openmw-mp/TimedLog.hpp>
 #include <components/openmw-mp/Base/BasePlayer.hpp>
 
@@ -10,6 +13,7 @@
 #include <MyGUI_Gui.h>
 #include <MyGUI_ImageBox.h>
 #include <MyGUI_InputManager.h>
+#include <MyGUI_ProgressBar.h>
 #include <MyGUI_LanguageManager.h>
 #include <MyGUI_RenderManager.h>
 #include <MyGUI_ScrollView.h>
@@ -46,6 +50,11 @@ mwmp::GUIController::GUIController()
     , mListBox(nullptr)
     , mServerQuestEditor(nullptr)
     , mPreLoginPasswordAutoSubmitted(false)
+    , mEmbeddedRestartHud(nullptr)
+    , mEmbeddedRestartProgress(nullptr)
+    , mEmbeddedRestartTitle(nullptr)
+    , mEmbeddedRestartMessage(nullptr)
+    , mEmbeddedRestartTotalSeconds(30)
 {
     mChat = nullptr;
     keySay = SDL_SCANCODE_Y;
@@ -70,6 +79,8 @@ void mwmp::GUIController::cleanUp()
     if (mServerQuestEditor != nullptr)
         delete mServerQuestEditor;
     mServerQuestEditor = nullptr;
+
+    destroyEmbeddedRestartHud();
 
     // A fresh connection gets one automatic submission from the credentials
     // collected by the account card, even if the previous connection ended
@@ -114,6 +125,11 @@ void mwmp::GUIController::setupChat()
 
 void mwmp::GUIController::printChatMessage(std::string &msg)
 {
+    // Y050 restart countdown is a private transport message, not chat. Handle it
+    // before GUIChat so it also works if chat history is temporarily hidden.
+    if (handleEmbeddedRestartControl(msg))
+        return;
+
     if (mChat != nullptr)
     {
         // X050: group state and validated party-XP controls are transported in
@@ -122,6 +138,129 @@ void mwmp::GUIController::printChatMessage(std::string &msg)
             return;
         mChat->print(msg);
     }
+}
+
+void mwmp::GUIController::ensureEmbeddedRestartHud()
+{
+    const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
+    const int width = std::max(260, std::min(520, view.width - 40));
+    const int height = 62;
+    const int left = std::max(0, (view.width - width) / 2);
+    // Lower than screen centre, but clear of the bottom resource bars.
+    const int top = std::max(20, std::min(view.height - height - 24, view.height / 2 + 85));
+
+    if (mEmbeddedRestartHud == nullptr)
+    {
+        mEmbeddedRestartHud = MyGUI::Gui::getInstance().createWidget<MyGUI::Widget>(
+            "", left, top, width, height, MyGUI::Align::Default, "Popup");
+        mEmbeddedRestartHud->setNeedMouseFocus(false);
+        mEmbeddedRestartHud->setNeedKeyFocus(false);
+
+        mEmbeddedRestartTitle = mEmbeddedRestartHud->createWidget<MyGUI::TextBox>(
+            "SandBrightText", MyGUI::IntCoord(0, 0, width, 20),
+            MyGUI::Align::Top | MyGUI::Align::HStretch, "RestartTitle");
+        mEmbeddedRestartTitle->setNeedMouseFocus(false);
+        mEmbeddedRestartTitle->setNeedKeyFocus(false);
+        mEmbeddedRestartTitle->setTextAlign(MyGUI::Align::Center);
+        mEmbeddedRestartTitle->setTextShadow(true);
+        mEmbeddedRestartTitle->setTextShadowColour(MyGUI::Colour::Black);
+
+        mEmbeddedRestartProgress = mEmbeddedRestartHud->createWidget<MyGUI::ProgressBar>(
+            "MW_Progress_Red", MyGUI::IntCoord(0, 22, width, 10),
+            MyGUI::Align::Top | MyGUI::Align::HStretch, "RestartProgress");
+        mEmbeddedRestartProgress->setNeedMouseFocus(false);
+        mEmbeddedRestartProgress->setNeedKeyFocus(false);
+
+        mEmbeddedRestartMessage = mEmbeddedRestartHud->createWidget<MyGUI::TextBox>(
+            "SandBrightText", MyGUI::IntCoord(0, 36, width, 24),
+            MyGUI::Align::Top | MyGUI::Align::HStretch, "RestartMessage");
+        mEmbeddedRestartMessage->setNeedMouseFocus(false);
+        mEmbeddedRestartMessage->setNeedKeyFocus(false);
+        mEmbeddedRestartMessage->setTextAlign(MyGUI::Align::Center | MyGUI::Align::VCenter);
+        mEmbeddedRestartMessage->setTextShadow(true);
+        mEmbeddedRestartMessage->setTextShadowColour(MyGUI::Colour::Black);
+    }
+    else
+    {
+        // Resolution/UI scale may have changed since the previous server message.
+        mEmbeddedRestartHud->setCoord(left, top, width, height);
+        if (mEmbeddedRestartTitle) mEmbeddedRestartTitle->setCoord(0, 0, width, 20);
+        if (mEmbeddedRestartProgress) mEmbeddedRestartProgress->setCoord(0, 22, width, 10);
+        if (mEmbeddedRestartMessage) mEmbeddedRestartMessage->setCoord(0, 36, width, 24);
+    }
+
+    mEmbeddedRestartHud->setVisible(true);
+}
+
+void mwmp::GUIController::destroyEmbeddedRestartHud()
+{
+    if (mEmbeddedRestartHud != nullptr)
+        MyGUI::Gui::getInstance().destroyWidget(mEmbeddedRestartHud);
+
+    mEmbeddedRestartHud = nullptr;
+    mEmbeddedRestartProgress = nullptr;
+    mEmbeddedRestartTitle = nullptr;
+    mEmbeddedRestartMessage = nullptr;
+    mEmbeddedRestartTotalSeconds = 30;
+}
+
+bool mwmp::GUIController::handleEmbeddedRestartControl(const std::string& message)
+{
+    static const std::string prefix = "@@AMP_RESTART@@";
+    if (message.compare(0, prefix.size(), prefix) != 0)
+        return false;
+
+    std::string value = message.substr(prefix.size());
+    while (!value.empty() && (value.back() == '\n' || value.back() == '\r' || value.back() == ' '))
+        value.pop_back();
+
+    // Y052: an aborted or rescheduled countdown clears the overlay immediately.
+    // Previously the HUD stayed on screen until the GUIController was destroyed.
+    if (value == "CANCEL")
+    {
+        destroyEmbeddedRestartHud();
+        return true;
+    }
+
+    int seconds = 0;
+    try
+    {
+        seconds = std::max(0, std::stoi(value));
+    }
+    catch (...)
+    {
+        return true;
+    }
+
+    ensureEmbeddedRestartHud();
+    if (seconds > mEmbeddedRestartTotalSeconds)
+        mEmbeddedRestartTotalSeconds = seconds;
+
+    if (mEmbeddedRestartProgress != nullptr)
+    {
+        mEmbeddedRestartProgress->setProgressRange(std::max(1, mEmbeddedRestartTotalSeconds));
+        mEmbeddedRestartProgress->setProgressPosition(std::min(seconds, mEmbeddedRestartTotalSeconds));
+    }
+
+    const auto arenaText = [](const std::string& key)
+    {
+        return MyGUI::LanguageManager::getInstance().replaceTags("#{arenamp=" + key + "}");
+    };
+
+    std::string title = arenaText("restart.countdown");
+    const std::string token = "%s";
+    const std::size_t pos = title.find(token);
+    if (pos != std::string::npos)
+        title.replace(pos, token.size(), std::to_string(seconds));
+    else
+        title += " " + std::to_string(seconds);
+
+    if (mEmbeddedRestartTitle != nullptr)
+        mEmbeddedRestartTitle->setCaption(title);
+    if (mEmbeddedRestartMessage != nullptr)
+        mEmbeddedRestartMessage->setCaption(arenaText("restart.leave_request"));
+
+    return true;
 }
 
 

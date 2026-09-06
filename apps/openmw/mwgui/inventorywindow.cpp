@@ -541,7 +541,9 @@ namespace MWGui
 
         const ItemStack& item = mTradeModel->getItem(sourceIndex);
         int count = item.mCount;
-        if (MyGUI::InputManager::getInstance().isControlPressed())
+        const bool oneAtATime = Settings::Manager::getBool("single item transfer", "GUI")
+            && (mTrading || mGuiMode == GM_Container || mGuiMode == GM_Companion);
+        if (MyGUI::InputManager::getInstance().isControlPressed() || oneAtATime)
             count = 1;
 
         mSelectedItem = sourceIndex;
@@ -559,7 +561,7 @@ namespace MWGui
                 MWBase::Environment::get().getWindowManager()->messageBox("#{sBarterDialog4}");
                 return;
             }
-            const bool control = MyGUI::InputManager::getInstance().isControlPressed();
+            const bool control = MyGUI::InputManager::getInstance().isControlPressed() || oneAtATime;
             const bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
             if (item.mCount > 1 && !control && !shift)
             {
@@ -579,7 +581,7 @@ namespace MWGui
         // inventory stack into the world. Ctrl = one, Shift = whole stack.
         if ((mGuiMode == GM_Container || mGuiMode == GM_Companion) && mDragAndDrop->getTransferTargetView())
         {
-            const bool control = MyGUI::InputManager::getInstance().isControlPressed();
+            const bool control = MyGUI::InputManager::getInstance().isControlPressed() || oneAtATime;
             const bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
             if (item.mCount > 1 && !control && !shift)
             {
@@ -641,7 +643,9 @@ namespace MWGui
             return;
 
         const ItemStack quickItem = mTradeModel->getItem(sourceIndex);
-        int quickCount = MyGUI::InputManager::getInstance().isControlPressed() ? 1 : quickItem.mCount;
+        const bool oneAtATime = Settings::Manager::getBool("single item transfer", "GUI");
+        int quickCount = (MyGUI::InputManager::getInstance().isControlPressed() || oneAtATime)
+            ? 1 : quickItem.mCount;
 
         // In barter/container/companion modes a double click means "send to the
         // other side". This mirrors modern two-pane inventories and compensates
@@ -728,7 +732,9 @@ namespace MWGui
         int count = item.mCount;
         bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
 
-        if (MyGUI::InputManager::getInstance().isControlPressed())
+        const bool oneAtATime = Settings::Manager::getBool("single item transfer", "GUI")
+            && (mTrading || mGuiMode == GM_Container || mGuiMode == GM_Companion);
+        if (MyGUI::InputManager::getInstance().isControlPressed() || oneAtATime)
             count = 1;
 
         if (mTrading)

@@ -30,10 +30,11 @@
       <Widget type="TextBox" skin="SandBrightText" position="10 5 170 22" name="PlayerMenuTitle">
         <Property key="TextAlign" value="Left VCenter"/>
       </Widget>
-      <Widget type="Button" skin="MW_Button" position="190 4 110 24" name="TabChat"/>
-      <Widget type="Button" skin="MW_Button" position="304 4 110 24" name="TabGroup"/>
-      <Widget type="Button" skin="MW_Button" position="418 4 110 24" name="TabPlayers"/>
-      <Widget type="Button" skin="MW_Button" position="532 4 168 24" name="ReturnButton"/>
+      <Widget type="Button" skin="MW_Button" position="190 4 100 24" name="TabChat"/>
+      <Widget type="Button" skin="MW_Button" position="294 4 100 24" name="TabGroup"/>
+      <Widget type="Button" skin="MW_Button" position="398 4 100 24" name="TabPlayers"/>
+      <Widget type="Button" skin="MW_Button" position="502 4 100 24" name="TabStats"/>
+      <Widget type="Button" skin="MW_Button" position="670 4 30 24" name="ReturnButton"/>
     </Widget>
 
     <Widget type="Widget" skin="" position="10 44 700 30" align="HStretch Top" name="ChatToolbar">
@@ -193,6 +194,23 @@
         <Widget type="Button" skin="MW_Button" position="0 2 160 26" name="PlayersRefreshButton"/>
         <Widget type="Button" skin="MW_Button" position="166 2 200 26" name="PlayersOpenListButton"/>
         <Widget type="Button" skin="MW_Button" position="372 2 200 26" name="PlayersInviteButton"/>
+      </Widget>
+    </Widget>
+
+    <!-- Y052: profile/statistics integrated into the Player Menu. -->
+    <Widget type="Widget" skin="MW_Box" position="10 46 700 416" align="Stretch" name="ProfilePane">
+      <Property key="Visible" value="false"/>
+      <Widget type="TextBox" skin="SandBrightText" position="14 8 672 24" name="ProfileTitle"/>
+      <Widget type="EditBox" skin="MW_TextBoxEditWithBorder" position="14 36 672 336" name="ProfileInfo">
+        <Property key="EditStatic" value="true"/><Property key="ReadOnly" value="true"/>
+        <Property key="MultiLine" value="true"/><Property key="WordWrap" value="true"/>
+        <Property key="FontName" value="DejaVuLGCSansMono"/>
+      </Widget>
+      <Widget type="Widget" skin="" position="14 378 672 30" name="ProfileActionRow">
+        <Widget type="Button" skin="MW_Button" position="0 2 130 26" name="ProfileRefreshButton"/>
+        <Widget type="Button" skin="MW_Button" position="136 2 90 26" name="ProfileFixButton"/>
+        <Widget type="Button" skin="MW_Button" position="232 2 190 26" name="ProfileReturnsButton"/>
+        <Widget type="Button" skin="MW_Button" position="428 2 220 26" name="ProfileDeleteButton"/>
       </Widget>
     </Widget>
 

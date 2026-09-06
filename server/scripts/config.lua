@@ -19,6 +19,19 @@ config.gameMode = "ArenaMP MMO"
 -- Time to login, in seconds
 config.loginTime = 60
 
+-- Y050: dedicated-server self restart. This replaces the old external
+-- Nirn_ResetAPI/launcher restart loop. The server saves state, shows a
+-- 30-second client HUD countdown, exits with a reserved code and relaunches
+-- itself from the native dedicated-server executable.
+config.embeddedRestart = {
+    enabled = true,
+    intervalHours = 12,
+    countdownSeconds = 30,
+    exitCode = 42,
+    commandName = "shutdown",
+    requiredRank = 2
+}
+
 -- X051: restart-safe player position persistence. The stock TES3MP 0.8.1
 -- server does not expose ID_PLAYER_POSITION to Lua, so X051 adds that callback
 -- and keeps the last in-cell transform authoritative. Disk writes are debounced;
@@ -1109,6 +1122,18 @@ config.allowSuicideCommand = true
 config.profileSystem = {
     ["return unlock level"] = 25,
     ["return cooldown seconds"] = 20
+}
+
+-- ArenaMP Y052 server-authoritative alchemy bottle requirement. The client
+-- setting [ArenaMW Alchemy] "require bottle" only drives the UI; this is what
+-- actually enforces it. Matching happens on refId because the server never sees
+-- localized item names - add exact refIds below if your bottles are named
+-- differently.
+config.alchemySystem = {
+    ["require bottle"] = true,
+    ["bottle refid tokens"] = { "bottle", "flask", "vial" },
+    ["bottle refids"] = {},
+    ["log rejections"] = true
 }
 
 -- ArenaMP Y049 persistent coloured map markers. Personal markers are stored

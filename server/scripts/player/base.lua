@@ -305,8 +305,16 @@ function BasePlayer:FinishLogin()
 
         if config.shareFactionExpulsion == true then
             WorldInstance:LoadFactionExpulsion(self.pid)
+            -- Y052: shared expulsion data is not mutated here; only this
+            -- player's runtime client state is cleared for the new login.
+            stateHelper:ClearFactionExpulsionForLogin(self.pid, WorldInstance, false)
+            -- Also discard any old personal expulsion flags left from a server
+            -- that previously used personal faction state.
+            stateHelper:ClearFactionExpulsionForLogin(self.pid, self, true)
         else
             self:LoadFactionExpulsion()
+            -- ArenaMP MMO rule: guild expulsions never survive a relog.
+            stateHelper:ClearFactionExpulsionForLogin(self.pid, self, true)
         end
 
         if config.shareFactionReputation == true then
@@ -343,8 +351,15 @@ function BasePlayer:FinishLogin()
             self:LoadMap()
         end
 
-        self:LoadClientScriptVariables()        
+        self:LoadClientScriptVariables()
         WorldInstance:LoadClientScriptVariables(self.pid)
+
+        -- Y052: faction-expulsion quest globals are a second persistence layer
+        -- used by vanilla guild scripts and several supported content suites.
+        -- Clear them after both personal and world globals were restored, so
+        -- stale expulsion state cannot re-apply itself immediately after login.
+        stateHelper:ClearFactionExpulsionGlobalsForLogin(
+            self.pid, self, WorldInstance, true)
 
         -- Start of AMP addition
         --

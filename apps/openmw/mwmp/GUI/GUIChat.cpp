@@ -243,12 +243,15 @@ namespace mwmp
         , mColorBar(nullptr)
         , mGroupPane(nullptr)
         , mPlayersPane(nullptr)
+        , mProfilePane(nullptr)
         , mPlayersActionRow(nullptr)
+        , mProfileActionRow(nullptr)
         , mGroupActionRow1(nullptr)
         , mGroupActionRow2(nullptr)
         , mGroupActionRow3(nullptr)
         , mGroupInfo(nullptr)
         , mPlayersInfo(nullptr)
+        , mProfileInfo(nullptr)
         , mGroupRoster(nullptr)
         , mPlayersList(nullptr)
         , mGroupRosterLabel(nullptr)
@@ -260,9 +263,14 @@ namespace mwmp
         , mTabChat(nullptr)
         , mTabGroup(nullptr)
         , mTabPlayers(nullptr)
+        , mTabStats(nullptr)
         , mPlayersRefreshButton(nullptr)
         , mPlayersOpenListButton(nullptr)
         , mPlayersInviteButton(nullptr)
+        , mProfileRefreshButton(nullptr)
+        , mProfileFixButton(nullptr)
+        , mProfileReturnsButton(nullptr)
+        , mProfileDeleteButton(nullptr)
         , mModeOoc(nullptr)
         , mModeRp(nullptr)
         , mChannelSay(nullptr)
@@ -410,12 +418,19 @@ namespace mwmp
         getWidget(mColorBarLabel, "ColorBarLabel");
         getWidget(mGroupPane, "GroupPane");
         getWidget(mPlayersPane, "PlayersPane");
+        getWidget(mProfilePane, "ProfilePane");
         getWidget(mPlayersActionRow, "PlayersActionRow");
+        getWidget(mProfileActionRow, "ProfileActionRow");
         getWidget(mPlayersList, "PlayersList");
         getWidget(mPlayersInfo, "PlayersInfo");
+        getWidget(mProfileInfo, "ProfileInfo");
         getWidget(mPlayersRefreshButton, "PlayersRefreshButton");
         getWidget(mPlayersOpenListButton, "PlayersOpenListButton");
         getWidget(mPlayersInviteButton, "PlayersInviteButton");
+        getWidget(mProfileRefreshButton, "ProfileRefreshButton");
+        getWidget(mProfileFixButton, "ProfileFixButton");
+        getWidget(mProfileReturnsButton, "ProfileReturnsButton");
+        getWidget(mProfileDeleteButton, "ProfileDeleteButton");
         getWidget(mGroupActionRow1, "GroupActionRow1");
         getWidget(mGroupActionRow2, "GroupActionRow2");
         getWidget(mGroupActionRow3, "GroupActionRow3");
@@ -425,6 +440,7 @@ namespace mwmp
         getWidget(mTabChat, "TabChat");
         getWidget(mTabGroup, "TabGroup");
         getWidget(mTabPlayers, "TabPlayers");
+        getWidget(mTabStats, "TabStats");
         getWidget(mModeOoc, "ModeOoc");
         getWidget(mModeRp, "ModeRp");
         // X054: the three layout slots become Say / local OOC / global OOC;
@@ -487,15 +503,19 @@ namespace mwmp
         MyGUI::TextBox* title = nullptr;
         MyGUI::TextBox* groupTitle = nullptr;
         MyGUI::TextBox* playersTitle = nullptr;
+        MyGUI::TextBox* profileTitle = nullptr;
         getWidget(title, "PlayerMenuTitle");
         getWidget(groupTitle, "GroupTitle");
         getWidget(playersTitle, "PlayersTitle");
+        getWidget(profileTitle, "ProfileTitle");
 
         title->setCaption(localizeArena("chat.menu.title"));
         setMenuCaption(mTabChat, localizeArena("chat.tab.chat"));
         setMenuCaption(mTabGroup, localizeArena("chat.tab.group"));
         setMenuCaption(mTabPlayers, localizeArena("chat.tab.players"));
-        setMenuCaption(mReturnButton, localizeArena("chat.return_game"));
+        setMenuCaption(mTabStats, localizeArena("chat.tab.stats"));
+        setMenuCaption(mReturnButton, "X");
+        mReturnButton->setTextColour(MyGUI::Colour(1.f, 0.15f, 0.15f));
         setMenuCaption(mModeOoc, "OOC");
         setMenuCaption(mModeRp, "RP");
         setMenuCaption(mChannelSay, localizeArena("chat.channel.say"));
@@ -533,6 +553,14 @@ namespace mwmp
         setMenuCaption(mPlayersOpenListButton, localizeArena("chat.players.open_list"));
         setMenuCaption(mPlayersInviteButton, localizeArena("chat.group.invite"));
 
+        profileTitle->setCaption(localizeArena("chat.profile.title"));
+        mProfileInfo->setCaption(localizeArena("chat.profile.loading"));
+        setMenuCaption(mProfileRefreshButton, localizeArena("chat.profile.refresh"));
+        setMenuCaption(mProfileFixButton, "FIX");
+        setMenuCaption(mProfileReturnsButton, localizeArena("chat.profile.returns"));
+        setMenuCaption(mProfileDeleteButton, localizeArena("chat.profile.delete"));
+        mProfileDeleteButton->setTextColour(MyGUI::Colour(1.f, 0.25f, 0.25f));
+
         emojiFontName = Settings::Manager::getString("emoji font", "Chat");
         menuFontName = Settings::Manager::getString("menu font", "Chat");
         if (menuFontName.empty())
@@ -545,6 +573,7 @@ namespace mwmp
         mTabChat->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onTabClicked);
         mTabGroup->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onTabClicked);
         mTabPlayers->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onTabClicked);
+        mTabStats->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onTabClicked);
         mModeOoc->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onModeClicked);
         mModeRp->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onModeClicked);
         mChannelSay->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onChannelClicked);
@@ -576,6 +605,10 @@ namespace mwmp
         mPlayersRefreshButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onPlayersButtonClicked);
         mPlayersOpenListButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onPlayersButtonClicked);
         mPlayersInviteButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onPlayersButtonClicked);
+        mProfileRefreshButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onProfileButtonClicked);
+        mProfileFixButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onProfileButtonClicked);
+        mProfileReturnsButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onProfileButtonClicked);
+        mProfileDeleteButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onProfileButtonClicked);
 
         mGroupCreateButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onGroupButtonClicked);
         mGroupRefreshButton->eventMouseButtonClick += MyGUI::newDelegate(this, &GUIChat::onGroupButtonClicked);
@@ -595,6 +628,7 @@ namespace mwmp
         // Keep the title bar draggable even though its label occupies part of it.
         title->setNeedMouseFocus(false);
         mGroupInfo->setEditReadOnly(true);
+        mProfileInfo->setEditReadOnly(true);
         updateGroupControls();
     }
 
@@ -771,6 +805,12 @@ namespace mwmp
                 // registration flow. Do not silently pre-fill the old password.
                 Settings::Manager::setString("password", "Login", "");
                 Settings::Manager::saveUser();
+            }
+            else
+            {
+                std::vector<std::string> fields = splitControlFields(action, '\t');
+                if (!fields.empty() && fields[0] == "STATE")
+                    rebuildProfileState(fields);
             }
             return true;
         }
@@ -1516,6 +1556,7 @@ namespace mwmp
         mColorBar->setVisible(chatVisible && activeDrawer == DRAWER_COLOR);
         mGroupPane->setVisible(menuVisible && activeTab == TAB_GROUP);
         mPlayersPane->setVisible(menuVisible && activeTab == TAB_PLAYERS);
+        mProfilePane->setVisible(menuVisible && activeTab == TAB_STATS);
 
         mCommandLine->setVisible(editorVisible);
         mHistory->setVisible(historyDisplayEnabled && (!menuVisible || chatVisible));
@@ -1565,6 +1606,8 @@ namespace mwmp
                 requestGroupState();
             else if (activeTab == TAB_PLAYERS)
                 requestPlayerList();
+            else if (activeTab == TAB_STATS)
+                requestProfileState();
         }
     }
 
@@ -1573,6 +1616,7 @@ namespace mwmp
         mTabChat->setStateSelected(activeTab == TAB_CHAT);
         mTabGroup->setStateSelected(activeTab == TAB_GROUP);
         mTabPlayers->setStateSelected(activeTab == TAB_PLAYERS);
+        mTabStats->setStateSelected(activeTab == TAB_STATS);
         mModeOoc->setStateSelected(!rpMode);
         mModeRp->setStateSelected(rpMode);
         mChannelSay->setStateSelected(chatChannel == CHANNEL_SAY);
@@ -1783,6 +1827,8 @@ namespace mwmp
             selectTab(TAB_GROUP);
         else if (sender == mTabPlayers)
             selectTab(TAB_PLAYERS);
+        else if (sender == mTabStats)
+            selectTab(TAB_STATS);
         else
             selectTab(TAB_CHAT);
     }
@@ -2393,12 +2439,17 @@ namespace mwmp
         if (MyGUI::Widget* title = mDragHandle->findWidget("PlayerMenuTitle"))
             title->setCoord(10, 5, titleWidth - 14, 22);
 
+        // Y052: keep the close button compact and unmistakable. The four tabs
+        // share the remaining title strip, while the red X always stays square.
+        const int closeWidth = 30;
+        const int tabsWidth = std::max(160, mDragHandle->getWidth() - titleWidth - closeWidth - sRowGap - 10);
         std::vector<MyGUI::Widget*> tabs;
         tabs.push_back(mTabChat);
         tabs.push_back(mTabGroup);
         tabs.push_back(mTabPlayers);
-        tabs.push_back(mReturnButton);
-        layoutRow(tabs, titleWidth, 4, std::max(120, mDragHandle->getWidth() - titleWidth - 10), 24, sRowGap);
+        tabs.push_back(mTabStats);
+        layoutRow(tabs, titleWidth, 4, tabsWidth, 24, sRowGap);
+        mReturnButton->setCoord(titleWidth + tabsWidth + sRowGap, 4, closeWidth, 24);
 
         // X054: one container, two rows. Row 1 is the RP switch plus coreChat's
         // five speech channels; row 2 is the roleplay action styles and the two
@@ -2512,6 +2563,20 @@ namespace mwmp
         playerActions.push_back(mPlayersOpenListButton);
         playerActions.push_back(mPlayersInviteButton);
         layoutRow(playerActions, 0, 2, paneInner, 26, sRowGap);
+
+        // Y052 profile/statistics page.
+        mProfilePane->setCoord(sSideMargin, paneTop, inner, paneHeight);
+        if (MyGUI::Widget* profileTitle = mProfilePane->findWidget("ProfileTitle"))
+            profileTitle->setCoord(14, 8, paneInner, 24);
+        const int profileBodyHeight = std::max(120, paneHeight - 110);
+        mProfileInfo->setCoord(14, 36, paneInner, profileBodyHeight);
+        mProfileActionRow->setCoord(14, 46 + profileBodyHeight, paneInner, 30);
+        std::vector<MyGUI::Widget*> profileActions;
+        profileActions.push_back(mProfileRefreshButton);
+        profileActions.push_back(mProfileFixButton);
+        profileActions.push_back(mProfileReturnsButton);
+        profileActions.push_back(mProfileDeleteButton);
+        layoutRow(profileActions, 0, 2, paneInner, 26, sRowGap);
 
     }
 
@@ -2789,6 +2854,66 @@ namespace mwmp
                 return;
             mGroupTargetEdit->setCaption(playerListNames[index]);
             sendGroupAction("invite", playerListNames[index]);
+        }
+    }
+
+    void GUIChat::requestProfileState()
+    {
+        send("/profileui state");
+    }
+
+    void GUIChat::rebuildProfileState(const std::vector<std::string>& fields)
+    {
+        if (mProfileInfo == nullptr || fields.empty())
+            return;
+
+        const std::string played = fields.size() > 1 ? unescapeControlField(fields[1]) : "-";
+        const std::string deaths = fields.size() > 2 ? fields[2] : "0";
+        const std::string arrests = fields.size() > 3 ? fields[3] : "0";
+        const std::string level = fields.size() > 4 ? fields[4] : "1";
+        const bool unlocked = fields.size() > 5 && fields[5] == "1";
+        const std::string unlockLevel = fields.size() > 6 ? fields[6] : "25";
+        const std::string slotA = fields.size() > 7 ? unescapeControlField(fields[7]) : "-";
+        const std::string slotB = fields.size() > 8 ? unescapeControlField(fields[8]) : "-";
+        const std::string slotC = fields.size() > 9 ? unescapeControlField(fields[9]) : "-";
+
+        std::ostringstream info;
+        info << localizeArena("chat.profile.time") << ": " << played << "\n"
+             << localizeArena("chat.profile.deaths") << ": " << deaths << "\n"
+             << localizeArena("chat.profile.arrests") << ": " << arrests << "\n"
+             << localizeArena("chat.profile.level") << ": " << level << "\n\n"
+             << localizeArena("chat.profile.return_points") << ":\n"
+             << "A: " << slotA << "\n"
+             << "B: " << slotB << "\n"
+             << "C: " << slotC;
+
+        if (!unlocked)
+            info << "\n\n" << localizeArena("chat.profile.unlock_hint") << " " << unlockLevel << ".";
+
+        mProfileInfo->setCaption(info.str());
+    }
+
+    void GUIChat::onProfileButtonClicked(MyGUI::Widget* sender)
+    {
+        if (sender == mProfileRefreshButton)
+        {
+            requestProfileState();
+            return;
+        }
+        if (sender == mProfileFixButton)
+        {
+            send("/fixme");
+            return;
+        }
+        if (sender == mProfileReturnsButton)
+        {
+            send("/profile returns");
+            return;
+        }
+        if (sender == mProfileDeleteButton)
+        {
+            send("/profile delete");
+            return;
         }
     }
 

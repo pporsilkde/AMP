@@ -833,7 +833,7 @@ namespace MWGui
         , mGlobalMapOverlay(nullptr)
         , mZoomInButton(nullptr)
         , mZoomOutButton(nullptr)
-        , mLocalZoomStep(0)
+        , mLocalZoomStep(std::clamp(Settings::Manager::getInt("local map zoom step", "Map"), -2, 3))
         , mGlobal(Settings::Manager::getBool("global", "Map"))
         , mEventBoxGlobal(nullptr)
         , mEventBoxLocal(nullptr)
@@ -1115,6 +1115,10 @@ namespace MWGui
     {
         LocalMapBase::onFrame(dt);
         NoDrop::onFrame(dt);
+
+        // The GUI mode can change while a pinned map remains visible, so keep
+        // its HUD/menu presentation in sync with inventory/menu transitions.
+        updatePinnedPresentation();
     }
 
     void MapWindow::setGlobalMapMarkerTooltip(MyGUI::Widget* markerWidget, int x, int y)
@@ -1212,7 +1216,9 @@ namespace MWGui
 
     void MapWindow::onZoomInClicked(MyGUI::Widget*)
     {
-        if (mGlobal || mPinned)
+        // Y052: the pinned map is exactly the view the zoom was requested for,
+        // so only the world map (which has its own scale) is excluded here.
+        if (mGlobal)
             return;
         mLocalZoomStep = std::min(3, mLocalZoomStep + 1);
         applyLocalZoom();
@@ -1220,7 +1226,7 @@ namespace MWGui
 
     void MapWindow::onZoomOutClicked(MyGUI::Widget*)
     {
-        if (mGlobal || mPinned)
+        if (mGlobal)
             return;
         mLocalZoomStep = std::max(-2, mLocalZoomStep - 1);
         applyLocalZoom();
@@ -1232,6 +1238,11 @@ namespace MWGui
         const int index = std::clamp(mLocalZoomStep + 2, 0, 5);
         const int baseSize = std::max(1, Settings::Manager::getInt("local map widget size", "Map"));
         setMapWidgetSize(static_cast<int>(std::lround(baseSize * zoomFactors[index])));
+
+        // Y052: remember the chosen scale across sessions instead of snapping
+        // back to 1.0 on every launch.
+        if (Settings::Manager::getInt("local map zoom step", "Map") != mLocalZoomStep)
+            Settings::Manager::setInt("local map zoom step", "Map", mLocalZoomStep);
     }
 
     void MapWindow::updatePinnedPresentation()
@@ -1240,8 +1251,14 @@ namespace MWGui
             return;
 
         const bool visible = isVisible();
-        const bool normalControls = visible && !mPinned
-            && MWBase::Environment::get().getWindowManager()->getMode() != MWGui::GM_None;
+        const bool guiOpen = MWBase::Environment::get().getWindowManager()->getMode() != MWGui::GM_None;
+
+        // ArenaMP Y051: pinning only removes the frame while the map is acting as
+        // an in-game HUD/minimap. Opening inventory or another GUI mode restores
+        // the normal window frame and controls without changing the saved pin state.
+        const bool framelessHud = mPinned && !guiOpen;
+        const bool normalControls = visible && guiOpen;
+
         if (mButton)
             mButton->setVisible(normalControls);
         if (mZoomInButton)
@@ -1254,18 +1271,17 @@ namespace MWGui
             return;
 
         for (MyGUI::Widget* widget : window->getSkinWidgetsByName("Action"))
-            widget->setVisible(!mPinned);
+            widget->setVisible(!framelessHud);
         for (MyGUI::Widget* widget : window->getSkinWidgetsByName("Caption"))
-            widget->setVisible(!mPinned);
+            widget->setVisible(!framelessHud);
 
-        // Keep only the small pin control accessible; the decorative frame/caption disappears.
         if (mPinButton)
             mPinButton->setVisible(visible);
 
         if (MyGUI::Widget* client = window->getSkinWidget("Client", false))
         {
             const MyGUI::IntSize size = mMainWidget->getSize();
-            if (mPinned)
+            if (framelessHud)
                 client->setCoord(0, 0, size.width, size.height);
             else
                 client->setCoord(8, 28, std::max(1, size.width - 16), std::max(1, size.height - 36));

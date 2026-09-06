@@ -6,6 +6,7 @@
 #include <MyGUI_ControllerManager.h>
 #include <MyGUI_ControllerRepeatClick.h>
 #include <MyGUI_ImageBox.h>
+#include <MyGUI_LanguageManager.h>
 
 #include <components/widgets/numericeditbox.hpp>
 #include <components/settings/settings.hpp>
@@ -76,6 +77,7 @@ namespace MWGui
         , mCurrentMerchantOffer(0)
         , mViewModeButton(nullptr)
         , mViewModeIcon(nullptr)
+        , mSingleTransferButton(nullptr)
         , mFilterKeys(nullptr)
         , mMerchantGoldIcon(nullptr)
     {
@@ -103,6 +105,7 @@ namespace MWGui
         getWidget(mBottomPane, "BottomPane");
         getWidget(mFilterEdit, "FilterEdit");
         getWidget(mViewModeButton, "ViewModeButton");
+        getWidget(mSingleTransferButton, "SingleTransferButton");
 
         getWidget(mItemView, "ItemView");
         mItemView->setExtendedMode(true);
@@ -131,6 +134,7 @@ namespace MWGui
         mFilterKeys->eventMouseButtonClick += MyGUI::newDelegate(this, &TradeWindow::onFilterChanged);
         mFilterEdit->eventEditTextChange += MyGUI::newDelegate(this, &TradeWindow::onNameFilterChanged);
         mViewModeButton->eventMouseButtonClick += MyGUI::newDelegate(this, &TradeWindow::onViewModeClicked);
+        mSingleTransferButton->eventMouseButtonClick += MyGUI::newDelegate(this, &TradeWindow::onSingleTransferClicked);
 
         mCancelButton->eventMouseButtonClick += MyGUI::newDelegate(this, &TradeWindow::onCancelButtonClicked);
         mOfferButton->eventMouseButtonClick += MyGUI::newDelegate(this, &TradeWindow::onOfferButtonClicked);
@@ -144,6 +148,8 @@ namespace MWGui
         mTotalBalance->eventEditSelectAccept += MyGUI::newDelegate(this, &TradeWindow::onAccept);
         mTotalBalance->setMinValue(std::numeric_limits<int>::min()+1); // disallow INT_MIN since abs(INT_MIN) is undefined
 
+        updateSingleTransferButton();
+
         // Keep the merchant panel a little roomier than the old layout so the
         // ItemView scrollbar and both bottom action rows remain fully inside
         // the outer frame at UI scaling factors above 1.0.
@@ -153,6 +159,7 @@ namespace MWGui
     void TradeWindow::setPtr(const MWWorld::Ptr& actor)
     {
         mPtr = actor;
+        updateSingleTransferButton();
 
         mCurrentBalance = 0;
         mCurrentMerchantOffer = 0;
@@ -237,7 +244,8 @@ namespace MWGui
             return;
 
         const ItemStack item = mSortModel->getItem(index);
-        const bool control = MyGUI::InputManager::getInstance().isControlPressed();
+        const bool control = MyGUI::InputManager::getInstance().isControlPressed()
+            || Settings::Manager::getBool("single item transfer", "GUI");
         const bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
         const int count = control ? 1 : item.mCount;
 
@@ -272,7 +280,8 @@ namespace MWGui
 
         mItemToSell = sourceIndex;
         const ItemStack item = mTradeModel->getItem(sourceIndex);
-        const bool control = MyGUI::InputManager::getInstance().isControlPressed();
+        const bool control = MyGUI::InputManager::getInstance().isControlPressed()
+            || Settings::Manager::getBool("single item transfer", "GUI");
         const bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
         const int count = control ? 1 : item.mCount;
 
@@ -818,6 +827,25 @@ namespace MWGui
             mViewModeIcon->setImageTexture(std::string("icons/inventoryextender/Base/")
                 + (mItemView->getViewMode() == ItemView::View_List ? "view_grid.dds" : "view_table.dds"));
         mViewModeButton->setStateSelected(mItemView->getViewMode() == ItemView::View_List);
+    }
+
+    void TradeWindow::onSingleTransferClicked(MyGUI::Widget*)
+    {
+        const bool enabled = Settings::Manager::getBool("single item transfer", "GUI");
+        Settings::Manager::setBool("single item transfer", "GUI", !enabled);
+        Settings::Manager::saveUser();
+        updateSingleTransferButton();
+    }
+
+    void TradeWindow::updateSingleTransferButton()
+    {
+        if (!mSingleTransferButton)
+            return;
+
+        const bool enabled = Settings::Manager::getBool("single item transfer", "GUI");
+        mSingleTransferButton->setStateSelected(enabled);
+        mSingleTransferButton->setCaption(MyGUI::LanguageManager::getInstance().replaceTags(
+            enabled ? "#{arenamp=inventory.single_transfer_on}" : "#{arenamp=inventory.single_transfer_off}"));
     }
 
     void TradeWindow::onReferenceUnavailable()

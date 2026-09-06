@@ -54,6 +54,10 @@ playerListHelper = require("playerListHelper")
 profileHelper = require("profileHelper")
 -- Y049: persistent coloured group map markers.
 groupMapHelper = require("groupMapHelper")
+-- Y050: embedded 12-hour graceful self-restart; no external launcher loop.
+restartHelper = require("restartHelper")
+-- Y052: server-authoritative empty-bottle requirement for potion brewing.
+alchemyBottleHelper = require("alchemyBottleHelper")
 -- X050a: built-in ArenaMP owner/console helper moved out of scripts/custom.
 helperAreana = require("helperAreana")
 guiHelper = require("guiHelper")
@@ -392,11 +396,19 @@ function OnServerPostInit()
         ApplyServerRuleConfig()
     end
     customEventHooks.triggerHandlers("OnServerPostInit", eventStatus, {})
+
+    -- Start the native-backed restart schedule only after all CoreScripts and
+    -- handlers are ready, so the final save can safely touch every subsystem.
+    restartHelper.Initialize()
 end
 
 function OnServerExit(errorState)
     tes3mp.LogMessage(enumerations.log.INFO, "Called \"OnServerExit\"")
-    tes3mp.LogMessage(enumerations.log.ERROR, "Error state: " .. tostring(errorState))
+    if errorState then
+        tes3mp.LogMessage(enumerations.log.ERROR, "Error state: " .. tostring(errorState))
+    else
+        tes3mp.LogMessage(enumerations.log.INFO, "Error state: false")
+    end
     customEventHooks.triggerHandlers("OnServerExit", customEventHooks.makeEventStatus(true, true) , {errorState})
 end
 
@@ -432,7 +444,7 @@ local function ParseDataFileEntries(entries, label)
             else
                 debugMessage = debugMessage .. "any]"
             end
-            tes3mp.LogAppend(enumerations.log.WARN, debugMessage)
+            tes3mp.LogAppend(enumerations.log.INFO, debugMessage)
             table.insert(dataFileList, entry)
         end
     end

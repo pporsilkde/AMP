@@ -68,6 +68,120 @@ function StateHelper:LoadFactionExpulsion(pid, stateObject)
     tes3mp.SendFactionChanges(pid)
 end
 
+-- Y052: clear saved guild expulsion flags for one client on every fresh login.
+-- This deliberately touches only expulsion state; faction rank and reputation
+-- remain intact. When faction expulsion is globally shared we only clear the
+-- client's runtime flags, never the shared world table.
+function StateHelper:ClearFactionExpulsionForLogin(pid, stateObject, clearStoredState)
+
+    if stateObject == nil or type(stateObject.data) ~= "table" then
+        return
+    end
+
+    if stateObject.data.factionExpulsion == nil then
+        stateObject.data.factionExpulsion = {}
+    end
+
+    local factionIds = {}
+    for factionId, _ in pairs(stateObject.data.factionExpulsion) do
+        table.insert(factionIds, factionId)
+    end
+
+    if #factionIds > 0 then
+        tes3mp.ClearFactionChanges(pid)
+        tes3mp.SetFactionChangesAction(pid, enumerations.faction.EXPULSION)
+
+        for _, factionId in ipairs(factionIds) do
+            tes3mp.SetFactionId(factionId)
+            tes3mp.SetFactionExpulsionState(false)
+            tes3mp.AddFaction(pid)
+        end
+
+        tes3mp.SendFactionChanges(pid)
+    end
+
+    if clearStoredState == true then
+        stateObject.data.factionExpulsion = {}
+        if type(stateObject.QuicksaveToDrive) == "function" then
+            stateObject:QuicksaveToDrive()
+        elseif type(stateObject.SaveToDrive) == "function" then
+            stateObject:SaveToDrive()
+        end
+    end
+end
+
+-- Y052: reset the script globals that vanilla Morrowind and supported content
+-- use for guild-expulsion forgiveness/timers. The IDs come from
+-- clientVariableScopes, so Tamriel Rebuilt/Skyrim Home of the Nords/etc. are
+-- covered without hardcoding another faction list here.
+function StateHelper:ClearFactionExpulsionGlobalsForLogin(pid, playerState, worldState, clearStoredState)
+
+    if type(clientVariableScopes) ~= "table"
+        or type(clientVariableScopes.globals) ~= "table"
+        or type(clientVariableScopes.globals.factionExpulsion) ~= "table" then
+        return
+    end
+
+    local function findStored(stateObject, wantedId)
+        if stateObject == nil or type(stateObject.data) ~= "table"
+            or type(stateObject.data.clientVariables) ~= "table"
+            or type(stateObject.data.clientVariables.globals) ~= "table" then
+            return nil, nil
+        end
+
+        local wanted = string.lower(tostring(wantedId))
+        for storedId, variable in pairs(stateObject.data.clientVariables.globals) do
+            if string.lower(tostring(storedId)) == wanted then
+                return storedId, variable
+            end
+        end
+        return nil, nil
+    end
+
+    tes3mp.ClearClientGlobals()
+    local count = 0
+
+    for _, variableId in ipairs(clientVariableScopes.globals.factionExpulsion) do
+        local storedKey, variable = findStored(playerState, variableId)
+        if variable == nil then
+            local worldKey
+            worldKey, variable = findStored(worldState, variableId)
+        end
+
+        local variableType = type(variable) == "table" and variable.variableType
+            or enumerations.variableType.SHORT
+
+        if variableType == enumerations.variableType.FLOAT then
+            tes3mp.AddClientGlobalFloat(variableId, 0)
+        else
+            if variableType ~= enumerations.variableType.LONG then
+                variableType = enumerations.variableType.SHORT
+            end
+            tes3mp.AddClientGlobalInteger(variableId, 0, variableType)
+        end
+        count = count + 1
+
+        if clearStoredState == true and storedKey ~= nil
+            and type(playerState) == "table" and type(playerState.data) == "table"
+            and type(playerState.data.clientVariables) == "table"
+            and type(playerState.data.clientVariables.globals) == "table" then
+            playerState.data.clientVariables.globals[storedKey] = nil
+        end
+    end
+
+    if count > 0 then
+        tes3mp.SendClientScriptGlobal(pid)
+    end
+
+    if clearStoredState == true and playerState ~= nil then
+        if type(playerState.QuicksaveToDrive) == "function" then
+            playerState:QuicksaveToDrive()
+        elseif type(playerState.SaveToDrive) == "function" then
+            playerState:SaveToDrive()
+        end
+    end
+end
+
 function StateHelper:LoadFactionReputation(pid, stateObject)
 
     if stateObject.data.factionReputation == nil then

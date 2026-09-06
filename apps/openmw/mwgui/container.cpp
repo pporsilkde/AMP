@@ -5,8 +5,11 @@
 #include <MyGUI_Button.h>
 #include <MyGUI_EditBox.h>
 #include <MyGUI_ImageBox.h>
+#include <MyGUI_LanguageManager.h>
 
 #include <cmath>
+
+#include <components/settings/settings.hpp>
 
 /*
     Start of tes3mp addition
@@ -59,6 +62,7 @@ namespace MWGui
         , mSortModel(nullptr)
         , mModel(nullptr)
         , mSelectedItem(-1)
+        , mSingleTransferButton(nullptr)
     {
         getWidget(mTakeButton, "TakeButton");
         getWidget(mCloseButton, "CloseButton");
@@ -71,6 +75,7 @@ namespace MWGui
         getWidget(mFilterEdit, "FilterEdit");
         getWidget(mEncumbranceBar, "EncumbranceBar");
         getWidget(mBottomBar, "BottomBar");
+        getWidget(mSingleTransferButton, "SingleTransferButton");
 
         getWidget(mItemView, "ItemView");
         mItemView->setExtendedMode(true);
@@ -98,11 +103,13 @@ namespace MWGui
         mFilterMisc->eventMouseButtonClick += MyGUI::newDelegate(this, &ContainerWindow::onFilterChanged);
         mFilterKeys->eventMouseButtonClick += MyGUI::newDelegate(this, &ContainerWindow::onFilterChanged);
         mViewModeButton->eventMouseButtonClick += MyGUI::newDelegate(this, &ContainerWindow::onViewModeClicked);
+        mSingleTransferButton->eventMouseButtonClick += MyGUI::newDelegate(this, &ContainerWindow::onSingleTransferClicked);
         mCloseButton->eventMouseButtonClick += MyGUI::newDelegate(this, &ContainerWindow::onCloseButtonClicked);
         mTakeButton->eventMouseButtonClick += MyGUI::newDelegate(this, &ContainerWindow::onTakeAllButtonClicked);
         mFilterEdit->eventEditTextChange += MyGUI::newDelegate(this, &ContainerWindow::onNameFilterChanged);
 
         updateBottomBarLayout();
+        updateSingleTransferButton();
 
         setCoord(160, 20, 680, 380);
     }
@@ -137,7 +144,8 @@ namespace MWGui
         if (mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mModel->getItemCount()))
             return;
 
-        const bool control = MyGUI::InputManager::getInstance().isControlPressed();
+        const bool control = MyGUI::InputManager::getInstance().isControlPressed()
+            || Settings::Manager::getBool("single item transfer", "GUI");
         const bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
         const int count = control ? 1 : item.mCount;
 
@@ -173,7 +181,8 @@ namespace MWGui
         if (mSelectedItem < 0 || mSelectedItem >= static_cast<int>(mModel->getItemCount()))
             return;
 
-        const bool control = MyGUI::InputManager::getInstance().isControlPressed();
+        const bool control = MyGUI::InputManager::getInstance().isControlPressed()
+            || Settings::Manager::getBool("single item transfer", "GUI");
         const bool shift = MyGUI::InputManager::getInstance().isShiftPressed();
         const int count = control ? 1 : item.mCount;
 
@@ -318,6 +327,9 @@ namespace MWGui
         */
 
         mPtr = container;
+        // The setting is shared with barter, so refresh the caption whenever this
+        // reusable window is opened after it may have been toggled elsewhere.
+        updateSingleTransferButton();
 
         bool loot = mPtr.getClass().isActor() && mPtr.getClass().getCreatureStats(mPtr).isDead();
 
@@ -649,15 +661,37 @@ namespace MWGui
                 + (mItemView->getViewMode() == ItemView::View_List ? "view_grid.dds" : "view_table.dds"));
     }
 
+    void ContainerWindow::onSingleTransferClicked(MyGUI::Widget* sender)
+    {
+        (void)sender;
+        const bool enabled = Settings::Manager::getBool("single item transfer", "GUI");
+        Settings::Manager::setBool("single item transfer", "GUI", !enabled);
+        Settings::Manager::saveUser();
+        updateSingleTransferButton();
+    }
+
+    void ContainerWindow::updateSingleTransferButton()
+    {
+        if (!mSingleTransferButton)
+            return;
+
+        const bool enabled = Settings::Manager::getBool("single item transfer", "GUI");
+        mSingleTransferButton->setStateSelected(enabled);
+        mSingleTransferButton->setCaption(MyGUI::LanguageManager::getInstance().replaceTags(
+            enabled ? "#{arenamp=inventory.single_transfer_on}" : "#{arenamp=inventory.single_transfer_off}"));
+    }
+
     void ContainerWindow::updateBottomBarLayout()
     {
-        if (!mBottomBar || !mEncumbranceBar || !mFilterEdit || !mViewModeButton || !mTakeButton || !mCloseButton)
+        if (!mBottomBar || !mEncumbranceBar || !mFilterEdit || !mViewModeButton || !mSingleTransferButton
+            || !mTakeButton || !mCloseButton)
             return;
 
         const int width = mBottomBar->getWidth();
         const int gap = 6;
         const int encWidth = std::max(90, std::min(120, width / 5));
         const int buttonW = 30;
+        const int singleW = 128;
         const int closeW = std::max(48, mCloseButton->getWidth());
         const int takeW = std::max(86, mTakeButton->getWidth());
 
@@ -667,6 +701,9 @@ namespace MWGui
 
         mViewModeButton->setCoord(x, 2, buttonW, 24);
         x += buttonW + gap;
+
+        mSingleTransferButton->setCoord(x, 2, singleW, 24);
+        x += singleW + gap;
 
         const int rightButtonsWidth = takeW + gap + closeW;
         const int filterWidth = std::max(80, width - x - gap - rightButtonsWidth);

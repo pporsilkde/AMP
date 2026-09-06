@@ -1,4 +1,15 @@
 #include <iostream>
+#include <vector>
+#include <string>
+#include <cstdlib>
+#include <cwchar>
+
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <unistd.h>
+#include <sys/types.h>
+#endif
 
 #include <boost/filesystem/fstream.hpp>
 #include <boost/iostreams/concepts.hpp>
@@ -146,6 +157,52 @@ boost::program_options::variables_map launchOptions(int argc, char *argv[], File
     return variables;
 }
 
+namespace
+{
+    constexpr int sArenaEmbeddedRestartExitCode = 42;
+
+    bool relaunchDedicatedServer(int argc, char* argv[])
+    {
+#if defined(_WIN32)
+        // Reuse the exact command line (including custom resource/config flags).
+        // The old RakPeer is already destroyed before this is called, so the new
+        // process can bind the same port immediately without an external launcher.
+        const wchar_t* current = GetCommandLineW();
+        if (current == nullptr || *current == L'\0')
+            return false;
+
+        std::vector<wchar_t> commandLine;
+        const std::size_t length = std::wcslen(current);
+        commandLine.assign(current, current + length + 1);
+
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION process{};
+        const BOOL ok = CreateProcessW(
+            nullptr, commandLine.data(), nullptr, nullptr, FALSE,
+            CREATE_NEW_PROCESS_GROUP, nullptr, nullptr, &startup, &process);
+        if (!ok)
+            return false;
+
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
+        return true;
+#else
+        const pid_t child = fork();
+        if (child < 0)
+            return false;
+        if (child == 0)
+        {
+            setsid();
+            execvp(argv[0], argv);
+            _exit(127);
+        }
+        return true;
+#endif
+    }
+}
+
+
 int main(int argc, char *argv[])
 {
     Settings::Manager mgr;
@@ -161,7 +218,12 @@ int main(int argc, char *argv[])
 
     int logLevel = mgr.getInt("logLevel", "General");
     if (logLevel < TimedLog::LOG_VERBOSE || logLevel > TimedLog::LOG_FATAL)
-        logLevel = TimedLog::LOG_VERBOSE;
+        logLevel = TimedLog::LOG_WARN;
+
+    // Y050 production server policy: do not allow legacy/user configs to turn
+    // the dedicated-server file back to VERBOSE/INFO. WARN is the minimum.
+    if (logLevel < TimedLog::LOG_WARN)
+        logLevel = TimedLog::LOG_WARN;
 
     // Some objects used to redirect cout and cerr
     // Scope must be here, so this still works inside the catch block for logging exceptions
@@ -180,7 +242,10 @@ int main(int argc, char *argv[])
     {
         // Redirect cout and cerr to tes3mp server log
 
-        logfile.open(boost::filesystem::path(cfgMgr.getLogPath() / "tes3mp-server.log"));
+        // Y050: a server process owns exactly one current log. Always truncate
+        // on process start instead of ever inheriting/continuing an old session.
+        logfile.open(boost::filesystem::path(cfgMgr.getLogPath() / "tes3mp-server.log"),
+            std::ios_base::out | std::ios_base::trunc);
 
         coutsb.open(Tee(logfile, oldcout));
         cerrsb.open(Tee(logfile, oldcerr));
@@ -309,7 +374,11 @@ int main(int argc, char *argv[])
 
         code = networking.mainLoop();
 
-        networking.getMasterClient()->Stop();
+        // ArenaMP Y052: without this guard a server running with [MasterServer]
+        // disabled crashed here, which is *before* the reserved-exit-code
+        // relaunch block below - so the scheduled 12h restart never happened.
+        if (networking.getMasterClient() != nullptr)
+            networking.getMasterClient()->Stop();
     }
     catch (std::exception &e)
     {
@@ -327,12 +396,41 @@ int main(int argc, char *argv[])
 
     if (!variables["no-logs"].as<bool>())
     {
-        // Restore cout and cerr
+        // Restore cout/cerr before explicitly closing the current run's file.
+        // This matters for standalone self-relaunch on Windows: the replacement
+        // process must be able to truncate the log immediately.
         std::cout.rdbuf(cout_rdbuf);
         std::cerr.rdbuf(cerr_rdbuf);
+        logfile.flush();
+        logfile.close();
     }
 
 
     breakpad_close();
+
+    // Y050 embedded restart: CoreScripts use the reserved code only after the
+    // 30-second warning, final save and kick. Relaunch here, after RakPeer and
+    // log streams are fully closed, so no launcher/supervisor is needed.
+    if (code == sArenaEmbeddedRestartExitCode)
+    {
+        // If the launcher owns this process, return the reserved code so its
+        // existing QProcess remains authoritative and it can relaunch a tracked
+        // child. This avoids an orphan server plus a launcher that incorrectly
+        // thinks the server stopped. The schedule/countdown/save remain in the
+        // server core; the launcher is only the process supervisor in this mode.
+        const char* launcherManaged = std::getenv("ARENAMP_LAUNCHER_MANAGED");
+        if (launcherManaged != nullptr && std::string(launcherManaged) == "1")
+            return sArenaEmbeddedRestartExitCode;
+
+        // Standalone dedicated-server launches do not need an external wrapper:
+        // reopen the exact executable/arguments after RakNet and the log are closed.
+        if (relaunchDedicatedServer(argc, argv))
+            return 0;
+
+        // A failed self-relaunch is intentionally non-zero so a service manager
+        // can still detect the failure instead of silently leaving the server off.
+        return sArenaEmbeddedRestartExitCode;
+    }
+
     return code;
 }

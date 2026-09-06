@@ -10,6 +10,23 @@ if type(config.profileSystem) == "table" then
     cfg.returnCooldown = tonumber(config.profileSystem["return cooldown seconds"]) or cfg.returnCooldown
 end
 
+local CONTROL_PREFIX = "@@AMP_PROFILE@@"
+
+local function escapeControl(value)
+    value = tostring(value or "")
+    value = value:gsub("\\", "\\\\")
+    value = value:gsub("\t", "\\t")
+    value = value:gsub("\r", "")
+    value = value:gsub("\n", "\\n")
+    return value
+end
+
+-- Y053: paths of profiles whose owner is being kicked for deletion. The stock
+-- disconnect path still runs SaveToDrive() for a logged-in player, which used
+-- to recreate the JSON file we had just removed, so the account survived a
+-- "delete profile" and the next login asked for the old password again.
+local pendingDeletion = {}
+
 local function valid(pid)
     return Players[pid] ~= nil and Players[pid]:IsLoggedIn() and type(Players[pid].data) == "table"
 end
@@ -69,6 +86,25 @@ local function slotDescription(slot, pid)
         return tr(pid, "пусто", "empty")
     end
     return slot.cell
+end
+
+local function sendState(pid)
+    local d = ensure(pid)
+    if not d then return end
+    local level = tonumber(Players[pid].data.stats and Players[pid].data.stats.level) or 1
+    local fields = {
+        "STATE",
+        escapeControl(formatTime(liveSeconds(pid))),
+        tostring(d.deaths),
+        tostring(d.arrests),
+        tostring(level),
+        d.returnUnlocked and "1" or "0",
+        tostring(cfg.unlockLevel),
+        escapeControl(slotDescription(d.returnSlots.A, pid)),
+        escapeControl(slotDescription(d.returnSlots.B, pid)),
+        escapeControl(slotDescription(d.returnSlots.C, pid))
+    }
+    tes3mp.SendMessage(pid, CONTROL_PREFIX .. table.concat(fields, "\t") .. "\n", false)
 end
 
 local function showMain(pid)
@@ -162,9 +198,19 @@ local function deleteProfile(pid, inputHash)
         tes3mp.MessageBox(pid,-1,tr(pid,"Не удалось удалить файл профиля: ","Could not delete profile file: ")..tostring(err or "unknown")); return
     end
     p.hasAccount=false
+
+    -- Y053: remember the path so the OnPlayerDisconnect handler below can remove
+    -- the file again once the mandatory disconnect save has finished. The account
+    -- table itself is deliberately left intact: eventHandler concatenates
+    -- data.login.passwordSalt unguarded, so blanking it here would trade one bug
+    -- for a nil-concat crash in the password path.
+    pendingDeletion[pid] = path
+    tes3mp.LogMessage(enumerations.log.WARN,
+        "[ArenaMP] profile deletion requested by pid " .. tostring(pid) .. " (" .. path .. ")")
+
     -- Clear the client's remembered password before disconnecting. The next
     -- registration therefore starts with an empty password field.
-    tes3mp.SendMessage(pid,"@@AMP_PROFILE@@DELETED\n",false)
+    tes3mp.SendMessage(pid, CONTROL_PREFIX .. "DELETED\n", false)
     tes3mp.SendMessage(pid,tr(pid,"Профиль удалён. Подключитесь снова, чтобы создать новый пароль и персонажа.\n",
         "Profile deleted. Reconnect to create a new password and character.\n"),false)
     p:Kick()
@@ -204,10 +250,40 @@ local function command(pid, cmd)
     if not valid(pid) then return end
     local sub=tostring(cmd[2] or ""):lower()
     if sub=="" or sub=="show" then showMain(pid); return end
+    if sub=="state" then sendState(pid); return end
     if sub=="returns" then showReturns(pid); return end
+    if sub=="delete" then requestDelete(pid); return end
 end
 
+local function uiCommand(pid, cmd)
+    if not valid(pid) then return end
+    local sub=tostring(cmd[2] or "state"):lower()
+    if sub=="state" then
+        sendState(pid)
+    elseif sub=="returns" then
+        showReturns(pid)
+    elseif sub=="delete" then
+        requestDelete(pid)
+    end
+end
+
+-- Runs after eventHandler.OnPlayerDisconnect has already called SaveToDrive(),
+-- so this is the point where the file can be removed for good.
+customEventHooks.registerHandler("OnPlayerDisconnect", function(eventStatus, pid)
+    local path = pendingDeletion[pid]
+    if path == nil then return end
+    pendingDeletion[pid] = nil
+    local ok, err = os.remove(path)
+    if ok then
+        tes3mp.LogMessage(enumerations.log.WARN, "[ArenaMP] profile file removed: " .. path)
+    elseif tostring(err or ""):find("No such file") == nil then
+        tes3mp.LogMessage(enumerations.log.ERROR,
+            "[ArenaMP] could not remove profile file " .. path .. ": " .. tostring(err))
+    end
+end)
+
 customCommandHooks.registerCommand("profile", command)
+customCommandHooks.registerCommand("profileui", uiCommand)
 customEventHooks.registerHandler("OnPlayerLevel", function(eventStatus,pid)
     if eventStatus.validDefaultHandler then profileHelper.CheckUnlock(pid,true) end
 end)

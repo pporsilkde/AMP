@@ -53,25 +53,32 @@ end
 function BaseRecordStore:DeleteUnlinkedRecords()
 
     if type(self.data.unlinkedRecordsToCheck) == "table" then
-        for arrayIndex, recordId in pairs(self.data.unlinkedRecordsToCheck) do
-            if not self:HasLinks(recordId) then
-                self:DeleteGeneratedRecord(recordId)
+        -- Y050: the same generated id can be queued more than once before the
+        -- next disconnect/save pass. Treat deletion as idempotent instead of
+        -- producing a WARN storm for the second copy of the same potion.
+        local seen = {}
+        for _, recordId in pairs(self.data.unlinkedRecordsToCheck) do
+            if not seen[recordId] then
+                seen[recordId] = true
+                if self.data.generatedRecords[recordId] ~= nil and not self:HasLinks(recordId) then
+                    self:DeleteGeneratedRecord(recordId)
+                end
             end
-
-            self.data.unlinkedRecordsToCheck[arrayIndex] = nil
         end
+        self.data.unlinkedRecordsToCheck = {}
     end
 end
 
 function BaseRecordStore:DeleteGeneratedRecord(recordId)
 
     if self.data.generatedRecords[recordId] == nil then
-        tes3mp.LogMessage(enumerations.log.WARN, "Tried deleting " .. self.storeType .. " record " .. recordId ..
-            " which doesn't exist!")
+        -- Idempotent cleanup: another queued reference may have deleted it first.
+        tes3mp.LogMessage(enumerations.log.INFO, "Generated " .. self.storeType .. " record " .. recordId ..
+            " was already deleted")
         return
     end
 
-    tes3mp.LogMessage(enumerations.log.WARN, "Deleting generated " .. self.storeType .. " record " .. recordId)
+    tes3mp.LogMessage(enumerations.log.INFO, "Deleting generated " .. self.storeType .. " record " .. recordId)
 
     -- Is this an enchantable record? If so, we should remove any links to it
     -- from its associated generated enchantment record if there is one

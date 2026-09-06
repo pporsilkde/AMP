@@ -581,8 +581,16 @@ namespace MWGui
             mBrewCountEdit->setValue(maxBrew);
 
         const std::string& lastBrew = MWMechanics::AlchemyKnowledge::getLastBrew();
-        mLastBrewText->setCaptionWithReplacing("#{arenamp=alchemy.last_brew}: "
-            + (lastBrew.empty() ? std::string("-") : lastBrew));
+        std::string statusLine = "#{arenamp=alchemy.last_brew}: "
+            + (lastBrew.empty() ? std::string("-") : lastBrew);
+
+        // Y052: the batch count is silently clamped by the bottle stock, so show
+        // that stock instead of leaving the player guessing why + does nothing.
+        if (Settings::Manager::getBool("require bottle", "ArenaMW Alchemy"))
+            statusLine += "   #{arenamp=alchemy.bottles_available}: "
+                + std::to_string(arenaPotionBottleCount());
+
+        mLastBrewText->setCaptionWithReplacing(statusLine);
         mRepeatLastButton->setEnabled(!MWMechanics::AlchemyKnowledge::getLastRecipe().empty());
 
         Widgets::SpellEffectList list;

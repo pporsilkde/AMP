@@ -52,6 +52,7 @@ namespace Launcher
         void backupProcessFinished(int exitCode, QProcess::ExitStatus exitStatus);
         void backupProcessError(QProcess::ProcessError error);
         void refreshDecodedLog();
+        void clearLogView();
 
     private:
         struct ServerConfig
@@ -90,6 +91,10 @@ namespace Launcher
         QProcess* mProcess;
         QProcess* mBackupProcess;
         QByteArray mRawLog;
+        // Y052: how many bytes of mRawLog have already been rendered into
+        // mLogView, so each refresh only appends the new tail.
+        int mLogViewRenderedBytes;
+        bool mLogRefreshPending;
         QString mPendingBackupPath;
         int mRestartCounter;
         bool mStopRequested;

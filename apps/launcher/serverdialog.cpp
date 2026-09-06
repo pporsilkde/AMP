@@ -1,5 +1,7 @@
 #include "serverdialog.hpp"
 
+#include <algorithm>
+
 #include <QAbstractSocket>
 #include <QApplication>
 #include <QCoreApplication>
@@ -19,9 +21,12 @@
 #include <QNetworkInterface>
 #include <QPlainTextEdit>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QPushButton>
+#include <QScrollBar>
 #include <QTextCodec>
 #include <QTextCursor>
+#include <QTextDocument>
 #include <QTextStream>
 #include <QTimer>
 #include <QTcpSocket>
@@ -210,6 +215,8 @@ Launcher::ServerDialog::ServerDialog(QWidget* parent)
     , mCloseButton(nullptr)
     , mProcess(new QProcess(this))
     , mBackupProcess(new QProcess(this))
+    , mLogViewRenderedBytes(0)
+    , mLogRefreshPending(false)
     , mRestartCounter(0)
     , mStopRequested(false)
     , mBackupInProgress(false)
@@ -239,7 +246,7 @@ Launcher::ServerDialog::ServerDialog(QWidget* parent)
     mEncodingCombo->addItem(tr("Windows-1251"), QStringLiteral("Windows-1251"));
     mEncodingCombo->addItem(tr("CP866"), QStringLiteral("CP866"));
     mRestartCheckBox = new QCheckBox(tr("Auto restart and backup"), this);
-    mRestartCheckBox->setChecked(true);
+    mRestartCheckBox->setChecked(false);
 
     optionsLayout->addWidget(mEncodingLabel);
     optionsLayout->addWidget(mEncodingCombo);
@@ -251,6 +258,10 @@ Launcher::ServerDialog::ServerDialog(QWidget* parent)
     mLogView = new QPlainTextEdit(this);
     mLogView->setReadOnly(true);
     mLogView->setLineWrapMode(QPlainTextEdit::NoWrap);
+    // Y050: never let a long-lived server turn the launcher into a second log
+    // database. The previous unbounded QTextDocument + QByteArray could grow
+    // beyond the server's own working set and was rebuilt for every output chunk.
+    mLogView->document()->setMaximumBlockCount(5000);
     mainLayout->addWidget(mLogView, 1);
 
     QDialogButtonBox* buttons = new QDialogButtonBox(this);
@@ -259,7 +270,7 @@ Launcher::ServerDialog::ServerDialog(QWidget* parent)
     mainLayout->addWidget(buttons);
 
     connect(mStopButton, SIGNAL(clicked()), this, SLOT(stopServer()));
-    connect(mCloseButton, SIGNAL(clicked()), mLogView, SLOT(clear()));
+    connect(mCloseButton, &QPushButton::clicked, this, &ServerDialog::clearLogView);
     connect(mEncodingCombo, SIGNAL(currentIndexChanged(int)), this, SLOT(refreshDecodedLog()));
     connect(mRestartCheckBox, SIGNAL(toggled(bool)), this, SIGNAL(autoRestartChanged(bool)));
     connect(mProcess, SIGNAL(readyReadStandardOutput()), this, SLOT(processReadyReadStandardOutput()));
@@ -282,8 +293,10 @@ bool Launcher::ServerDialog::startServer()
     mStopRequested = false;
     mCloseButton->setEnabled(true);
     mStopButton->setEnabled(true);
-    if (!mRawLog.isEmpty())
-        appendStatusLine(QStringLiteral("----------------------------------------"));
+    // A new server process starts a new diagnostic session. Do not keep the
+    // previous run duplicated in launcher RAM; the dedicated server also
+    // truncates tes3mp-server.log on startup.
+    clearLogView();
 
     QString preparationError;
     if (!preparePortableServer(&preparationError))
@@ -315,6 +328,14 @@ bool Launcher::ServerDialog::startServer()
     mProcess->setProgram(QDir::toNativeSeparators(executable));
     mProcess->setArguments(QStringList());
     mProcess->setProcessChannelMode(QProcess::SeparateChannels);
+
+    // Mark this child as launcher-managed. The 12h schedule still lives in the
+    // dedicated-server core, but on restart the server returns the reserved code
+    // to this QProcess instead of spawning an untracked orphan. Standalone
+    // tes3mp-server launches self-relaunch natively.
+    QProcessEnvironment processEnvironment = QProcessEnvironment::systemEnvironment();
+    processEnvironment.insert(QStringLiteral("ARENAMP_LAUNCHER_MANAGED"), QStringLiteral("1"));
+    mProcess->setProcessEnvironment(processEnvironment);
 
     const QString workingDirectory = serverRuntimeBasePath();
     mProcess->setWorkingDirectory(workingDirectory);
@@ -515,6 +536,21 @@ void Launcher::ServerDialog::processFinished(int exitCode, QProcess::ExitStatus 
     appendStatusLine(tr("Server stopped. Exit code: %1").arg(exitCode));
     emit runningChanged(false, displayAddress(), configuredPort());
 
+    // Y050 reserved graceful-restart code. The schedule/save/countdown lives in
+    // the dedicated server core; the launcher only reopens its tracked child.
+    // Skip the old backup/restart pipeline so the 12h reset is cheap and cannot
+    // collide with the server's direct self-relaunch mode.
+    if (!mStopRequested && exitStatus == QProcess::NormalExit && exitCode == 42)
+    {
+        appendStatusLine(tr("ArenaMP scheduled restart: relaunching dedicated server..."));
+        mStopButton->setEnabled(false);
+        QTimer::singleShot(750, this, [this]()
+        {
+            startServer();
+        });
+        return;
+    }
+
     const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
     const bool rapidCrash = !mStopRequested
         && exitStatus == QProcess::CrashExit
@@ -587,6 +623,11 @@ void Launcher::ServerDialog::stopServer()
 
 void Launcher::ServerDialog::refreshDecodedLog()
 {
+    // A different codec invalidates everything already on screen, so this is the
+    // one path that still re-renders the whole retained buffer.
+    mLogViewRenderedBytes = 0;
+    if (mLogView != nullptr)
+        mLogView->clear();
     updateLogView();
 }
 
@@ -596,18 +637,88 @@ void Launcher::ServerDialog::appendRawLog(const QByteArray& data)
         return;
 
     mRawLog.append(data);
-    updateLogView();
+
+    // Y050: keep only the recent tail. Before this cap a 40+ MB server log was
+    // duplicated in mRawLog and QPlainTextEdit, and setPlainText rebuilt all of
+    // it on every packet of stdout, causing the launcher CPU/RAM spike reported
+    // in the server log session. One MiB is ample for interactive diagnostics.
+    static const int maxRawLogBytes = 1024 * 1024;
+    if (mRawLog.size() > maxRawLogBytes)
+    {
+        int removeBytes = mRawLog.size() - maxRawLogBytes;
+        mRawLog.remove(0, removeBytes);
+        const int newline = mRawLog.indexOf('\n');
+        if (newline >= 0)
+        {
+            mRawLog.remove(0, newline + 1);
+            removeBytes += newline + 1;
+        }
+
+        // The rendered cursor is an offset into mRawLog, so it has to follow the
+        // trim. QPlainTextEdit drops the corresponding old blocks on its own
+        // through maximumBlockCount, so no rebuild is needed here.
+        mLogViewRenderedBytes = std::max(0, mLogViewRenderedBytes - removeBytes);
+    }
+
+    // Coalesce bursts: render at most ~6 times/second instead of rebuilding the
+    // QTextDocument for every individual INFO line. WARN default makes this
+    // almost idle in normal operation.
+    if (!mLogRefreshPending)
+    {
+        mLogRefreshPending = true;
+        QTimer::singleShot(160, this, [this]()
+        {
+            mLogRefreshPending = false;
+            updateLogView();
+        });
+    }
 }
 
 void Launcher::ServerDialog::updateLogView()
 {
     QTextCodec* codec = currentCodec();
-    const QString text = codec != nullptr ? codec->toUnicode(mRawLog) : QString::fromUtf8(mRawLog.constData(), mRawLog.size());
-    mLogView->setPlainText(text);
-    QTextCursor cursor = mLogView->textCursor();
-    cursor.movePosition(QTextCursor::End);
-    mLogView->setTextCursor(cursor);
-    mLogView->ensureCursorVisible();
+    // Y052: append only the bytes that have not been rendered yet. The previous
+    // setPlainText() re-decoded and rebuilt the whole 1 MiB document up to six
+    // times per second, and it also destroyed the scroll position and any
+    // selection, which made the log unreadable while the server was running.
+    if (mLogViewRenderedBytes > mRawLog.size())
+        mLogViewRenderedBytes = 0;
+
+    // Stop at the last complete line: a chunk boundary must never fall inside a
+    // line (appendPlainText always starts a new block) or inside a multi-byte
+    // character, and '\n' cannot occur inside a UTF-8 or CP1251 sequence.
+    const int completeEnd = mRawLog.lastIndexOf('\n') + 1;
+    if (completeEnd <= mLogViewRenderedBytes)
+        return;
+
+    const QByteArray chunk = mRawLog.mid(mLogViewRenderedBytes, completeEnd - mLogViewRenderedBytes);
+    mLogViewRenderedBytes = completeEnd;
+
+    QString text = codec != nullptr ? codec->toUnicode(chunk)
+                                    : QString::fromUtf8(chunk.constData(), chunk.size());
+    while (text.endsWith(QLatin1Char('\n')) || text.endsWith(QLatin1Char('\r')))
+        text.chop(1);
+    if (text.isEmpty())
+        return;
+
+    QScrollBar* scrollBar = mLogView->verticalScrollBar();
+    const int previousValue = scrollBar->value();
+    const bool followTail = previousValue >= scrollBar->maximum() - 4;
+
+    mLogView->appendPlainText(text);
+
+    if (followTail)
+        scrollBar->setValue(scrollBar->maximum());
+    else
+        scrollBar->setValue(std::min(previousValue, scrollBar->maximum()));
+}
+
+void Launcher::ServerDialog::clearLogView()
+{
+    mRawLog.clear();
+    mLogViewRenderedBytes = 0;
+    if (mLogView != nullptr)
+        mLogView->clear();
 }
 
 QTextCodec* Launcher::ServerDialog::currentCodec() const
@@ -970,6 +1081,9 @@ void Launcher::ServerDialog::appendStatusLine(const QString& text)
     const QString line = QStringLiteral("[")
         + QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"))
         + QStringLiteral("] ") + text + QStringLiteral("\n");
-    mRawLog.append(line.toUtf8());
+    // Encode with the codec the view will decode with, otherwise launcher status
+    // lines show up as mojibake whenever a non-UTF-8 log encoding is selected.
+    QTextCodec* codec = currentCodec();
+    mRawLog.append(codec != nullptr ? codec->fromUnicode(line) : line.toUtf8());
     updateLogView();
 }

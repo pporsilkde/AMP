@@ -63,7 +63,8 @@ namespace mwmp
         {
             TAB_CHAT = 0,
             TAB_GROUP,
-            TAB_PLAYERS
+            TAB_PLAYERS,
+            TAB_STATS
         };
 
         // X052: only one auxiliary strip may occupy the row under the toolbar.
@@ -189,6 +190,10 @@ namespace mwmp
         void rebuildPlayerList(const std::vector<std::string>& fields);
         void updatePlayerDetails();
 
+        // Y052 profile/statistics page integrated into the Player Menu.
+        void requestProfileState();
+        void rebuildProfileState(const std::vector<std::string>& fields);
+
         // X052 quick-insert strip and nickname colour picker.
         void setDrawer(ChatDrawer drawer);
         // X053: pull in the generated colour atlas font, if one is configured.
@@ -216,6 +221,7 @@ namespace mwmp
         void onRosterAccepted(MyGUI::ListBox* sender, size_t index);
         void onPlayersButtonClicked(MyGUI::Widget* sender);
         void onPlayerListSelected(MyGUI::ListBox* sender, size_t index);
+        void onProfileButtonClicked(MyGUI::Widget* sender);
 
         void onDragStart(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
         void onDrag(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
@@ -234,12 +240,15 @@ namespace mwmp
         MyGUI::Widget* mColorBar;
         MyGUI::Widget* mGroupPane;
         MyGUI::Widget* mPlayersPane;
+        MyGUI::Widget* mProfilePane;
         MyGUI::Widget* mPlayersActionRow;
+        MyGUI::Widget* mProfileActionRow;
         MyGUI::Widget* mGroupActionRow1;
         MyGUI::Widget* mGroupActionRow2;
         MyGUI::Widget* mGroupActionRow3;
         MyGUI::EditBox* mGroupInfo;
         MyGUI::EditBox* mPlayersInfo;
+        MyGUI::EditBox* mProfileInfo;
         MyGUI::ListBox* mGroupRoster;
         MyGUI::ListBox* mPlayersList;
         MyGUI::TextBox* mGroupRosterLabel;
@@ -252,9 +261,14 @@ namespace mwmp
         MyGUI::Button* mTabChat;
         MyGUI::Button* mTabGroup;
         MyGUI::Button* mTabPlayers;
+        MyGUI::Button* mTabStats;
         MyGUI::Button* mPlayersRefreshButton;
         MyGUI::Button* mPlayersOpenListButton;
         MyGUI::Button* mPlayersInviteButton;
+        MyGUI::Button* mProfileRefreshButton;
+        MyGUI::Button* mProfileFixButton;
+        MyGUI::Button* mProfileReturnsButton;
+        MyGUI::Button* mProfileDeleteButton;
         MyGUI::Button* mModeOoc;
         MyGUI::Button* mModeRp;
         MyGUI::Button* mChannelSay;
