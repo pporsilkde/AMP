@@ -28,6 +28,16 @@
             <Widget type="Button" skin="" position_real="0 0 1 1" name="EventBoxGlobal" align="Stretch"/>
         </Widget>
 
+        <!-- Local map zoom -->
+        <Widget type="Button" skin="MW_Button" position="8 233 28 22" align="Bottom Left" name="ZoomOutButton">
+            <Property key="Caption" value="-"/>
+            <Property key="NeedKey" value="false"/>
+        </Widget>
+        <Widget type="Button" skin="MW_Button" position="39 233 28 22" align="Bottom Left" name="ZoomInButton">
+            <Property key="Caption" value="+"/>
+            <Property key="NeedKey" value="false"/>
+        </Widget>
+
         <!-- World button -->
         <Widget type="AutoSizedButton" skin="MW_Button" position="213 233 61 22" align="Bottom Right" name="WorldButton">
             <Property key="ExpandDirection" value="Left"/>

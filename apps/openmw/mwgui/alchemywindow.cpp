@@ -1,5 +1,11 @@
 #include "alchemywindow.hpp"
 
+#include <algorithm>
+#include <cctype>
+#include <limits>
+#include <string>
+#include <vector>
+
 #include <MyGUI_Gui.h>
 #include <MyGUI_Button.h>
 #include <MyGUI_EditBox.h>
@@ -14,6 +20,7 @@
 */
 #include "../mwmp/Main.hpp"
 #include "../mwmp/Networking.hpp"
+#include "../mwmp/LocalPlayer.hpp"
 #include "../mwmp/ObjectList.hpp"
 /*
     End of tes3mp addition
@@ -31,16 +38,127 @@
 
 #include "../mwworld/class.hpp"
 #include "../mwworld/esmstore.hpp"
+#include "../mwworld/containerstore.hpp"
 
 #include <MyGUI_Macros.h>
 #include <components/esm/records.hpp>
 #include <components/misc/stringops.hpp>
+#include <components/settings/settings.hpp>
 
 #include "inventoryitemmodel.hpp"
 #include "sortfilteritemmodel.hpp"
 #include "itemview.hpp"
 #include "itemwidget.hpp"
 #include "widgets.hpp"
+
+namespace
+{
+    std::vector<std::string> arenaBottleTokens()
+    {
+        std::vector<std::string> result;
+        std::string configured = Settings::Manager::getString("bottle name tokens", "ArenaMW Alchemy");
+        std::size_t start = 0;
+        while (start <= configured.size())
+        {
+            const std::size_t end = configured.find(';', start);
+            std::string token = configured.substr(start,
+                end == std::string::npos ? std::string::npos : end - start);
+            while (!token.empty() && std::isspace(static_cast<unsigned char>(token.front())))
+                token.erase(token.begin());
+            while (!token.empty() && std::isspace(static_cast<unsigned char>(token.back())))
+                token.pop_back();
+            token = Misc::StringUtils::lowerCaseUtf8(token);
+            if (!token.empty())
+                result.push_back(token);
+            if (end == std::string::npos)
+                break;
+            start = end + 1;
+        }
+        return result;
+    }
+
+    bool arenaIsPotionBottle(const MWWorld::Ptr& item)
+    {
+        if (item.isEmpty() || item.getTypeName() != typeid(ESM::Miscellaneous).name())
+            return false;
+
+        const std::string name = Misc::StringUtils::lowerCaseUtf8(item.getClass().getName(item));
+        if (name.empty())
+            return false;
+
+        const std::vector<std::string> tokens = arenaBottleTokens();
+        for (const std::string& token : tokens)
+        {
+            if (name.find(token) != std::string::npos)
+                return true;
+        }
+        return false;
+    }
+
+    int arenaPotionBottleCount()
+    {
+        if (!Settings::Manager::getBool("require bottle", "ArenaMW Alchemy"))
+            return std::numeric_limits<int>::max();
+
+        MWWorld::Ptr player = MWMechanics::getPlayer();
+        if (player.isEmpty())
+            return 0;
+
+        int count = 0;
+        MWWorld::ContainerStore& store = player.getClass().getContainerStore(player);
+        for (MWWorld::ContainerStoreIterator it = store.begin(MWWorld::ContainerStore::Type_Miscellaneous);
+             it != store.end(); ++it)
+        {
+            if (arenaIsPotionBottle(*it))
+                count += std::max(0, it->getRefData().getCount());
+        }
+        return count;
+    }
+
+    void arenaConsumePotionBottles(int count)
+    {
+        if (count <= 0 || !Settings::Manager::getBool("require bottle", "ArenaMW Alchemy"))
+            return;
+
+        MWWorld::Ptr player = MWMechanics::getPlayer();
+        if (player.isEmpty())
+            return;
+
+        MWWorld::ContainerStore& store = player.getClass().getContainerStore(player);
+        mwmp::LocalPlayer* localPlayer = mwmp::Main::get().getLocalPlayer();
+        if (!localPlayer)
+            return;
+
+        // Batch bottle removals into one inventory packet. ContainerStore::remove()
+        // normally sends its own packet, so temporarily suppress that path to avoid
+        // applying the same removal twice on the server.
+        const bool previousAvoid = localPlayer->avoidSendingInventoryPackets;
+        localPlayer->avoidSendingInventoryPackets = true;
+
+        int remaining = count;
+        for (MWWorld::ContainerStoreIterator it = store.begin(MWWorld::ContainerStore::Type_Miscellaneous);
+             it != store.end() && remaining > 0; )
+        {
+            MWWorld::ContainerStoreIterator current = it++;
+            if (!arenaIsPotionBottle(*current))
+                continue;
+
+            const int available = std::max(0, current->getRefData().getCount());
+            const int take = std::min(available, remaining);
+            if (take <= 0)
+                continue;
+
+            const std::string refId = current->getCellRef().getRefId();
+            current->getContainerStore()->remove(*current, take, player);
+            localPlayer->storeItemRemoval(refId, take);
+            remaining -= take;
+        }
+
+        localPlayer->avoidSendingInventoryPackets = previousAvoid;
+        if (!previousAvoid)
+            localPlayer->sendStoredItemRemovals();
+    }
+}
 
 namespace MWGui
 {
@@ -160,6 +278,18 @@ namespace MWGui
         mAlchemy->setPotionName(mNameEdit->getCaption());
         int count = mAlchemy->countPotionsToBrew();
         count = std::min(count, mBrewCountEdit->getValue());
+
+        if (Settings::Manager::getBool("require bottle", "ArenaMW Alchemy"))
+        {
+            const int bottles = arenaPotionBottleCount();
+            if (bottles <= 0)
+            {
+                MWBase::Environment::get().getWindowManager()->messageBox("#{arenamp=alchemy.bottle_required}");
+                return;
+            }
+            count = std::min(count, bottles);
+        }
+
         createPotions(count);
     }
 
@@ -190,6 +320,9 @@ namespace MWGui
             winMgr->messageBox("#{sNotifyMessage6a}");
             break;
         case MWMechanics::Alchemy::Result_Success:
+            // Y049: one real Misc bottle is consumed for each potion that was
+            // actually created. Failed attempts do not destroy empty bottles.
+            arenaConsumePotionBottles(count);
             winMgr->playSound("potion success");
 
             /*
@@ -440,7 +573,9 @@ namespace MWGui
         // Keep the mechanics-side name synchronized with the edit box so the live
         // batch limit remains correct before the Create button is pressed.
         mAlchemy->setPotionName(mNameEdit->getCaption());
-        const int maxBrew = mAlchemy->countPotionsToBrew();
+        int maxBrew = mAlchemy->countPotionsToBrew();
+        if (Settings::Manager::getBool("require bottle", "ArenaMW Alchemy"))
+            maxBrew = std::min(maxBrew, arenaPotionBottleCount());
         mBrewCountEdit->setMaxValue(std::max(1, maxBrew));
         if (maxBrew > 0 && mBrewCountEdit->getValue() > maxBrew)
             mBrewCountEdit->setValue(maxBrew);

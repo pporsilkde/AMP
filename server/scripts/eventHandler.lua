@@ -631,6 +631,7 @@ eventHandler.OnPlayerDisconnect = function(pid)
 
                 Players[pid].data.timestamps.lastDisconnect = os.time()
                 Players[pid].data.timestamps.lastSessionDuration = os.time() - Players[pid].data.timestamps.lastLogin
+                if profileHelper ~= nil then profileHelper.AccumulateSession(Players[pid]) end
 
                 -- Adjust the time left for this player's active spells
                 Players[pid]:UpdateActiveSpellTimes()
@@ -991,6 +992,13 @@ end
 eventHandler.OnPlayerSendMessage = function(pid, message)
 
     if Players[pid] ~= nil and Players[pid]:IsLoggedIn() then
+        -- Y049: internal client signal emitted only when the native crime system
+        -- actually sends the player to jail. Keep it out of chat and commands.
+        if message == "@@AMP_PROFILE@@ARREST" then
+            if profileHelper ~= nil then profileHelper.RecordArrest(pid) end
+            return
+        end
+
         tes3mp.LogMessage(enumerations.log.INFO, logicHandler.GetChatName(pid) .. ": " .. message)
 
         local eventStatus = customEventHooks.triggerValidators("OnPlayerSendMessage", {pid, message})
@@ -1276,6 +1284,7 @@ eventHandler.OnPlayerDeath = function(pid)
     if Players[pid] ~= nil and Players[pid]:IsLoggedIn() then
         local eventStatus = customEventHooks.triggerValidators("OnPlayerDeath", {pid})
         if eventStatus.validDefaultHandler then
+            if profileHelper ~= nil then profileHelper.RecordDeath(pid) end
             Players[pid]:ProcessDeath()
 
             -- Y029: a dead escort target may remain registered in the cell until

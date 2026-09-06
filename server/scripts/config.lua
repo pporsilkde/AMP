@@ -353,6 +353,11 @@ config.refinedAlchemy = {
     ["skill reveal effect 3"] = 45,
     ["skill reveal effect 4"] = 60,
     ["fatigue affects success"] = true,
+    -- Y049: require an actual empty container for each successfully brewed potion.
+    -- Only Misc items whose DISPLAY NAME contains one of these semicolon-separated
+    -- tokens qualify; refIds are intentionally ignored.
+    ["require bottle"] = true,
+    ["bottle name tokens"] = "bottle;flask;vial;бутыл;флакон;склян",
 }
 
 config.alchemyGameplay = {
@@ -1100,6 +1105,19 @@ config.bountyDeathPenalty = false
 -- Whether players should be allowed to use the /suicide command
 config.allowSuicideCommand = true
 
+-- ArenaMP Y049 persistent profile/statistics and level-25 return points.
+config.profileSystem = {
+    ["return unlock level"] = 25,
+    ["return cooldown seconds"] = 20
+}
+
+-- ArenaMP Y049 persistent coloured map markers. Personal markers are stored
+-- inside the player profile; group markers are stored by persistent group id.
+config.mapMarkerSystem = {
+    ["max personal markers"] = 128,
+    ["max group markers"] = 64
+}
+
 -- Whether players should be allowed to use the /fixme command
 config.allowFixmeCommand = true
 
@@ -1120,7 +1138,8 @@ config.customMenuIds = { menuHelper = 9001, confiscate = 9002, recordPrint = 900
     questEditorStages = 9023, questEditorStageList = 9024, questEditorStageDetail = 9025,
     questEditorRequirements = 9026, questEditorRequirementList = 9027, questEditorRewards = 9028,
     questEditorRewardList = 9029, questEditorTransitions = 9030, questEditorTransitionList = 9031,
-    questEditorConfirm = 9032, questEditorStageFlags = 9033, questEditorGiver = 9034 }
+    questEditorConfirm = 9032, questEditorStageFlags = 9033, questEditorGiver = 9034,
+    profileMain = 9040, profileReturns = 9041, profileDeletePassword = 9042 }
 
 -- The menu files that should be loaded for menuHelper, from the scripts/menu subfolder
 config.menuHelperFiles = { "help", "defaultCrafting", "advancedExample" }
@@ -1423,7 +1442,7 @@ config.disallowedNameStrings = { "bitch", "blowjob", "blow job", "cocksuck", "cu
 
 -- The order in which table keys should be saved to JSON files
 config.playerKeyOrder = { "login", "name", "passwordHash", "passwordSalt", "timestamps", "settings",
-    "character", "customClass", "location", "stats", "fame", "shapeshift", "attributes",
+    "character", "customClass", "location", "stats", "profile", "fame", "shapeshift", "attributes",
     "attributeSkillIncreases", "skills", "skillProgress", "recordLinks", "equipment", "inventory",
     "spellbook", "books", "factionRanks", "factionReputation", "factionExpulsion", "mapExplored",
     "ipAddresses", "customVariables", "admin", "difficulty", "enforcedLogLevel", "physicsFramerate",

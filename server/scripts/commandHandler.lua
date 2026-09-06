@@ -753,34 +753,24 @@ function commandHandler.ProcessCommand(pid, cmd)
     elseif cmd[1] == "fixme" then
         if config.allowFixmeCommand == true then
             local currentTime = os.time()
-
-            if not tes3mp.IsInExterior(pid) then
-                local message = "Sorry! You can only use " .. color.Yellow .. "/fixme" ..
-                    color.White .. " in exteriors.\n"
-                tes3mp.SendMessage(pid, message, false)
-            elseif Players[pid].data.timestamps.lastFixMe == nil or
+            if Players[pid].data.timestamps.lastFixMe == nil or
                 currentTime >= Players[pid].data.timestamps.lastFixMe + config.fixmeInterval then
-
-                logicHandler.RunConsoleCommandOnPlayer(pid, "fixme")
+                -- Y049: FIX is an emergency home return. The private-cell
+                -- system redirects the template Caius cell to this account's copy.
+                logicHandler.RunConsoleCommandOnPlayer(pid, 'coc "Balmora, Caius Cosades\' House"')
                 Players[pid].data.timestamps.lastFixMe = currentTime
-                tes3mp.SendMessage(pid, "You have fixed your position!\n", false)
+                local isRu = tostring(Players[pid].language or "EN"):upper() == "RU"
+                tes3mp.SendMessage(pid, isRu and "FIX: возвращение в дом Кая Косадеса.\n"
+                    or "FIX: returning you to Caius Cosades' house.\n", false)
             else
-                local remainingSeconds = Players[pid].data.timestamps.lastFixMe +
-                    config.fixmeInterval - currentTime
-                local message = "Sorry! You can't use " .. color.Yellow .. "/fixme" ..
-                    color.White .. " for another "
-
-                if remainingSeconds > 1 then
-                    message = message .. color.Yellow .. remainingSeconds .. color.White .. " seconds"
-                else
-                    message = message .. " second"
-                end
-
-                message = message .. "\n"
-                tes3mp.SendMessage(pid, message, false)
+                local remainingSeconds = Players[pid].data.timestamps.lastFixMe + config.fixmeInterval - currentTime
+                local isRu = tostring(Players[pid].language or "EN"):upper() == "RU"
+                tes3mp.SendMessage(pid, (isRu and "FIX будет доступен через " or "FIX cooldown: ") ..
+                    tostring(remainingSeconds) .. (isRu and " сек.\n" or " s.\n"), false)
             end
         else
-            tes3mp.SendMessage(pid, "That command is disabled on this server.\n", false)
+            local isRu = tostring(Players[pid].language or "EN"):upper() == "RU"
+            tes3mp.SendMessage(pid, isRu and "FIX отключён на сервере.\n" or "FIX is disabled on this server.\n", false)
         end
 
     elseif cmd[1] == "storeconsole" and cmd[2] ~= nil and cmd[3] ~= nil and admin then

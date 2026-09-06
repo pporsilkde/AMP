@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <MyGUI type="Layout" version="3.2.0">
-    <Widget type="Window" skin="MW_Dialog" position="0 0 430 412" layer="Windows" align="Center" name="_Main">
+    <Widget type="Window" skin="MW_Dialog" position="0 0 430 428" layer="Windows" align="Center" name="_Main">
         <Widget type="ImageBox" skin="ImageBox" position="35 18 360 99" name="LoginBrand">
             <Property key="ImageTexture" value="textures\menu_arenamw.png"/>
             <Property key="NeedMouse" value="false"/>
@@ -17,18 +17,19 @@
 
         <Widget type="TextBox" skin="ProgressText" position="35 190 360 18" name="LabelName"/>
         <Widget type="EditBox" skin="MW_TextEdit" position="35 212 360 30" name="EditLogin"/>
+        <Widget type="TextBox" skin="SandText" position="35 242 360 16" name="NameCounter"><Property key="TextAlign" value="Right VCenter"/></Widget>
 
-        <Widget type="TextBox" skin="ProgressText" position="35 247 360 18" name="LabelPassword"/>
-        <Widget type="EditBox" skin="MW_TextEdit" position="35 269 360 30" name="EditPassword"/>
+        <Widget type="TextBox" skin="ProgressText" position="35 263 360 18" name="LabelPassword"/>
+        <Widget type="EditBox" skin="MW_TextEdit" position="35 285 360 30" name="EditPassword"/>
 
-        <Widget type="TextBox" skin="ProgressText" position="35 304 360 18" name="LabelLanguage"/>
-        <Widget type="ComboBox" skin="MW_ComboBox" position="35 326 360 28" name="LanguageSelect"/>
+        <Widget type="TextBox" skin="ProgressText" position="35 320 360 18" name="LabelLanguage"/>
+        <Widget type="ComboBox" skin="MW_ComboBox" position="35 342 360 28" name="LanguageSelect"/>
 
-        <Widget type="AutoSizedButton" skin="MW_Button" position="35 360 0 28" name="ButtonExit">
+        <Widget type="AutoSizedButton" skin="MW_Button" position="35 376 0 28" name="ButtonExit">
             <Property key="ExpandDirection" value="Right"/>
             <Property key="Caption" value="Exit"/>
         </Widget>
-        <Widget type="AutoSizedButton" skin="MW_Button" position="395 360 0 28" name="ButtonConnect">
+        <Widget type="AutoSizedButton" skin="MW_Button" position="395 376 0 28" name="ButtonConnect">
             <Property key="ExpandDirection" value="Left"/>
             <Property key="Caption" value="Sign in"/>
         </Widget>

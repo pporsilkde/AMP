@@ -6335,6 +6335,21 @@ namespace MWWorld
             static int iDaysinPrisonMod = mStore.get<ESM::GameSetting>().find("iDaysinPrisonMod")->mValue.getInteger();
             mDaysInPrison = std::max(1, bounty / iDaysinPrisonMod);
 
+            // Y049: count genuine crime-system arrests in the persistent ArenaMP
+            // profile. Server-driven death/jail penalties bypass World::goToJail,
+            // so they are not accidentally counted as arrests.
+            if (bounty > 0)
+            {
+                mwmp::LocalPlayer* localPlayer = mwmp::Main::get().getLocalPlayer();
+                mwmp::Networking* networking = mwmp::Main::get().getNetworking();
+                if (localPlayer && networking && localPlayer->isLoggedIn())
+                {
+                    localPlayer->chatMessage = "@@AMP_PROFILE@@ARREST";
+                    networking->getPlayerPacket(ID_CHAT_MESSAGE)->setPlayer(localPlayer);
+                    networking->getPlayerPacket(ID_CHAT_MESSAGE)->Send();
+                }
+            }
+
             return;
         }
         else

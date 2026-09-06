@@ -450,6 +450,7 @@ end
 
 local function broadcastState(group)
     for _, pid in ipairs(onlineGroupPids(group)) do groupHelper.SendState(pid) end
+    if groupMapHelper ~= nil and group ~= nil then groupMapHelper.BroadcastGroup(group.id) end
 end
 
 local function createGroup(pid, requestedName)
@@ -614,6 +615,8 @@ local function leaveGroup(pid)
     refreshNativeAllies(group, { pid })
     broadcastState(group)
     groupHelper.SendState(pid)
+    if groupMapHelper ~= nil then groupMapHelper.SyncGroup(pid) end
+    if groupMemberCount(group) == 0 and groupMapHelper ~= nil then groupMapHelper.DeleteGroup(group.id) end
     return true, "You left the group"
 end
 
@@ -626,8 +629,10 @@ local function disbandGroup(pid)
     data.groups[group.id] = nil
     saveData()
     refreshNativeAllies(nil, online)
+    if groupMapHelper ~= nil then groupMapHelper.DeleteGroup(group.id) end
     for _, memberPid in ipairs(online) do
         groupHelper.SendState(memberPid)
+        if groupMapHelper ~= nil then groupMapHelper.SyncGroup(memberPid) end
         sendNotice(memberPid, "The group was disbanded", false)
     end
     return true, nil
@@ -652,6 +657,7 @@ local function kickMember(pid, targetName)
     if targetPid ~= nil then
         clearPlayerGroup(targetPid)
         groupHelper.SendState(targetPid)
+        if groupMapHelper ~= nil then groupMapHelper.SyncGroup(targetPid) end
         sendNotice(targetPid, "You were removed from " .. group.name, true)
     end
     saveData()

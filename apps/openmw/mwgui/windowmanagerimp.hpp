@@ -191,6 +191,11 @@ namespace MWGui
     MWGui::ConfirmationDialog* getConfirmationDialog() override;
     MWGui::TradeWindow* getTradeWindow() override;
 
+    // ArenaMP Y049: server-persisted personal map markers are restored through
+    // the existing GUI collection so the map window and HUD compass share one
+    // editable marker layer.
+    CustomMarkerCollection& getCustomMarkerCollection() { return mCustomMarkers; }
+
     /*
         Start of tes3mp addition
 

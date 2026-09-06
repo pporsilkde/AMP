@@ -50,6 +50,10 @@ deathRecovery = require("deathRecovery")
 -- X052: nickname colour picker and the Player Menu copy of the /list roster.
 chatColorHelper = require("chatColorHelper")
 playerListHelper = require("playerListHelper")
+-- Y049: persistent profile statistics, deletion and level-25 return slots.
+profileHelper = require("profileHelper")
+-- Y049: persistent coloured group map markers.
+groupMapHelper = require("groupMapHelper")
 -- X050a: built-in ArenaMP owner/console helper moved out of scripts/custom.
 helperAreana = require("helperAreana")
 guiHelper = require("guiHelper")

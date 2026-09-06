@@ -2,7 +2,15 @@
 
 #include <osg/Texture2D>
 
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <iomanip>
+#include <sstream>
+
 #include <MyGUI_ScrollView.h>
+#include <MyGUI_ComboBox.h>
+#include <MyGUI_TextBox.h>
 #include <MyGUI_ImageBox.h>
 #include <MyGUI_RenderManager.h>
 #include <MyGUI_Gui.h>
@@ -18,6 +26,8 @@
 */
 #include "../mwmp/Main.hpp"
 #include "../mwmp/GUIController.hpp"
+#include "../mwmp/Networking.hpp"
+#include "../mwmp/LocalPlayer.hpp"
 /*
     End of tes3mp addition
 */
@@ -39,7 +49,9 @@
 #include "../mwrender/localmap.hpp"
 
 #include "confirmationdialog.hpp"
+#include "exposedwindow.hpp"
 #include "tooltips.hpp"
+#include "mapmarkerstyle.hpp"
 
 namespace
 {
@@ -68,6 +80,33 @@ namespace
     /*
         End of ArenaMP X026 addition
     */
+
+    std::string arenaMapUrlEncode(const std::string& value)
+    {
+        std::ostringstream out;
+        out << std::uppercase << std::hex;
+        for (unsigned char c : value)
+        {
+            if (std::isalnum(c) || c == '_' || c == '-' || c == '.')
+                out << static_cast<char>(c);
+            else
+                out << '%' << std::setw(2) << std::setfill('0') << static_cast<int>(c);
+        }
+        return out.str();
+    }
+
+    void sendArenaGroupMarkerCommand(const std::string& command)
+    {
+        if (!mwmp::Main::isInitialized())
+            return;
+        mwmp::LocalPlayer* player = mwmp::Main::get().getLocalPlayer();
+        mwmp::Networking* networking = mwmp::Main::get().getNetworking();
+        if (!player || !networking || !player->isLoggedIn())
+            return;
+        player->chatMessage = command;
+        networking->getPlayerPacket(ID_CHAT_MESSAGE)->setPlayer(player);
+        networking->getPlayerPacket(ID_CHAT_MESSAGE)->Send();
+    }
 
     const int cellSize = Constants::CellSizeInUnits;
 
@@ -282,6 +321,49 @@ namespace MWGui
         }
     }
 
+    void LocalMapBase::setMapWidgetSize(int size)
+    {
+        size = std::clamp(size, 48, 1024);
+        if (!mLocalMap || size == mMapWidgetSize || mMapWidgetSize <= 0)
+            return;
+
+        const int oldSize = mMapWidgetSize;
+        const float ratio = static_cast<float>(size) / static_cast<float>(oldSize);
+        const MyGUI::IntPoint oldCompass = mCompass->getPosition();
+
+        mMapWidgetSize = size;
+        mLocalMap->setCanvasSize(mMapWidgetSize * mNumCells, mMapWidgetSize * mNumCells);
+
+        for (int mx = 0; mx < mNumCells; ++mx)
+        {
+            for (int my = 0; my < mNumCells; ++my)
+            {
+                MapEntry& entry = mMaps[my + mNumCells * mx];
+                const MyGUI::IntCoord coord(mx * mMapWidgetSize, my * mMapWidgetSize, mMapWidgetSize, mMapWidgetSize);
+                entry.mMapWidget->setCoord(coord);
+                entry.mFogWidget->setCoord(coord);
+            }
+        }
+
+        // Keep the current player position centred while the map scale changes.
+        const float oldCenterX = static_cast<float>(oldCompass.left + 16);
+        const float oldCenterY = static_cast<float>(oldCompass.top + 16);
+        const MyGUI::IntPoint compassPos(
+            static_cast<int>(std::lround(oldCenterX * ratio)) - 16,
+            static_cast<int>(std::lround(oldCenterY * ratio)) - 16);
+        mCompass->setPosition(compassPos);
+        const MyGUI::IntCoord viewSize = mLocalMap->getCoord();
+        mLocalMap->setViewOffset(MyGUI::IntPoint(
+            viewSize.width / 2 - (compassPos.left + 16),
+            viewSize.height / 2 - (compassPos.top + 16)));
+
+        mNeedDoorMarkersUpdate = true;
+        updateMagicMarkers();
+        updateCustomMarkers();
+        updatePlayerMarkers();
+        redraw();
+    }
+
     void LocalMapBase::setCellPrefix(const std::string& prefix)
     {
         mPrefix = prefix;
@@ -388,13 +470,22 @@ namespace MWGui
                     MarkerWidget* markerWidget = mLocalMap->createWidget<MarkerWidget>("CustomMarkerButton",
                         widgetCoord, MyGUI::Align::Default);
                     markerWidget->setDepth(Local_MarkerAboveFogLayer);
+                    const ArenaMapMarkerStyle style = parseArenaMapMarker(marker.mNote);
                     markerWidget->setUserString("ToolTipType", "Layout");
                     markerWidget->setUserString("ToolTipLayout", "TextToolTipOneLine");
-                    markerWidget->setUserString("Caption_TextOneLine", MyGUI::TextIterator::toTagsString(marker.mNote));
-                    markerWidget->setNormalColour(MyGUI::Colour(0.6f, 0.6f, 0.6f));
+                    markerWidget->setUserString("Caption_TextOneLine", MyGUI::TextIterator::toTagsString(style.text));
+                    markerWidget->setNormalColour(style.styled ? arenaMarkerColour(style.color) : MyGUI::Colour(0.6f, 0.6f, 0.6f));
                     markerWidget->setHoverColour(MyGUI::Colour(1.0f, 1.0f, 1.0f));
                     markerWidget->setUserData(marker);
                     markerWidget->setNeedMouseFocus(true);
+                    if (style.styled)
+                    {
+                        MyGUI::TextBox* glyph = markerWidget->createWidget<MyGUI::TextBox>(
+                            "SandBrightText", MyGUI::IntCoord(0, -1, 16, 16), MyGUI::Align::Stretch);
+                        glyph->setCaption(style.kind);
+                        glyph->setTextAlign(MyGUI::Align::Center);
+                        glyph->setNeedMouseFocus(false);
+                    }
                     customMarkerCreated(markerWidget);
                     mCustomMarkerWidgets.push_back(markerWidget);
                 }
@@ -740,6 +831,9 @@ namespace MWGui
         , mGlobalMap(nullptr)
         , mGlobalMapImage(nullptr)
         , mGlobalMapOverlay(nullptr)
+        , mZoomInButton(nullptr)
+        , mZoomOutButton(nullptr)
+        , mLocalZoomStep(0)
         , mGlobal(Settings::Manager::getBool("global", "Map"))
         , mEventBoxGlobal(nullptr)
         , mEventBoxLocal(nullptr)
@@ -780,6 +874,11 @@ namespace MWGui
         mButton->eventMouseButtonClick += MyGUI::newDelegate(this, &MapWindow::onWorldButtonClicked);
         mButton->setCaptionWithReplacing( mGlobal ? "#{sLocal}" : "#{sWorld}");
 
+        getWidget(mZoomOutButton, "ZoomOutButton");
+        getWidget(mZoomInButton, "ZoomInButton");
+        mZoomOutButton->eventMouseButtonClick += MyGUI::newDelegate(this, &MapWindow::onZoomOutClicked);
+        mZoomInButton->eventMouseButtonClick += MyGUI::newDelegate(this, &MapWindow::onZoomInClicked);
+
         getWidget(mEventBoxGlobal, "EventBoxGlobal");
         mEventBoxGlobal->eventMouseDrag += MyGUI::newDelegate(this, &MapWindow::onMouseDrag);
         mEventBoxGlobal->eventMouseButtonPressed += MyGUI::newDelegate(this, &MapWindow::onDragStart);
@@ -794,16 +893,58 @@ namespace MWGui
 
         mGlobalMap->setVisible(mGlobal);
         mLocalMap->setVisible(!mGlobal);
+        applyLocalZoom();
+        updatePinnedPresentation();
     }
 
     void MapWindow::onNoteEditOk()
     {
-        if (mEditNoteDialog.getDeleteButtonShown())
-            mCustomMarkers.updateMarker(mEditingMarker, mEditNoteDialog.getText());
+        const bool editing = mEditNoteDialog.getDeleteButtonShown();
+        const ArenaMapMarkerStyle previousStyle = editing ? parseArenaMapMarker(mEditingMarker.mNote) : ArenaMapMarkerStyle();
+        const std::string kind = mEditNoteDialog.getMarkerKind();
+        const std::string color = mEditNoteDialog.getMarkerColor();
+        const bool groupShare = mEditNoteDialog.getGroupShare();
+        const std::string text = mEditNoteDialog.getText();
+        const std::string encoded = makeArenaPersonalMarker(kind, color, groupShare, text);
+
+        if (editing)
+            mCustomMarkers.updateMarker(mEditingMarker, encoded);
         else
         {
-            mEditingMarker.mNote = mEditNoteDialog.getText();
+            mEditingMarker.mNote = encoded;
             mCustomMarkers.addMarker(mEditingMarker);
+        }
+
+        const std::string cell = mEditingMarker.mCell.mPaged ? std::string("world") : mEditingMarker.mCell.mWorldspace;
+
+        // Server-authoritative personal persistence. Cell-local map indices are
+        // transmitted as well so markers in large interiors survive reconnects.
+        {
+            std::ostringstream cmd;
+            cmd << "/mapmark add " << (mEditingMarker.mCell.mPaged ? "1" : "0") << ' '
+                << arenaMapUrlEncode(cell) << ' ' << mEditingMarker.mCell.mIndex.mX << ' ' << mEditingMarker.mCell.mIndex.mY << ' '
+                << mEditingMarker.mWorldX << ' ' << mEditingMarker.mWorldY << ' '
+                << kind << ' ' << color << ' ' << (groupShare ? "1" : "0") << ' '
+                << arenaMapUrlEncode(text.empty() ? std::string(" ") : text);
+            sendArenaGroupMarkerCommand(cmd.str());
+        }
+
+        if (groupShare)
+        {
+            std::ostringstream cmd;
+            cmd << "/groupmark add " << (mEditingMarker.mCell.mPaged ? "1" : "0") << ' '
+                << arenaMapUrlEncode(cell) << ' ' << mEditingMarker.mCell.mIndex.mX << ' ' << mEditingMarker.mCell.mIndex.mY << ' '
+                << mEditingMarker.mWorldX << ' ' << mEditingMarker.mWorldY << ' '
+                << kind << ' ' << color << ' ' << arenaMapUrlEncode(text.empty() ? std::string(" ") : text);
+            sendArenaGroupMarkerCommand(cmd.str());
+        }
+        else if (editing && previousStyle.styled && previousStyle.group)
+        {
+            // Turning group sharing off must remove the old server group copy.
+            std::ostringstream cmd;
+            cmd << "/groupmark deleteat " << (mEditingMarker.mCell.mPaged ? "1" : "0") << ' '
+                << arenaMapUrlEncode(cell) << ' ' << mEditingMarker.mWorldX << ' ' << mEditingMarker.mWorldY;
+            sendArenaGroupMarkerCommand(cmd.str());
         }
 
         mEditNoteDialog.setVisible(false);
@@ -820,15 +961,32 @@ namespace MWGui
 
     void MapWindow::onNoteEditDeleteConfirm()
     {
-        mCustomMarkers.deleteMarker(mEditingMarker);
+        const ArenaMapMarkerStyle style = parseArenaMapMarker(mEditingMarker.mNote);
+        const std::string cell = mEditingMarker.mCell.mPaged ? std::string("world") : mEditingMarker.mCell.mWorldspace;
 
+        {
+            std::ostringstream cmd;
+            cmd << "/mapmark deleteat " << (mEditingMarker.mCell.mPaged ? "1" : "0") << ' '
+                << arenaMapUrlEncode(cell) << ' ' << mEditingMarker.mWorldX << ' ' << mEditingMarker.mWorldY;
+            sendArenaGroupMarkerCommand(cmd.str());
+        }
+        if (style.styled && style.group)
+        {
+            std::ostringstream cmd;
+            cmd << "/groupmark deleteat " << (mEditingMarker.mCell.mPaged ? "1" : "0") << ' '
+                << arenaMapUrlEncode(cell) << ' ' << mEditingMarker.mWorldX << ' ' << mEditingMarker.mWorldY;
+            sendArenaGroupMarkerCommand(cmd.str());
+        }
+        mCustomMarkers.deleteMarker(mEditingMarker);
         mEditNoteDialog.setVisible(false);
     }
 
     void MapWindow::onCustomMarkerDoubleClicked(MyGUI::Widget *sender)
     {
         mEditingMarker = *sender->getUserData<ESM::CustomMarker>();
-        mEditNoteDialog.setText(mEditingMarker.mNote);
+        const ArenaMapMarkerStyle style = parseArenaMapMarker(mEditingMarker.mNote);
+        mEditNoteDialog.setText(style.text);
+        mEditNoteDialog.setMarkerStyle(style.kind, style.color, style.group);
         mEditNoteDialog.showDeleteButton(true);
         mEditNoteDialog.setVisible(true);
     }
@@ -869,6 +1027,7 @@ namespace MWGui
             mEditingMarker.mCell.mIndex.mY = y;
         }
 
+        mEditNoteDialog.setMarkerStyle("?", "yellow", false);
         mEditNoteDialog.setVisible(true);
         mEditNoteDialog.showDeleteButton(false);
         mEditNoteDialog.setText("");
@@ -891,7 +1050,7 @@ namespace MWGui
     void MapWindow::setVisible(bool visible)
     {
         WindowBase::setVisible(visible);
-        mButton->setVisible(visible && MWBase::Environment::get().getWindowManager()->getMode() != MWGui::GM_None);
+        updatePinnedPresentation();
     }
 
     void MapWindow::renderGlobalMap()
@@ -968,7 +1127,10 @@ namespace MWGui
         CustomMarkerCollection::RangeType markers = mCustomMarkers.getMarkers(cellId);
         std::vector<std::string> destNotes;
         for (CustomMarkerCollection::ContainerType::const_iterator it = markers.first; it != markers.second; ++it)
-            destNotes.push_back(it->second.mNote);
+        {
+            const ArenaMapMarkerStyle style = parseArenaMapMarker(it->second.mNote);
+            destNotes.push_back(style.styled ? style.kind + "  " + style.text : it->second.mNote);
+        }
 
         if (!destNotes.empty())
         {
@@ -1044,6 +1206,70 @@ namespace MWGui
 
         if (mGlobal)
             globalMapUpdatePlayer ();
+
+        updatePinnedPresentation();
+    }
+
+    void MapWindow::onZoomInClicked(MyGUI::Widget*)
+    {
+        if (mGlobal || mPinned)
+            return;
+        mLocalZoomStep = std::min(3, mLocalZoomStep + 1);
+        applyLocalZoom();
+    }
+
+    void MapWindow::onZoomOutClicked(MyGUI::Widget*)
+    {
+        if (mGlobal || mPinned)
+            return;
+        mLocalZoomStep = std::max(-2, mLocalZoomStep - 1);
+        applyLocalZoom();
+    }
+
+    void MapWindow::applyLocalZoom()
+    {
+        static const float zoomFactors[] = {0.60f, 0.78f, 1.0f, 1.30f, 1.65f, 2.05f};
+        const int index = std::clamp(mLocalZoomStep + 2, 0, 5);
+        const int baseSize = std::max(1, Settings::Manager::getInt("local map widget size", "Map"));
+        setMapWidgetSize(static_cast<int>(std::lround(baseSize * zoomFactors[index])));
+    }
+
+    void MapWindow::updatePinnedPresentation()
+    {
+        if (!mMainWidget)
+            return;
+
+        const bool visible = isVisible();
+        const bool normalControls = visible && !mPinned
+            && MWBase::Environment::get().getWindowManager()->getMode() != MWGui::GM_None;
+        if (mButton)
+            mButton->setVisible(normalControls);
+        if (mZoomInButton)
+            mZoomInButton->setVisible(normalControls && !mGlobal);
+        if (mZoomOutButton)
+            mZoomOutButton->setVisible(normalControls && !mGlobal);
+
+        Window* window = mMainWidget->castType<Window>(false);
+        if (!window)
+            return;
+
+        for (MyGUI::Widget* widget : window->getSkinWidgetsByName("Action"))
+            widget->setVisible(!mPinned);
+        for (MyGUI::Widget* widget : window->getSkinWidgetsByName("Caption"))
+            widget->setVisible(!mPinned);
+
+        // Keep only the small pin control accessible; the decorative frame/caption disappears.
+        if (mPinButton)
+            mPinButton->setVisible(visible);
+
+        if (MyGUI::Widget* client = window->getSkinWidget("Client", false))
+        {
+            const MyGUI::IntSize size = mMainWidget->getSize();
+            if (mPinned)
+                client->setCoord(0, 0, size.width, size.height);
+            else
+                client->setCoord(8, 28, std::max(1, size.width - 16), std::max(1, size.height - 36));
+        }
     }
 
     void MapWindow::onPinToggled()
@@ -1051,6 +1277,7 @@ namespace MWGui
         Settings::Manager::setBool("map pin", "Windows", mPinned);
 
         MWBase::Environment::get().getWindowManager()->setMinimapVisibility(!mPinned);
+        updatePinnedPresentation();
     }
 
     void MapWindow::onTitleDoubleClicked()
@@ -1194,15 +1421,29 @@ namespace MWGui
 
     EditNoteDialog::EditNoteDialog()
         : WindowModal("openmw_edit_note.layout")
+        , mGroupShare(false)
     {
         getWidget(mOkButton, "OkButton");
         getWidget(mCancelButton, "CancelButton");
         getWidget(mDeleteButton, "DeleteButton");
         getWidget(mTextEdit, "TextEdit");
+        getWidget(mTypeSelect, "MarkerType");
+        getWidget(mColorSelect, "MarkerColor");
+        getWidget(mGroupButton, "GroupShareButton");
+
+        for (const char* value : {"?", "!", "A", "B", "C"})
+            mTypeSelect->addItem(value);
+        for (const char* value : {"yellow", "red", "green", "blue", "orange", "purple", "white"})
+            mColorSelect->addItem(MyGUI::LanguageManager::getInstance().replaceTags(
+                std::string("#{arenamp=map.marker.color.") + value + "}"));
+        mTypeSelect->setIndexSelected(0);
+        mColorSelect->setIndexSelected(0);
+        refreshGroupCaption();
 
         mCancelButton->eventMouseButtonClick += MyGUI::newDelegate(this, &EditNoteDialog::onCancelButtonClicked);
         mOkButton->eventMouseButtonClick += MyGUI::newDelegate(this, &EditNoteDialog::onOkButtonClicked);
         mDeleteButton->eventMouseButtonClick += MyGUI::newDelegate(this, &EditNoteDialog::onDeleteButtonClicked);
+        mGroupButton->eventMouseButtonClick += MyGUI::newDelegate(this, &EditNoteDialog::onGroupButtonClicked);
     }
 
     void EditNoteDialog::showDeleteButton(bool show)
@@ -1223,6 +1464,46 @@ namespace MWGui
     std::string EditNoteDialog::getText()
     {
         return MyGUI::TextIterator::getOnlyText(mTextEdit->getCaption());
+    }
+
+    void EditNoteDialog::setMarkerStyle(const std::string& kind, const std::string& color, bool groupShare)
+    {
+        const std::vector<std::string> kinds={"?","!","A","B","C"};
+        const std::vector<std::string> colors={"yellow","red","green","blue","orange","purple","white"};
+        auto ki=std::find(kinds.begin(),kinds.end(),kind);
+        auto ci=std::find(colors.begin(),colors.end(),color);
+        mTypeSelect->setIndexSelected(ki==kinds.end()?0:static_cast<std::size_t>(std::distance(kinds.begin(),ki)));
+        mColorSelect->setIndexSelected(ci==colors.end()?0:static_cast<std::size_t>(std::distance(colors.begin(),ci)));
+        mGroupShare=groupShare;
+        refreshGroupCaption();
+    }
+
+    std::string EditNoteDialog::getMarkerKind() const
+    {
+        const std::vector<std::string> v={"?","!","A","B","C"};
+        const std::size_t i=mTypeSelect->getIndexSelected();
+        return i<v.size()?v[i]:"?";
+    }
+
+    std::string EditNoteDialog::getMarkerColor() const
+    {
+        const std::vector<std::string> v={"yellow","red","green","blue","orange","purple","white"};
+        const std::size_t i=mColorSelect->getIndexSelected();
+        return i<v.size()?v[i]:"yellow";
+    }
+
+    bool EditNoteDialog::getGroupShare() const { return mGroupShare; }
+
+    void EditNoteDialog::refreshGroupCaption()
+    {
+        mGroupButton->setCaption(MyGUI::LanguageManager::getInstance().replaceTags(
+            mGroupShare ? "#{arenamp=map.marker.group_on}" : "#{arenamp=map.marker.group_off}"));
+    }
+
+    void EditNoteDialog::onGroupButtonClicked(MyGUI::Widget*)
+    {
+        mGroupShare=!mGroupShare;
+        refreshGroupCaption();
     }
 
     void EditNoteDialog::onOpen()

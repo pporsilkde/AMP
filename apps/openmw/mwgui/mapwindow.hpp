@@ -15,6 +15,12 @@
 
     Declare GUIController here so we can use it for delegates
 */
+namespace MyGUI
+{
+    class Button;
+    class ComboBox;
+}
+
 namespace mwmp
 {
     class GUIController;
@@ -101,6 +107,7 @@ namespace MWGui
         void requestMapRender(const MWWorld::CellStore* cell);
         void setPlayerDir(const float x, const float y);
         void setPlayerPos(int cellX, int cellY, const float nx, const float ny);
+        void setMapWidgetSize(int size);
 
         void onFrame(float dt);
 
@@ -227,6 +234,10 @@ namespace MWGui
         bool getDeleteButtonShown();
         void setText(const std::string& text);
         std::string getText();
+        void setMarkerStyle(const std::string& kind, const std::string& color, bool groupShare);
+        std::string getMarkerKind() const;
+        std::string getMarkerColor() const;
+        bool getGroupShare() const;
 
         typedef MyGUI::delegates::CMultiDelegate0 EventHandle_Void;
 
@@ -237,11 +248,17 @@ namespace MWGui
         void onCancelButtonClicked(MyGUI::Widget* sender);
         void onOkButtonClicked(MyGUI::Widget* sender);
         void onDeleteButtonClicked(MyGUI::Widget* sender);
+        void onGroupButtonClicked(MyGUI::Widget* sender);
+        void refreshGroupCaption();
 
         MyGUI::TextBox* mTextEdit;
         MyGUI::Button* mOkButton;
         MyGUI::Button* mCancelButton;
         MyGUI::Button* mDeleteButton;
+        MyGUI::ComboBox* mTypeSelect;
+        MyGUI::ComboBox* mColorSelect;
+        MyGUI::Button* mGroupButton;
+        bool mGroupShare;
     };
 
     class MapWindow : public MWGui::WindowPinnableBase, public LocalMapBase, public NoDrop
@@ -315,6 +332,10 @@ namespace MWGui
         void onDragStart(MyGUI::Widget* _sender, int _left, int _top, MyGUI::MouseButton _id);
         void onMouseDrag(MyGUI::Widget* _sender, int _left, int _top, MyGUI::MouseButton _id);
         void onWorldButtonClicked(MyGUI::Widget* _sender);
+        void onZoomInClicked(MyGUI::Widget* sender);
+        void onZoomOutClicked(MyGUI::Widget* sender);
+        void applyLocalZoom();
+        void updatePinnedPresentation();
         void onMapDoubleClicked(MyGUI::Widget* sender);
         void onCustomMarkerDoubleClicked(MyGUI::Widget* sender);
         void onNoteEditOk();
@@ -333,6 +354,9 @@ namespace MWGui
         MyGUI::ImageBox* mPlayerArrowLocal;
         MyGUI::ImageBox* mPlayerArrowGlobal;
         MyGUI::Button* mButton;
+        MyGUI::Button* mZoomInButton;
+        MyGUI::Button* mZoomOutButton;
+        int mLocalZoomStep;
         MyGUI::IntPoint mLastDragPos;
         bool mGlobal;
 

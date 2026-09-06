@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <MyGUI type="Layout" version="3.2.0">
-    <Widget type="Window" skin="MW_Dialog" position="0 0 430 476" layer="Windows" align="Center" name="_Main">
+    <Widget type="Window" skin="MW_Dialog" position="0 0 430 492" layer="Windows" align="Center" name="_Main">
         <Widget type="ImageBox" skin="ImageBox" position="35 16 360 99" name="LoginBrand">
             <Property key="ImageTexture" value="textures\menu_arenamw.png"/>
             <Property key="NeedMouse" value="false"/>
@@ -17,21 +17,22 @@
 
         <Widget type="TextBox" skin="ProgressText" position="35 194 360 18" name="LabelName"/>
         <Widget type="EditBox" skin="MW_TextEdit" position="35 216 360 30" name="EditLogin"/>
+        <Widget type="TextBox" skin="SandText" position="35 246 360 16" name="NameCounter"><Property key="TextAlign" value="Right VCenter"/></Widget>
 
-        <Widget type="TextBox" skin="ProgressText" position="35 251 360 18" name="LabelPassword"/>
-        <Widget type="EditBox" skin="MW_TextEdit" position="35 273 360 30" name="EditPassword"/>
+        <Widget type="TextBox" skin="ProgressText" position="35 267 360 18" name="LabelPassword"/>
+        <Widget type="EditBox" skin="MW_TextEdit" position="35 289 360 30" name="EditPassword"/>
 
-        <Widget type="TextBox" skin="ProgressText" position="35 308 360 18" name="LabelPasswordConfirm"/>
-        <Widget type="EditBox" skin="MW_TextEdit" position="35 330 360 30" name="EditPasswordConfirm"/>
+        <Widget type="TextBox" skin="ProgressText" position="35 324 360 18" name="LabelPasswordConfirm"/>
+        <Widget type="EditBox" skin="MW_TextEdit" position="35 346 360 30" name="EditPasswordConfirm"/>
 
-        <Widget type="TextBox" skin="ProgressText" position="35 365 360 18" name="LabelLanguage"/>
-        <Widget type="ComboBox" skin="MW_ComboBox" position="35 387 360 28" name="LanguageSelect"/>
+        <Widget type="TextBox" skin="ProgressText" position="35 381 360 18" name="LabelLanguage"/>
+        <Widget type="ComboBox" skin="MW_ComboBox" position="35 403 360 28" name="LanguageSelect"/>
 
-        <Widget type="AutoSizedButton" skin="MW_Button" position="35 424 0 28" name="ButtonExit">
+        <Widget type="AutoSizedButton" skin="MW_Button" position="35 440 0 28" name="ButtonExit">
             <Property key="ExpandDirection" value="Right"/>
             <Property key="Caption" value="Exit"/>
         </Widget>
-        <Widget type="AutoSizedButton" skin="MW_Button" position="395 424 0 28" name="ButtonConnect">
+        <Widget type="AutoSizedButton" skin="MW_Button" position="395 440 0 28" name="ButtonConnect">
             <Property key="ExpandDirection" value="Left"/>
             <Property key="Caption" value="Create account"/>
         </Widget>

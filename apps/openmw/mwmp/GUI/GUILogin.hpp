@@ -8,6 +8,7 @@ namespace MyGUI
     class Button;
     class ComboBox;
     class EditBox;
+    class TextBox;
 }
 
 namespace mwmp
@@ -47,15 +48,18 @@ namespace mwmp
         void onConnect(MyGUI::Widget* sender);
         void onExitClicked(MyGUI::Widget* sender);
         void onLoginAccepted(MyGUI::Edit* sender);
+        void onLoginEdited(MyGUI::EditBox* sender);
         void onPasswordAccepted(MyGUI::Edit* sender);
         void onPasswordConfirmAccepted(MyGUI::Edit* sender);
         void onLanguageChanged(MyGUI::ComboBox* sender, size_t index);
         void refreshStrings();
         void applyLanguage(const std::string& language, bool persist);
+        void updateNameCounter();
 
         MyGUI::EditBox* mLogin = nullptr;
         MyGUI::EditBox* mPassword = nullptr;
         MyGUI::EditBox* mPasswordConfirm = nullptr;
+        MyGUI::TextBox* mNameCounter = nullptr;
         MyGUI::ComboBox* mLanguage = nullptr;
         MyGUI::Button* mConnect = nullptr;
         MyGUI::Button* mExit = nullptr;

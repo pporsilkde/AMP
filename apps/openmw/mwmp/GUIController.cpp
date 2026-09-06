@@ -13,6 +13,7 @@
 #include <MyGUI_LanguageManager.h>
 #include <MyGUI_RenderManager.h>
 #include <MyGUI_ScrollView.h>
+#include <MyGUI_TextBox.h>
 
 #include <extern/PicoSHA2/picosha2.h>
 
@@ -21,6 +22,7 @@
 #include "../mwbase/inputmanager.hpp"
 
 #include "../mwgui/mapwindow.hpp"
+#include "../mwgui/mapmarkerstyle.hpp"
 
 #include "../mwworld/worldimp.hpp"
 #include "../mwworld/player.hpp"
@@ -570,14 +572,56 @@ ESM::CustomMarker mwmp::GUIController::createMarker(const RakNet::RakNetGUID &gu
 
 void mwmp::GUIController::updatePlayersMarkers(MWGui::LocalMapBase *localMapBase)
 {
-    // ArenaMP: remote-player marker widgets are intentionally disabled on local maps and the HUD
-    // minimap. Recreating one MyGUI widget per network update/player caused instability when several
-    // players shared a cell. Keep the marker collection for the world-map tooltip path, but never
-    // instantiate local-map widgets for it.
-    std::vector<MyGUI::Widget*>::iterator markerWidgetIterator = localMapBase->mPlayerMarkerWidgets.begin();
-    for (; markerWidgetIterator != localMapBase->mPlayerMarkerWidgets.end(); ++markerWidgetIterator)
-        MyGUI::Gui::getInstance().destroyWidget(*markerWidgetIterator);
+    // Y049: live player positions remain tooltip-only on the local/HUD map (the
+    // older per-network-update widgets were unstable). Only persistent group
+    // markers are materialized here, and they change rarely.
+    for (MyGUI::Widget* widget : localMapBase->mPlayerMarkerWidgets)
+        MyGUI::Gui::getInstance().destroyWidget(widget);
     localMapBase->mPlayerMarkerWidgets.clear();
+
+    if (!localMapBase->mLocalMap)
+        return;
+
+    std::size_t created = 0;
+    constexpr std::size_t maxVisibleGroupMarkers = 48;
+    for (int dX = -localMapBase->mCellDistance; dX <= localMapBase->mCellDistance && created < maxVisibleGroupMarkers; ++dX)
+    {
+        for (int dY = -localMapBase->mCellDistance; dY <= localMapBase->mCellDistance && created < maxVisibleGroupMarkers; ++dY)
+        {
+            ESM::CellId cellId;
+            cellId.mPaged = !localMapBase->mInterior;
+            cellId.mWorldspace = localMapBase->mInterior ? localMapBase->mPrefix : ESM::CellId::sDefaultWorldspace;
+            cellId.mIndex.mX = localMapBase->mCurX + dX;
+            cellId.mIndex.mY = localMapBase->mCurY + dY;
+            PlayerMarkerCollection::RangeType range = mPlayerMarkers.getMarkers(cellId);
+            for (auto it = range.first; it != range.second && created < maxVisibleGroupMarkers; ++it)
+            {
+                const ESM::CustomMarker& marker = it->second;
+                const MWGui::ArenaMapMarkerStyle style = MWGui::parseArenaMapMarker(marker.mNote);
+                if (!style.styled || !style.group || marker.mNote.rfind("@AMP_GMARK@|", 0) != 0)
+                    continue;
+
+                MWGui::LocalMapBase::MarkerUserData markerPos(localMapBase->mLocalMapRender);
+                const MyGUI::IntPoint pos = localMapBase->getMarkerPosition(marker.mWorldX, marker.mWorldY, markerPos);
+                MyGUI::Widget* widget = localMapBase->mLocalMap->createWidget<MyGUI::Widget>(
+                    "CustomMarkerButton", MyGUI::IntCoord(pos.left - 8, pos.top - 8, 16, 16), MyGUI::Align::Default);
+                widget->setDepth(1);
+                widget->setColour(MWGui::arenaMarkerColour(style.color));
+                widget->setUserString("ToolTipType", "Layout");
+                widget->setUserString("ToolTipLayout", "TextToolTipOneLine");
+                widget->setUserString("Caption_TextOneLine", style.kind + "  " + style.text);
+                widget->setNeedMouseFocus(true);
+
+                MyGUI::TextBox* glyph = widget->createWidget<MyGUI::TextBox>(
+                    "SandBrightText", MyGUI::IntCoord(0, -1, 16, 16), MyGUI::Align::Stretch);
+                glyph->setCaption(style.kind);
+                glyph->setTextAlign(MyGUI::Align::Center);
+                glyph->setNeedMouseFocus(false);
+                localMapBase->mPlayerMarkerWidgets.push_back(widget);
+                ++created;
+            }
+        }
+    }
 }
 
 void mwmp::GUIController::setGlobalMapMarkerTooltip(MWGui::MapWindow *mapWindow, MyGUI::Widget *markerWidget, int x, int y)
@@ -589,8 +633,23 @@ void mwmp::GUIController::setGlobalMapMarkerTooltip(MWGui::MapWindow *mapWindow,
     cellId.mPaged = true;
     PlayerMarkerCollection::RangeType markers = mPlayerMarkers.getMarkers(cellId);
     std::vector<std::string> destNotes;
+    bool hasLivePlayer = false;
     for (PlayerMarkerCollection::ContainerType::const_iterator it = markers.first; it != markers.second; ++it)
-        destNotes.push_back(it->second.mNote);
+    {
+        const MWGui::ArenaMapMarkerStyle style = MWGui::parseArenaMapMarker(it->second.mNote);
+        if (style.styled)
+            destNotes.push_back(style.kind + "  " + style.text);
+        else
+        {
+            destNotes.push_back(it->second.mNote);
+            hasLivePlayer = true;
+        }
+    }
+
+    // Y049: a visited exterior cell containing at least one connected player is
+    // a red square on the world map. Group notes alone do not trigger the red.
+    markerWidget->setColour(hasLivePlayer ? MyGUI::Colour(1.f, 0.12f, 0.10f)
+                                          : MyGUI::Colour::parse(MyGUI::LanguageManager::getInstance().replaceTags("#{fontcolour=normal}")));
 
     if (!destNotes.empty())
     {

@@ -24,6 +24,7 @@
 #include "apps/openmw/mwinput/inputmanagerimp.hpp"
 #include "apps/openmw/mwmechanics/xpserverbridge.hpp"
 #include <components/openmw-mp/TimedLog.hpp>
+#include <components/misc/constants.hpp>
 #include <components/settings/settings.hpp>
 
 #include "../Networking.hpp"
@@ -726,6 +727,9 @@ namespace mwmp
         static const std::string colorPrefix = "@@AMP_COLOR@@";
         static const std::string playersPrefix = "@@AMP_PLAYERS@@";
         static const std::string placementDenyPrefix = "@@AMP_PLACE_DENY@@";
+        static const std::string personalMapPrefix = "@@AMP_PMARK@@";
+        static const std::string groupMapPrefix = "@@AMP_GMARK@@";
+        static const std::string profilePrefix = "@@AMP_PROFILE@@";
 
         if (msg.compare(0, groupPrefix.size(), groupPrefix) == 0)
         {
@@ -754,6 +758,140 @@ namespace mwmp
             std::vector<std::string> fields = splitControlFields(msg.substr(playersPrefix.size()), '\t');
             if (!fields.empty() && fields[0] == "STATE")
                 rebuildPlayerList(fields);
+            return true;
+        }
+
+
+        if (msg.compare(0, profilePrefix.size(), profilePrefix) == 0)
+        {
+            const std::string action = msg.substr(profilePrefix.size());
+            if (action.rfind("DELETED", 0) == 0)
+            {
+                // A deleted server profile must return to a genuinely fresh
+                // registration flow. Do not silently pre-fill the old password.
+                Settings::Manager::setString("password", "Login", "");
+                Settings::Manager::saveUser();
+            }
+            return true;
+        }
+
+        if (msg.compare(0, personalMapPrefix.size(), personalMapPrefix) == 0)
+        {
+            std::vector<std::string> fields = splitControlFields(msg.substr(personalMapPrefix.size()), '\t');
+            MWGui::WindowManager* windowManager = dynamic_cast<MWGui::WindowManager*>(
+                MWBase::Environment::get().getWindowManager());
+            if (!windowManager || fields.empty())
+                return true;
+
+            MWGui::CustomMarkerCollection& markers = windowManager->getCustomMarkerCollection();
+            if (fields[0] == "CLEAR")
+            {
+                // In multiplayer the server is authoritative for personal map
+                // notes. Clearing the shared collection also removes stale local
+                // save remnants before the current profile is replayed.
+                markers.clear();
+                mPersonalMapMarkers.clear();
+                return true;
+            }
+
+            if (fields[0] == "ADD" && fields.size() >= 12)
+            {
+                ESM::CustomMarker marker;
+                const std::string id = fields[1];
+                const bool paged = fields[2] == "1";
+                const std::string cell = unescapeControlField(fields[3]);
+                marker.mCell.mPaged = paged;
+                marker.mCell.mWorldspace = paged ? ESM::CellId::sDefaultWorldspace : cell;
+                marker.mCell.mIndex.mX = std::atoi(fields[4].c_str());
+                marker.mCell.mIndex.mY = std::atoi(fields[5].c_str());
+                marker.mWorldX = std::strtof(fields[6].c_str(), nullptr);
+                marker.mWorldY = std::strtof(fields[7].c_str(), nullptr);
+                const std::string kind = unescapeControlField(fields[8]);
+                const std::string colour = unescapeControlField(fields[9]);
+                const bool group = fields[10] == "1";
+                const std::string text = unescapeControlField(fields[11]);
+                marker.mNote = "@AMP_MARK@|" + kind + "|" + colour + "|" + (group ? "1" : "0") + "|" + text;
+                markers.addMarker(marker);
+                mPersonalMapMarkers[id] = marker;
+                return true;
+            }
+            return true;
+        }
+
+        if (msg.compare(0, groupMapPrefix.size(), groupMapPrefix) == 0)
+        {
+            std::vector<std::string> fields = splitControlFields(msg.substr(groupMapPrefix.size()), '\t');
+            GUIController* gui = Main::get().getGUIController();
+            if (!gui || fields.empty())
+                return true;
+
+            if (fields[0] == "CLEAR")
+            {
+                for (const auto& entry : mGroupMapMarkers)
+                {
+                    if (gui->mPlayerMarkers.contains(entry.second))
+                        gui->mPlayerMarkers.deleteMarker(entry.second);
+                }
+                mGroupMapMarkers.clear();
+                return true;
+            }
+
+            if (fields[0] == "ADD" && fields.size() >= 10)
+            {
+                const std::string id = fields[1];
+                auto old = mGroupMapMarkers.find(id);
+                if (old != mGroupMapMarkers.end())
+                {
+                    if (gui->mPlayerMarkers.contains(old->second))
+                        gui->mPlayerMarkers.deleteMarker(old->second);
+                    mGroupMapMarkers.erase(old);
+                }
+
+                ESM::CustomMarker marker;
+                const bool paged = fields[2] == "1";
+                const std::string cell = unescapeControlField(fields[3]);
+                std::string kind, colour, text, owner;
+                if (fields.size() >= 12)
+                {
+                    marker.mCell.mIndex.mX = std::atoi(fields[4].c_str());
+                    marker.mCell.mIndex.mY = std::atoi(fields[5].c_str());
+                    marker.mWorldX = std::strtof(fields[6].c_str(), nullptr);
+                    marker.mWorldY = std::strtof(fields[7].c_str(), nullptr);
+                    kind = unescapeControlField(fields[8]);
+                    colour = unescapeControlField(fields[9]);
+                    text = unescapeControlField(fields[10]);
+                    owner = unescapeControlField(fields[11]);
+                }
+                else
+                {
+                    // Compatibility with the first Y049 draft protocol.
+                    marker.mWorldX = std::strtof(fields[4].c_str(), nullptr);
+                    marker.mWorldY = std::strtof(fields[5].c_str(), nullptr);
+                    kind = unescapeControlField(fields[6]);
+                    colour = unescapeControlField(fields[7]);
+                    text = unescapeControlField(fields[8]);
+                    owner = fields.size() > 9 ? unescapeControlField(fields[9]) : std::string();
+                    if (paged)
+                    {
+                        marker.mCell.mIndex.mX = static_cast<int>(std::floor(marker.mWorldX / Constants::CellSizeInUnits));
+                        marker.mCell.mIndex.mY = static_cast<int>(std::floor(marker.mWorldY / Constants::CellSizeInUnits));
+                    }
+                }
+
+                // The owner's editable personal copy is already restored through
+                // @@AMP_PMARK@@, so do not draw a second marker on top of it.
+                const std::string localAccountName = Settings::Manager::getString("name", "Login");
+                if (!owner.empty() && owner == localAccountName)
+                    return true;
+
+                marker.mNote = "@AMP_GMARK@|" + kind + "|" + colour + "|" + text;
+                marker.mCell.mPaged = paged;
+                marker.mCell.mWorldspace = paged ? ESM::CellId::sDefaultWorldspace : cell;
+
+                mGroupMapMarkers[id] = marker;
+                gui->mPlayerMarkers.addMarker(marker);
+                return true;
+            }
             return true;
         }
 

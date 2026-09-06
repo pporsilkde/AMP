@@ -7,6 +7,7 @@
 #include <MyGUI_ComboBox.h>
 #include <MyGUI_EditBox.h>
 #include <MyGUI_LanguageManager.h>
+#include <MyGUI_TextBox.h>
 
 #include <components/settings/settings.hpp>
 
@@ -39,6 +40,7 @@ namespace mwmp
     {
         getWidget(mLogin, "EditLogin");
         getWidget(mPassword, "EditPassword");
+        getWidget(mNameCounter, "NameCounter");
         getWidget(mLanguage, "LanguageSelect");
         getWidget(mConnect, "ButtonConnect");
         getWidget(mExit, "ButtonExit");
@@ -51,6 +53,7 @@ namespace mwmp
             mPasswordConfirm->setEditPassword(true);
 
         mLogin->eventEditSelectAccept += MyGUI::newDelegate(this, &GUILogin::onLoginAccepted);
+        mLogin->eventEditTextChange += MyGUI::newDelegate(this, &GUILogin::onLoginEdited);
         mPassword->eventEditSelectAccept += MyGUI::newDelegate(this, &GUILogin::onPasswordAccepted);
         if (mPasswordConfirm)
             mPasswordConfirm->eventEditSelectAccept += MyGUI::newDelegate(this, &GUILogin::onPasswordConfirmAccepted);
@@ -68,6 +71,7 @@ namespace mwmp
         setLanguage(Settings::Manager::getString("interface language", "General"));
 
         refreshStrings();
+        updateNameCounter();
         center();
         setVisible(false);
     }
@@ -90,6 +94,7 @@ namespace mwmp
     void GUILogin::setLogin(const std::string& value)
     {
         mLogin->setCaption(value);
+        updateNameCounter();
     }
 
     void GUILogin::setPassword(const std::string& value)
@@ -110,6 +115,17 @@ namespace mwmp
         mLoginEditable = editable;
         mLogin->setEditReadOnly(!editable);
         mLogin->setNeedKeyFocus(editable);
+
+        // Y049: the character/account name entered during first-time character
+        // creation is capped at 30 Unicode characters. Existing account names
+        // are left untouched when the field is read-only, preserving login
+        // compatibility with older profiles.
+        mLogin->setMaxTextLength(editable ? 30 : 256);
+        if (editable && mLogin->getCaption().length() > 30)
+            mLogin->setCaption(mLogin->getCaption().substr(0, 30));
+        if (mNameCounter)
+            mNameCounter->setVisible(editable);
+        updateNameCounter();
     }
 
     void GUILogin::setRetryMode(bool retry)
@@ -189,6 +205,11 @@ namespace mwmp
         MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mPassword);
     }
 
+    void GUILogin::onLoginEdited(MyGUI::EditBox*)
+    {
+        updateNameCounter();
+    }
+
     void GUILogin::onPasswordAccepted(MyGUI::Edit*)
     {
         if (mMode == RegisterMode && mPasswordConfirm)
@@ -230,6 +251,17 @@ namespace mwmp
         setText("LabelLanguage", arenaText("login.language"));
         mConnect->setCaption(arenaText("login.login"));
         mExit->setCaption(arenaText("login.exit"));
+    }
+
+    void GUILogin::updateNameCounter()
+    {
+        if (!mNameCounter || !mLogin)
+            return;
+
+        const std::size_t count = mLogin->getCaption().length();
+        const std::size_t limit = mLoginEditable ? 30u : std::max<std::size_t>(count, 30u);
+        mNameCounter->setCaption(std::to_string(count) + "/" + std::to_string(limit));
+        mNameCounter->setTextAlign(MyGUI::Align::Right | MyGUI::Align::VCenter);
     }
 
     void GUILogin::applyLanguage(const std::string& language, bool persist)

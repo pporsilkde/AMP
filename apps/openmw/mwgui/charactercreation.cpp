@@ -289,9 +289,9 @@ namespace MWGui
                     mPlayerName = mNameDialog->getLogin();
                     const std::string loginPassword = mNameDialog->getPassword();
                     const std::string loginLanguage = mNameDialog->getLanguage();
-                    if (mPlayerName.length() > 31)
-                        mPlayerName = mPlayerName.substr(0, 31);
-
+                    // Y049: GUILogin caps this edit box at 30 Unicode characters.
+                    // Do not truncate the UTF-8 std::string by bytes here: doing so
+                    // could split Cyrillic or another multibyte character.
                     Settings::Manager::setString("name", "Login", mPlayerName);
                     Settings::Manager::setString("password", "Login", loginPassword);
                     Settings::Manager::setString("interface language", "General", loginLanguage);

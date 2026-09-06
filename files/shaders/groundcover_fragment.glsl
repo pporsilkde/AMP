@@ -36,6 +36,7 @@ varying float euclideanDepth;
 varying float linearDepth;
 varying vec3 passWorldPos;
 
+uniform float waterCausticsIntensity;
 uniform float osg_SimulationTime;
 uniform mat4 osg_ViewMatrixInverse;
 
@@ -131,7 +132,7 @@ void main()
         float causticsIntensity = zcaustics(passWorldPos.xy * 0.012, osg_SimulationTime * 0.5) * 1.70;
         float causticsBlend = clamp(waterDepth * 0.018, 0.0, 0.72) / (1.0 + waterDepth / 700.0);
         causticsBlend *= causticsFade;
-        gl_FragData[0].xyz *= mix(1.0, 0.65 + causticsIntensity, causticsBlend);
+        gl_FragData[0].xyz *= mix(1.0, 0.65 + causticsIntensity * waterCausticsIntensity, causticsBlend);
     }
 
     if (cameraUnderwater && !isInterior && waterDepth > 0.0)

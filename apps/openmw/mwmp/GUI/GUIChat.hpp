@@ -7,6 +7,8 @@
 #include <utility>
 #include <vector>
 
+#include <components/esm/custommarkerstate.hpp>
+
 #include "apps/openmw/mwgui/windowbase.hpp"
 
 namespace MyGUI
@@ -286,6 +288,12 @@ namespace mwmp
         ChatWindowState windowState;
         ChatChannel chatChannel;
         ChatStyle chatStyle;
+        // Y049: server-restored personal markers and synthetic group markers.
+        // Personal markers are installed into WindowManager's editable marker
+        // collection; group markers stay in GUIController's transient layer.
+        std::map<std::string, ESM::CustomMarker> mPersonalMapMarkers;
+        std::map<std::string, ESM::CustomMarker> mGroupMapMarkers;
+
         PlayerMenuTab activeTab;
         bool rpMode;
         bool stayOpenAfterSend;
