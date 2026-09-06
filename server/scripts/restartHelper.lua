@@ -101,6 +101,9 @@ local function kickPlayers()
         pcall(function() tes3mp.Kick(pid) end)
     end
 end
+
+function ArenaMPEmbeddedRestartStop()
+    local cfg = settings()
     tes3mp.LogMessage(enumerations.log.WARN,
         "[ArenaMP Core] embedded 12h restart: stopping server for self-relaunch")
     tes3mp.StopServer(cfg.exitCode)
