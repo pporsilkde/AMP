@@ -42,7 +42,9 @@ namespace mwmp
         float getDeathRecoveryDurationSeconds() const { return mDeathRecoveryDuration; }
         float getDeathRecoveryInitialXp() const { return mDeathRecoveryInitialXp; }
         int getRestoreHealthPotionCount(std::string* firstRefId = nullptr) const;
-        bool getRecoverableAllyName(std::string& name) const;
+        int getRequiredDeathRecoveryPotionCount(int level) const;
+        int getSelfDeathRecoveryPotionRequirement() const;
+        bool getRecoverableAllyName(std::string& name, int* level = nullptr) const;
         void requestTouchRecovery(const MWWorld::Ptr& target);
 
         bool processCharGen();

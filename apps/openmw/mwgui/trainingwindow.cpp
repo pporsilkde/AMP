@@ -1,6 +1,12 @@
 #include "trainingwindow.hpp"
 
 #include <MyGUI_Gui.h>
+#include <MyGUI_LanguageManager.h>
+
+#include <algorithm>
+#include <cstdlib>
+#include <map>
+#include <sstream>
 
 /*
     Start of tes3mp addition
@@ -9,6 +15,7 @@
 */
 #include "../mwmp/Main.hpp"
 #include "../mwmp/Networking.hpp"
+#include "../mwmp/LocalPlayer.hpp"
 #include "../mwmp/ObjectList.hpp"
 /*
     End of tes3mp addition
@@ -46,6 +53,22 @@ bool sortSkills (const std::pair<int, int>& left, const std::pair<int, int>& rig
 
     return left.first < right.first;
 }
+
+struct ServerTrainingState
+{
+    int count = 0;
+    int limit = 3;
+    unsigned int revision = 0;
+    bool ready = false;
+};
+
+std::map<std::string, ServerTrainingState> sServerTrainingStates;
+unsigned int sServerTrainingRevision = 0;
+
+std::string arenaTrainingText(const std::string& key)
+{
+    return MyGUI::LanguageManager::getInstance().replaceTags("#{arenamp=" + key + "}");
+}
 }
 
 namespace MWGui
@@ -53,11 +76,13 @@ namespace MWGui
 
     TrainingWindow::TrainingWindow()
         : WindowBase("openmw_trainingwindow.layout")
+        , mTrainingStateRevision(0)
         , mTimeAdvancer(0.05f)
     {
         getWidget(mTrainingOptions, "TrainingOptions");
         getWidget(mCancelButton, "CancelButton");
         getWidget(mPlayerGold, "PlayerGold");
+        getWidget(mTrainingCounter, "TrainingCounter");
 
         mCancelButton->eventMouseButtonClick += MyGUI::newDelegate(this, &TrainingWindow::onCancelButtonClicked);
 
@@ -78,9 +103,75 @@ namespace MWGui
         center();
     }
 
+    void TrainingWindow::setServerTrainingState(const std::string& trainerKey, int count, int limit)
+    {
+        if (trainerKey.empty())
+            return;
+        ServerTrainingState& state = sServerTrainingStates[trainerKey];
+        state.count = std::max(0, count);
+        state.limit = std::max(1, limit);
+        state.ready = true;
+        state.revision = ++sServerTrainingRevision;
+    }
+
+    std::string TrainingWindow::makeTrainerKey(const MWWorld::Ptr& actor) const
+    {
+        if (actor.isEmpty())
+            return std::string();
+        std::ostringstream stream;
+        stream << actor.getCellRef().getRefId() << '|'
+               << actor.getCellRef().getRefNum().mIndex << '|'
+               << actor.getCellRef().getMpNum();
+        return stream.str();
+    }
+
+    void TrainingWindow::sendTrainingControl(const std::string& action)
+    {
+        if (mTrainerKey.empty() || !mwmp::Main::isInitialized())
+            return;
+        mwmp::LocalPlayer* localPlayer = mwmp::Main::get().getLocalPlayer();
+        mwmp::Networking* networking = mwmp::Main::get().getNetworking();
+        if (!localPlayer || !networking)
+            return;
+        localPlayer->chatMessage = "@@AMP_TRAIN@@" + action + "\t" + mTrainerKey;
+        networking->getPlayerPacket(ID_CHAT_MESSAGE)->setPlayer(localPlayer);
+        networking->getPlayerPacket(ID_CHAT_MESSAGE)->Send();
+    }
+
+    void TrainingWindow::refreshTrainingCounter()
+    {
+        if (!mTrainingCounter)
+            return;
+        auto it = sServerTrainingStates.find(mTrainerKey);
+        const bool ready = it != sServerTrainingStates.end() && it->second.ready;
+        if (!ready)
+        {
+            mTrainingCounter->setCaption(arenaTrainingText("training.limit.counter") + ": "
+                + arenaTrainingText("training.limit.loading") + " / 3");
+            mTrainingCounter->setTextColour(MyGUI::Colour::White);
+            return;
+        }
+        const ServerTrainingState& state = it->second;
+        mTrainingCounter->setCaption(arenaTrainingText("training.limit.counter") + ": "
+            + MyGUI::utility::toString(state.count) + " / " + MyGUI::utility::toString(state.limit));
+        mTrainingCounter->setTextColour(state.count >= state.limit
+            ? MyGUI::Colour(1.f, 0.25f, 0.25f) : MyGUI::Colour::White);
+        mTrainingStateRevision = state.revision;
+    }
+
     void TrainingWindow::setPtr (const MWWorld::Ptr& actor)
     {
         mPtr = actor;
+        mTrainerKey = makeTrainerKey(actor);
+        mTrainingStateRevision = 0;
+        if (!mTrainerKey.empty())
+        {
+            ServerTrainingState& pending = sServerTrainingStates[mTrainerKey];
+            pending.ready = false;
+            pending.revision = ++sServerTrainingRevision;
+        }
+        refreshTrainingCounter();
+        sendTrainingControl("QUERY");
 
         MWWorld::Ptr player = MWMechanics::getPlayer();
         int playerGold = player.getClass().getContainerStore(player).count(MWWorld::ContainerStore::sGoldId);
@@ -195,6 +286,21 @@ namespace MWGui
 
     void TrainingWindow::onTrainingSelected (MyGUI::Widget *sender)
     {
+        auto trainingState = sServerTrainingStates.find(mTrainerKey);
+        if (trainingState == sServerTrainingStates.end() || !trainingState->second.ready)
+        {
+            MWBase::Environment::get().getWindowManager()->messageBox(
+                arenaTrainingText("training.limit.loading"));
+            sendTrainingControl("QUERY");
+            return;
+        }
+        if (trainingState->second.count >= trainingState->second.limit)
+        {
+            MWBase::Environment::get().getWindowManager()->messageBox(
+                arenaTrainingText("training.limit.reached"));
+            return;
+        }
+
         int skillId = *sender->getUserData<int>();
 
         MWWorld::Ptr player = MWBase::Environment::get().getWorld ()->getPlayerPtr();
@@ -308,6 +414,13 @@ namespace MWGui
             End of tes3mp change (major)
         */
 
+        // Y054: one successful training consumes one runtime slot for this exact
+        // NPC. Update locally first to close the reopen-before-reply race, then
+        // let the server return its authoritative counter.
+        setServerTrainingState(mTrainerKey, trainingState->second.count + 1, trainingState->second.limit);
+        refreshTrainingCounter();
+        sendTrainingControl("USE");
+
         // advance time
         MWBase::Environment::get().getMechanicsManager()->rest(2, false);
 
@@ -354,6 +467,9 @@ namespace MWGui
     void TrainingWindow::onFrame(float dt)
     {
         checkReferenceAvailable();
+        auto state = sServerTrainingStates.find(mTrainerKey);
+        if (state != sServerTrainingStates.end() && state->second.revision != mTrainingStateRevision)
+            refreshTrainingCounter();
         mTimeAdvancer.onFrame(dt);
     }
 

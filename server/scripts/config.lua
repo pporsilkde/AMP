@@ -1074,6 +1074,12 @@ config.ignoreModifierWithMaxSkill = false
 -- The refIds of items that players are not allowed to equip for balancing reasons
 config.bannedEquipmentItems = { "helseth's ring" }
 
+-- Y054 training limiter. Counts are intentionally runtime-only: reconnecting
+-- does not reset them, while a real server restart clears them automatically.
+config.trainingLimit = {
+    ["per npc per restart"] = 3
+}
+
 -- Whether players should respawn when dying
 config.playersRespawn = true
 
@@ -1090,6 +1096,12 @@ config.deathRecovery = {
     ["potion revive health fraction"] = 0.25,
     ["touch revive health fraction"] = 0.10,
     ["ally revive distance"] = 256,
+
+    -- Y054: Restore Health potion cost scales with the incapacitated player's
+    -- permanent level. At defaults: level 1-4 = 1 potion, 5-9 = 2, 10-14 = 3, etc.
+    ["base potions required"] = 1,
+    ["levels per extra potion"] = 5,
+    ["extra potions per step"] = 1,
 
     -- Y040: the revive request names an inventory item, so the server checks that
     -- the item really restores health before spending it. Custom potions are

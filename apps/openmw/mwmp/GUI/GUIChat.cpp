@@ -21,6 +21,7 @@
 #include "apps/openmw/mwbase/environment.hpp"
 #include "apps/openmw/mwbase/world.hpp"
 #include "apps/openmw/mwgui/windowmanagerimp.hpp"
+#include "apps/openmw/mwgui/trainingwindow.hpp"
 #include "apps/openmw/mwinput/inputmanagerimp.hpp"
 #include "apps/openmw/mwmechanics/xpserverbridge.hpp"
 #include <components/openmw-mp/TimedLog.hpp>
@@ -764,6 +765,7 @@ namespace mwmp
         static const std::string personalMapPrefix = "@@AMP_PMARK@@";
         static const std::string groupMapPrefix = "@@AMP_GMARK@@";
         static const std::string profilePrefix = "@@AMP_PROFILE@@";
+        static const std::string trainingPrefix = "@@AMP_TRAIN@@";
 
         if (msg.compare(0, groupPrefix.size(), groupPrefix) == 0)
         {
@@ -795,6 +797,16 @@ namespace mwmp
             return true;
         }
 
+
+
+        if (msg.compare(0, trainingPrefix.size(), trainingPrefix) == 0)
+        {
+            std::vector<std::string> fields = splitControlFields(msg.substr(trainingPrefix.size()), '\t');
+            if (fields.size() >= 4 && fields[0] == "STATE")
+                MWGui::TrainingWindow::setServerTrainingState(fields[1],
+                    std::atoi(fields[2].c_str()), std::atoi(fields[3].c_str()));
+            return true;
+        }
 
         if (msg.compare(0, profilePrefix.size(), profilePrefix) == 0)
         {

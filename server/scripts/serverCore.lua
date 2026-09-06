@@ -58,6 +58,8 @@ groupMapHelper = require("groupMapHelper")
 restartHelper = require("restartHelper")
 -- Y052: server-authoritative empty-bottle requirement for potion brewing.
 alchemyBottleHelper = require("alchemyBottleHelper")
+-- Y054: per-player/per-NPC training cap kept in server runtime memory.
+trainingLimitHelper = require("trainingLimitHelper")
 -- X050a: built-in ArenaMP owner/console helper moved out of scripts/custom.
 helperAreana = require("helperAreana")
 guiHelper = require("guiHelper")

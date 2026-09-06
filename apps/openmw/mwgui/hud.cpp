@@ -991,6 +991,7 @@ namespace MWGui
                 }
 
                 const int potions = local->getRestoreHealthPotionCount();
+                const int requiredPotions = local->getSelfDeathRecoveryPotionRequirement();
                 // MyGUI::utility::toString concatenates every argument, so passing a
                 // precision to it printed a stray digit after the seconds value.
                 std::ostringstream secondsStream;
@@ -1003,41 +1004,49 @@ namespace MWGui
                 mDeathRecoveryXpText->setCaption(arenaText("death.recovery.xp") + ": "
                     + MyGUI::utility::toString(static_cast<int>(std::lround(xp))) + "  |  "
                     + secondsStream.str() + " s");
-                if (potions > 0)
+                if (potions >= requiredPotions)
                 {
                     mDeathRecoveryPrompt->setCaption(arenaText("death.recovery.self_prompt") + "\n"
                         + arenaText("death.recovery.self_status") + "  |  "
-                        + arenaText("death.recovery.potions") + ": " + MyGUI::utility::toString(potions));
+                        + arenaText("death.recovery.potions") + ": " + MyGUI::utility::toString(potions)
+                        + " / " + MyGUI::utility::toString(requiredPotions));
                     mDeathRecoveryAction->setCaption(arenaText("death.recovery.action"));
                     mDeathRecoveryAction->setVisible(true);
                 }
                 else
                 {
-                    mDeathRecoveryPrompt->setCaption(arenaText("death.recovery.self_no_potion"));
+                    mDeathRecoveryPrompt->setCaption(arenaText("death.recovery.self_no_potion") + "  |  "
+                        + arenaText("death.recovery.potions") + ": " + MyGUI::utility::toString(potions)
+                        + " / " + MyGUI::utility::toString(requiredPotions));
                     mDeathRecoveryAction->setVisible(false);
                 }
             }
             else if (local)
             {
                 std::string allyName;
-                if (local->getRecoverableAllyName(allyName))
+                int allyLevel = 1;
+                if (local->getRecoverableAllyName(allyName, &allyLevel))
                 {
                     const int potions = local->getRestoreHealthPotionCount();
+                    const int requiredPotions = local->getRequiredDeathRecoveryPotionCount(allyLevel);
                     mDeathRecoveryPanel->setVisible(true);
                     mDeathRecoveryXpBar->setVisible(false);
                     mDeathRecoveryXpText->setVisible(false);
                     mDeathRecoveryTitle->setCaption(arenaText("death.recovery.ally_title") + ": " + allyName);
-                    if (potions > 0)
+                    if (potions >= requiredPotions)
                     {
                         mDeathRecoveryPrompt->setCaption(arenaText("death.recovery.ally_prompt") + "\n"
                             + arenaText("death.recovery.ally_status") + "  |  "
-                            + arenaText("death.recovery.potions") + ": " + MyGUI::utility::toString(potions));
+                            + arenaText("death.recovery.potions") + ": " + MyGUI::utility::toString(potions)
+                            + " / " + MyGUI::utility::toString(requiredPotions));
                         mDeathRecoveryAction->setCaption(arenaText("death.recovery.action"));
                         mDeathRecoveryAction->setVisible(true);
                     }
                     else
                     {
-                        mDeathRecoveryPrompt->setCaption(arenaText("death.recovery.touch_hint"));
+                        mDeathRecoveryPrompt->setCaption(arenaText("death.recovery.touch_hint") + "  |  "
+                            + arenaText("death.recovery.potions") + ": " + MyGUI::utility::toString(potions)
+                            + " / " + MyGUI::utility::toString(requiredPotions));
                         mDeathRecoveryAction->setVisible(false);
                     }
                 }

@@ -209,16 +209,61 @@ local function isRestoreHealthPotion(refId)
     return recordRestoresHealth(refId)
 end
 
-local function takeOne(player, refId)
-    if not isRestoreHealthPotion(refId) then
-        tes3mp.LogMessage(enumerations.log.WARN, "deathRecovery: refused unrecognised revive item " ..
-            tostring(refId) .. " from " .. tostring(player.accountName))
-        return false
+local function requiredPotionCount(target)
+    if target == nil then return math.max(1, math.floor(cfgNumber("base potions required", 1))) end
+    local base = math.max(1, math.floor(cfgNumber("base potions required", 1)))
+    local levelsPerStep = math.max(1, math.floor(cfgNumber("levels per extra potion", 5)))
+    local extraPerStep = math.max(0, math.floor(cfgNumber("extra potions per step", 1)))
+    local level = math.max(1, math.floor(tonumber(target.data.stats.level) or 1))
+    return base + math.floor(level / levelsPerStep) * extraPerStep
+end
+
+local function takePotions(player, preferredRefId, required)
+    required = math.max(1, math.floor(tonumber(required) or 1))
+    if player == nil or type(player.data.inventory) ~= "table" then return false end
+
+    -- Build an ordered list so the refId selected by the client is consumed first,
+    -- then use any other valid Restore Health potions. This means mixed potion
+    -- stacks count correctly toward high-level revives.
+    local candidates = {}
+    local seen = {}
+    local function addCandidate(refId)
+        if type(refId) ~= "string" or refId == "" or seen[refId] then return end
+        if not isRestoreHealthPotion(refId) then return end
+        local count = inventoryCount(player, refId)
+        if count <= 0 then return end
+        seen[refId] = true
+        table.insert(candidates, { refId = refId, count = count })
     end
-    if inventoryCount(player, refId) < 1 then return false end
-    inventoryHelper.removeClosestItem(player.data.inventory, refId, 1)
+
+    if type(preferredRefId) == "string" and preferredRefId ~= "" then
+        if not isRestoreHealthPotion(preferredRefId) then
+            tes3mp.LogMessage(enumerations.log.WARN, "deathRecovery: refused unrecognised revive item " ..
+                tostring(preferredRefId) .. " from " .. tostring(player.accountName))
+            return false
+        end
+        addCandidate(preferredRefId)
+    end
+    for _, item in pairs(player.data.inventory) do
+        if type(item) == "table" then addCandidate(item.refId) end
+    end
+
+    local available = 0
+    for _, entry in ipairs(candidates) do available = available + entry.count end
+    if available < required then return false end
+
+    local remaining = required
+    local removals = {}
+    for _, entry in ipairs(candidates) do
+        if remaining <= 0 then break end
+        local amount = math.min(remaining, entry.count)
+        inventoryHelper.removeClosestItem(player.data.inventory, entry.refId, amount)
+        table.insert(removals, { refId = entry.refId, count = amount })
+        remaining = remaining - amount
+    end
+
     tableHelper.cleanNils(player.data.inventory)
-    player:LoadItemChanges({ { refId = refId, count = 1 } }, enumerations.inventory.REMOVE)
+    player:LoadItemChanges(removals, enumerations.inventory.REMOVE)
     player:Save()
     return true
 end
@@ -322,7 +367,8 @@ local function controlValidator(eventStatus, pid, message)
 
     if action == "SELF_POTION" then
         local refId = fields[2] or ""
-        if player.deathRecoveryActive == true and refId ~= "" and takeOne(player, refId) then
+        if player.deathRecoveryActive == true and refId ~= ""
+            and takePotions(player, refId, requiredPotionCount(player)) then
             recoverTarget(player, pid, "potion")
         end
 
@@ -335,7 +381,7 @@ local function controlValidator(eventStatus, pid, message)
             and nearby(pid, targetPid) then
             if action == "ALLY_POTION" then
                 local refId = fields[3] or ""
-                if refId ~= "" and takeOne(player, refId) then
+                if refId ~= "" and takePotions(player, refId, requiredPotionCount(target)) then
                     recoverTarget(target, pid, "potion")
                 end
             else

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <MyGUI type="Layout">
-    <Widget type="Window" skin="MW_Dialog" layer="Windows" position="0 0 319 200" align="Center" name="_Main">
+    <Widget type="Window" skin="MW_Dialog" layer="Windows" position="0 0 319 226" align="Center" name="_Main">
 
         <Widget type="TextBox" skin="NormalText" position="0 5 319 24" name="Select" align="Right Top">
             <Property key="TextAlign" value="Center"/>
@@ -13,14 +13,18 @@
         </Widget>
 
 
-        <Widget type="Widget" skin="MW_Box" position="6 54 299 100" align="Left Top" name="TrainingOptions">
+        <Widget type="TextBox" skin="SandText" position="8 52 295 20" name="TrainingCounter" align="Left Top">
+            <Property key="TextAlign" value="Center VCenter"/>
+        </Widget>
+
+        <Widget type="Widget" skin="MW_Box" position="6 76 299 100" align="Left Top" name="TrainingOptions">
         </Widget>
 
 
-        <Widget type="TextBox" skin="SandText" position="8 161 200 24" name="PlayerGold" align="Right Top">
+        <Widget type="TextBox" skin="SandText" position="8 187 200 24" name="PlayerGold" align="Right Top">
             <Property key="TextAlign" value="Left"/>
         </Widget>
-        <Widget type="AutoSizedButton" skin="MW_Button" position="244 161 60 24" name="CancelButton" align="Right Top">
+        <Widget type="AutoSizedButton" skin="MW_Button" position="244 187 60 24" name="CancelButton" align="Right Top">
             <Property key="ExpandDirection" value="Left"/>
             <Property key="Caption" value="#{sCancel}"/>
         </Widget>

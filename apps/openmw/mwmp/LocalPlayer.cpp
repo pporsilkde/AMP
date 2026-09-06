@@ -328,7 +328,24 @@ int LocalPlayer::getRestoreHealthPotionCount(std::string* firstRefId) const
     return total;
 }
 
-bool LocalPlayer::getRecoverableAllyName(std::string& name) const
+int LocalPlayer::getRequiredDeathRecoveryPotionCount(int level) const
+{
+    // Keep the client presentation in lock-step with the default server policy.
+    // The server remains authoritative and validates the target's saved level.
+    const int safeLevel = std::max(1, level);
+    return 1 + safeLevel / 5;
+}
+
+int LocalPlayer::getSelfDeathRecoveryPotionRequirement() const
+{
+    const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+    if (player.isEmpty())
+        return 1;
+    return getRequiredDeathRecoveryPotionCount(
+        player.getClass().getCreatureStats(player).getLevel());
+}
+
+bool LocalPlayer::getRecoverableAllyName(std::string& name, int* level) const
 {
     name.clear();
     MWWorld::Ptr faced = MWBase::Environment::get().getWorld()->getFacedObject();
@@ -346,6 +363,8 @@ bool LocalPlayer::getRecoverableAllyName(std::string& name) const
     if (!faced.getClass().getCreatureStats(faced).isDead())
         return false;
     name = target->npc.mName;
+    if (level)
+        *level = std::max(1, faced.getClass().getCreatureStats(faced).getLevel());
     return !name.empty();
 }
 
@@ -400,19 +419,25 @@ void LocalPlayer::updateDeathRecovery(float dt)
         return;
 
     std::string potionRefId;
-    if (getRestoreHealthPotionCount(&potionRefId) <= 0 || potionRefId.empty())
+    const int potionCount = getRestoreHealthPotionCount(&potionRefId);
+    if (potionRefId.empty())
         return;
 
     if (mDeathRecoveryActive)
     {
+        if (potionCount < getSelfDeathRecoveryPotionRequirement())
+            return;
         sendDeathRecoveryControl("SELF_POTION\t" + potionRefId);
         mDeathRecoveryRequestCooldown = 0.75f;
         return;
     }
 
     std::string allyName;
-    if (getRecoverableAllyName(allyName))
+    int allyLevel = 1;
+    if (getRecoverableAllyName(allyName, &allyLevel))
     {
+        if (potionCount < getRequiredDeathRecoveryPotionCount(allyLevel))
+            return;
         sendDeathRecoveryControl("ALLY_POTION\t" + allyName + "\t" + potionRefId);
         mDeathRecoveryRequestCooldown = 0.75f;
     }
