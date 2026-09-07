@@ -1,3 +1,5 @@
+ArenaMP cumulative patch: Y057
+Anti-abuse: no skill/SP changes while incapacitated
 ArenaMP bundled CoreScripts v19
 Source snapshot: ArenaMP Y032 (Y029 + Y030 + Y031 + MMO persistence fix)
 Network protocol: ArenaMP 806 (matching client/server build required)

@@ -1,15 +1,25 @@
+## Y057 — Incapacitated Skill-Point Anti-Abuse
+
+- Server rejects every `PlayerSkill` packet while `deathRecoveryActive` is true and immediately restores authoritative skills.
+- `PlayerLevel` cannot alter level, level progress, Skill Points, attribute XP progress or reward keys while incapacitated; only death-recovery XP decay is accepted.
+- Exploit remains blocked even if inventory/progression UI is opened or the client is modified.
+
 ## Y056 — engine-owned dynamic stats
 
+Dynamic stats were stored as results, which is why they could not be checked and, once damaged, never recovered. They are now stored as the things they are computed from.
+
 ### Fixed
-- Base health, magicka and fatigue no longer reset or collapse when logging in. The stored profile is no longer treated as authoritative for stats the engine derives.
-- Maximum fatigue is re-derived as Strength + Willpower + Agility + Endurance every time `calculateDynamicStats` runs, not only as a side effect of an attribute changing value. The snapshot `LoadStatsDynamic` writes over it at login used to stick forever.
+- Base health, magicka and fatigue no longer reset or collapse when logging in. The stored profile is no longer authoritative for stats the engine derives.
+- Maximum fatigue is re-derived as Strength + Willpower + Agility + Endurance whenever `calculateDynamicStats` runs for the player, not only as a side effect of an attribute changing value. The snapshot `LoadStatsDynamic` writes over it at login used to stick forever. Hand-authored NPCs are untouched and keep the maximum fatigue their record gives them.
 - Maximum magicka no longer divides by zero when the base is 0. The resulting NaN was written into the stat, sent to the server and stored, after which the character's magicka never recovered.
-- Base health is validated against a floor rebuilt from the character's own history: what character creation gave for its race and class, plus one level-up's worth of the starting racial Endurance for every level since. Nothing legitimate sits below that. A value that does is rebuilt retrospectively, walking the same levels with Endurance rising in even steps from the starting racial figure to the current one, with the rebuilt accrual scaled by 1.4 to compensate for Endurance usually having been raised earlier than evenly. The character creation base is never scaled.
-- The server re-derives fatigue in `BasePlayer:RepairDerivedStats()` before sending it, and `SaveStatsDynamic` no longer stores a base health lower than the one already on the account. Werewolf form keeps its own base health and is exempt.
+
+### Added
+- `stats.healthLedger` in the player profile records what maximum health is built from: the level it starts at, the base health at that level, and the Endurance at every level-up since. Health is then `originHealth + fLevelUpHealthEndMult * sum(gains)` — addition only, every term stored, so it can be rebuilt exactly however many times it is lost. The ledger is reconciled against the recorded level, so a missed or duplicated level packet corrects itself.
+- New characters seed the ledger at level 1 with their character creation health, a true origin. Characters that predate it seed once from the value the client rebuilds on first login, using the race and class records the server cannot read; everything after that point is exact.
+- Client-side rebuild for that one-time seed: floor is `chargen + k*L*E0`, below which nothing legitimate can sit, and the seed walks the same levels with Endurance rising in even steps, scaled by 1.4 to compensate for Endurance usually having been raised earlier than evenly. Werewolf form is exempt and keeps its own base health.
 
 ### Multiplayer / compatibility
-- No new packet IDs or save fields. Protocol remains **806**.
-- Damaged profiles are repaired on the next login and the corrected values are published back to the server. `tools/y056_audit_stats.py` can audit them offline.
+- No new packet IDs. Protocol remains **806**. One new optional profile field, `stats.healthLedger`; profiles without it are seeded on first login.
 
 ## Y043 — archetype presentation, localisation and recovery HUD
 

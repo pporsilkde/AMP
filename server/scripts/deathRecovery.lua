@@ -403,17 +403,52 @@ local function levelValidator(eventStatus, pid, playerPacket)
         return nil
     end
 
-    -- While incapacitated, the server owns the XP ceiling. A stale or modified
-    -- client may submit a PlayerLevel packet between decay ticks, but it can
-    -- never restore XP that has already faded. Other level/SP fields retain the
-    -- normal ArenaMP handling.
+    -- Y057 anti-abuse: while incapacitated the server owns the complete
+    -- progression snapshot. The client may only report a lower XP value caused
+    -- by the death-recovery decay. Level, level progress, Skill Points,
+    -- attribute XP progress and reward keys are restored from persisted data.
+    -- This prevents repeatedly spending/recreating Skill Points while lying
+    -- unconscious, including from modified clients.
+    local stored = player.data and player.data.stats or {}
     local ceiling = exactRemainingXp(player, now())
+
+    playerPacket.stats.level = stored.level or playerPacket.stats.level
+    playerPacket.stats.levelProgress = stored.levelProgress or 0
+    playerPacket.stats.skillPoints = stored.skillPoints or 0
+    playerPacket.stats.xpAttributeProgress = stored.xpAttributeProgress or {0, 0, 0, 0, 0, 0, 0, 0}
+    playerPacket.stats.xpRewardKeys = stored.xpRewardKeys or {}
     playerPacket.stats.experience = math.min(
         math.max(0, tonumber(playerPacket.stats.experience) or 0), ceiling)
+
     return nil
 end
 
+local function skillValidator(eventStatus, pid, playerPacket)
+    local player = Players and Players[pid] or nil
+    if player == nil or player.deathRecoveryActive ~= true then
+        return nil
+    end
+
+    -- Y057 anti-abuse: no base skill change is legal while unconscious. Reject
+    -- the packet before SaveSkills() and immediately restore the authoritative
+    -- skills + Skill Points on the client. This also closes the exploit for
+    -- clients that manage to keep/open the inventory or progression UI.
+    tes3mp.LogAppend(enumerations.log.WARN,
+        "[AntiAbuse] Blocked PlayerSkill while incapacitated for " ..
+        logicHandler.GetChatName(pid))
+
+    if type(player.LoadSkills) == "function" then
+        player:LoadSkills()
+    end
+    if type(player.LoadLevel) == "function" then
+        player:LoadLevel()
+    end
+
+    return customEventHooks.makeEventStatus(false, false)
+end
+
 customEventHooks.registerValidator("OnPlayerLevel", levelValidator)
+customEventHooks.registerValidator("OnPlayerSkill", skillValidator)
 customEventHooks.registerValidator("OnPlayerSendMessage", controlValidator)
 customEventHooks.registerHandler("OnPlayerDisconnect", function(_, pid)
     local player = Players and Players[pid] or nil
