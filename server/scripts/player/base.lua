@@ -903,7 +903,79 @@ function BasePlayer:SaveClass(playerPacket)
     end
 end
 
+-- Y056: base fatigue is Strength + Willpower + Agility + Endurance and base health
+-- starts at floor(0.5 * (Strength + Endurance)). Both are derivable from the stored
+-- attributes, so a stored value that contradicts them is corruption rather than
+-- progression and must not be handed back to the client.
+function BasePlayer:GetAttributeBase(attributeName)
+
+    if self.data.attributes == nil then return nil end
+
+    local value = self.data.attributes[attributeName]
+
+    if type(value) == "table" then
+        return tonumber(value.base)
+    elseif type(value) == "number" then
+        return tonumber(value)
+    end
+
+    return nil
+end
+
+function BasePlayer:RepairDerivedStats()
+
+    if self.data.stats == nil then return end
+
+    local strength = self:GetAttributeBase("Strength")
+    local willpower = self:GetAttributeBase("Willpower")
+    local agility = self:GetAttributeBase("Agility")
+    local endurance = self:GetAttributeBase("Endurance")
+
+    if strength == nil or willpower == nil or agility == nil or endurance == nil then
+        return
+    end
+
+    local derivedFatigue = strength + willpower + agility + endurance
+
+    if self.data.stats.fatigueBase ~= derivedFatigue then
+        tes3mp.LogMessage(enumerations.log.WARN, "Repairing base fatigue for " .. self.accountName ..
+            " from " .. tostring(self.data.stats.fatigueBase) .. " to " .. tostring(derivedFatigue))
+
+        local ratio = 1
+        if type(self.data.stats.fatigueBase) == "number" and self.data.stats.fatigueBase > 0 then
+            ratio = math.min(1, math.max(0, self.data.stats.fatigueCurrent / self.data.stats.fatigueBase))
+        end
+
+        self.data.stats.fatigueBase = derivedFatigue
+        self.data.stats.fatigueCurrent = derivedFatigue * ratio
+    end
+
+    local minimumHealth = math.floor(0.5 * (strength + endurance))
+    local level = self.data.stats.level or 1
+
+    if type(self.data.stats.healthBase) ~= "number" or self.data.stats.healthBase < minimumHealth then
+
+        local ratio = 1
+        if type(self.data.stats.healthBase) == "number" and self.data.stats.healthBase > 0 then
+            ratio = math.min(1, math.max(0, self.data.stats.healthCurrent / self.data.stats.healthBase))
+        end
+
+        -- The per-level history is gone, so rebuild it from the Endurance on record;
+        -- that is the same 10% a level-up would have granted.
+        local repairedHealth = minimumHealth + math.max(0, level - 1) * 0.1 * endurance
+
+        tes3mp.LogMessage(enumerations.log.WARN, "Repairing base health for " .. self.accountName ..
+            " from " .. tostring(self.data.stats.healthBase) .. " to " .. tostring(repairedHealth))
+
+        self.data.stats.healthBase = repairedHealth
+        self.data.stats.healthCurrent = math.max(1, repairedHealth * ratio)
+    end
+end
+
 function BasePlayer:LoadStatsDynamic()
+
+    -- Y056: never send a snapshot the stored attributes already contradict
+    self:RepairDerivedStats()
 
     local healthBase
 
@@ -926,6 +998,19 @@ end
 function BasePlayer:SaveStatsDynamic(playerPacket)
 
     local healthBase = playerPacket.stats.healthBase
+
+    -- Y056: base health only ever grows, so a client reporting less than the account
+    -- already has is reporting a placeholder it built before its profile arrived.
+    -- Keep the stored figure and let the rest of the packet through.
+    if not tes3mp.IsWerewolf(self.pid) and type(self.data.stats.healthBase) == "number" and
+        type(healthBase) == "number" and healthBase < self.data.stats.healthBase then
+
+        tes3mp.LogMessage(enumerations.log.WARN, "Ignoring base health regression for " ..
+            self.accountName .. " (" .. tostring(self.data.stats.healthBase) .. " -> " ..
+            tostring(healthBase) .. ")")
+
+        healthBase = self.data.stats.healthBase
+    end
 
     -- Sometimes, the player's base health gets set to 1 serverside;
     -- use this temporary fix until we figure out why

@@ -175,16 +175,16 @@ namespace MWMechanics
                      index == ESM::Attribute::Agility ||
                      index == ESM::Attribute::Endurance)
             {
-                float strength     = getAttribute(ESM::Attribute::Strength).getModified();
-                float willpower    = getAttribute(ESM::Attribute::Willpower).getModified();
-                float agility      = getAttribute(ESM::Attribute::Agility).getModified();
-                float endurance    = getAttribute(ESM::Attribute::Endurance).getModified();
-                DynamicStat<float> fatigue = getFatigue();
-                float diff = (strength+willpower+agility+endurance) - fatigue.getBase();
-                float currentToBaseRatio = fatigue.getBase() > 0 ? (fatigue.getCurrent() / fatigue.getBase()) : 0;
-                fatigue.setModified(fatigue.getModified() + diff, 0);
-                fatigue.setCurrent(fatigue.getBase() * currentToBaseRatio);
-                setFatigue(fatigue);
+                /*
+                    Start of AMP change (Y056)
+
+                    Body moved into recalcFatigueBase() so the same derivation can be
+                    forced from outside, after a server profile has overwritten it.
+                */
+                recalcFatigueBase();
+                /*
+                    End of AMP change (Y056)
+                */
             }
         }
     }
@@ -450,6 +450,35 @@ namespace MWMechanics
     {
         mRecalcMagicka = val;
     }
+
+    /*
+        Start of AMP addition (Y056)
+
+        Maximum fatigue is Strength + Willpower + Agility + Endurance and nothing else.
+        Keeping it in one place means a stale stored value can always be corrected
+        instead of being trusted forever.
+    */
+    void CreatureStats::recalcFatigueBase()
+    {
+        float strength     = getAttribute(ESM::Attribute::Strength).getModified();
+        float willpower    = getAttribute(ESM::Attribute::Willpower).getModified();
+        float agility      = getAttribute(ESM::Attribute::Agility).getModified();
+        float endurance    = getAttribute(ESM::Attribute::Endurance).getModified();
+
+        DynamicStat<float> fatigue = getFatigue();
+        float diff = (strength+willpower+agility+endurance) - fatigue.getBase();
+
+        if (diff == 0)
+            return;
+
+        float currentToBaseRatio = fatigue.getBase() > 0 ? (fatigue.getCurrent() / fatigue.getBase()) : 0;
+        fatigue.setModified(fatigue.getModified() + diff, 0);
+        fatigue.setCurrent(fatigue.getBase() * currentToBaseRatio);
+        setFatigue(fatigue);
+    }
+    /*
+        End of AMP addition (Y056)
+    */
 
     void CreatureStats::setKnockedDown(bool value)
     {

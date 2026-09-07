@@ -1684,10 +1684,35 @@ namespace MWMechanics
 
         DynamicStat<float> magicka = creatureStats.getMagicka();
         float diff = (static_cast<int>(magickaFactor*intelligence)) - magicka.getBase();
-        float currentToBaseRatio = (magicka.getCurrent() / magicka.getBase());
+
+        /*
+            Start of AMP change (Y056)
+
+            A base of zero (a profile that has not arrived yet, or a character whose
+            Intelligence was drained to nothing) made this a division by zero. The
+            resulting NaN was then written into the stat, sent to the server and stored,
+            after which the character's magicka never recovered.
+        */
+        float currentToBaseRatio = (magicka.getBase() > 0) ? (magicka.getCurrent() / magicka.getBase()) : 0.f;
+        /*
+            End of AMP change (Y056)
+        */
+
         magicka.setModified(magicka.getModified() + diff, 0);
         magicka.setCurrent(magicka.getBase() * currentToBaseRatio, false, true);
         creatureStats.setMagicka(magicka);
+
+        /*
+            Start of AMP addition (Y056)
+
+            Fatigue is derived the same way magicka is, but until now it was only ever
+            recalculated as a side effect of an attribute actually changing value. A
+            stored snapshot pushed over it at login therefore stuck around forever.
+        */
+        creatureStats.recalcFatigueBase();
+        /*
+            End of AMP addition (Y056)
+        */
     }
 
     void Actors::restoreDynamicStats (const MWWorld::Ptr& ptr, double hours, bool sleep)

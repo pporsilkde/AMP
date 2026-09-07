@@ -108,6 +108,19 @@ namespace MWMechanics
         bool needToRecalcDynamicStats();
         void setNeedRecalcDynamicStats(bool val);
 
+        /*
+            Start of AMP addition (Y056)
+
+            Fatigue's maximum is fully derived from Strength, Willpower, Agility and
+            Endurance, exactly the way magicka's maximum is derived from Intelligence.
+            Expose that derivation so login code can re-apply it after a stored snapshot
+            has been written over the top of the engine's own value.
+        */
+        void recalcFatigueBase();
+        /*
+            End of AMP addition (Y056)
+        */
+
         float getFallHeight() const;
         void addToFallHeight(float height);
 

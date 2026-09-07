@@ -163,6 +163,22 @@ namespace MWMechanics
             ///< Calculate health based on endurance and strength.
             ///  Called at character creation.
 
+            /*
+                Start of AMP addition (Y056)
+            */
+            float getMinimumBaseHealth() const;
+            ///< floor(0.5 * (Strength + Endurance)) - what character creation alone would
+            ///  hand out for the attributes this character currently has. Base health can
+            ///  only ever grow from there, so anything below it is corrupt data.
+
+            bool repairCorruptedBaseHealth();
+            ///< Lift a base health value that sits below getMinimumBaseHealth() back up to
+            ///  a plausible figure for the current level. Returns true if it changed the
+            ///  stat, false if the stored value was already sane.
+            /*
+                End of AMP addition (Y056)
+            */
+
             void flagAsUsed (const std::string& id);
             ///< @note Id must be lower-case
 

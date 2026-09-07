@@ -1555,9 +1555,6 @@ void LocalPlayer::setCharacter()
 
 void LocalPlayer::setDynamicStats()
 {
-    // Y044: an authoritative profile section has arrived.
-    markLoginSyncReceived(LoginSync_StatsDynamic);
-
     MWBase::World *world = MWBase::Environment::get().getWorld();
     MWWorld::Ptr ptrPlayer = world->getPlayerPtr();
 
@@ -1571,7 +1568,77 @@ void LocalPlayer::setDynamicStats()
         dynamicStat.setCurrent(creatureStats.mDynamic[i].mCurrent);
         ptrCreatureStats->setDynamic(i, dynamicStat);
     }
+
+    /*
+        Start of AMP change (Y056)
+
+        The stored snapshot is not authoritative for stats the engine derives. Correct
+        them here, then let Y044's baseline logic run, then push the corrected figures
+        back so the bad values stop being handed out on the next login.
+    */
+    const bool corrected = applyEngineDerivedDynamicStats();
+
+    // Y044: an authoritative profile section has arrived.
+    markLoginSyncReceived(LoginSync_StatsDynamic);
+
+    if (corrected)
+        updateStatsDynamic(true);
+    /*
+        End of AMP change (Y056)
+    */
 }
+
+/*
+    Start of AMP addition (Y056)
+*/
+bool LocalPlayer::applyEngineDerivedDynamicStats()
+{
+    MWWorld::Ptr ptrPlayer = getPlayerPtr();
+
+    if (ptrPlayer.isEmpty() || !ptrPlayer.getClass().isNpc())
+        return false;
+
+    MWMechanics::NpcStats *ptrNpcStats = &ptrPlayer.getClass().getNpcStats(ptrPlayer);
+
+    const float oldHealthBase = ptrNpcStats->getHealth().getBase();
+    const float oldMagickaBase = ptrNpcStats->getMagicka().getBase();
+    const float oldFatigueBase = ptrNpcStats->getFatigue().getBase();
+
+    // Maximum fatigue is Strength + Willpower + Agility + Endurance, always.
+    ptrNpcStats->recalcFatigueBase();
+
+    // Maximum magicka is Intelligence times the magicka multiplier, always. Ask the
+    // mechanics update to redo it rather than duplicating the GMST lookup here.
+    ptrNpcStats->setNeedRecalcDynamicStats(true);
+
+    // Maximum health cannot be re-derived, only sanity checked against its floor.
+    const bool healthRepaired = ptrNpcStats->repairCorruptedBaseHealth();
+
+    if (healthRepaired)
+    {
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
+            "Stored base health %.1f was below the minimum %.1f for this character; repaired to %.1f",
+            oldHealthBase, ptrNpcStats->getMinimumBaseHealth(), ptrNpcStats->getHealth().getBase());
+    }
+
+    const bool fatigueChanged = ptrNpcStats->getFatigue().getBase() != oldFatigueBase;
+
+    if (fatigueChanged)
+    {
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO,
+            "Stored base fatigue %.1f did not match the derived value %.1f; using the derived one",
+            oldFatigueBase, ptrNpcStats->getFatigue().getBase());
+    }
+
+    // The magicka recalculation happens in the next mechanics update, so it is not
+    // visible yet; report a change only if the stored value cannot possibly be right.
+    (void)oldMagickaBase;
+
+    return healthRepaired || fatigueChanged;
+}
+/*
+    End of AMP addition (Y056)
+*/
 
 void LocalPlayer::setAttributes()
 {

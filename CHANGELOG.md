@@ -1,3 +1,16 @@
+## Y056 — engine-owned dynamic stats
+
+### Fixed
+- Base health, magicka and fatigue no longer drop to character-creation values when logging in. The stored profile is no longer treated as authoritative for stats the engine derives.
+- Maximum fatigue is re-derived as Strength + Willpower + Agility + Endurance every time `calculateDynamicStats` runs, not only as a side effect of an attribute changing value. A stored snapshot pushed over it at login used to stick forever.
+- Maximum magicka no longer divides by zero when the base is 0. The resulting NaN was written into the stat, sent to the server and stored, after which the character's magicka never recovered.
+- Base health is validated against its floor, `floor(0.5 * (Strength + Endurance))`. A value below that floor is corruption rather than progression and is lifted back to `floor + (level - 1) * 0.1 * Endurance`.
+- The server repairs the same two values in `BasePlayer:RepairDerivedStats()` before sending them, and `SaveStatsDynamic` refuses to store a base health lower than the one already on the account.
+
+### Multiplayer / compatibility
+- No new packet IDs or save fields. Protocol remains **806**.
+- Existing damaged profiles are repaired on the next login; `tools/y056_audit_stats.py` can audit or repair them offline.
+
 ## Y043 — archetype presentation, localisation and recovery HUD
 
 - Added a clear selected-archetype card and 0–100% power bar to preset/custom class creation.

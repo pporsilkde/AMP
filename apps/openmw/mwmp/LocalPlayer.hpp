@@ -110,6 +110,19 @@ namespace mwmp
 
         void setCharacter();
         void setDynamicStats();
+
+        /*
+            Start of AMP addition (Y056)
+
+            Re-derive the dynamic stats the engine owns after a server profile has been
+            applied, and repair a base health value that the profile got wrong. Returns
+            true when anything had to be corrected, so the caller can publish the fixed
+            values back to the server.
+        */
+        bool applyEngineDerivedDynamicStats();
+        /*
+            End of AMP addition (Y056)
+        */
         void setAttributes();
         void setSkills();
         void setLevel();

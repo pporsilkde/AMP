@@ -516,6 +516,59 @@ void MWMechanics::NpcStats::updateHealth()
     setHealth(floor(0.5f * (strength + endurance)));
 }
 
+/*
+    Start of AMP addition (Y056)
+
+    Unlike magicka and fatigue, maximum health cannot be recomputed from the current
+    attributes alone, because it accumulates across level-ups. What can be checked is
+    the floor: base health starts at floor(0.5 * (Strength + Endurance)) and only ever
+    grows, so a value below that floor is corruption, not progression.
+*/
+float MWMechanics::NpcStats::getMinimumBaseHealth() const
+{
+    const float endurance = getAttribute(ESM::Attribute::Endurance).getBase();
+    const float strength = getAttribute(ESM::Attribute::Strength).getBase();
+
+    return floor(0.5f * (strength + endurance));
+}
+
+bool MWMechanics::NpcStats::repairCorruptedBaseHealth()
+{
+    const float minimum = getMinimumBaseHealth();
+
+    if (minimum <= 0.f)
+        return false;
+
+    MWMechanics::DynamicStat<float> health(getHealth());
+
+    if (health.getBase() >= minimum)
+        return false;
+
+    const MWWorld::Store<ESM::GameSetting> &gmst =
+        MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>();
+
+    const float endurance = getAttribute(ESM::Attribute::Endurance).getBase();
+    const float perLevel = gmst.find("fLevelUpHealthEndMult")->mValue.getFloat();
+    const float levels = static_cast<float>(std::max(0, getLevel() - 1));
+
+    // The exact per-level history is gone, so rebuild it from the Endurance the
+    // character has now. That is the same figure a level-up would have granted.
+    const float repaired = minimum + levels * perLevel * endurance;
+
+    float ratio = 1.f;
+    if (health.getBase() > 0.f)
+        ratio = std::min(1.f, std::max(0.f, health.getCurrent() / health.getBase()));
+
+    health.setBase(repaired);
+    health.setCurrent(std::max(1.f, repaired * ratio));
+    setHealth(health);
+
+    return true;
+}
+/*
+    End of AMP addition (Y056)
+*/
+
 int MWMechanics::NpcStats::getLevelupAttributeMultiplier(int attribute) const
 {
     int num = mSkillIncreases[attribute];
