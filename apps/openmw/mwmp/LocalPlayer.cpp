@@ -1573,8 +1573,9 @@ void LocalPlayer::setDynamicStats()
         Start of AMP change (Y056)
 
         The stored snapshot is not authoritative for stats the engine derives. Correct
-        them here, then let Y044's baseline logic run, then push the corrected figures
-        back so the bad values stop being handed out on the next login.
+        them here, then let Y044's baseline logic run so it takes the corrected numbers,
+        then publish anything that had to be fixed so the bad values stop being handed
+        back out on the next login.
     */
     const bool corrected = applyEngineDerivedDynamicStats();
 
@@ -1591,6 +1592,47 @@ void LocalPlayer::setDynamicStats()
 /*
     Start of AMP addition (Y056)
 */
+namespace
+{
+    // Character creation hands out the race's attribute values for the player's sex,
+    // plus 10 for each of the class's two favoured attributes. Those are the exact
+    // numbers maximum health started from, and unlike the per-level history they can be
+    // recovered at any time from records the client already has loaded.
+    bool getCharacterCreationAttributes(const MWWorld::Ptr &ptrPlayer, float &strength, float &endurance)
+    {
+        const ESM::NPC *record = ptrPlayer.get<ESM::NPC>()->mBase;
+
+        if (record == nullptr)
+            return false;
+
+        const MWWorld::ESMStore &store = MWBase::Environment::get().getWorld()->getStore();
+        const ESM::Race *race = store.get<ESM::Race>().search(record->mRace);
+
+        if (race == nullptr)
+            return false;
+
+        const bool male = record->isMale();
+
+        strength = static_cast<float>(race->mData.mAttributeValues[ESM::Attribute::Strength].getValue(male));
+        endurance = static_cast<float>(race->mData.mAttributeValues[ESM::Attribute::Endurance].getValue(male));
+
+        const ESM::Class *characterClass = store.get<ESM::Class>().search(record->mClass);
+
+        if (characterClass != nullptr)
+        {
+            for (int i = 0; i < 2; ++i)
+            {
+                if (characterClass->mData.mAttribute[i] == ESM::Attribute::Strength)
+                    strength += 10.f;
+                else if (characterClass->mData.mAttribute[i] == ESM::Attribute::Endurance)
+                    endurance += 10.f;
+            }
+        }
+
+        return true;
+    }
+}
+
 bool LocalPlayer::applyEngineDerivedDynamicStats()
 {
     MWWorld::Ptr ptrPlayer = getPlayerPtr();
@@ -1600,26 +1642,10 @@ bool LocalPlayer::applyEngineDerivedDynamicStats()
 
     MWMechanics::NpcStats *ptrNpcStats = &ptrPlayer.getClass().getNpcStats(ptrPlayer);
 
-    const float oldHealthBase = ptrNpcStats->getHealth().getBase();
-    const float oldMagickaBase = ptrNpcStats->getMagicka().getBase();
     const float oldFatigueBase = ptrNpcStats->getFatigue().getBase();
 
     // Maximum fatigue is Strength + Willpower + Agility + Endurance, always.
     ptrNpcStats->recalcFatigueBase();
-
-    // Maximum magicka is Intelligence times the magicka multiplier, always. Ask the
-    // mechanics update to redo it rather than duplicating the GMST lookup here.
-    ptrNpcStats->setNeedRecalcDynamicStats(true);
-
-    // Maximum health cannot be re-derived, only sanity checked against its floor.
-    const bool healthRepaired = ptrNpcStats->repairCorruptedBaseHealth();
-
-    if (healthRepaired)
-    {
-        LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
-            "Stored base health %.1f was below the minimum %.1f for this character; repaired to %.1f",
-            oldHealthBase, ptrNpcStats->getMinimumBaseHealth(), ptrNpcStats->getHealth().getBase());
-    }
 
     const bool fatigueChanged = ptrNpcStats->getFatigue().getBase() != oldFatigueBase;
 
@@ -1630,11 +1656,100 @@ bool LocalPlayer::applyEngineDerivedDynamicStats()
             oldFatigueBase, ptrNpcStats->getFatigue().getBase());
     }
 
-    // The magicka recalculation happens in the next mechanics update, so it is not
-    // visible yet; report a change only if the stored value cannot possibly be right.
-    (void)oldMagickaBase;
+    // Maximum magicka is Intelligence times the magicka multiplier, always. Ask the next
+    // mechanics update to redo it rather than duplicating the GMST lookup here; that also
+    // lets any Fortify Maximum Magicka effect land first.
+    ptrNpcStats->setNeedRecalcDynamicStats(true);
 
-    return healthRepaired || fatigueChanged;
+    const bool healthRepaired = repairBaseHealth(ptrPlayer);
+
+    return fatigueChanged || healthRepaired;
+}
+
+// Maximum health cannot be read back: it accumulates across level-ups, and every
+// increase used the Endurance the character had at that moment, which is recorded
+// nowhere. It can, however, be reconstructed retrospectively.
+//
+// Two figures are built from the character's own history:
+//
+//   floor       - what the character would have if Endurance had never risen above the
+//                 value character creation handed out. Endurance only ever grows, so
+//                 nothing legitimate can sit below this. It is the corruption test.
+//
+//   retrospect  - the same walk over the character's levels, but with Endurance rising
+//                 in even steps from the starting racial figure to the one the character
+//                 has now. That is the repair target, so both Endurance and level take
+//                 part rather than a single flat multiplier.
+//
+// For L level-ups with Endurance going E0 -> E1 in even steps, the level-ups contribute
+// fLevelUpHealthEndMult * (L * E0 + (E1 - E0) * (L + 1) / 2).
+//
+// That accrual is then scaled by sHealthRebuildGenerosity. Even growth is the most
+// pessimistic assumption that still fits the character's history - most characters put
+// points into Endurance early, where they compound over more levels - so the plain figure
+// tends to land short of what was really lost. The multiplier applies to the rebuilt
+// accrual only, never to the character creation base, which is known exactly.
+bool LocalPlayer::repairBaseHealth(const MWWorld::Ptr &ptrPlayer)
+{
+    // How much of the unrecoverable level-up history to hand back. 1.0 is the strict
+    // even-growth reconstruction; anything above it compensates for Endurance usually
+    // having been raised earlier than evenly.
+    static const float sHealthRebuildGenerosity = 1.4f;
+
+    float chargenStrength = 0.f;
+    float chargenEndurance = 0.f;
+
+    if (!getCharacterCreationAttributes(ptrPlayer, chargenStrength, chargenEndurance))
+        return false;
+
+    MWMechanics::NpcStats *ptrNpcStats = &ptrPlayer.getClass().getNpcStats(ptrPlayer);
+
+    const float chargenHealth = std::floor(0.5f * (chargenStrength + chargenEndurance));
+
+    if (chargenHealth <= 0.f)
+        return false;
+
+    const MWWorld::Store<ESM::GameSetting> &gmst =
+        MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>();
+
+    const float perLevel = gmst.find("fLevelUpHealthEndMult")->mValue.getFloat();
+    const float levelUps = static_cast<float>(std::max(0, ptrNpcStats->getLevel() - 1));
+
+    // A permanently drained Endurance can sit below the starting one, so never walk the
+    // history upwards past what the character can currently show for itself.
+    const float currentEndurance = ptrNpcStats->getAttribute(ESM::Attribute::Endurance).getBase();
+    const float startEndurance = std::min(chargenEndurance, currentEndurance);
+    const float endEndurance = std::max(startEndurance, currentEndurance);
+
+    const float floorHealth = chargenHealth + perLevel * levelUps * startEndurance;
+
+    const float retrospectAccrual = perLevel *
+        (levelUps * startEndurance + (endEndurance - startEndurance) * (levelUps + 1.f) * 0.5f);
+
+    const float retrospectHealth = chargenHealth + retrospectAccrual * sHealthRebuildGenerosity;
+
+    MWMechanics::DynamicStat<float> health(ptrNpcStats->getHealth());
+
+    if (health.getBase() >= floorHealth)
+        return false;
+
+    float ratio = 1.f;
+    if (health.getBase() > 0.f)
+        ratio = std::min(1.f, std::max(0.f, health.getCurrent() / health.getBase()));
+
+    LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
+        "Stored base health %.1f is below the floor %.1f at level %d "
+        "(character creation gave %.0f, Endurance %.0f -> %.0f, accrual %.1f x %.2f); "
+        "rebuilding retrospectively to %.1f",
+        health.getBase(), floorHealth, ptrNpcStats->getLevel(), chargenHealth,
+        startEndurance, endEndurance, retrospectAccrual, sHealthRebuildGenerosity,
+        retrospectHealth);
+
+    health.setBase(retrospectHealth);
+    health.setCurrent(std::max(1.f, retrospectHealth * ratio));
+    ptrNpcStats->setHealth(health);
+
+    return true;
 }
 /*
     End of AMP addition (Y056)

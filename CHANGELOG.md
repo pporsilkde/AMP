@@ -1,15 +1,15 @@
 ## Y056 — engine-owned dynamic stats
 
 ### Fixed
-- Base health, magicka and fatigue no longer drop to character-creation values when logging in. The stored profile is no longer treated as authoritative for stats the engine derives.
-- Maximum fatigue is re-derived as Strength + Willpower + Agility + Endurance every time `calculateDynamicStats` runs, not only as a side effect of an attribute changing value. A stored snapshot pushed over it at login used to stick forever.
+- Base health, magicka and fatigue no longer reset or collapse when logging in. The stored profile is no longer treated as authoritative for stats the engine derives.
+- Maximum fatigue is re-derived as Strength + Willpower + Agility + Endurance every time `calculateDynamicStats` runs, not only as a side effect of an attribute changing value. The snapshot `LoadStatsDynamic` writes over it at login used to stick forever.
 - Maximum magicka no longer divides by zero when the base is 0. The resulting NaN was written into the stat, sent to the server and stored, after which the character's magicka never recovered.
-- Base health is validated against its floor, `floor(0.5 * (Strength + Endurance))`. A value below that floor is corruption rather than progression and is lifted back to `floor + (level - 1) * 0.1 * Endurance`.
-- The server repairs the same two values in `BasePlayer:RepairDerivedStats()` before sending them, and `SaveStatsDynamic` refuses to store a base health lower than the one already on the account.
+- Base health is validated against a floor rebuilt from the character's own history: what character creation gave for its race and class, plus one level-up's worth of the starting racial Endurance for every level since. Nothing legitimate sits below that. A value that does is rebuilt retrospectively, walking the same levels with Endurance rising in even steps from the starting racial figure to the current one, with the rebuilt accrual scaled by 1.4 to compensate for Endurance usually having been raised earlier than evenly. The character creation base is never scaled.
+- The server re-derives fatigue in `BasePlayer:RepairDerivedStats()` before sending it, and `SaveStatsDynamic` no longer stores a base health lower than the one already on the account. Werewolf form keeps its own base health and is exempt.
 
 ### Multiplayer / compatibility
 - No new packet IDs or save fields. Protocol remains **806**.
-- Existing damaged profiles are repaired on the next login; `tools/y056_audit_stats.py` can audit or repair them offline.
+- Damaged profiles are repaired on the next login and the corrected values are published back to the server. `tools/y056_audit_stats.py` can audit them offline.
 
 ## Y043 — archetype presentation, localisation and recovery HUD
 

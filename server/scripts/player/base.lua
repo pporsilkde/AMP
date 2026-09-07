@@ -903,10 +903,13 @@ function BasePlayer:SaveClass(playerPacket)
     end
 end
 
--- Y056: base fatigue is Strength + Willpower + Agility + Endurance and base health
--- starts at floor(0.5 * (Strength + Endurance)). Both are derivable from the stored
--- attributes, so a stored value that contradicts them is corruption rather than
+-- Y056: maximum fatigue is Strength + Willpower + Agility + Endurance and nothing else,
+-- so a stored value the stored attributes contradict is corruption rather than
 -- progression and must not be handed back to the client.
+--
+-- Base health is deliberately not rebuilt here. Doing it properly needs the attributes
+-- character creation handed out, which live in the race and class records the server
+-- does not read. The client performs that repair and publishes the result back.
 function BasePlayer:GetAttributeBase(attributeName)
 
     if self.data.attributes == nil then return nil end
@@ -938,37 +941,17 @@ function BasePlayer:RepairDerivedStats()
     local derivedFatigue = strength + willpower + agility + endurance
 
     if self.data.stats.fatigueBase ~= derivedFatigue then
-        tes3mp.LogMessage(enumerations.log.WARN, "Repairing base fatigue for " .. self.accountName ..
-            " from " .. tostring(self.data.stats.fatigueBase) .. " to " .. tostring(derivedFatigue))
 
         local ratio = 1
         if type(self.data.stats.fatigueBase) == "number" and self.data.stats.fatigueBase > 0 then
             ratio = math.min(1, math.max(0, self.data.stats.fatigueCurrent / self.data.stats.fatigueBase))
         end
 
+        tes3mp.LogMessage(enumerations.log.WARN, "Repairing base fatigue for " .. self.accountName ..
+            " from " .. tostring(self.data.stats.fatigueBase) .. " to " .. tostring(derivedFatigue))
+
         self.data.stats.fatigueBase = derivedFatigue
         self.data.stats.fatigueCurrent = derivedFatigue * ratio
-    end
-
-    local minimumHealth = math.floor(0.5 * (strength + endurance))
-    local level = self.data.stats.level or 1
-
-    if type(self.data.stats.healthBase) ~= "number" or self.data.stats.healthBase < minimumHealth then
-
-        local ratio = 1
-        if type(self.data.stats.healthBase) == "number" and self.data.stats.healthBase > 0 then
-            ratio = math.min(1, math.max(0, self.data.stats.healthCurrent / self.data.stats.healthBase))
-        end
-
-        -- The per-level history is gone, so rebuild it from the Endurance on record;
-        -- that is the same 10% a level-up would have granted.
-        local repairedHealth = minimumHealth + math.max(0, level - 1) * 0.1 * endurance
-
-        tes3mp.LogMessage(enumerations.log.WARN, "Repairing base health for " .. self.accountName ..
-            " from " .. tostring(self.data.stats.healthBase) .. " to " .. tostring(repairedHealth))
-
-        self.data.stats.healthBase = repairedHealth
-        self.data.stats.healthCurrent = math.max(1, repairedHealth * ratio)
     end
 end
 
