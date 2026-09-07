@@ -2,6 +2,7 @@
 
 #include <sstream>
 #include <iomanip>
+#include <set>
 
 #include <MyGUI_ImageBox.h>
 #include <MyGUI_LanguageManager.h>
@@ -44,9 +45,76 @@ namespace MWGui
     }
 
 
+    /*
+        Start of AMP addition (Y044)
+
+        mWidgetMap holds raw MyGUI pointers to children of the effect box. Those
+        children can be destroyed without this class ever being told, which used
+        to leave dangling pointers that were dereferenced on the next frame -
+        reliably reproducible while casting, because casting is what adds a new
+        effect and forces the strip to be rebuilt.
+    */
+    SpellIcons::~SpellIcons()
+    {
+        invalidate();
+    }
+
+    void SpellIcons::invalidate()
+    {
+        mWidgetMap.clear();
+        mParent = nullptr;
+    }
+
+    void SpellIcons::pruneDeadWidgets(MyGUI::Widget* parent)
+    {
+        // A cache built for a different parent can never be reused.
+        if (parent != mParent)
+        {
+            mWidgetMap.clear();
+            mParent = parent;
+            return;
+        }
+
+        if (mWidgetMap.empty())
+            return;
+
+        // Only widgets that are still live children of the parent may be touched.
+        std::set<MyGUI::Widget*> liveChildren;
+        const size_t childCount = parent->getChildCount();
+        for (size_t i = 0; i < childCount; ++i)
+            liveChildren.insert(parent->getChildAt(i));
+
+        for (auto it = mWidgetMap.begin(); it != mWidgetMap.end();)
+        {
+            if (it->second == nullptr || liveChildren.find(it->second) == liveChildren.end())
+                it = mWidgetMap.erase(it);
+            else
+                ++it;
+        }
+    }
+    /*
+        End of AMP addition (Y044)
+    */
+
     void SpellIcons::updateWidgets(MyGUI::Widget *parent, bool adjustSize)
     {
         // TODO: Tracking add/remove/expire would be better than force updating every frame
+
+        /*
+            Start of AMP addition (Y044)
+
+            Never work with a cache that outlived its widgets.
+        */
+        if (parent == nullptr)
+        {
+            invalidate();
+            return;
+        }
+
+        pruneDeadWidgets(parent);
+        /*
+            End of AMP addition (Y044)
+        */
 
         MWWorld::Ptr player = MWMechanics::getPlayer();
         const MWMechanics::CreatureStats& stats = player.getClass().getCreatureStats(player);

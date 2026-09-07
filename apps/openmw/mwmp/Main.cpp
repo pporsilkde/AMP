@@ -269,9 +269,27 @@ void Main::updateWorld(float dt) const
 
         mNetworking->getPlayerPacket(ID_PLAYER_BASEINFO)->setPlayer(getLocalPlayer());
         mNetworking->getPlayerPacket(ID_LOADED)->setPlayer(getLocalPlayer());
+        /*
+            Start of AMP addition (Y044)
+
+            The server answers ID_LOADED with the full character profile. Until every
+            section of it has been applied here, our own state is still the CharGen
+            placeholder and must not be published, or the server will persist it over
+            the profile it just loaded.
+        */
+        mLocalPlayer->beginLoginSync();
+        /*
+            End of AMP addition (Y044)
+        */
+
         mNetworking->getPlayerPacket(ID_PLAYER_BASEINFO)->Send();
         mNetworking->getPlayerPacket(ID_LOADED)->Send();
-        mLocalPlayer->updateStatsDynamic(true);
+
+        // Y044: this forced send used to race the server's own LoadStatsDynamic()
+        // and persist the CharGen placeholder health/magicka/fatigue over it.
+        if (!mLocalPlayer->isLoginSyncPending())
+            mLocalPlayer->updateStatsDynamic(true);
+
         get().getGUIController()->setChatVisible(true);
     }
     else

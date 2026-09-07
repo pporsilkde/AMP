@@ -1059,6 +1059,14 @@ eventHandler.OnGenericPlayerEvent = function(pid, packetType)
     if Players[pid] ~= nil and Players[pid]:IsLoggedIn() then
         local playerPacket = packetReader.GetPlayerPacketTables(pid, packetType)
 
+        -- Y044: during the login handshake a client can still be publishing its
+        -- CharGen placeholder. Never let that overwrite the profile we just sent;
+        -- resend the authoritative section instead. See BeginProfileLoginGuard().
+        if type(Players[pid].RejectStaleProfilePacket) == "function" and
+            Players[pid]:RejectStaleProfilePacket(packetType, playerPacket) then
+            return
+        end
+
         local eventStatus = customEventHooks.triggerValidators("On" .. packetType, {pid, playerPacket})
         if eventStatus.validDefaultHandler then
             Players[pid]:SaveDataByPacketType(packetType, playerPacket)
@@ -1097,6 +1105,12 @@ eventHandler.OnPlayerLevel = function(pid)
                 logicHandler.GetChatName(pid))
             Players[pid]:LoadLevel()
             return
+        end
+
+        -- Y044: a level packet that survived the C26 check comes from a client that
+        -- has already applied the server profile, so the wider guard can be lifted.
+        if type(Players[pid].EndProfileLoginGuard) == "function" then
+            Players[pid]:EndProfileLoginGuard()
         end
 
         local eventStatus = customEventHooks.triggerValidators("OnPlayerLevel", {pid, playerPacket})

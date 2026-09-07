@@ -166,6 +166,10 @@ function BasePlayer:__init(pid, playerName)
     self.xpLoginGuardUntil = 0
     self.xpLastQuicksaveTime = 0
 
+    -- Y044: same protection, extended to attributes, skills, dynamic stats and
+    -- equipment. See BeginProfileLoginGuard().
+    self.profileLoginGuardUntil = 0
+
     -- Y039: transient death-recovery state. This is never persisted; XP itself
     -- remains authoritative in data.stats and is saved by deathRecovery.
     self.deathRecoveryActive = false
@@ -389,6 +393,10 @@ function BasePlayer:FinishLogin()
         if privateOverridesChanged or privateLocationChanged then
             self:QuicksaveToDrive()
         end
+
+        -- Y044: arm the guard in the same breath as loggedIn, because that is the
+        -- exact moment stale client packets start being accepted.
+        self:BeginProfileLoginGuard()
 
         self.loggedIn = true
         privateCellInstances.NotifyIfInside(self)
@@ -1101,6 +1109,134 @@ function BasePlayer:IsStaleEmptyXpPacket(playerPacket)
                 return false
             end
         end
+    end
+
+    return true
+end
+
+-- Y044: the C26 stale-packet guard used to cover PLAYER_LEVEL only. Every other
+-- profile-bearing packet had exactly the same race: FinishLogin() sends the stored
+-- profile, sets loggedIn and returns, while the client is still holding its CharGen
+-- placeholder (level 1 skills, class base attributes and the starting
+-- shirt/pants/shoes) and publishes it. The server then persisted that placeholder
+-- over the profile it had just loaded, which is how players lost skills,
+-- attributes, base health/magicka/fatigue and their worn equipment on login.
+--
+-- The guard below rejects those packets for a short window after login and re-sends
+-- the authoritative state, so unpatched clients are protected as well.
+
+-- Sections and the loader that restores each of them.
+BasePlayer.profileGuardSections = {
+    PlayerAttribute = "LoadAttributes",
+    PlayerSkill = "LoadSkills",
+    PlayerStatsDynamic = "LoadStatsDynamic",
+    PlayerEquipment = "LoadEquipment"
+}
+
+function BasePlayer:BeginProfileLoginGuard()
+    -- Kept deliberately short: it only has to cover the handshake, not gameplay.
+    self.profileLoginGuardUntil = os.time() + (config.profileLoginGuardSeconds or 10)
+end
+
+function BasePlayer:IsProfileLoginGuardActive()
+    return os.time() <= (self.profileLoginGuardUntil or 0)
+end
+
+function BasePlayer:EndProfileLoginGuard()
+    self.profileLoginGuardUntil = 0
+end
+
+-- A packet that agrees with the stored profile proves the client has applied it,
+-- so the guard can be lifted immediately instead of waiting out the window.
+function BasePlayer:ProfilePacketMatchesStored(packetType, playerPacket)
+
+    if playerPacket == nil then
+        return false
+    end
+
+    local function baseOf(storedValue)
+        if type(storedValue) == "table" then
+            return storedValue.base
+        end
+        return storedValue
+    end
+
+    if packetType == "PlayerAttribute" then
+        if playerPacket.attributes == nil then return false end
+
+        for attributeName, attribute in pairs(playerPacket.attributes) do
+            if baseOf(self.data.attributes[attributeName]) ~= attribute.base then
+                return false
+            end
+        end
+
+        return true
+
+    elseif packetType == "PlayerSkill" then
+        if playerPacket.skills == nil then return false end
+
+        for skillName, skill in pairs(playerPacket.skills) do
+            if baseOf(self.data.skills[skillName]) ~= skill.base then
+                return false
+            end
+        end
+
+        return true
+
+    elseif packetType == "PlayerStatsDynamic" then
+        if playerPacket.stats == nil then return false end
+
+        local stored = self.data.stats
+
+        -- Only the base values are compared; current values legitimately drift.
+        return math.abs((stored.healthBase or 0) - (playerPacket.stats.healthBase or 0)) < 0.01
+            and math.abs((stored.magickaBase or 0) - (playerPacket.stats.magickaBase or 0)) < 0.01
+            and math.abs((stored.fatigueBase or 0) - (playerPacket.stats.fatigueBase or 0)) < 0.01
+
+    elseif packetType == "PlayerEquipment" then
+        if playerPacket.equipment == nil then return false end
+
+        -- Equipment packets only carry the slots that changed.
+        for slot, equipmentItem in pairs(playerPacket.equipment) do
+            local storedItem = self.data.equipment[slot]
+            local storedRefId = ""
+
+            if storedItem ~= nil then
+                storedRefId = storedItem.refId or ""
+            end
+
+            if storedRefId ~= (equipmentItem.refId or "") then
+                return false
+            end
+        end
+
+        return true
+    end
+
+    return false
+end
+
+-- Reject an incoming profile packet while the guard is active, then restore the
+-- authoritative section so the client stops disagreeing with us.
+function BasePlayer:RejectStaleProfilePacket(packetType, playerPacket)
+
+    local loaderName = BasePlayer.profileGuardSections[packetType]
+
+    if loaderName == nil or not self:IsProfileLoginGuardActive() then
+        return false
+    end
+
+    if self:ProfilePacketMatchesStored(packetType, playerPacket) then
+        self:EndProfileLoginGuard()
+        return false
+    end
+
+    tes3mp.LogAppend(enumerations.log.WARN,
+        "[Profile] Ignored stale " .. packetType .. " during login sync for " ..
+        logicHandler.GetChatName(self.pid))
+
+    if type(self[loaderName]) == "function" then
+        self[loaderName](self)
     end
 
     return true

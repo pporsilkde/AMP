@@ -214,6 +214,12 @@ LocalPlayer::LocalPlayer()
     isPlayingAnimation = false;
     diedSinceArrestAttempt = false;
 
+    // Y044: no server profile has been received yet, so nothing may be sent upstream.
+    mLoginSyncPending = false;
+    mLoginSyncReceived = 0;
+    mLoginSyncElapsed = 0.f;
+    mDynamicStatsBaselineValid = false;
+
     mDeathRecoveryActive = false;
     mDeathRecoveryElapsed = 0.f;
     mDeathRecoveryDuration = 30.f;
@@ -272,6 +278,14 @@ void LocalPlayer::update()
     static float updateTimer = 0;
     const float timeoutSec = 0.015;
 
+    /*
+        Start of AMP addition (Y044)
+    */
+    updateLoginSync(frameDuration);
+    /*
+        End of AMP addition (Y044)
+    */
+
     if ((updateTimer += MWBase::Environment::get().getFrameDuration()) >= timeoutSec)
     {
         updateTimer = 0;
@@ -279,15 +293,165 @@ void LocalPlayer::update()
         updatePosition();
         updateAnimFlags();
         updateAttackOrCast();
-        updateEquipment();
-        updateStatsDynamic();
-        updateAttributes();
-        updateSkills();
-        updateLevel();
+
+        /*
+            Start of AMP change (Y044)
+
+            Movement, animation and casting stay live during the login handshake so
+            the session never feels frozen, but character state is not published
+            until the server-owned profile has replaced the CharGen placeholder.
+        */
+        if (!mLoginSyncPending)
+        {
+            updateEquipment();
+            updateStatsDynamic();
+            updateAttributes();
+            updateSkills();
+            updateLevel();
+        }
+        /*
+            End of AMP change (Y044)
+        */
+
         updateBounty();
         updateReputation();
     }
 }
+
+/*
+    Start of AMP addition (Y044)
+
+    Login profile synchronisation gate.
+*/
+void LocalPlayer::beginLoginSync()
+{
+    // A character created in this session has no stored profile to wait for; its
+    // state was already published by processCharGen().
+    if (charGenState.endStage > 1)
+    {
+        mLoginSyncPending = false;
+        mDynamicStatsBaselineValid = false;
+        return;
+    }
+
+    mLoginSyncPending = true;
+    mLoginSyncReceived = 0;
+    mLoginSyncElapsed = 0.f;
+    mDynamicStatsBaselineValid = false;
+
+    LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO,
+        "Holding back character state packets until the server profile arrives");
+}
+
+void LocalPlayer::markLoginSyncReceived(int section)
+{
+    if (!mLoginSyncPending)
+        return;
+
+    mLoginSyncReceived |= section;
+
+    if ((mLoginSyncReceived & LoginSync_All) == LoginSync_All)
+    {
+        mLoginSyncPending = false;
+        adoptServerStateAsBaseline();
+
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO,
+            "Server profile fully applied, resuming character state packets");
+    }
+}
+
+void LocalPlayer::updateLoginSync(float dt)
+{
+    if (!mLoginSyncPending)
+        return;
+
+    mLoginSyncElapsed += dt;
+
+    // A server that never sends one of the sections must not lock the client out
+    // of its own progression for the rest of the session.
+    static const float sLoginSyncTimeout = 15.f;
+
+    if (mLoginSyncElapsed >= sLoginSyncTimeout)
+    {
+        mLoginSyncPending = false;
+        adoptServerStateAsBaseline();
+
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
+            "Timed out waiting for the full server profile (received mask %d), resuming character state packets",
+            mLoginSyncReceived);
+    }
+}
+
+// Copy whatever the player Ptr holds right now into our mirrors, so the first
+// update after the gate opens does not report the freshly applied server values
+// back as if they were local changes.
+void LocalPlayer::adoptServerStateAsBaseline()
+{
+    MWWorld::Ptr ptrPlayer = getPlayerPtr();
+
+    if (ptrPlayer.isEmpty())
+        return;
+
+    const MWMechanics::NpcStats& ptrNpcStats = ptrPlayer.getClass().getNpcStats(ptrPlayer);
+    MWMechanics::CreatureStats& ptrCreatureStats = ptrPlayer.getClass().getCreatureStats(ptrPlayer);
+
+    mOldHealth = ptrCreatureStats.getHealth();
+    mOldMagicka = ptrCreatureStats.getMagicka();
+    mOldFatigue = ptrCreatureStats.getFatigue();
+    mDynamicStatsBaselineValid = true;
+
+    for (int i = 0; i < 3; ++i)
+        ptrCreatureStats.getDynamic(i).writeState(creatureStats.mDynamic[i]);
+
+    for (int i = 0; i < 8; ++i)
+    {
+        ptrNpcStats.getAttribute(i).writeState(creatureStats.mAttributes[i]);
+        npcStats.mSkillIncrease[i] = ptrNpcStats.getSkillIncrease(i);
+        npcStats.mXpAttributeProgress[i] = ptrNpcStats.getXpAttributeProgress(i);
+    }
+
+    for (int i = 0; i < 27; ++i)
+        ptrNpcStats.getSkill(i).writeState(npcStats.mSkills[i]);
+
+    creatureStats.mLevel = ptrNpcStats.getLevel();
+    npcStats.mLevelProgress = ptrNpcStats.getLevelProgress();
+    npcStats.mExperience = ptrNpcStats.getExperience();
+    npcStats.mSkillPoints = ptrNpcStats.getSkillPoints();
+    npcStats.mXpRewardKeys.assign(ptrNpcStats.getXpRewardKeys().begin(), ptrNpcStats.getXpRewardKeys().end());
+
+    if (ptrPlayer.getClass().hasInventoryStore(ptrPlayer))
+    {
+        MWWorld::InventoryStore& invStore = ptrPlayer.getClass().getInventoryStore(ptrPlayer);
+
+        for (int slot = 0; slot < MWWorld::InventoryStore::Slots; slot++)
+        {
+            auto& item = equipmentItems[slot];
+            MWWorld::ContainerStoreIterator it = invStore.getSlot(slot);
+
+            if (it != invStore.end())
+            {
+                item.refId = it->getCellRef().getRefId();
+                item.count = it->getRefData().getCount();
+                item.charge = it->getCellRef().getCharge();
+                item.enchantmentCharge = it->getCellRef().getEnchantmentCharge();
+                item.poisonId = it->getRefData().getPoisonId();
+                item.poisonCharges = it->getRefData().getPoisonCharges();
+            }
+            else
+            {
+                item.refId = "";
+                item.count = 0;
+                item.charge = -1;
+                item.enchantmentCharge = -1;
+                item.poisonId.clear();
+                item.poisonCharges = 0;
+            }
+        }
+    }
+}
+/*
+    End of AMP addition (Y044)
+*/
 
 float LocalPlayer::getDeathRecoveryRemainingSeconds() const
 {
@@ -545,9 +709,27 @@ void LocalPlayer::updateStatsDynamic(bool forceUpdate)
     MWMechanics::DynamicStat<float> magicka(ptrCreatureStats->getMagicka());
     MWMechanics::DynamicStat<float> fatigue(ptrCreatureStats->getFatigue());
 
-    static MWMechanics::DynamicStat<float> oldHealth(ptrCreatureStats->getHealth());
-    static MWMechanics::DynamicStat<float> oldMagicka(ptrCreatureStats->getMagicka());
-    static MWMechanics::DynamicStat<float> oldFatigue(ptrCreatureStats->getFatigue());
+    /*
+        Start of AMP change (Y044)
+
+        These were function-local statics, so they kept the values of the previous
+        session after a relog inside the same process and were compared against a
+        character they no longer belonged to.
+    */
+    if (!mDynamicStatsBaselineValid)
+    {
+        mOldHealth = ptrCreatureStats->getHealth();
+        mOldMagicka = ptrCreatureStats->getMagicka();
+        mOldFatigue = ptrCreatureStats->getFatigue();
+        mDynamicStatsBaselineValid = true;
+    }
+
+    MWMechanics::DynamicStat<float>& oldHealth = mOldHealth;
+    MWMechanics::DynamicStat<float>& oldMagicka = mOldMagicka;
+    MWMechanics::DynamicStat<float>& oldFatigue = mOldFatigue;
+    /*
+        End of AMP change (Y044)
+    */
 
 
     // Update stats when they become 0 or they have changed enough
@@ -1373,6 +1555,9 @@ void LocalPlayer::setCharacter()
 
 void LocalPlayer::setDynamicStats()
 {
+    // Y044: an authoritative profile section has arrived.
+    markLoginSyncReceived(LoginSync_StatsDynamic);
+
     MWBase::World *world = MWBase::Environment::get().getWorld();
     MWWorld::Ptr ptrPlayer = world->getPlayerPtr();
 
@@ -1390,6 +1575,9 @@ void LocalPlayer::setDynamicStats()
 
 void LocalPlayer::setAttributes()
 {
+    // Y044: an authoritative profile section has arrived.
+    markLoginSyncReceived(LoginSync_Attributes);
+
     MWWorld::Ptr ptrPlayer = getPlayerPtr();
 
     MWMechanics::NpcStats *ptrNpcStats = &ptrPlayer.getClass().getNpcStats(ptrPlayer);
@@ -1423,6 +1611,9 @@ void LocalPlayer::setAttributes()
 
 void LocalPlayer::setSkills()
 {
+    // Y044: an authoritative profile section has arrived.
+    markLoginSyncReceived(LoginSync_Skills);
+
     MWWorld::Ptr ptrPlayer = getPlayerPtr();
 
     MWMechanics::NpcStats *ptrNpcStats = &ptrPlayer.getClass().getNpcStats(ptrPlayer);
@@ -1454,6 +1645,9 @@ void LocalPlayer::setSkills()
 
 void LocalPlayer::setLevel()
 {
+    // Y044: an authoritative profile section has arrived.
+    markLoginSyncReceived(LoginSync_Level);
+
     MWBase::World *world = MWBase::Environment::get().getWorld();
     MWWorld::Ptr ptrPlayer = world->getPlayerPtr();
 
@@ -1590,6 +1784,9 @@ void LocalPlayer::setClass()
 
 void LocalPlayer::setEquipment()
 {
+    // Y044: an authoritative profile section has arrived.
+    markLoginSyncReceived(LoginSync_Equipment);
+
     MWWorld::Ptr ptrPlayer = getPlayerPtr();
 
     MWWorld::InventoryStore &ptrInventory = ptrPlayer.getClass().getInventoryStore(ptrPlayer);

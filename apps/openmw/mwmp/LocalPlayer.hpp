@@ -6,6 +6,7 @@
 
 #include <components/openmw-mp/Base/BasePlayer.hpp>
 #include "../mwmechanics/activespells.hpp"
+#include "../mwmechanics/stat.hpp"
 #include "../mwworld/ptr.hpp"
 #include "../mwworld/timestamp.hpp"
 #include "InteractionAnimationSync.hpp"
@@ -50,6 +51,33 @@ namespace mwmp
         bool processCharGen();
         bool isLoggedIn();
         void updateLanguage();
+
+        /*
+            Start of AMP addition (Y044)
+
+            Between ID_LOADED and the arrival of the server-owned profile, the local
+            player Ptr still holds the temporary CharGen state: level 1, class base
+            skills and the starting shirt/pants/shoes. Sending that state would make
+            the server persist it over the profile it has just loaded, which is how
+            skills, attributes, base health/magicka/fatigue and worn equipment were
+            being lost on login. Hold those packets back until the profile lands.
+        */
+        enum LoginSyncSection
+        {
+            LoginSync_StatsDynamic = 1 << 0,
+            LoginSync_Attributes   = 1 << 1,
+            LoginSync_Skills       = 1 << 2,
+            LoginSync_Level        = 1 << 3,
+            LoginSync_Equipment    = 1 << 4,
+            LoginSync_All          = (1 << 5) - 1
+        };
+
+        void beginLoginSync();
+        void markLoginSyncReceived(int section);
+        bool isLoginSyncPending() const { return mLoginSyncPending; }
+        /*
+            End of AMP addition (Y044)
+        */
 
         void updateStatsDynamic(bool forceUpdate = false);
         void updateAttributes(bool forceUpdate = false);
@@ -163,6 +191,27 @@ namespace mwmp
         void updateDeathRecovery(float dt);
         void sendDeathRecoveryControl(const std::string& payload);
         bool isRestoreHealthPotion(const MWWorld::Ptr& item) const;
+
+        /*
+            Start of AMP addition (Y044)
+        */
+        void updateLoginSync(float dt);
+        void adoptServerStateAsBaseline();
+
+        bool mLoginSyncPending;
+        int mLoginSyncReceived;
+        float mLoginSyncElapsed;
+
+        // These used to be function-local statics inside updateStatsDynamic(), so
+        // they survived a disconnect and were compared against the stats of the
+        // previous session after a relog within the same process.
+        bool mDynamicStatsBaselineValid;
+        MWMechanics::DynamicStat<float> mOldHealth;
+        MWMechanics::DynamicStat<float> mOldMagicka;
+        MWMechanics::DynamicStat<float> mOldFatigue;
+        /*
+            End of AMP addition (Y044)
+        */
 
         bool mDeathRecoveryActive;
         float mDeathRecoveryElapsed;

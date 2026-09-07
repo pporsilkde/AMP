@@ -1006,9 +1006,25 @@ namespace MWMechanics
                 else
                 {
                     localCast = MechanicsHelper::getLocalCast(mCaster);
-                    localCast->success = MechanicsHelper::getSpellSuccess(mId, mCaster);
-                    localCast->pressed = false;
-                    localCast->shouldSend = true;
+
+                    /*
+                        Start of AMP change (Y044)
+
+                        getLocalCast() returns nullptr for a caster that is neither the
+                        local player nor one of our local actors, which happens when an
+                        actor is cast from during the frame its LocalActor is being
+                        handed over on a cell change. Fall back to the ordinary success
+                        roll instead of dereferencing a null pointer.
+                    */
+                    if (localCast)
+                    {
+                        localCast->success = MechanicsHelper::getSpellSuccess(mId, mCaster);
+                        localCast->pressed = false;
+                        localCast->shouldSend = true;
+                    }
+                    /*
+                        End of AMP change (Y044)
+                    */
                 }
 
                 // Check success

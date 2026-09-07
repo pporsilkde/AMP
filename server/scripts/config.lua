@@ -1403,6 +1403,14 @@ config.cellPacketTypes = { "delete", "place", "spawn", "move", "rotate", "lock",
     "doorState", "clientScriptLocal", "container", "equipment", "ai", "death", "actorList", "position",
     "statsDynamic", "spellsActive", "cellChangeTo", "cellChangeFrom" }
 
+-- Y044: how long after a successful login incoming attribute, skill, dynamic-stat
+-- and equipment packets are checked against the stored profile before being
+-- accepted. A client that is still holding its CharGen placeholder would otherwise
+-- persist level 1 skills, class base attributes and the starting clothes over the
+-- profile the server has just sent. The guard lifts early as soon as a packet
+-- agrees with the stored profile, so this is only an upper bound.
+config.profileLoginGuardSeconds = 10
+
 -- Y013-fix-01: minimum seconds between two quicksaves of the same destination
 -- cell triggered by an actor cell change. Interior transitions still persist
 -- promptly; exterior hops rely on the normal periodic save.
