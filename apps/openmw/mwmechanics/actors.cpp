@@ -1708,8 +1708,14 @@ namespace MWMechanics
             Fatigue is derived the same way magicka is, but until now it was only ever
             recalculated as a side effect of an attribute actually changing value. A
             stored snapshot pushed over it at login therefore stuck around forever.
+
+            Player only. A hand-authored NPC carries whatever maximum fatigue its record
+            gives it, and that record is the authority; this function also runs whenever
+            an NPC's Intelligence changes, so deriving here would silently replace the
+            authored value with the attribute sum.
         */
-        creatureStats.recalcFatigueBase();
+        if (ptr == getPlayer())
+            creatureStats.recalcFatigueBase();
         /*
             End of AMP addition (Y056)
         */

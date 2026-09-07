@@ -27,4 +27,5 @@ Y023 combat HP: direct Widget fill; no ProgressBar Track; frameless overhead; fr
 Y024 chat HUD live feed: HUD no-scroll; Player Menu/pause history scroll only
 
 Y025 combat HP cell reset + validated fill ownership + floating damage recovery
-Y056 dynamic stats: fatigue and magicka derived by the engine; base health floor-validated
+Y056 dynamic stats: fatigue and magicka derived by the engine; base health rebuilt from
+  stats.healthLedger (origin level + per-level Endurance), seeded once for old profiles

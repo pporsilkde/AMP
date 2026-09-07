@@ -1696,13 +1696,19 @@ bool LocalPlayer::repairBaseHealth(const MWWorld::Ptr &ptrPlayer)
     // having been raised earlier than evenly.
     static const float sHealthRebuildGenerosity = 1.4f;
 
+    MWMechanics::NpcStats *ptrNpcStats = &ptrPlayer.getClass().getNpcStats(ptrPlayer);
+
+    // Werewolf form carries its own base health, stored separately by the server and
+    // unrelated to what character creation handed the human shape. Nothing here applies
+    // to it, and its Endurance would badly distort the rebuild.
+    if (ptrNpcStats->isWerewolf())
+        return false;
+
     float chargenStrength = 0.f;
     float chargenEndurance = 0.f;
 
     if (!getCharacterCreationAttributes(ptrPlayer, chargenStrength, chargenEndurance))
         return false;
-
-    MWMechanics::NpcStats *ptrNpcStats = &ptrPlayer.getClass().getNpcStats(ptrPlayer);
 
     const float chargenHealth = std::floor(0.5f * (chargenStrength + chargenEndurance));
 
