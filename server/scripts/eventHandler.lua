@@ -1106,14 +1106,8 @@ eventHandler.OnPlayerLevel = function(pid)
             Players[pid]:LoadLevel()
             return
         end
-
-        -- Y044: a level packet that survived the C26 check comes from a client that
-        -- has already applied the server profile, so the wider guard can be lifted.
-        if type(Players[pid].EndProfileLoginGuard) == "function" then
-            Players[pid]:EndProfileLoginGuard()
-        end
-
-        local eventStatus = customEventHooks.triggerValidators("OnPlayerLevel", {pid, playerPacket})
+        -- S003: PlayerLevel must not unlock equipment/profile sections.
+local eventStatus = customEventHooks.triggerValidators("OnPlayerLevel", {pid, playerPacket})
 
         if eventStatus.validDefaultHandler then
             Players[pid]:SaveLevel(playerPacket)
@@ -1551,8 +1545,12 @@ eventHandler.OnGenericActorEvent = function(pid, cellDescription, packetType)
             customEventHooks.triggerHandlers("On" .. packetType, eventStatus,
                 {pid, cellDescription, actors})
         else
-            tes3mp.LogMessage(enumerations.log.WARN, "Undefined behavior: " .. logicHandler.GetChatName(pid) ..
-                " sent " .. packetType .. " for unloaded " .. cellDescription)
+            -- Alpha 0.02: actor updates can arrive after the client has already
+            -- unloaded a cell. They are stale transport packets, not a gameplay
+            -- violation. Drop them before validators/storage and keep WARN for
+            -- malformed packets that reach a loaded cell.
+            tes3mp.LogAppend(enumerations.log.INFO, "- Ignored stale " .. packetType ..
+                " for unloaded cell " .. cellDescription .. " from " .. logicHandler.GetChatName(pid))
         end
     else
         tes3mp.Kick(pid)
@@ -1997,9 +1995,13 @@ eventHandler.OnContainer = function(pid, cellDescription)
 
         local isCellLoaded = LoadedCells[cellDescription] ~= nil
 
-        if not config.allowOnContainerForUnloadedCells and  not isCellLoaded and logicHandler.DoesPacketOriginRequireLoadedCell(packetOrigin) then
-            tes3mp.LogMessage(enumerations.log.WARN, "Invalid Container: " .. logicHandler.GetChatName(pid) ..
-                " used impossible packetOrigin for unloaded " .. cellDescription)
+        if not config.allowOnContainerForUnloadedCells and not isCellLoaded and
+            logicHandler.DoesPacketOriginRequireLoadedCell(packetOrigin) then
+            -- A container packet may be queued in the client while its cell
+            -- unloads. Do not load the cell or apply a remove/move from stale
+            -- transport data; this is a normal unload race.
+            tes3mp.LogAppend(enumerations.log.INFO, "- Ignored stale Container for unloaded cell " ..
+                cellDescription .. " from " .. logicHandler.GetChatName(pid))
             return
         end
 

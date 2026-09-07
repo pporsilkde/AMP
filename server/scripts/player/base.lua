@@ -169,6 +169,7 @@ function BasePlayer:__init(pid, playerName)
     -- Y044: same protection, extended to attributes, skills, dynamic stats and
     -- equipment. See BeginProfileLoginGuard().
     self.profileLoginGuardUntil = 0
+    self.profileLoginGuardPending = {}
 
     -- Y039: transient death-recovery state. This is never persisted; XP itself
     -- remains authoritative in data.stats and is saved by deathRecovery.
@@ -275,10 +276,13 @@ function BasePlayer:FinishLogin()
             end
         end
 
-        self:CleanInventory()
+        -- S003: old working ArenaMP servers did not clean inventory here.
+        -- Generated-record validation can happen later; login restoration must
+        -- first send the complete persisted profile intact.
+        -- self:CleanInventory()
         self:LoadInventory()
         self:LoadEquipment()
-        self:CleanSpellbook()
+        -- self:CleanSpellbook()
         self:LoadSpellbook()
         self:LoadSpellsActive()
         self:LoadCooldowns()
@@ -405,6 +409,13 @@ function BasePlayer:FinishLogin()
         -- account character snapshot have been fully loaded.
         tes3mp.SetPlayerVisible(self.pid, true)
 
+        -- S003: LoadEquipment above is intentionally kept for normal profile
+        -- ordering, but the local player model can be rebuilt when visibility is
+        -- restored. Re-assert the authoritative saved slots after that rebuild,
+        -- otherwise the client may stay visually and logically naked until the
+        -- player equips something manually.
+        self:LoadEquipment()
+
         if self.data.alliedPlayers == nil then self.data.alliedPlayers = {} end
 
         for _, otherAccountName in ipairs(self.data.alliedPlayers) do
@@ -518,6 +529,9 @@ function BasePlayer:EndCharGen()
     -- New accounts remain private through the entire registration/CharGen flow.
     -- Publish only the final character snapshot.
     tes3mp.SetPlayerVisible(self.pid, true)
+
+    -- S003: apply final saved equipment only after the published model exists.
+    self:LoadEquipment()
 
     self:RunPlayerSpecificStartupScripts()
 end
@@ -1134,16 +1148,45 @@ BasePlayer.profileGuardSections = {
 }
 
 function BasePlayer:BeginProfileLoginGuard()
-    -- Kept deliberately short: it only has to cover the handshake, not gameplay.
     self.profileLoginGuardUntil = os.time() + (config.profileLoginGuardSeconds or 10)
+    self.profileLoginGuardPending = {
+        PlayerAttribute = true,
+        PlayerSkill = true,
+        PlayerStatsDynamic = true,
+        PlayerEquipment = true
+    }
 end
 
-function BasePlayer:IsProfileLoginGuardActive()
-    return os.time() <= (self.profileLoginGuardUntil or 0)
+function BasePlayer:IsProfileLoginGuardActive(packetType)
+    if os.time() > (self.profileLoginGuardUntil or 0) then
+        self.profileLoginGuardPending = {}
+        return false
+    end
+
+    if packetType == nil then
+        return true
+    end
+
+    return self.profileLoginGuardPending ~= nil and
+        self.profileLoginGuardPending[packetType] == true
 end
 
-function BasePlayer:EndProfileLoginGuard()
-    self.profileLoginGuardUntil = 0
+function BasePlayer:EndProfileLoginGuard(packetType)
+    if packetType == nil then
+        self.profileLoginGuardUntil = 0
+        self.profileLoginGuardPending = {}
+        return
+    end
+
+    if self.profileLoginGuardPending == nil then
+        self.profileLoginGuardPending = {}
+    end
+
+    self.profileLoginGuardPending[packetType] = nil
+
+    if next(self.profileLoginGuardPending) == nil then
+        self.profileLoginGuardUntil = 0
+    end
 end
 
 -- A packet that agrees with the stored profile proves the client has applied it,
@@ -1196,6 +1239,10 @@ function BasePlayer:ProfilePacketMatchesStored(packetType, playerPacket)
     elseif packetType == "PlayerEquipment" then
         if playerPacket.equipment == nil then return false end
 
+        if next(playerPacket.equipment) == nil then
+            return false
+        end
+
         -- Equipment packets only carry the slots that changed.
         for slot, equipmentItem in pairs(playerPacket.equipment) do
             local storedItem = self.data.equipment[slot]
@@ -1222,16 +1269,16 @@ function BasePlayer:RejectStaleProfilePacket(packetType, playerPacket)
 
     local loaderName = BasePlayer.profileGuardSections[packetType]
 
-    if loaderName == nil or not self:IsProfileLoginGuardActive() then
+    if loaderName == nil or not self:IsProfileLoginGuardActive(packetType) then
         return false
     end
 
     if self:ProfilePacketMatchesStored(packetType, playerPacket) then
-        self:EndProfileLoginGuard()
+        self:EndProfileLoginGuard(packetType)
         return false
     end
 
-    tes3mp.LogAppend(enumerations.log.WARN,
+    tes3mp.LogAppend(enumerations.log.INFO,
         "[Profile] Ignored stale " .. packetType .. " during login sync for " ..
         logicHandler.GetChatName(self.pid))
 
