@@ -323,6 +323,15 @@ eventHandler.InitializeDefaultHandlers = function()
 
         if eventStatus.validDefaultHandler == false then return end
 
+        local fixGuard = require("fixCombatGuard")
+        for _, object in pairs(objects or {}) do
+            if object.hittingPid ~= nil then fixGuard.hit(object.hittingPid) end
+        end
+        for targetPid, target in pairs(targetPlayers or {}) do
+            fixGuard.hit(targetPid)
+            if target.hittingPid ~= nil then fixGuard.hit(target.hittingPid) end
+        end
+
         local debugMessage = nil
 
         for uniqueIndex, object in pairs(objects) do
@@ -1582,6 +1591,7 @@ eventHandler.OnActorAI = function(pid, cellDescription)
                 -- Y029: authored FOLLOW/ESCORT must survive an authority hand-off
                 -- and a cell becoming empty. Transient COMBAT heartbeats stay in
                 -- the native C++ cache and are deliberately not written to JSON.
+                require("fixCombatGuard").observeAI(actors)
                 LoadedCells[cellDescription]:SaveActorAI(actors)
                 tes3mp.CopyReceivedActorListToStore()
 
@@ -1630,6 +1640,7 @@ eventHandler.OnActorDeath = function(pid, cellDescription)
                     tes3mp.LogAppend(enumerations.log.INFO, debugMessage .. deathReason)
                 end
 
+                for id in pairs(actors) do require("fixCombatGuard").actorDied(id) end
                 LoadedCells[cellDescription]:SaveActorsByPacketType("ActorDeath", actors)
             end
             customEventHooks.triggerHandlers("OnActorDeath", eventStatus, {pid, cellDescription, actors})

@@ -108,7 +108,7 @@ void Networking::setVoiceEnabled(bool enabled)
 
 bool Networking::isVoiceEnabled() const
 {
-    return voiceEnabled;
+    return false; // Alpha 0.14: do not relay voice, regardless of cfg.
 }
 
 void Networking::setVoiceRangeMeters(float meters)

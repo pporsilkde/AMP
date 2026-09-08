@@ -1,3 +1,8 @@
+#include <cctype>
+#include "apps/openmw/mwbase/mechanicsmanager.hpp"
+#include "apps/openmw/mwmechanics/creaturestats.hpp"
+#include "apps/openmw/mwmechanics/aisequence.hpp"
+#include "apps/openmw/mwworld/class.hpp"
 #include "GUIChat.hpp"
 
 #include <algorithm>
@@ -1007,6 +1012,24 @@ namespace mwmp
     {
         LocalPlayer *localPlayer = Main::get().getLocalPlayer();
         Networking *networking = Main::get().getNetworking();
+
+        std::istringstream commandStream(str);
+        std::string command;
+        commandStream >> command;
+        std::transform(command.begin(), command.end(), command.begin(),
+            [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        if (command == "/fix" || command == "/fixme")
+        {
+            const MWWorld::Ptr player = localPlayer->getPlayerPtr();
+            if (!player.isEmpty() &&
+                (player.getClass().getCreatureStats(player).getAiSequence().isInCombat()
+                 || !MWBase::Environment::get().getMechanicsManager()->getActorsFighting(player).empty()))
+            {
+                MWBase::Environment::get().getWindowManager()->messageBox(
+                    MyGUI::LanguageManager::getInstance().replaceTags("#{arenamp=fix.combat_blocked}"));
+                return;
+            }
+        }
 
         localPlayer->chatMessage = str;
         networking->getPlayerPacket(ID_CHAT_MESSAGE)->setPlayer(localPlayer);
@@ -2914,7 +2937,7 @@ namespace mwmp
         }
         if (sender == mProfileFixButton)
         {
-            send("/fixme");
+            send("/fix");
             return;
         }
         if (sender == mProfileReturnsButton)

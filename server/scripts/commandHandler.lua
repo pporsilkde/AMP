@@ -750,30 +750,32 @@ function commandHandler.ProcessCommand(pid, cmd)
             tes3mp.SendMessage(pid, "That command is disabled on this server.\n", false)
         end
 
-    elseif cmd[1] == "fixme" then
-        if config.allowFixmeCommand == true then
+    elseif cmd[1] == "fix" or cmd[1] == "fixme" then
+        local player = Players[pid]
+        local isRu = tostring(player.language or "EN"):upper() == "RU"
+        if require("fixCombatGuard").blocked(pid) then
+            tes3mp.SendMessage(pid, isRu and "FIX и FIXME недоступны в бою или без сознания.\n"
+                or "FIX and FIXME are unavailable in combat or while unconscious.\n", false)
+        elseif config.allowFixmeCommand == true then
             local currentTime = os.time()
-            if Players[pid].data.timestamps.lastFixMe == nil or
-                currentTime >= Players[pid].data.timestamps.lastFixMe + config.fixmeInterval then
-                -- Y055: FIX uses the proven Nirn_FixAPI recovery point only.
-                -- Do not reuse this destination for unrelated emergency recovery paths.
-                tes3mp.SetCell(pid, "Balmora, Temple")
-                tes3mp.SendCell(pid)
-                tes3mp.SetPos(pid, 4700.0, 4700.0, 15000.0)
-                tes3mp.SetRot(pid, 0.0, 0.0)
+            local last = player.data.timestamps.lastFixMe
+            if last == nil or currentTime >= last + config.fixmeInterval then
+                if cmd[1] == "fix" then
+                    tes3mp.SetCell(pid, "Balmora, Temple")
+                    tes3mp.SendCell(pid)
+                    -- Preserve the project's existing Nirn_FixAPI recovery point.
+                    tes3mp.SetPos(pid, 4700.0, 4700.0, 15000.0)
+                    tes3mp.SetRot(pid, 0.0, 0.0)
+                else
+                    tes3mp.SetPos(pid, tes3mp.GetPosX(pid), tes3mp.GetPosY(pid), tes3mp.GetPosZ(pid) + 100)
+                end
                 tes3mp.SendPos(pid)
-                Players[pid].data.timestamps.lastFixMe = currentTime
-                local isRu = tostring(Players[pid].language or "EN"):upper() == "RU"
-                tes3mp.SendMessage(pid, isRu and "FIX: возвращение в Храм Балморы.\n"
-                    or "FIX: returning you to Balmora Temple.\n", false)
+                player.data.timestamps.lastFixMe = currentTime
             else
-                local remainingSeconds = Players[pid].data.timestamps.lastFixMe + config.fixmeInterval - currentTime
-                local isRu = tostring(Players[pid].language or "EN"):upper() == "RU"
-                tes3mp.SendMessage(pid, (isRu and "FIX будет доступен через " or "FIX cooldown: ") ..
-                    tostring(remainingSeconds) .. (isRu and " сек.\n" or " s.\n"), false)
+                tes3mp.SendMessage(pid, (isRu and "FIX/FIXME будет доступен через " or "FIX/FIXME cooldown: ") ..
+                    tostring(last + config.fixmeInterval - currentTime) .. (isRu and " сек.\n" or " s.\n"), false)
             end
         else
-            local isRu = tostring(Players[pid].language or "EN"):upper() == "RU"
             tes3mp.SendMessage(pid, isRu and "FIX отключён на сервере.\n" or "FIX is disabled on this server.\n", false)
         end
 
