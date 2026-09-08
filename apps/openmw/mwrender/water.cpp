@@ -264,7 +264,7 @@ protected:
         }
     }
 
-    void apply(osg::StateSet* stateset, osg::NodeVisitor* /*nv*/) override
+    void apply(osg::StateSet* stateset, osg::NodeVisitor* nv) override
     {
         if (osg::Uniform* rainIntensityUniform = stateset->getUniform("rainIntensity"))
             rainIntensityUniform->set(mRainIntensity);
@@ -291,7 +291,7 @@ protected:
             interiorUniform->set(mInterior ? *mInterior : false);
 
         const float waterLevel = mWaterNode ? mWaterNode->getPosition().z() : 0.f;
-        const float sheltered = MWRender::getShelteredWaterFactor(waterLevel, mInterior ? *mInterior : false);
+        const float sheltered = MWRender::getShelteredWaterFactor(waterLevel, mInterior ? *mInterior : false, nv);
         const float shelteredWave = std::clamp(Settings::Manager::getFloat("sheltered wave multiplier", "Water"), 0.0f, 1.0f);
         const float shelteredVerticalWave = std::clamp(Settings::Manager::getFloat("sheltered vertical wave multiplier", "Water"), 0.0f, 1.0f);
         const float shelteredFoam = std::clamp(Settings::Manager::getFloat("sheltered foam multiplier", "Water"), 0.0f, 1.0f);

@@ -1211,7 +1211,20 @@ function BasePlayer:LoadSkills()
     tes3mp.SendSkills(self.pid)
 end
 
+-- Alpha 0.11: progression packets cannot spend/refund points while unconscious.
+-- Resend both halves of the transaction; the server owns XP decay during recovery.
+function BasePlayer:RejectRecoveryProgressPacket(packetType)
+    if self.deathRecoveryActive ~= true or
+        (packetType ~= "PlayerSkill" and packetType ~= "PlayerLevel") then
+        return false
+    end
+    self:LoadSkills()
+    self:LoadLevel()
+    return true
+end
+
 function BasePlayer:SaveSkills(playerPacket)
+    if self:RejectRecoveryProgressPacket("PlayerSkill") then return end
 
     for skillName in pairs(self.data.skills) do
 
@@ -1502,6 +1515,7 @@ function BasePlayer:PersistXpProgress(force)
 end
 
 function BasePlayer:SaveLevel(playerPacket)
+    if self:RejectRecoveryProgressPacket("PlayerLevel") then return end
     local oldLevel = self.data.stats.level or 1
     local oldSkillPoints = self.data.stats.skillPoints or 0
 

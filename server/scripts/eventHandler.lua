@@ -1057,6 +1057,7 @@ end
 
 eventHandler.OnGenericPlayerEvent = function(pid, packetType)
     if Players[pid] ~= nil and Players[pid]:IsLoggedIn() then
+        if Players[pid]:RejectRecoveryProgressPacket(packetType) then return end
         local playerPacket = packetReader.GetPlayerPacketTables(pid, packetType)
 
         -- Y044: during the login handshake a client can still be publishing its
@@ -1085,6 +1086,8 @@ end
 
 eventHandler.OnPlayerLevel = function(pid)
     if Players[pid] ~= nil and Players[pid]:IsLoggedIn() then
+        -- Reject before XP-signal preprocessing and custom progression handlers.
+        if Players[pid]:RejectRecoveryProgressPacket("PlayerLevel") then return end
         local playerPacket = packetReader.GetPlayerPacketTables(pid, "PlayerLevel")
 
         -- X050: kill/quest XP is submitted as a transient reward-key signal.

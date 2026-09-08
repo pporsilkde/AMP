@@ -555,6 +555,11 @@ void LocalPlayer::beginDeathRecovery()
 {
     const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
     mDeathRecoveryActive = true;
+    // Close existing item/skill windows too; resurrection clears the recovery flag.
+    auto* windowManager = MWBase::Environment::get().getWindowManager();
+    windowManager->removeGuiMode(MWGui::GM_Barter);
+    windowManager->removeGuiMode(MWGui::GM_Container);
+    windowManager->removeGuiMode(MWGui::GM_Inventory);
     mDeathRecoveryElapsed = 0.f;
     mDeathRecoveryDuration = 30.f;
     mDeathRecoveryRequestCooldown = 0.f;

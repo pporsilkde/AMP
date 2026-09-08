@@ -26,6 +26,7 @@
 #include "../mwbase/environment.hpp"
 #include "../mwbase/mechanicsmanager.hpp"
 #include "../mwbase/windowmanager.hpp"
+#include "../mwbase/soundmanager.hpp"
 #include "../mwbase/world.hpp"
 
 #include "../mwworld/class.hpp"
@@ -34,6 +35,8 @@
 #include "../mwworld/timestamp.hpp"
 
 #include "../mwmp/MechanicsHelper.hpp"
+#include "../mwmp/Main.hpp"
+#include "../mwmp/LocalPlayer.hpp"
 
 namespace
 {
@@ -262,6 +265,7 @@ namespace
 
         // XP is banked immediately. No vanilla sleep gate or attribute picker is
         // involved; each completed level grants spendable skill points instead.
+        const int levelBefore = stats.getLevel();
         for (int guard = 0; guard < 100; ++guard)
         {
             const float required = xpRequirementForLevel(stats.getLevel());
@@ -271,6 +275,8 @@ namespace
             stats.setExperience(std::max(0.f, stats.getExperience() - required));
             completeLevelUp(player);
         }
+        if (stats.getLevel() > levelBefore)
+            MWBase::Environment::get().getSoundManager()->streamMusic("Special/MW_Triumph.mp3");
     }
 
     void addExperience(const MWWorld::Ptr& player, float amount, const std::string& notification)
@@ -728,6 +734,10 @@ namespace MWMechanics
         bool spendSkillPoints(const MWWorld::Ptr& player, int skillId)
         {
             if (!isEnabled() || player.isEmpty() || !player.getClass().isNpc())
+                return false;
+            const mwmp::LocalPlayer* localPlayer = mwmp::Main::get().getLocalPlayer();
+            if ((localPlayer && localPlayer->isDeathRecoveryActive())
+                || player.getClass().getCreatureStats(player).isDead())
                 return false;
             if (skillId < 0 || skillId >= ESM::Skill::Length)
                 return false;

@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <osg/FrameStamp>
+#include <osg/NodeVisitor>
+#include "shelteredwatertransition.hpp"
 
 #include <osg/Vec3f>
 
@@ -20,7 +23,7 @@ namespace MWRender
     // terrain rises to the water line within the configured fetch radius. This
     // deliberately uses geometry instead of cell names so modded lakes, canals,
     // rivers and coves work without per-world lists.
-    inline float getShelteredWaterFactor(float waterLevel, bool interior)
+    inline float sampleShelteredWaterFactor(float waterLevel, bool interior)
     {
         if (!Settings::Manager::getBool("auto sheltered water", "Water"))
             return 0.f;
@@ -32,7 +35,7 @@ namespace MWRender
             return 0.f;
 
         MWWorld::Ptr player = world->getPlayerPtr();
-        if (player.isEmpty() || !player.getCell() || !player.getCell()->isExterior())
+        if (player.isEmpty() || !player.isInCell() || !player.getCell()->isExterior())
             return 0.f;
 
         const osg::Vec3f playerPos = player.getRefData().getPosition().asVec3();
@@ -41,15 +44,17 @@ namespace MWRender
         const float threshold = std::clamp(Settings::Manager::getFloat("sheltered enclosure threshold", "Water"), 0.25f, 0.95f);
 
         // Recompute only after a meaningful move/water-level change. Two callers
-        // (world-state caustics and water material) keep tiny independent caches.
+        // (world-state caustics and water material) share this inline cache.
         static osg::Vec3f lastPos(std::numeric_limits<float>::max(), 0.f, 0.f);
         static float lastWater = std::numeric_limits<float>::max();
         static float lastRadius = -1.f;
         static float lastThreshold = -1.f;
+        static float lastMargin = std::numeric_limits<float>::max();
         static float cached = 0.f;
         const osg::Vec2f move(playerPos.x() - lastPos.x(), playerPos.y() - lastPos.y());
         if (move.length2() < 256.f * 256.f && std::abs(lastWater - waterLevel) < 1.f
-            && std::abs(lastRadius - radius) < 1.f && std::abs(lastThreshold - threshold) < 0.001f)
+            && std::abs(lastRadius - radius) < 1.f && std::abs(lastThreshold - threshold) < 0.001f
+            && std::abs(lastMargin - landMargin) < 0.001f)
             return cached;
 
         constexpr int directions = 16;
@@ -86,8 +91,17 @@ namespace MWRender
         lastWater = waterLevel;
         lastRadius = radius;
         lastThreshold = threshold;
+        lastMargin = landMargin;
         cached = factor;
         return factor;
+    }
+    inline float getShelteredWaterFactor(float waterLevel, bool interior, osg::NodeVisitor* visitor)
+    {
+        const float target = sampleShelteredWaterFactor(waterLevel, interior);
+        static ShelteredWaterTransition transition;
+        if (!visitor || !visitor->getFrameStamp())
+            return target;
+        return transition.update(target, visitor->getFrameStamp()->getSimulationTime());
     }
 }
 

@@ -31,6 +31,7 @@
 */
 #include <components/openmw-mp/TimedLog.hpp>
 #include "../mwmp/Main.hpp"
+#include "../mwmp/LocalPlayer.hpp"
 #include "../mwmp/GUIController.hpp"
 /*
     End of tes3mp addition
@@ -1542,6 +1543,15 @@ namespace MWGui
 
     void WindowManager::pushGuiMode(GuiMode mode, const MWWorld::Ptr& arg)
     {
+        // Alpha 0.11: cover keyboard, controller and direct GUI requests.
+        if (mode == GM_Inventory || mode == GM_Container || mode == GM_Barter)
+        {
+            const mwmp::LocalPlayer* localPlayer = mwmp::Main::get().getLocalPlayer();
+            const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+            if ((localPlayer && localPlayer->isDeathRecoveryActive())
+                || (!player.isEmpty() && player.getClass().getCreatureStats(player).isDead()))
+                return;
+        }
         if (mode==GM_Inventory && mAllowed==GW_None)
             return;
 
