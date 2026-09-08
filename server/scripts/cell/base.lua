@@ -1506,6 +1506,24 @@ function BaseCell:SaveActorCellChanges(pid)
             -- Only proceed if this Actor is actually supposed to exist in this cell
             if self.data.objectData[uniqueIndex] ~= nil then
 
+                -- The packet itself carries the destination transform. A missing
+                -- historical source position must not discard an otherwise valid
+                -- move after C++ has already accepted it and will relay it.
+                local position = {
+                    tes3mp.GetActorPosX(actorIndex), tes3mp.GetActorPosY(actorIndex),
+                    tes3mp.GetActorPosZ(actorIndex), tes3mp.GetActorRotX(actorIndex),
+                    tes3mp.GetActorRotY(actorIndex), tes3mp.GetActorRotZ(actorIndex)
+                }
+                local validPosition = #position == 6
+                for _, value in pairs(position) do
+                    if type(value) ~= "number" or value ~= value or math.abs(value) == math.huge then
+                        validPosition = false
+                    end
+                end
+                if not validPosition then
+                    tes3mp.LogAppend(enumerations.log.WARN, "- Invalid destination transform for " .. uniqueIndex)
+                else
+
                 -- X034: persist the route independently of whichever client owns
                 -- the actor. Interior transitions are door breadcrumbs; exterior
                 -- grid hops are harmless because the client walks exterior homes
@@ -1695,6 +1713,31 @@ function BaseCell:SaveActorCellChanges(pid)
                         rotY = tes3mp.GetActorRotY(actorIndex),
                         rotZ = tes3mp.GetActorRotZ(actorIndex)
                     }
+                    -- Alpha 0.12: a destination-only observer may never have loaded
+                    -- the intermediate cell. Introduce the reference from its original
+                    -- content cell, then replay its current state in the destination.
+                    -- Source observers already know this reference and receive the
+                    -- normal C++ ActorCellChange broadcast after this callback.
+                    local arrived = newCell.data.objectData[uniqueIndex]
+                    local origin = arrived.cellChangeFrom
+                    if origin ~= nil then
+                        for _, visitorPid in pairs(newCell.visitors) do
+                            if visitorPid ~= pid and not tableHelper.containsValue(self.visitors, visitorPid) then
+                                tes3mp.ClearActorList()
+                                tes3mp.SetActorListPid(visitorPid)
+                                tes3mp.SetActorListCell(origin)
+                                tes3mp.SetActorRefNum(tes3mp.GetActorRefNum(actorIndex))
+                                tes3mp.SetActorMpNum(tes3mp.GetActorMpNum(actorIndex))
+                                tes3mp.SetActorCell(newCellDescription)
+                                local location = arrived.location
+                                tes3mp.SetActorPosition(location.posX, location.posY, location.posZ)
+                                tes3mp.SetActorRotation(location.rotX, location.rotY, location.rotZ)
+                                tes3mp.AddActor()
+                                tes3mp.SendActorCellChange(false, false)
+                                newCell:LoadActorPackets(visitorPid, newCell.data.objectData, { uniqueIndex })
+                            end
+                        end
+                    end
                     -- Y013-fix-01: the original code quicksaved the destination on
                     -- every actor cell change, including exterior->exterior. Wandering
                     -- NPCs and followers cross exterior borders constantly, so on a
@@ -1714,6 +1757,11 @@ function BaseCell:SaveActorCellChanges(pid)
                             newCell:QuicksaveToDrive()
                         end
                     end
+                end
+                -- Close the destination-position guard before handling the stale
+                -- objectData branch below.  Keeping this boundary explicit is
+                -- important: the two branches are independent (missing source
+                -- transform versus missing actor record).
                 end
             else
                 -- Y050: this is a stale authority hand-off, not a corrupt cell.

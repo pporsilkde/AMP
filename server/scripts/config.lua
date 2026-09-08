@@ -19,19 +19,6 @@ config.gameMode = "ArenaMP MMO"
 -- Time to login, in seconds
 config.loginTime = 60
 
--- Y050: dedicated-server self restart. This replaces the old external
--- Nirn_ResetAPI/launcher restart loop. The server saves state, shows a
--- 30-second client HUD countdown, exits with a reserved code and relaunches
--- itself from the native dedicated-server executable.
-config.embeddedRestart = {
-    enabled = true,
-    intervalHours = 12,
-    countdownSeconds = 30,
-    exitCode = 42,
-    commandName = "shutdown",
-    requiredRank = 2
-}
-
 -- X051: restart-safe player position persistence. The stock TES3MP 0.8.1
 -- server does not expose ID_PLAYER_POSITION to Lua, so X051 adds that callback
 -- and keeps the last in-cell transform authoritative. Disk writes are debounced;
@@ -109,7 +96,7 @@ config.arenaStavesAccuracyBonus = true
 config.arenaSkillBooksLevelLimit = true
 config.arenaNewConstantEffectDifficulty = true
 -- X030: skill-use-only multiplier (organic skill actions).
-config.arenaGlobalXpMultiplier = 1.0
+config.arenaGlobalXpMultiplier = 1.00
 -- X030: overall server-authoritative XP rate. 0.50 very slow, 0.75 slow,
 -- 1.00 normal, 1.50 fast, 2.00 very fast. This mirrors the launcher's
 -- convenience profiles; remote servers still choose their own value.
@@ -366,11 +353,6 @@ config.refinedAlchemy = {
     ["skill reveal effect 3"] = 45,
     ["skill reveal effect 4"] = 60,
     ["fatigue affects success"] = true,
-    -- Y049: require an actual empty container for each successfully brewed potion.
-    -- Only Misc items whose DISPLAY NAME contains one of these semicolon-separated
-    -- tokens qualify; refIds are intentionally ignored.
-    ["require bottle"] = true,
-    ["bottle name tokens"] = "bottle;flask;vial;бутыл;флакон;склян",
 }
 
 config.alchemyGameplay = {
@@ -634,95 +616,11 @@ config.serverQuestVanillaJournalWhitelist = {}
 config.startupScriptsInstructions = color.SkyBlue .. " \n"
 
 
--- ArenaMP Y043: MFR.esm compatibility policy.
--- The server detects MFR.esm at OnServerPostInit; these values are inert when
--- MFR is not loaded. The full-content profile reproduces MFR al_OptionStart3.
-config.mfrCompatibility = {
-    enabled = true,
-    forceFullContent = true,
-    privateQuestInstances = true,
-    disableWaterMist = true,
-    disableOptionMenu = true,
-    dataFile = "MFR.esm",
-    playerStartupScripts = { "aL_LoadGameMFR", "SW_UpdatePCRep" },
-    disabledScripts = {
-        -- 904 activators in 73 exterior cells run al_mistScript distance/weather/time logic.
-        -- Blank it to remove the heavy scripted water-mist controller.
-        "al_mistScript",
-        -- ArenaMP owns the MFR content profile; prevent a later local menu from
-        -- switching the world back to Start1/Start2 or rewriting the same globals.
-        "al_OptionInitialize", "al_OptionStart1", "al_OptionStart2", "al_OptionStart3",
-        "al_VanillaScript01", "al_VanillaScript02"
-    },
-    fullContentGlobals = {
-        { id = "al_MFRGlobal", type = "short", value = 1 },
-        { id = "al_mpregen_check", type = "short", value = 1 },
-        { id = "al_DifficultyMod", type = "float", value = 1.5 },
-        { id = "al_travGlobal", type = "short", value = 1 },
-        { id = "aL_Retroactive", type = "short", value = 0 },
-        { id = "al_CraftGlobal", type = "short", value = 1 },
-        { id = "al_QuestFalmer", type = "short", value = 0 },
-        { id = "al_QuestGMCald", type = "short", value = 0 },
-        { id = "al_QuestPelagiad", type = "short", value = 0 },
-        { id = "al_QuestCent", type = "short", value = 0 },
-        { id = "al_QuestClagius", type = "short", value = 0 },
-        { id = "al_QuestNirnroot", type = "short", value = 0 },
-        { id = "al_QuestHeladren", type = "short", value = 0 },
-        { id = "al_QuestCalia1", type = "short", value = 0 },
-        { id = "al_QuestCalia2", type = "short", value = 0 },
-        { id = "al_QuestEndyne", type = "short", value = 0 },
-        { id = "al_QuestFireAnud", type = "short", value = 0 },
-        { id = "al_QuestArena", type = "short", value = 0 },
-        { id = "al_QuestSkyrim", type = "short", value = 0 },
-        { id = "al_QuestTelMora", type = "short", value = 0 },
-        { id = "al_LocGDR", type = "short", value = 0 },
-        { id = "al_LowerLevels", type = "short", value = 0 },
-    },
-    privateQuestCells = {
-        "Vivec, Arena Pit",
-        "Vivec, Arena Blue Team's Bloodworks",
-        "Vivec, Arena Red Team's Bloodworks",
-        "Нрингмарт, Ледяные туннели",
-        "Нрингмарт, Зал кондесации",
-        "Нрингмарт, Зал Рудного Эха",
-        "Хижина Калии",
-        "Marandus, Dome",
-        "Сейда Нин, Дом Эндина",
-        "Форт Легиона Лунной Бабочки, Шахта",
-        "Аркнтанд, Галерея четырех лун",
-        "Аркнтанд, Эбонитовые залежи",
-        "Ашир-Дан, глубины",
-        "Забытые Своды Ануднабии",
-        "Akimaes Grotto",
-        "Тель Мора, Подземная Башня",
-    },
-    synchronizedScripts = {
-        "fal_falmersAttackScript", "al_falmer_wall_1", "al_Fal_FirePlace_01", "al_fal_FireIce",
-        "al_Fal_BM_rock_04", "Fal_ActObvalScript", "mfr_doorPass01", "mfr_doorPass02",
-        "al_fal_dwrv_load00clScr", "al_moonmothCaveDoor", "al_in_mudcave_rock_3_actFM", "al_moonmoth_cave_In",
-        "al_moonRuinDisable", "al_door_buttonbox_broken", "al_dwrv_arkntCrank1", "al_moonmoth_brennan",
-        "al_brennanJournal", "al_moonCaveJournal_85", "al_ashirDun_hpMinus", "al_chest_Ahir-Dan",
-        "al_HinabiDoor", "al_HinabiRock", "al_ClagiusADdisable", "al_ClagiusADdisable2",
-        "al_ClagiusADdisableRM", "al_moonCollisionDisable", "al_MoonGhorkDisable", "compCaliaScript",
-        "compCaliaStartScript", "al_calia_sword_sc", "al_CaliaDoor", "al_EndyneClothing",
-        "al_EndyneScriptAct", "al_EndyneStEnDis", "al_bookBetTreddur", "al_GMCaldDisable",
-        "al_mg_AnvilOfBoetia", "al_mg_book_script01", "al_mg_FAJournal01", "al_mg_FAJournal02",
-        "al_mg_chestofornsomaren", "al_mg_door_anudnabia", "al_PelagiadWelldoor", "al_PelagiadWelldoor2",
-        "al_PelagiadWellTopic", "al_cent_shock_remoteScr", "al_cent_shock_scr", "al_cent_shock_scr2",
-        "al_cent_shock_scr3", "al_cent_shock_scr4", "Arena_Dealer_script", "Arena_Master_Script",
-        "Arena_Grand_champion_Script", "Arena_Partner_Script", "Arena_Partner_R_Script", "Arena_Pit_door",
-        "Arena_PlaceChampions_script", "Arena_PlaceChamps_team_script", "Arena_PlaceFighters_script", "Arena_PlaceFighters_R_script",
-        "Arena_PlaceMonsters_script", "Arena_Monster_check_script", "Arena_FinalBattle_music_script", "Arena_Garding_dead_check_Script",
-        "Arena_Mods_dead_check_Script", "Arena_Bolvyn_Dead_Check_Script", "Arena_Rothis_dead_check_Script", "Arena_Trebon_Dead_Check_Script",
-        "Arena_Vatini_Dead_Check_Script", "Arena_bet_BlueFighter_Script", "Arena_bet_RedFighter_Script", "Arena_guard_script",
-        "Arena_options_stone_script", "Arena_spikes_colission", "Arena_spikes_damage", "arena_invisiblewall_script",
-        "Arena_safespot_block_script", "OAAB_script_TMora_redjinx", "OAAB_script_TMora_trapShock", "OAAB_script_TMora_vampcount",
-        "OAAB_script_TMora_vampstalker", "OAAB_script_TMora_whitejinx", "OAAB_script_TMora_goldkanet", "OAAB_script_TMora_index",
-        "OAAB_script_TMora_memstone_01", "OAAB_script_TMora_memstone_02", "OAAB_script_TMora_memstone_03", "OAAB_script_TMora_memstone_04",
-        "OAAB_script_TMora_timsa", "OAAB_script_TMora_tramaroot", "OAAB_script_TMora_webtrap", "al_dwrv_lava_GDR",
-        "al_GDRDisable", "al_GDRDisable2", "al_odr_Ladder_dn_ScrGDR", "al_odr_Ladder_ScriptGDR",
-    }
-}
+-- Active content collection: NIRN (requiredDataFiles.json already supplied by server(2)).
+-- Do not run MFR startup scripts or create its globals against Nirn_Core.ESP.
+config.contentCollection = "NIRN"
+config.mfrCompatibility = { enabled = false }
+
 
 -- Which ingame startup scripts should be run via the /runstartup command
 -- Note: These affect the world and must not be run for every player who joins.
@@ -746,8 +644,7 @@ config.allowConsole = false
 -- Whether players should be allowed to rest in bed by default
 config.allowBedRest = true
 
--- Whether players should be allowed to rest in the wilderness by default.
--- ArenaMP default: beds are required; outdoor rest/sleep is disabled.
+-- Whether players should be allowed to rest in the wilderness by default
 config.allowWildernessRest = false
 
 -- Whether players should be allowed to wait by default
@@ -1074,12 +971,6 @@ config.ignoreModifierWithMaxSkill = false
 -- The refIds of items that players are not allowed to equip for balancing reasons
 config.bannedEquipmentItems = { "helseth's ring" }
 
--- Y054 training limiter. Counts are intentionally runtime-only: reconnecting
--- does not reset them, while a real server restart clears them automatically.
-config.trainingLimit = {
-    ["per npc per restart"] = 3
-}
-
 -- Whether players should respawn when dying
 config.playersRespawn = true
 
@@ -1096,12 +987,6 @@ config.deathRecovery = {
     ["potion revive health fraction"] = 0.25,
     ["touch revive health fraction"] = 0.10,
     ["ally revive distance"] = 256,
-
-    -- Y054: Restore Health potion cost scales with the incapacitated player's
-    -- permanent level. At defaults: level 1-4 = 1 potion, 5-9 = 2, 10-14 = 3, etc.
-    ["base potions required"] = 1,
-    ["levels per extra potion"] = 5,
-    ["extra potions per step"] = 1,
 
     -- Y040: the revive request names an inventory item, so the server checks that
     -- the item really restores health before spending it. Custom potions are
@@ -1130,31 +1015,6 @@ config.bountyDeathPenalty = false
 -- Whether players should be allowed to use the /suicide command
 config.allowSuicideCommand = true
 
--- ArenaMP Y049 persistent profile/statistics and level-25 return points.
-config.profileSystem = {
-    ["return unlock level"] = 25,
-    ["return cooldown seconds"] = 20
-}
-
--- ArenaMP Y052 server-authoritative alchemy bottle requirement. The client
--- setting [ArenaMW Alchemy] "require bottle" only drives the UI; this is what
--- actually enforces it. Matching happens on refId because the server never sees
--- localized item names - add exact refIds below if your bottles are named
--- differently.
-config.alchemySystem = {
-    ["require bottle"] = true,
-    ["bottle refid tokens"] = { "bottle", "flask", "vial" },
-    ["bottle refids"] = {},
-    ["log rejections"] = true
-}
-
--- ArenaMP Y049 persistent coloured map markers. Personal markers are stored
--- inside the player profile; group markers are stored by persistent group id.
-config.mapMarkerSystem = {
-    ["max personal markers"] = 128,
-    ["max group markers"] = 64
-}
-
 -- Whether players should be allowed to use the /fixme command
 config.allowFixmeCommand = true
 
@@ -1175,8 +1035,7 @@ config.customMenuIds = { menuHelper = 9001, confiscate = 9002, recordPrint = 900
     questEditorStages = 9023, questEditorStageList = 9024, questEditorStageDetail = 9025,
     questEditorRequirements = 9026, questEditorRequirementList = 9027, questEditorRewards = 9028,
     questEditorRewardList = 9029, questEditorTransitions = 9030, questEditorTransitionList = 9031,
-    questEditorConfirm = 9032, questEditorStageFlags = 9033, questEditorGiver = 9034,
-    profileMain = 9040, profileReturns = 9041, profileDeletePassword = 9042 }
+    questEditorConfirm = 9032, questEditorStageFlags = 9033, questEditorGiver = 9034 }
 
 -- The menu files that should be loaded for menuHelper, from the scripts/menu subfolder
 config.menuHelperFiles = { "help", "defaultCrafting", "advancedExample" }
@@ -1403,14 +1262,6 @@ config.cellPacketTypes = { "delete", "place", "spawn", "move", "rotate", "lock",
     "doorState", "clientScriptLocal", "container", "equipment", "ai", "death", "actorList", "position",
     "statsDynamic", "spellsActive", "cellChangeTo", "cellChangeFrom" }
 
--- Y044: how long after a successful login incoming attribute, skill, dynamic-stat
--- and equipment packets are checked against the stored profile before being
--- accepted. A client that is still holding its CharGen placeholder would otherwise
--- persist level 1 skills, class base attributes and the starting clothes over the
--- profile the server has just sent. The guard lifts early as soon as a packet
--- agrees with the stored profile, so this is only an upper bound.
-config.profileLoginGuardSeconds = 10
-
 -- Y013-fix-01: minimum seconds between two quicksaves of the same destination
 -- cell triggered by an actor cell change. Interior transitions still persist
 -- promptly; exterior hops rely on the normal periodic save.
@@ -1464,7 +1315,7 @@ config.objectGrabPermissions = {
 -- Warning: Only set this to false if you trust the people connecting and are sure they know
 --          what they're doing. Otherwise, you risk getting corrupt server data from
 --          their usage of unshared plugins.
-config.enforceDataFiles = false
+config.enforceDataFiles = true
 
 -- Whether the server should avoid crashing when Lua script errors occur
 -- Warning: Only set this to true if you want to have a highly experimental server where
@@ -1487,7 +1338,7 @@ config.disallowedNameStrings = { "bitch", "blowjob", "blow job", "cocksuck", "cu
 
 -- The order in which table keys should be saved to JSON files
 config.playerKeyOrder = { "login", "name", "passwordHash", "passwordSalt", "timestamps", "settings",
-    "character", "customClass", "location", "stats", "profile", "fame", "shapeshift", "attributes",
+    "character", "customClass", "location", "stats", "fame", "shapeshift", "attributes",
     "attributeSkillIncreases", "skills", "skillProgress", "recordLinks", "equipment", "inventory",
     "spellbook", "books", "factionRanks", "factionReputation", "factionExpulsion", "mapExplored",
     "ipAddresses", "customVariables", "admin", "difficulty", "enforcedLogLevel", "physicsFramerate",

@@ -218,12 +218,7 @@ int main(int argc, char *argv[])
 
     int logLevel = mgr.getInt("logLevel", "General");
     if (logLevel < TimedLog::LOG_VERBOSE || logLevel > TimedLog::LOG_FATAL)
-        logLevel = TimedLog::LOG_WARN;
-
-    // Y050 production server policy: do not allow legacy/user configs to turn
-    // the dedicated-server file back to VERBOSE/INFO. WARN is the minimum.
-    if (logLevel < TimedLog::LOG_WARN)
-        logLevel = TimedLog::LOG_WARN;
+        logLevel = TimedLog::LOG_INFO;
 
     // Some objects used to redirect cout and cerr
     // Scope must be here, so this still works inside the catch block for logging exceptions

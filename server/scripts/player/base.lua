@@ -903,36 +903,13 @@ function BasePlayer:SaveClass(playerPacket)
     end
 end
 
--- Y056 -----------------------------------------------------------------------
+-- Y056: maximum fatigue is Strength + Willpower + Agility + Endurance and nothing else,
+-- so a stored value the stored attributes contradict is corruption rather than
+-- progression and must not be handed back to the client.
 --
--- Dynamic stats are stored as results, which is why they cannot be checked and, once
--- damaged, never recover. The fix is to keep what they are computed FROM.
---
--- Maximum fatigue needs nothing extra: it is Strength + Willpower + Agility + Endurance
--- and the attributes are already on record, so it is re-derived on every login.
---
--- Maximum health accumulates across level-ups, so the inputs are written down as they
--- happen, in stats.healthLedger:
---
---     originLevel   the level the ledger starts from
---     originHealth  base health at that level
---     gains         Endurance at each level-up since, one entry per level
---
---     healthBase = originHealth + healthEndMult * sum(gains)
---
--- Nothing but addition, and every term is stored, so the value can be rebuilt exactly
--- however many times it gets lost. New characters seed at level 1 with their character
--- creation health, which is the true origin. Characters that predate the ledger seed
--- once from whatever the client reports after it has rebuilt them; everything after
--- that point is exact.
---
--- fLevelUpHealthEndMult mirrored from the game settings - the server cannot read GMSTs,
--- so change both together if that setting is modified.
-local healthEndMult = 0.1
-
--- Rebuilt health is a float; compare with a tolerance rather than for equality.
-local healthEpsilon = 0.01
-
+-- Base health is deliberately not rebuilt here. Doing it properly needs the attributes
+-- character creation handed out, which live in the race and class records the server
+-- does not read. The client performs that repair and publishes the result back.
 function BasePlayer:GetAttributeBase(attributeName)
 
     if self.data.attributes == nil then return nil end
@@ -946,68 +923,6 @@ function BasePlayer:GetAttributeBase(attributeName)
     end
 
     return nil
-end
-
-function BasePlayer:GetLedgerHealth()
-
-    local ledger = self.data.stats.healthLedger
-
-    if type(ledger) ~= "table" or type(ledger.originHealth) ~= "number" then
-        return nil
-    end
-
-    local total = ledger.originHealth
-
-    if type(ledger.gains) == "table" then
-        for _, endurance in ipairs(ledger.gains) do
-            total = total + healthEndMult * endurance
-        end
-    end
-
-    return total
-end
-
-function BasePlayer:SeedHealthLedger(originHealth)
-
-    if type(originHealth) ~= "number" or originHealth <= 0 then return end
-
-    self.data.stats.healthLedger = {
-        originLevel = self.data.stats.level or 1,
-        originHealth = originHealth,
-        gains = {}
-    }
-
-    tes3mp.LogMessage(enumerations.log.INFO, "Seeded health ledger for " .. self.accountName ..
-        " at level " .. tostring(self.data.stats.healthLedger.originLevel) ..
-        " with base health " .. tostring(originHealth))
-end
-
--- Bring the ledger in line with the level actually on record. Doing it by comparison
--- rather than by reacting to each level change means a missed or duplicated level packet
--- corrects itself instead of leaving the ledger permanently out of step.
-function BasePlayer:ReconcileHealthLedger()
-
-    local ledger = self.data.stats.healthLedger
-
-    if type(ledger) ~= "table" or type(ledger.gains) ~= "table" then return end
-
-    local level = self.data.stats.level or 1
-    local expected = math.max(0, level - (ledger.originLevel or 1))
-
-    while #ledger.gains > expected do
-        table.remove(ledger.gains)
-    end
-
-    if #ledger.gains < expected then
-
-        local endurance = self:GetAttributeBase("Endurance")
-
-        if endurance == nil then return end
-
-        while #ledger.gains < expected do
-            table.insert(ledger.gains, endurance)
-        end
-    end
 end
 
 function BasePlayer:RepairDerivedStats()
@@ -1038,31 +953,6 @@ function BasePlayer:RepairDerivedStats()
         self.data.stats.fatigueBase = derivedFatigue
         self.data.stats.fatigueCurrent = derivedFatigue * ratio
     end
-
-    -- Werewolf form keeps its own base health and is outside the ledger entirely.
-    if tes3mp.IsWerewolf(self.pid) then return end
-
-    self:ReconcileHealthLedger()
-
-    local ledgerHealth = self:GetLedgerHealth()
-
-    if ledgerHealth == nil then return end
-
-    if type(self.data.stats.healthBase) ~= "number" or
-        math.abs(self.data.stats.healthBase - ledgerHealth) > healthEpsilon then
-
-        local ratio = 1
-        if type(self.data.stats.healthBase) == "number" and self.data.stats.healthBase > 0 then
-            ratio = math.min(1, math.max(0, self.data.stats.healthCurrent / self.data.stats.healthBase))
-        end
-
-        tes3mp.LogMessage(enumerations.log.WARN, "Restoring base health for " .. self.accountName ..
-            " from " .. tostring(self.data.stats.healthBase) .. " to " .. tostring(ledgerHealth) ..
-            " (rebuilt from the level ledger)")
-
-        self.data.stats.healthBase = ledgerHealth
-        self.data.stats.healthCurrent = math.max(1, ledgerHealth * ratio)
-    end
 end
 
 function BasePlayer:LoadStatsDynamic()
@@ -1092,31 +982,13 @@ function BasePlayer:SaveStatsDynamic(playerPacket)
 
     local healthBase = playerPacket.stats.healthBase
 
-    -- Y056: the ledger owns base health. Anything else the client reports for it is a
-    -- placeholder, a rounding artefact or corruption, so the ledger value wins.
-    if not tes3mp.IsWerewolf(self.pid) and type(healthBase) == "number" then
+    -- Y056: base health only ever grows, so a client reporting less than the account
+    -- already has is reporting a placeholder it built before its profile arrived.
+    -- Keep the stored figure and let the rest of the packet through.
+    if not tes3mp.IsWerewolf(self.pid) and type(self.data.stats.healthBase) == "number" and
+        type(healthBase) == "number" and healthBase < self.data.stats.healthBase then
 
-        if self:GetLedgerHealth() == nil then
-
-            -- First packet since this account gained a ledger. For a character created
-            -- in this session that is its character creation health at level 1, an exact
-            -- origin. For an older character it is whatever the client rebuilt from the
-            -- race and class records the server cannot read.
-            self:SeedHealthLedger(math.max(healthBase, self.data.stats.healthBase or 0))
-        else
-            self:ReconcileHealthLedger()
-        end
-
-        local ledgerHealth = self:GetLedgerHealth()
-
-        if ledgerHealth ~= nil and math.abs(healthBase - ledgerHealth) > healthEpsilon then
-
-            tes3mp.LogMessage(enumerations.log.WARN, "Overriding reported base health for " ..
-                self.accountName .. " (" .. tostring(healthBase) .. " -> " ..
-                tostring(ledgerHealth) .. ", rebuilt from the level ledger)")
-
-            healthBase = ledgerHealth
-        end
+        healthBase = self.data.stats.healthBase
     end
 
     -- Sometimes, the player's base health gets set to 1 serverside;
@@ -1533,13 +1405,6 @@ function BasePlayer:SaveLevel(playerPacket)
     -- frequent, so ordinary gains are debounced to one write per 5 seconds;
     -- level-ups and SP changes are persisted immediately.
     local importantChange = oldLevel ~= self.data.stats.level or oldSkillPoints ~= self.data.stats.skillPoints
-
-    -- Y056: record what this level-up contributes to maximum health while the inputs are
-    -- still known, so the value can be rebuilt from scratch later.
-    if oldLevel ~= self.data.stats.level then
-        self:ReconcileHealthLedger()
-    end
-
     self:PersistXpProgress(importantChange)
 end
 

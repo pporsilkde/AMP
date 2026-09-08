@@ -1,4 +1,5 @@
 local deathRecovery = {}
+local nirnRestoreHealth = require("nirnRestoreHealth")
 
 local CONTROL_PREFIX = "@@AMP_REVIVE@@"
 
@@ -200,6 +201,7 @@ local function isRestoreHealthPotion(refId)
     if not cfgBoolean("validate potion refIds", true) then return true end
 
     local lowered = string.lower(refId)
+    if nirnRestoreHealth[lowered] then return true end
     for _, pattern in pairs(cfgList("restore health refId patterns")) do
         if type(pattern) == "string" and pattern ~= "" and string.match(lowered, pattern) ~= nil then
             return true
@@ -238,8 +240,6 @@ local function takePotions(player, preferredRefId, required)
 
     if type(preferredRefId) == "string" and preferredRefId ~= "" then
         if not isRestoreHealthPotion(preferredRefId) then
-            tes3mp.LogMessage(enumerations.log.WARN, "deathRecovery: refused unrecognised revive item " ..
-                tostring(preferredRefId) .. " from " .. tostring(player.accountName))
             return false
         end
         addCandidate(preferredRefId)

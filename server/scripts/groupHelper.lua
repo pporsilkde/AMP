@@ -28,6 +28,11 @@ local cfg = {
     protectSummons = true,
     summonCheckInterval = 2000,
     summonStopCombatCooldown = 2,
+    -- Sending a console StopCombat to a summon during a cell transition can
+    -- race the client's UpdateSummonedCreatures cleanup.  Keep the legacy
+    -- backstop available, but require an explicit opt-in from the server
+    -- configuration instead of emitting this packet by default.
+    summonStopCombat = false,
     summonLegacyStopCombatTick = false,
     debugMode = false,
     invitePopups = true,
@@ -44,6 +49,9 @@ if type(config.groupSystem) == "table" then
     cfg.maxQuestXpSignal = tonumber(config.groupSystem["max client quest xp signal"]) or cfg.maxQuestXpSignal
     if config.groupSystem["summon protection"] ~= nil then cfg.protectSummons = config.groupSystem["summon protection"] end
     cfg.summonCheckInterval = tonumber(config.groupSystem["summon check interval ms"]) or cfg.summonCheckInterval
+    if config.groupSystem["summon stopcombat"] ~= nil then
+        cfg.summonStopCombat = config.groupSystem["summon stopcombat"]
+    end
     if config.groupSystem["summon legacy stopcombat tick"] ~= nil then
         cfg.summonLegacyStopCombatTick = config.groupSystem["summon legacy stopcombat tick"]
     end
@@ -1102,6 +1110,7 @@ function groupHelper.IsFriendlySummon(pid, cellDescription, uniqueIndex)
 end
 
 local function stopSummonCombat(cellDescription, uid, targetPid)
+    if not cfg.summonStopCombat then return false end
     if not isValidPid(targetPid) or LoadedCells[cellDescription] == nil then return false end
     local cacheKey = cellDescription .. "|" .. uid .. "|" .. tostring(targetPid)
     local current = now()
