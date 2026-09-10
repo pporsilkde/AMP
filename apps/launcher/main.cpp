@@ -1,3 +1,4 @@
+#include <QTimer>
 #include <iostream>
 
 #include <QTranslator>
@@ -39,6 +40,10 @@ int main(int argc, char *argv[])
 
         if (result == Launcher::FirstRunDialogResultContinue)
             mainWin.show();
+
+        if (result == Launcher::FirstRunDialogResultContinue
+            && app.arguments().contains(QStringLiteral("--arena-update-resume")))
+            QTimer::singleShot(0, &mainWin, SLOT(play()));
 
         int exitCode = app.exec();
 

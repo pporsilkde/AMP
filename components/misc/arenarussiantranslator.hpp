@@ -32,6 +32,22 @@ namespace ArenaUi
             static const QHash<QString, QString> map = []()
             {
                 QHash<QString, QString> m;
+                m.insert(QString::fromUtf8(u8"Connect to another server"), QString::fromUtf8(u8"Подключиться к другому серверу"));
+                m.insert(QString::fromUtf8(u8"Server address"), QString::fromUtf8(u8"Адрес сервера"));
+                m.insert(QString::fromUtf8(u8"Server website"), QString::fromUtf8(u8"Сайт сервера"));
+                m.insert(QString::fromUtf8(u8"ArenaMP update"), QString::fromUtf8(u8"Обновление ArenaMP"));
+                m.insert(QString::fromUtf8(u8"Checking for updates..."), QString::fromUtf8(u8"Проверка обновлений..."));
+                m.insert(QString::fromUtf8(u8"Downloading engine update..."), QString::fromUtf8(u8"Скачивание обновления движка..."));
+                m.insert(QString::fromUtf8(u8"Downloading content update..."), QString::fromUtf8(u8"Скачивание обновления сборки..."));
+                m.insert(QString::fromUtf8(u8"Preparing update files..."), QString::fromUtf8(u8"Подготовка файлов обновления..."));
+                m.insert(QString::fromUtf8(u8"Update failed"), QString::fromUtf8(u8"Не удалось обновить"));
+                m.insert(QString::fromUtf8(u8"Cannot create update staging folder."), QString::fromUtf8(u8"Не удалось создать временную папку обновления."));
+                m.insert(QString::fromUtf8(u8"Updater is missing. Install the complete client package."), QString::fromUtf8(u8"Обновлятор отсутствует. Установите полный пакет клиента."));
+                m.insert(QString::fromUtf8(u8"Could not start the update installer."), QString::fromUtf8(u8"Не удалось запустить установщик обновления."));
+                m.insert(QString::fromUtf8(u8"Invalid server address"), QString::fromUtf8(u8"Неверный адрес сервера"));
+                m.insert(QString::fromUtf8(u8"Enter an address and a port from 1 to 65535."), QString::fromUtf8(u8"Укажите адрес и порт от 1 до 65535."));
+                m.insert(QString::fromUtf8(u8"Could not create the desktop shortcut."), QString::fromUtf8(u8"Не удалось создать ярлык на рабочем столе."));
+
                 m.insert(QString::fromUtf8(u8"Play"), QString::fromUtf8(u8"\u0418\u0433\u0440\u0430\u0442\u044C"));
                 m.insert(QString::fromUtf8(u8"Data Files"), QString::fromUtf8(u8"\u0424\u0430\u0439\u043B\u044B \u0434\u0430\u043D\u043D\u044B\u0445"));
                 m.insert(QString::fromUtf8(u8"Graphics"), QString::fromUtf8(u8"\u0413\u0440\u0430\u0444\u0438\u043A\u0430"));

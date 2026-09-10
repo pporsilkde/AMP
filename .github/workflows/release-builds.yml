@@ -203,10 +203,24 @@ jobs:
             ccache --show-stats || true
           fi
 
+      - name: Set up updater Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build standalone Windows updater
+        shell: pwsh
+        run: |
+          python apps/launcher/updater/test_updater.py
+          python -m pip install --disable-pip-version-check pyinstaller==6.16.0
+          python -m PyInstaller --noconfirm --clean --onefile --console --hide-console hide-early --icon files/windows/openmw-wizard.ico --name arena-updater --distpath install --workpath updater-build --specpath updater-build apps/launcher/updater/arena_updater.py
+          if (!(Test-Path "install/arena-updater.exe")) { throw "Updater build failed" }
+
       - name: Verify Windows install tree
         shell: pwsh
         run: |
           $requiredFiles = @(
+            "install\arena-updater.exe",
             "install\tes3mp.exe",
             "install\tes3mp-server.exe",
             "install\tes3mp-server-default.cfg",
@@ -381,6 +395,18 @@ jobs:
           cmake --build build --parallel 2
           cmake --install build
           ccache --show-stats || true
+
+      - name: Set up updater Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build standalone Linux updater
+        run: |
+          python apps/launcher/updater/test_updater.py
+          python -m pip install --disable-pip-version-check pyinstaller==6.16.0
+          python -m PyInstaller --noconfirm --clean --onefile --console --name arena-updater --distpath stage/bin --workpath updater-build --specpath updater-build apps/launcher/updater/arena_updater.py
+          test -x stage/bin/arena-updater
 
       - name: Create portable Steam Deck archive
         run: |

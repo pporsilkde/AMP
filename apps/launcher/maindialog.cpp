@@ -1,3 +1,4 @@
+#include "updatecontroller.hpp"
 #include "maindialog.hpp"
 
 #include <components/version/version.hpp>
@@ -761,6 +762,8 @@ bool Launcher::MainDialog::loadBuildManifest()
         mPlayPage->setServerAddress(mBuildServerAddress);
         mPlayPage->setServerPort(mBuildServerPort);
         mPlayPage->setBuildManifestComplete(mBuildComplete);
+        mPlayPage->setAlternativeServer(manifest.altAddress, manifest.altPort, manifest.useAlternativeServer);
+        mPlayPage->setProjectUrl(manifest.projectUrl);
         if (mBuildServerAddressSpecified)
         {
             mPlayPage->setAutoStartServer(false);
@@ -770,6 +773,7 @@ bool Launcher::MainDialog::loadBuildManifest()
         }
     }
 
+    QTimer::singleShot(0, this, [this, manifestPath]() { UpdateController::showResult(this, manifestPath); });
     qDebug() << "Loaded ArenaMP build manifest:" << manifestPath;
     return true;
 }
@@ -818,7 +822,7 @@ bool Launcher::MainDialog::writeBuildManifest()
     const bool localServerModeSelected = mPlayPage != nullptr
         && mPlayPage->autoStartServer();
 
-    if (localServerModeSelected && existingManifestRead)
+    if ((localServerModeSelected || mBuildComplete || (mPlayPage && mPlayPage->alternativeServer())) && existingManifestRead)
     {
         // Host mode is a launcher choice. Do not replace the distributed remote
         // endpoint in build.ini with this machine's LAN address and local port.
@@ -846,6 +850,12 @@ bool Launcher::MainDialog::writeBuildManifest()
         manifest.serverPort = mPlayPage != nullptr ? mPlayPage->serverPort() : mBuildServerPort;
         manifest.serverPortSpecified = !manifest.serverPort.trimmed().isEmpty();
         manifest.vanillaServerCompatibility = false;
+    }
+    if (mPlayPage)
+    {
+        manifest.useAlternativeServer = mPlayPage->alternativeServer();
+        manifest.altAddress = mPlayPage->alternativeAddress();
+        manifest.altPort = mPlayPage->alternativePort();
     }
     manifest.complete = mBuildComplete;
     manifest.contentFiles = mGameSettings.getContentList();
@@ -876,6 +886,13 @@ bool Launcher::MainDialog::writeBuildManifest()
 
 void Launcher::MainDialog::applyBuildManifestRestrictions()
 {
+    Config::BuildManifest linkManifest;
+    if (mPlayPage && !mBuildManifestPath.isEmpty() && linkManifest.read(mBuildManifestPath))
+    {
+        mPlayPage->setAlternativeServer(linkManifest.altAddress, linkManifest.altPort, linkManifest.useAlternativeServer);
+        mPlayPage->setProjectUrl(linkManifest.projectUrl);
+    }
+
     if (mPlayPage != nullptr)
     {
         mPlayPage->setBuildManifestComplete(mBuildComplete);
@@ -1207,6 +1224,17 @@ void Launcher::MainDialog::wizardFinished(int exitCode, QProcess::ExitStatus exi
 
 void Launcher::MainDialog::play()
 {
+    static bool updating = false;
+    if (updating) return;
+    const bool alternate = mPlayPage->alternativeServer();
+    bool portOk = false;
+    const int port = mPlayPage->alternativePort().toInt(&portOk);
+    if (alternate && (mPlayPage->alternativeAddress().isEmpty() || !portOk || port < 1 || port > 65535))
+    {
+        QMessageBox::warning(this, tr("Invalid server address"), tr("Enter an address and a port from 1 to 65535."));
+        return;
+    }
+
     if (!writeSettings())
         return qApp->quit();
 
@@ -1222,8 +1250,19 @@ void Launcher::MainDialog::play()
         return;
     }
 
-    mPendingClientAddress = mPlayPage->serverAddress();
-    mPendingClientPort = mPlayPage->serverPort();
+    // Skip exactly one check when a committed update restarts this launcher.
+    static bool resumed = QCoreApplication::arguments().contains(QStringLiteral("--arena-update-resume"));
+    if (!resumed)
+    {
+        updating = true;
+        const auto result = UpdateController::beforeLaunch(this, mBuildManifestPath, mBuildDataPath);
+        updating = false;
+        if (result != UpdateController::Result::Continue) return;
+    }
+    resumed = false;
+
+    mPendingClientAddress = alternate ? mPlayPage->alternativeAddress() : mPlayPage->serverAddress();
+    mPendingClientPort = alternate ? mPlayPage->alternativePort() : mPlayPage->serverPort();
 
     bool startedNow = false;
     const bool localServerMode = mPlayPage->autoStartServer();

@@ -1,3 +1,6 @@
+#include <QStandardPaths>
+#include <QSaveFile>
+#include <QRegularExpression>
 #include "mainwizard.hpp"
 
 #include <QDebug>
@@ -938,6 +941,53 @@ void Wizard::MainWizard::importerFinished(int exitCode, QProcess::ExitStatus exi
 void Wizard::MainWizard::accept()
 {
     writeSettings();
+    // The chosen data installation is already stored in launcher/openmw.cfg.
+    // Name the shortcut after the distributed server/build, not the executable.
+    const QString desktop = QStandardPaths::writableLocation(QStandardPaths::DesktopLocation);
+    QString name = mBuildName.trimmed();
+    if (name.isEmpty()) name = QStringLiteral("Server");
+    name.replace(QRegularExpression(QStringLiteral("[\\\\/:*?\"<>|\\x00-\\x1f]")), QStringLiteral("_"));
+    while (name.endsWith(QLatin1Char('.')) || name.endsWith(QLatin1Char(' '))) name.chop(1);
+    if (name.isEmpty()) name = QStringLiteral("Server");
+    name = name.left(100);
+    const QDir application(QCoreApplication::applicationDirPath());
+#ifdef Q_OS_WIN
+    const QString launcher = application.filePath(QStringLiteral("openmw-launcher.exe"));
+    const QString shortcut = QDir(desktop).filePath(name + QStringLiteral(".lnk"));
+    if (!desktop.isEmpty() && QFileInfo::exists(launcher) && !QFileInfo::exists(shortcut))
+    {
+        QDir().mkpath(desktop);
+        if (!QFile::link(launcher, shortcut)) addLogText(tr("Could not create the desktop shortcut."));
+    }
+#elif defined(Q_OS_LINUX)
+    const QString launcher = application.filePath(QStringLiteral("openmw-launcher"));
+    const QString shortcut = QDir(desktop).filePath(name + QStringLiteral(".desktop"));
+    if (!desktop.isEmpty() && QFileInfo::exists(launcher) && !QFileInfo::exists(shortcut))
+    {
+        QDir().mkpath(desktop);
+        auto desktopEscape = [](QString value) {
+            value.replace(QLatin1Char('\\'), QStringLiteral("\\\\"));
+            value.replace(QLatin1Char('\n'), QStringLiteral("\\n"));
+            value.replace(QLatin1Char('\r'), QStringLiteral("\\r"));
+            return value;
+        };
+        QString command = launcher;
+        command.replace(QLatin1Char('\\'), QStringLiteral("\\\\\\\\"));
+        command.replace(QLatin1Char('"'), QStringLiteral("\\\\\""));
+        command.replace(QLatin1Char('`'), QStringLiteral("\\\\`"));
+        command.replace(QLatin1Char('$'), QStringLiteral("\\\\$"));
+        command.replace(QLatin1Char('%'), QStringLiteral("%%"));
+        QSaveFile file(shortcut);
+        if (file.open(QIODevice::WriteOnly | QIODevice::Text))
+        {
+            const QString text = QStringLiteral("[Desktop Entry]\nType=Application\nName=%1\nExec=\"%2\"\nPath=%3\nIcon=openmw\nTerminal=false\nCategories=Game;\n")
+                .arg(desktopEscape(name), command, desktopEscape(application.absolutePath()));
+            file.write(text.toUtf8());
+            if (file.commit()) QFile::setPermissions(shortcut, QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner | QFile::ReadGroup | QFile::ReadOther);
+        }
+    }
+#endif
+
     QWizard::accept();
 }
 

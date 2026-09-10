@@ -25,6 +25,18 @@ namespace Config
         static QString portableDataPath(const QString& manifestPath, const QString& dataDir);
         static QString canonicalLanguage(const QString& language);
 
+        bool useAlternativeServer;
+        QString contentVersion;
+        QString engineBuild;
+        QString projectUrl;
+        QString checkUrl;
+        QString updateUrl;
+        QString windowsUrl;
+        QString linuxUrl;
+        QString macosUrl;
+        QString androidUrl;
+        QString altAddress;
+        QString altPort;
         int formatVersion;
         QString buildName;
         QString dataPath;

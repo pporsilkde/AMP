@@ -1,3 +1,6 @@
+#include <QDesktopServices>
+#include <QUrl>
+#include <QLineEdit>
 #include "playpage.hpp"
 
 #include <array>
@@ -141,6 +144,38 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     setObjectName("PlayPage");
     setupUi(this);
     serverPortEdit->setValidator(new QIntValidator(1, 65535, serverPortEdit));
+
+    mAlternativeServer = new QCheckBox(tr("Connect to another server"), this);
+    mAlternativeAddress = new QLineEdit(this);
+    mAlternativeAddress->setPlaceholderText(tr("Server address"));
+    mAlternativePort = new QLineEdit(QStringLiteral("25565"), this);
+    mAlternativePort->setMaximumWidth(90);
+    mAlternativePort->setValidator(new QIntValidator(1, 65535, this));
+    mProjectLink = new QPushButton(tr("Server website"), this);
+    mProjectLink->setVisible(false);
+    serverConnectionLayout->addWidget(mAlternativeServer, 7, 0, 1, 2);
+    QHBoxLayout* alternativeFields = new QHBoxLayout();
+    alternativeFields->addWidget(mAlternativeAddress, 1);
+    alternativeFields->addWidget(mAlternativePort);
+    serverConnectionLayout->addLayout(alternativeFields, 8, 0, 1, 2);
+    serverConnectionLayout->addWidget(mProjectLink, 9, 0, 1, 2);
+    mAlternativeAddress->setVisible(false);
+    mAlternativePort->setVisible(false);
+    connect(mAlternativeServer, &QCheckBox::toggled, this, [this](bool checked) {
+        mAlternativeAddress->setVisible(checked);
+        mAlternativePort->setVisible(checked);
+        if (checked) autoStartServerCheckBox->setChecked(false);
+    });
+    connect(autoStartServerCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
+        if (checked) mAlternativeServer->setChecked(false);
+    });
+    connect(mProjectLink, &QPushButton::clicked, this, [this]() {
+        QString link = mProjectUrl.trimmed();
+        if (!link.contains(QStringLiteral("://"))) link.prepend(QStringLiteral("https://"));
+        const QUrl url(link);
+        if (url.isValid() && (url.scheme() == QLatin1String("https") || url.scheme() == QLatin1String("http")))
+            QDesktopServices::openUrl(url);
+    });
 
     // Host mode has a separate bind-interface selector.  The public/share
     // address must not be confused with the address the local socket binds to:
@@ -1091,4 +1126,19 @@ void Launcher::PlayPage::slotSyncFormFromRawConfig()
     populateFormFromConfig(serverSettingsEditor->toPlainText());
     setServerSettingsStatus(tr("Form updated from raw config"));
     serverSettingsModeTabs->setCurrentWidget(formServerSettingsTab);
+}
+
+void Launcher::PlayPage::setAlternativeServer(const QString& address, const QString& port, bool enabled)
+{
+    mAlternativeAddress->setText(address);
+    mAlternativePort->setText(port);
+    mAlternativeServer->setChecked(enabled);
+}
+bool Launcher::PlayPage::alternativeServer() const { return mAlternativeServer->isChecked(); }
+QString Launcher::PlayPage::alternativeAddress() const { return mAlternativeAddress->text().trimmed(); }
+QString Launcher::PlayPage::alternativePort() const { return mAlternativePort->text().trimmed(); }
+void Launcher::PlayPage::setProjectUrl(const QString& url)
+{
+    mProjectUrl = url;
+    mProjectLink->setVisible(!url.trimmed().isEmpty());
 }

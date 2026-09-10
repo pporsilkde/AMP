@@ -93,6 +93,18 @@ Config::BuildManifest::BuildManifest()
 
 void Config::BuildManifest::clear()
 {
+    useAlternativeServer = false;
+    contentVersion = QStringLiteral("00000");
+    engineBuild = QStringLiteral("00000");
+    projectUrl = QStringLiteral("");
+    checkUrl = QStringLiteral("");
+    updateUrl = QStringLiteral("");
+    windowsUrl = QStringLiteral("");
+    linuxUrl = QStringLiteral("");
+    macosUrl = QStringLiteral("");
+    androidUrl = QStringLiteral("");
+    altAddress = QStringLiteral("");
+    altPort = QStringLiteral("25565");
     formatVersion = 1;
     buildName = QStringLiteral("ArenaMP");
     dataPath.clear();
@@ -145,13 +157,37 @@ bool Config::BuildManifest::read(const QString& filePath, QString* errorMessage)
         const QString value = decodeValue(line.mid(equals + 1));
 
         if (isBuildSection(section)
-            && (key == QLatin1String("format") || key == QLatin1String("version")))
+            && key == QLatin1String("format"))
         {
             bool ok = false;
             const int parsed = value.toInt(&ok);
             if (ok && parsed > 0)
                 formatVersion = parsed;
         }
+        else if (isBuildSection(section) && key == QLatin1String("version"))
+            contentVersion = value;
+        else if (isBuildSection(section) && key == QLatin1String("build"))
+            engineBuild = value;
+        else if (isBuildSection(section) && key == QLatin1String("url"))
+            projectUrl = value;
+        else if (isBuildSection(section) && key == QLatin1String("url_check"))
+            checkUrl = value;
+        else if (isBuildSection(section) && (key == QLatin1String("url_update") || key == QLatin1String("update") || key == QLatin1String("update-url") || key == QLatin1String("update_url")))
+            updateUrl = value;
+        else if (isBuildSection(section) && key == QLatin1String("url_win"))
+            windowsUrl = value;
+        else if (isBuildSection(section) && key == QLatin1String("url_linux"))
+            linuxUrl = value;
+        else if (isBuildSection(section) && key == QLatin1String("url_macos"))
+            macosUrl = value;
+        else if (isBuildSection(section) && key == QLatin1String("url_android"))
+            androidUrl = value;
+        else if (isServerSection(section) && (key == QLatin1String("alt_adress") || key == QLatin1String("alt_address")))
+            altAddress = value;
+        else if (isServerSection(section) && key == QLatin1String("alt_port"))
+            altPort = value;
+        else if (isServerSection(section) && key == QLatin1String("use_alt_server"))
+            useAlternativeServer = value == QLatin1String("1") || value.compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0;
         else if (isBuildSection(section)
             && (key == QLatin1String("name") || key == QLatin1String("build-name")))
             buildName = value;
@@ -237,7 +273,20 @@ bool Config::BuildManifest::write(const QString& filePath, QString* errorMessage
     stream << "language=" << encodeValue(canonicalLanguage(language)) << "\n";
     stream << "complete=" << (complete ? "true" : "false") << "\n\n";
 
-    stream << "[Server]\n";
+    stream << "version=" << encodeValue(contentVersion) << "\n";
+    stream << "build=" << encodeValue(engineBuild) << "\n";
+    stream << "url=" << encodeValue(projectUrl) << "\n";
+    stream << "url_check=" << encodeValue(checkUrl) << "\n";
+    stream << "url_update=" << encodeValue(updateUrl) << "\n";
+    stream << "url_win=" << encodeValue(windowsUrl) << "\n";
+    stream << "url_linux=" << encodeValue(linuxUrl) << "\n";
+    stream << "url_macos=" << encodeValue(macosUrl) << "\n";
+    stream << "url_android=" << encodeValue(androidUrl) << "\n";
+
+    stream << "\n[Server]\n";
+    stream << "use_alt_server=" << (useAlternativeServer ? "true" : "false") << "\n";
+    stream << "alt_adress=" << encodeValue(altAddress) << "\n";
+    stream << "alt_port=" << encodeValue(altPort) << "\n";
     if (serverAddressSpecified)
         stream << "address=" << encodeValue(serverAddress.trimmed().isEmpty() ? QStringLiteral("127.0.0.1") : serverAddress.trimmed()) << "\n";
     if (serverPortSpecified)

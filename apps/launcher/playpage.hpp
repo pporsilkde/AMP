@@ -6,6 +6,7 @@
 #include <QString>
 
 class QWidget;
+class QLineEdit;
 class QLabel;
 class QComboBox;
 class QPushButton;
@@ -29,6 +30,11 @@ namespace Launcher
         void setServerRunning(bool running, const QString& address = QString(), const QString& port = QString(), bool managed = true);
         void setBuildManifestComplete(bool complete);
 
+        void setAlternativeServer(const QString& address, const QString& port, bool enabled);
+        bool alternativeServer() const;
+        QString alternativeAddress() const;
+        QString alternativePort() const;
+        void setProjectUrl(const QString& url);
         QString buildName() const;
         QString serverAddress() const;
         QString serverPort() const;
@@ -77,6 +83,11 @@ namespace Launcher
         void slotXpGainMultiplierChanged(double value);
 
     private:
+        QCheckBox* mAlternativeServer;
+        QLineEdit* mAlternativeAddress;
+        QLineEdit* mAlternativePort;
+        QPushButton* mProjectLink;
+        QString mProjectUrl;
         QString serverConfigPath() const;
         QString persistentServerConfigPath() const;
         bool writeServerConfigFile(const QString& path, const QString& text, QString* errorMessage) const;

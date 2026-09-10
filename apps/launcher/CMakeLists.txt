@@ -3,6 +3,7 @@ set(LAUNCHER
     graphicspage.cpp
     sdlinit.cpp
     main.cpp
+    updatecontroller.cpp
     maindialog.cpp
     playpage.cpp
     textslotmsgbox.cpp
@@ -124,3 +125,12 @@ if (BUILD_WITH_CODE_COVERAGE)
 endif()
 
 
+
+# Worker has no dependency on the running client's Qt/DLL files. Release CI
+# freezes this standard-library script into a standalone executable.
+configure_file(updater/arena_updater.py ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/arena_updater.py COPYONLY)
+if (WIN32)
+    install(FILES updater/arena_updater.py DESTINATION ".")
+elseif (NOT APPLE)
+    install(FILES updater/arena_updater.py DESTINATION "${BINDIR}")
+endif()
