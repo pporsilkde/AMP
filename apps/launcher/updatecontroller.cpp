@@ -16,6 +16,7 @@
 #include <QProcess>
 #include <QProgressDialog>
 #include <QStandardPaths>
+#include <QSignalBlocker>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QDebug>
@@ -241,6 +242,14 @@ CheckResult checkAvailable(QWidget* parent, const QString& manifestPath, const Q
     progress.setMinimumDuration(0);
     progress.setAutoClose(false);
 
+    // QProgressDialog::closeEvent emits canceled(), including when close() is
+    // called by us after a successful check. Do not let normal cleanup invoke
+    // the user-cancel handler and discard the worker's UpdateAvailable result.
+    const auto closeProgress = [&progress]() {
+        const QSignalBlocker blocker(&progress);
+        progress.close();
+    };
+
     QProcess worker;
     QEventLoop loop;
     QTimer timeout;
@@ -285,7 +294,7 @@ CheckResult checkAvailable(QWidget* parent, const QString& manifestPath, const Q
     if (!worker.waitForStarted(3000))
     {
         log(context.logFile, QStringLiteral("check_start_failed"), worker.errorString());
-        progress.close();
+        closeProgress();
         return CheckResult::NoUpdate;
     }
 
@@ -293,14 +302,15 @@ CheckResult checkAvailable(QWidget* parent, const QString& manifestPath, const Q
     if (worker.state() != QProcess::NotRunning)
         loop.exec();
     timeout.stop();
-    progress.close();
+    closeProgress();
 
     if (canceled)
-        return CheckResult::NoUpdate;
-    if (worker.exitStatus() == QProcess::NormalExit && worker.exitCode() == 10)
+        available = false;
+    else if (worker.exitStatus() == QProcess::NormalExit && worker.exitCode() == 10)
         available = true;
     log(context.logFile, QStringLiteral("check_finished"),
-        QStringLiteral("exit=%1 status=%2 button=%3").arg(worker.exitCode()).arg(int(worker.exitStatus()))
+        QStringLiteral("exit=%1 status=%2 cancelled=%3 button=%4")
+            .arg(worker.exitCode()).arg(int(worker.exitStatus())).arg(canceled ? 1 : 0)
             .arg(available ? QStringLiteral("Update") : QStringLiteral("Play")));
     return available ? CheckResult::UpdateAvailable : CheckResult::NoUpdate;
 }
