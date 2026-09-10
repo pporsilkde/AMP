@@ -52,6 +52,7 @@ class UpdaterTests(unittest.TestCase):
             entry=zipfile.ZipInfo('escape');entry.create_system=3;entry.external_attr=0o120777<<16
             z.writestr(entry,'../../outside')
         with self.assertRaises(ValueError): u.extract(p,self.root/'stage')
+    @unittest.skipIf(os.name == "nt", "Windows does not expose POSIX executable mode bits")
     def test_tar_internal_links_and_executable(self):
         p=self.root/'engine.tar.gz'
         with tarfile.open(p,'w:gz') as tar:

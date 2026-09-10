@@ -340,7 +340,9 @@ def commit(job, plan, fail_after=None):
             # Sibling temporary file guarantees atomic replace across cache/data disks.
             shutil.copyfile(entry['source'], temp)
             os.chmod(temp, stat.S_IMODE(Path(entry['source']).stat().st_mode))
-            with temp.open('rb') as f: os.fsync(f.fileno())
+            # Windows rejects fsync() on a read-only descriptor (errno 9).
+            # Open read/write so the same durability step works on Windows and POSIX.
+            with temp.open('r+b') as f: os.fsync(f.fileno())
             if op['original']: os.replace(str(dest), str(backup))
             os.replace(str(temp), str(dest))
             if fail_after is not None and index == fail_after: raise OSError('Injected commit failure')
