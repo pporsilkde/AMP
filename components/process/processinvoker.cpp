@@ -66,6 +66,10 @@ bool Process::ProcessInvoker::startProcess(const QString &name, const QStringLis
     QStringList candidates;
 #ifdef Q_OS_WIN
     candidates << name + QLatin1String(".exe");
+    // Some older ArenaMP packages used the explicit client suffix.  Keep it
+    // as a compatibility fallback so an updater cannot leave Play apparently
+    // inert merely because the executable was renamed.
+    candidates << name + QLatin1String("-client.exe");
 #else
     candidates << name;
 #ifndef Q_OS_MAC
@@ -73,22 +77,43 @@ bool Process::ProcessInvoker::startProcess(const QString &name, const QStringLis
     // generated (for example when running directly from a build tree).
     candidates << name + QLatin1String(".x86_64");
 #endif
+    candidates << name + QLatin1String("-client");
+#ifndef Q_OS_MAC
+    candidates << name + QLatin1String("-client.x86_64");
+#endif
 #endif
 
     QString path;
-    for (const QString &candidate : candidates)
+    // Release packages keep the client beside the launcher.  The current and
+    // parent directories are inexpensive compatibility fallbacks for older
+    // layouts where the launcher lived in a bin/ subdirectory.
+    QStringList searchDirectories;
+    searchDirectories << applicationDir.absolutePath();
+    const QString currentDirectory = QDir::currentPath();
+    if (!currentDirectory.isEmpty() && !searchDirectories.contains(currentDirectory, Qt::CaseInsensitive))
+        searchDirectories << currentDirectory;
+    const QString parentDirectory = applicationDir.absoluteFilePath(QStringLiteral(".."));
+    if (!parentDirectory.isEmpty() && !searchDirectories.contains(parentDirectory, Qt::CaseInsensitive))
+        searchDirectories << parentDirectory;
+
+    for (const QString &directory : searchDirectories)
     {
-        const QString absolute = applicationDir.absoluteFilePath(candidate);
-        if (QFileInfo::exists(absolute))
+        for (const QString &candidate : candidates)
         {
-            path = absolute;
-            break;
+            const QString absolute = QDir(directory).absoluteFilePath(candidate);
+            if (QFileInfo::exists(absolute))
+            {
+                path = absolute;
+                break;
+            }
         }
+        if (!path.isEmpty()) break;
     }
     if (path.isEmpty() && !candidates.isEmpty())
         path = applicationDir.absoluteFilePath(candidates.first());
 
     QFileInfo info(path);
+    const QString workingDirectory = info.absoluteDir().absolutePath();
 
     if (!info.exists()) {
         QMessageBox msgBox;
@@ -102,6 +127,7 @@ bool Process::ProcessInvoker::startProcess(const QString &name, const QStringLis
         return false;
     }
 
+#ifndef Q_OS_WIN
     if (!info.isExecutable()) {
         QMessageBox msgBox;
         msgBox.setWindowTitle(tr("Error starting executable"));
@@ -113,11 +139,22 @@ bool Process::ProcessInvoker::startProcess(const QString &name, const QStringLis
         msgBox.exec();
         return false;
     }
+#endif
+
+    qDebug() << "Starting ArenaMP client" << info.absoluteFilePath() << arguments;
 
     // Start the executable
     if (detached) {
         qint64 detachedPid = 0;
-        if (!QProcess::startDetached(path, arguments, applicationDir.absolutePath(), &detachedPid)) {
+        if (!QProcess::startDetached(path, arguments, workingDirectory, &detachedPid)) {
+            // A few Windows runners reject the detached overload for a
+            // wrapper/compatibility executable even though a normal QProcess
+            // can start it.  Retry once in the attached object and verify the
+            // process reached the Started state before reporting failure.
+            mProcess->setWorkingDirectory(workingDirectory);
+            mProcess->start(path, arguments);
+            if (mProcess->waitForStarted(3000))
+                return true;
             QMessageBox msgBox;
             msgBox.setWindowTitle(tr("Error starting executable"));
             msgBox.setIcon(QMessageBox::Critical);
@@ -130,7 +167,7 @@ bool Process::ProcessInvoker::startProcess(const QString &name, const QStringLis
             return false;
         }
     } else {
-        mProcess->setWorkingDirectory(applicationDir.absolutePath());
+        mProcess->setWorkingDirectory(workingDirectory);
         mProcess->start(path, arguments);
 
         /*

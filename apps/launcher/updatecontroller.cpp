@@ -235,7 +235,12 @@ Result beforeLaunch(QWidget* parent, const QString& manifestPath, const QString&
                 parent->hide();
                 parent->close();
             }
-            QCoreApplication::quit();
+            // The apply helper is waiting for this PID.  Use exit(), rather
+            // than only posting quit(), so this path cannot be held open by a
+            // secondary Qt window/event loop (for example the server console
+            // or a platform modal dialog).  No game is launched from this
+            // process; the helper starts a fresh launcher after committing.
+            QCoreApplication::exit(0);
             return Result::Restarting;
         }
         // No installer started, so target files are untouched and preparation can be discarded.

@@ -118,6 +118,13 @@ class UpdaterTests(unittest.TestCase):
             request={'manifest':str(mf),'data':str(data),'client':str(client),'parent_pid':0,'engine_key':'url_win'}
             # Missing check must not prevent launching and must not alter any revisions.
             self.assertEqual(u.prepare(request,job),0)
+            # Equal revisions are the normal no-update path. It must return
+            # immediately without a pending transaction, so the launcher can
+            # continue and invoke tes3mp itself.
+            (web/'check.ini').write_text('version=00001\nbuild=00001\n')
+            equal_job = self.root/'equal-job'; equal_job.mkdir()
+            self.assertEqual(u.prepare(request,equal_job),0)
+            self.assertFalse((mf.parent/'.arena-update-pending.json').exists())
             (web/'check.ini').write_text('version=00002\nbuild=00003\n')
             self.assertEqual(u.prepare(request,job),10)
             plan=json.loads((job/'plan.json').read_text());self.assertEqual(plan['versions'],{'version':'00002','build':'00003'})

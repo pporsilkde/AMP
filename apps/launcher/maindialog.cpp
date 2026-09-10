@@ -1266,7 +1266,7 @@ void Launcher::MainDialog::play()
             setEnabled(false);
             hide();
             close();
-            qApp->quit();
+            QCoreApplication::exit(0);
             return;
         }
         if (result != UpdateController::Result::Continue) return;
@@ -1396,7 +1396,10 @@ void Launcher::MainDialog::launchClient()
     {
         if (mServerDialog != nullptr && mServerDialog->isRunning())
             return;
-        qApp->quit();
+        // The client is detached; terminate the launcher immediately after
+        // the hand-off so a failed update/check path cannot leave an inert
+        // launcher window in front of the game.
+        QCoreApplication::exit(0);
     }
 }
 

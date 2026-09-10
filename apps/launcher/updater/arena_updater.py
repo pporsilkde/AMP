@@ -368,7 +368,23 @@ def alive(pid):
         if not handle: return ctypes.get_last_error() == 5
         try: return kernel.WaitForSingleObject(handle, 0) == 258
         finally: kernel.CloseHandle(handle)
-    try: os.kill(pid, 0); return True
+    try:
+        os.kill(pid, 0)
+        # On Linux an exited launcher can remain as a zombie until the
+        # desktop/session parent reaps it.  kill(pid, 0) still succeeds for a
+        # zombie, which would make apply wait the full 120-second deadline and
+        # report that the launcher never closed.  Treat the zombie state as
+        # exited so the staged client can be committed immediately.
+        if sys.platform.startswith('linux'):
+            stat_path = Path('/proc') / str(pid) / 'stat'
+            try:
+                stat_text = stat_path.read_text(encoding='utf-8')
+                close_paren = stat_text.rfind(')')
+                if close_paren >= 0 and stat_text[close_paren + 2:close_paren + 3] == 'Z':
+                    return False
+            except (OSError, UnicodeError):
+                pass
+        return True
     except ProcessLookupError: return False
     except PermissionError: return True
 
