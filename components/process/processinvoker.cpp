@@ -4,6 +4,7 @@
 #include <QStringList>
 #include <QString>
 #include <QDir>
+#include <QFileInfo>
 #include <QDebug>
 #include <QCoreApplication>
 
@@ -53,19 +54,39 @@ QProcess* Process::ProcessInvoker::getProcess()
 
 bool Process::ProcessInvoker::startProcess(const QString &name, const QStringList &arguments, bool detached)
 {
-//    mProcess = new QProcess(this);
+    //    mProcess = new QProcess(this);
     mName = name;
     mArguments = arguments;
 
-    QString path(name);
+    // Never depend on the process current directory. The portable Linux
+    // package is normally started through a wrapper, Steam/desktop launchers
+    // may choose another cwd, and an update/restart can change it as well.
+    // Resolve executables beside openmw-launcher instead.
+    const QDir applicationDir(QCoreApplication::applicationDirPath());
+    QStringList candidates;
 #ifdef Q_OS_WIN
-    path.append(QLatin1String(".exe"));
-#elif defined(Q_OS_MAC)
-    QDir dir(QCoreApplication::applicationDirPath());
-    path = dir.absoluteFilePath(name);
+    candidates << name + QLatin1String(".exe");
 #else
-    path.prepend(QLatin1String("./"));
+    candidates << name;
+#ifndef Q_OS_MAC
+    // A raw x86_64 binary is accepted when the portable wrapper was not
+    // generated (for example when running directly from a build tree).
+    candidates << name + QLatin1String(".x86_64");
 #endif
+#endif
+
+    QString path;
+    for (const QString &candidate : candidates)
+    {
+        const QString absolute = applicationDir.absoluteFilePath(candidate);
+        if (QFileInfo::exists(absolute))
+        {
+            path = absolute;
+            break;
+        }
+    }
+    if (path.isEmpty() && !candidates.isEmpty())
+        path = applicationDir.absoluteFilePath(candidates.first());
 
     QFileInfo info(path);
 
@@ -95,7 +116,8 @@ bool Process::ProcessInvoker::startProcess(const QString &name, const QStringLis
 
     // Start the executable
     if (detached) {
-        if (!mProcess->startDetached(path, arguments)) {
+        qint64 detachedPid = 0;
+        if (!QProcess::startDetached(path, arguments, applicationDir.absolutePath(), &detachedPid)) {
             QMessageBox msgBox;
             msgBox.setWindowTitle(tr("Error starting executable"));
             msgBox.setIcon(QMessageBox::Critical);
@@ -108,6 +130,7 @@ bool Process::ProcessInvoker::startProcess(const QString &name, const QStringLis
             return false;
         }
     } else {
+        mProcess->setWorkingDirectory(applicationDir.absolutePath());
         mProcess->start(path, arguments);
 
         /*

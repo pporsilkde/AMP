@@ -24,6 +24,7 @@
 #include <QProcessEnvironment>
 #include <QPushButton>
 #include <QScrollBar>
+#include <QStringList>
 #include <QTextCodec>
 #include <QTextCursor>
 #include <QTextDocument>
@@ -853,11 +854,20 @@ QString Launcher::ServerDialog::resolveServerExecutable() const
 {
     QDir dir(applicationBasePath());
 #ifdef Q_OS_WIN
-    const QString executable = dir.absoluteFilePath(QStringLiteral("tes3mp-server.exe"));
+    const QStringList candidates { QStringLiteral("tes3mp-server.exe") };
 #else
-    const QString executable = dir.absoluteFilePath(QStringLiteral("tes3mp-server"));
+    const QStringList candidates {
+        QStringLiteral("tes3mp-server"),
+        QStringLiteral("tes3mp-server.x86_64")
+    };
 #endif
-    return QFileInfo(executable).exists() ? executable : QString();
+    for (const QString& candidate : candidates)
+    {
+        const QString executable = dir.absoluteFilePath(candidate);
+        if (QFileInfo(executable).exists() && QFileInfo(executable).isExecutable())
+            return executable;
+    }
+    return QString();
 }
 
 QString Launcher::ServerDialog::resolveDisplayAddress(const QString& bindAddress) const

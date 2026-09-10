@@ -114,6 +114,7 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     , mBuildServerAddressSpecified(false)
     , mBuildServerPortSpecified(false)
     , mBuildComplete(false)
+    , mServerLaunchAttempts(0)
     , mGameSettings (mCfgMgr)
 {
     setupUi(this);
@@ -1257,6 +1258,17 @@ void Launcher::MainDialog::play()
         updating = true;
         const auto result = UpdateController::beforeLaunch(this, mBuildManifestPath, mBuildDataPath);
         updating = false;
+        if (result == UpdateController::Result::Restarting)
+        {
+            // The installer is now waiting for this PID. Do not leave a still
+            // interactive launcher behind while the Windows client files are
+            // being replaced (a second Play click would race the transaction).
+            setEnabled(false);
+            hide();
+            close();
+            qApp->quit();
+            return;
+        }
         if (result != UpdateController::Result::Continue) return;
     }
     resumed = false;
@@ -1321,9 +1333,49 @@ void Launcher::MainDialog::play()
     }
 
     if (startedNow)
-        QTimer::singleShot(900, this, SLOT(launchClient()));
+    {
+        // A fixed 900 ms delay is not reliable on Linux/Steam Deck: the
+        // server may still be loading Lua/scripts and has not bound its port
+        // yet. Wait for an actual TCP listener, with a bounded fallback so a
+        // broken server cannot leave the launcher waiting forever.
+        mServerLaunchAttempts = 0;
+        QTimer::singleShot(100, this, SLOT(launchClientWhenServerReady()));
+    }
     else
         launchClient();
+}
+
+void Launcher::MainDialog::launchClientWhenServerReady()
+{
+    if (mServerDialog == nullptr || !mServerDialog->isRunning())
+    {
+        QMessageBox::warning(this, tr("Server stopped"),
+            tr("The local server stopped before the client could connect."));
+        mPendingClientAddress.clear();
+        mPendingClientPort.clear();
+        return;
+    }
+
+    const QString address = mServerDialog->localConnectAddress();
+    const QString port = mServerDialog->configuredPort();
+    if (mServerDialog->isServerReachable(250))
+    {
+        launchClient();
+        return;
+    }
+
+    // 80 * 250 ms is about 20 seconds. Keep checking without blocking the
+    // GUI, so the server console remains responsive while it initializes.
+    if (++mServerLaunchAttempts >= 80)
+    {
+        QMessageBox::warning(this, tr("Server is not ready"),
+            tr("The local server did not open %1:%2 in time.").arg(address, port));
+        mPendingClientAddress.clear();
+        mPendingClientPort.clear();
+        return;
+    }
+
+    QTimer::singleShot(250, this, SLOT(launchClientWhenServerReady()));
 }
 
 void Launcher::MainDialog::launchClient()

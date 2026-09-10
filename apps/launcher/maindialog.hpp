@@ -66,6 +66,7 @@ namespace Launcher
         void wizardStarted();
         void wizardFinished(int exitCode, QProcess::ExitStatus exitStatus);
         void launchClient();
+        void launchClientWhenServerReady();
         void autoStartServerChanged(bool enabled);
         void autoRestartServerChanged(bool enabled);
         void serverRunningChanged(bool running, const QString& address, const QString& port);
@@ -125,6 +126,7 @@ namespace Launcher
         bool mBuildComplete;
         QString mPendingClientAddress;
         QString mPendingClientPort;
+        int mServerLaunchAttempts;
 
         Files::ConfigurationManager mCfgMgr;
 

@@ -75,7 +75,12 @@ Result beforeLaunch(QWidget* parent, const QString& manifestPath, const QString&
     {
         // The running worker must be independent of all client files, including itself.
         program = QDir(job.path()).filePath(QFileInfo(helper).fileName());
-        if (!QFile::copy(helper, program)) return Result::Stop;
+        if (!QFile::copy(helper, program))
+        {
+            QMessageBox::warning(parent, tr("Update failed"),
+                tr("Could not copy the updater to its staging folder."));
+            return Result::Stop;
+        }
         QFile::setPermissions(program, QFile::permissions(helper));
     }
     else
@@ -91,7 +96,12 @@ Result beforeLaunch(QWidget* parent, const QString& manifestPath, const QString&
             return recoveryPending ? Result::Stop : Result::Continue;
         }
         const QString script = QDir(job.path()).filePath(QStringLiteral("arena_updater.py"));
-        if (!QFile::copy(helper, script)) return Result::Stop;
+        if (!QFile::copy(helper, script))
+        {
+            QMessageBox::warning(parent, tr("Update failed"),
+                tr("Could not copy the updater script to its staging folder."));
+            return Result::Stop;
+        }
         prefix << script;
     }
     QString launcher = QCoreApplication::applicationFilePath();
@@ -110,7 +120,12 @@ Result beforeLaunch(QWidget* parent, const QString& manifestPath, const QString&
         {QStringLiteral("engine_key"), key},
         {QStringLiteral("parent_pid"), double(QCoreApplication::applicationPid())}
     };
-    if (!saveJson(requestPath, request)) return Result::Stop;
+    if (!saveJson(requestPath, request))
+    {
+        QMessageBox::warning(parent, tr("Update failed"),
+            tr("Could not create the updater request file."));
+        return Result::Stop;
+    }
 
     QProgressDialog progress(tr("Checking for updates..."), tr("Cancel"), 0, 0, parent);
     progress.setWindowTitle(tr("ArenaMP update"));
@@ -198,13 +213,33 @@ Result beforeLaunch(QWidget* parent, const QString& manifestPath, const QString&
     {
         // A detached helper waits for THIS PID, so the launcher and its loaded DLLs
         // have exited before any replacement. The helper opens the new launcher.
-        if (QProcess::startDetached(program, prefix + QStringList {QStringLiteral("apply"), requestPath}, client))
+        // Keep the staging directory as the helper's working directory. This is
+        // important on Windows: starting a copied .exe from the install folder
+        // can leave the helper locked by the launcher process, and a relative
+        // helper dependency must resolve beside the copied executable.
+        job.setAutoRemove(false);
+        qint64 detachedPid = 0;
+        const bool started = QProcess::startDetached(
+            program,
+            prefix + QStringList {QStringLiteral("apply"), requestPath},
+            job.path(),
+            &detachedPid);
+        if (started)
         {
-            job.setAutoRemove(false);
+            // Close the visible window before returning to the event loop. The
+            // detached helper waits for this process PID, then replaces files.
+            // Hiding/closing also prevents a second Play click during apply.
+            if (parent != nullptr)
+            {
+                parent->setEnabled(false);
+                parent->hide();
+                parent->close();
+            }
             QCoreApplication::quit();
             return Result::Restarting;
         }
         // No installer started, so target files are untouched and preparation can be discarded.
+        job.setAutoRemove(true);
         QFile::remove(pendingPath);
         QMessageBox::warning(parent, tr("Update failed"), tr("Could not start the update installer."));
         return Result::Stop;
@@ -220,12 +255,32 @@ Result beforeLaunch(QWidget* parent, const QString& manifestPath, const QString&
     }
     if (worker.exitCode() == 20 || (recoveryPending && QFileInfo::exists(pendingPath)))
     {
+        if (error.isEmpty())
+            error = tr("The update was blocked because another client is still running.");
         QMessageBox::warning(parent, tr("Update failed"), error);
         return Result::Stop;
     }
-    if (!error.isEmpty() || (!checking && worker.exitCode() != 0))
+    // A network/check-only failure is non-blocking by design: check.ini may be
+    // unavailable and the installed client must still start. Once package
+    // preparation has begun, however, a failed worker is fatal because the
+    // update may have staged a transaction that must not be ignored.
+    if (worker.exitStatus() != QProcess::NormalExit || worker.exitCode() != 0)
     {
-        if (error.isEmpty()) error = QString::fromUtf8(worker.readAllStandardError());
+        if (checking && !recoveryPending)
+        {
+            qWarning() << "Arena updater check failed; continuing with installed client"
+                       << worker.exitCode() << worker.errorString();
+            return Result::Continue;
+        }
+        if (error.isEmpty())
+            error = QString::fromUtf8(worker.readAllStandardError()).trimmed();
+        if (error.isEmpty())
+            error = tr("The updater stopped unexpectedly (exit code %1).").arg(worker.exitCode());
+        QMessageBox::warning(parent, tr("Update failed"), error);
+        return Result::Stop;
+    }
+    if (!error.isEmpty())
+    {
         QMessageBox::warning(parent, tr("Update failed"), error);
         return Result::Stop;
     }
