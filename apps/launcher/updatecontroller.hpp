@@ -6,8 +6,9 @@ namespace Launcher
 {
     namespace UpdateController
     {
-        enum class Result { Continue, Restarting, Stop };
-        Result beforeLaunch(QWidget* parent, const QString& manifestPath, const QString& dataPath);
+        enum class CheckResult { NoUpdate, UpdateAvailable };
+        CheckResult checkAvailable(QWidget* parent, const QString& manifestPath, const QString& dataPath);
+        bool startUpdate(QWidget* parent, const QString& manifestPath, const QString& dataPath);
         void showResult(QWidget* parent, const QString& manifestPath);
     }
 }

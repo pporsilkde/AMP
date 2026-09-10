@@ -287,6 +287,12 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     loadServerSettings();
 }
 
+void Launcher::PlayPage::setPlayButtonState(const QString& text, bool enabled)
+{
+    playButton->setText(text);
+    playButton->setEnabled(enabled);
+}
+
 namespace
 {
     const std::array<double, 5> sXpRatePresets = { 0.50, 0.75, 1.00, 1.50, 2.00 };

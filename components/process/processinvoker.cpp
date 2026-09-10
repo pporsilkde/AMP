@@ -54,66 +54,21 @@ QProcess* Process::ProcessInvoker::getProcess()
 
 bool Process::ProcessInvoker::startProcess(const QString &name, const QStringList &arguments, bool detached)
 {
-    //    mProcess = new QProcess(this);
+//    mProcess = new QProcess(this);
     mName = name;
     mArguments = arguments;
 
-    // Never depend on the process current directory. The portable Linux
-    // package is normally started through a wrapper, Steam/desktop launchers
-    // may choose another cwd, and an update/restart can change it as well.
-    // Resolve executables beside openmw-launcher instead.
-    const QDir applicationDir(QCoreApplication::applicationDirPath());
-    QStringList candidates;
+    QString path(name);
 #ifdef Q_OS_WIN
-    candidates << name + QLatin1String(".exe");
-    // Some older ArenaMP packages used the explicit client suffix.  Keep it
-    // as a compatibility fallback so an updater cannot leave Play apparently
-    // inert merely because the executable was renamed.
-    candidates << name + QLatin1String("-client.exe");
+    path.append(QLatin1String(".exe"));
+#elif defined(Q_OS_MAC)
+    QDir dir(QCoreApplication::applicationDirPath());
+    path = dir.absoluteFilePath(name);
 #else
-    candidates << name;
-#ifndef Q_OS_MAC
-    // A raw x86_64 binary is accepted when the portable wrapper was not
-    // generated (for example when running directly from a build tree).
-    candidates << name + QLatin1String(".x86_64");
+    path.prepend(QLatin1String("./"));
 #endif
-    candidates << name + QLatin1String("-client");
-#ifndef Q_OS_MAC
-    candidates << name + QLatin1String("-client.x86_64");
-#endif
-#endif
-
-    QString path;
-    // Release packages keep the client beside the launcher.  The current and
-    // parent directories are inexpensive compatibility fallbacks for older
-    // layouts where the launcher lived in a bin/ subdirectory.
-    QStringList searchDirectories;
-    searchDirectories << applicationDir.absolutePath();
-    const QString currentDirectory = QDir::currentPath();
-    if (!currentDirectory.isEmpty() && !searchDirectories.contains(currentDirectory, Qt::CaseInsensitive))
-        searchDirectories << currentDirectory;
-    const QString parentDirectory = applicationDir.absoluteFilePath(QStringLiteral(".."));
-    if (!parentDirectory.isEmpty() && !searchDirectories.contains(parentDirectory, Qt::CaseInsensitive))
-        searchDirectories << parentDirectory;
-
-    for (const QString &directory : searchDirectories)
-    {
-        for (const QString &candidate : candidates)
-        {
-            const QString absolute = QDir(directory).absoluteFilePath(candidate);
-            if (QFileInfo::exists(absolute))
-            {
-                path = absolute;
-                break;
-            }
-        }
-        if (!path.isEmpty()) break;
-    }
-    if (path.isEmpty() && !candidates.isEmpty())
-        path = applicationDir.absoluteFilePath(candidates.first());
 
     QFileInfo info(path);
-    const QString workingDirectory = info.absoluteDir().absolutePath();
 
     if (!info.exists()) {
         QMessageBox msgBox;
@@ -127,7 +82,6 @@ bool Process::ProcessInvoker::startProcess(const QString &name, const QStringLis
         return false;
     }
 
-#ifndef Q_OS_WIN
     if (!info.isExecutable()) {
         QMessageBox msgBox;
         msgBox.setWindowTitle(tr("Error starting executable"));
@@ -139,22 +93,10 @@ bool Process::ProcessInvoker::startProcess(const QString &name, const QStringLis
         msgBox.exec();
         return false;
     }
-#endif
-
-    qDebug() << "Starting ArenaMP client" << info.absoluteFilePath() << arguments;
 
     // Start the executable
     if (detached) {
-        qint64 detachedPid = 0;
-        if (!QProcess::startDetached(path, arguments, workingDirectory, &detachedPid)) {
-            // A few Windows runners reject the detached overload for a
-            // wrapper/compatibility executable even though a normal QProcess
-            // can start it.  Retry once in the attached object and verify the
-            // process reached the Started state before reporting failure.
-            mProcess->setWorkingDirectory(workingDirectory);
-            mProcess->start(path, arguments);
-            if (mProcess->waitForStarted(3000))
-                return true;
+        if (!mProcess->startDetached(path, arguments)) {
             QMessageBox msgBox;
             msgBox.setWindowTitle(tr("Error starting executable"));
             msgBox.setIcon(QMessageBox::Critical);
@@ -167,7 +109,6 @@ bool Process::ProcessInvoker::startProcess(const QString &name, const QStringLis
             return false;
         }
     } else {
-        mProcess->setWorkingDirectory(workingDirectory);
         mProcess->start(path, arguments);
 
         /*
@@ -220,7 +161,6 @@ void Process::ProcessInvoker::processError(QProcess::ProcessError error)
                       <p>Press \"Show Details...\" for more information.</p></body></html>").arg(mName));
     msgBox.setDetailedText(mProcess->errorString());
     msgBox.exec();
-
 }
 
 void Process::ProcessInvoker::processFinished(int exitCode, QProcess::ExitStatus exitStatus)

@@ -29,6 +29,7 @@ namespace Launcher
         void setAutoRestartServer(bool enabled);
         void setServerRunning(bool running, const QString& address = QString(), const QString& port = QString(), bool managed = true);
         void setBuildManifestComplete(bool complete);
+        void setPlayButtonState(const QString& text, bool enabled);
 
         void setAlternativeServer(const QString& address, const QString& port, bool enabled);
         bool alternativeServer() const;

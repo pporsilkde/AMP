@@ -42,8 +42,8 @@ int main(int argc, char *argv[])
             mainWin.show();
 
         if (result == Launcher::FirstRunDialogResultContinue
-            && app.arguments().contains(QStringLiteral("--arena-update-resume")))
-            QTimer::singleShot(0, &mainWin, SLOT(play()));
+            && !app.arguments().contains(QStringLiteral("--arena-update-resume")))
+            QTimer::singleShot(0, &mainWin, SLOT(checkForUpdates()));
 
         int exitCode = app.exec();
 

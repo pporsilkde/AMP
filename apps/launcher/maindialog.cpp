@@ -7,6 +7,7 @@
 #include <components/config/contentorder.hpp>
 
 #include <QDate>
+#include <QCoreApplication>
 #include <QMessageBox>
 #include <QFontDatabase>
 #include <QInputDialog>
@@ -107,6 +108,7 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     , mWizardInvoker(nullptr)
     , mServerDialog(nullptr)
     , mWatermarkLabel(nullptr)
+    , mPlayButton(nullptr)
     , mBuildManifestLoaded(false)
     , mBuildName(QStringLiteral("ArenaMP"))
     , mBuildServerAddress(QStringLiteral("127.0.0.1"))
@@ -114,7 +116,8 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     , mBuildServerAddressSpecified(false)
     , mBuildServerPortSpecified(false)
     , mBuildComplete(false)
-    , mServerLaunchAttempts(0)
+    , mUpdateAvailable(false)
+    , mUpdateCheckRunning(false)
     , mGameSettings (mCfgMgr)
 {
     setupUi(this);
@@ -157,6 +160,7 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     buttonBox->addButton(helpButton, QDialogButtonBox::HelpRole);
     buttonBox->addButton(serverButton, QDialogButtonBox::ActionRole);
     buttonBox->addButton(playButton, QDialogButtonBox::AcceptRole);
+    mPlayButton = playButton;
 
     connect(buttonBox, SIGNAL(rejected()), this, SLOT(close()));
     connect(buttonBox, SIGNAL(accepted()), this, SLOT(play()));
@@ -1220,13 +1224,53 @@ void Launcher::MainDialog::wizardFinished(int exitCode, QProcess::ExitStatus exi
         show();
         raise();
         activateWindow();
+        QTimer::singleShot(0, this, SLOT(checkForUpdates()));
     }
+}
+
+void Launcher::MainDialog::checkForUpdates()
+{
+    if (mUpdateCheckRunning || QCoreApplication::arguments().contains(QStringLiteral("--arena-update-resume")))
+        return;
+
+    mUpdateAvailable = false;
+    if (mPlayButton == nullptr || mPlayPage == nullptr || mBuildManifestPath.isEmpty())
+        return;
+
+    mUpdateCheckRunning = true;
+    mPlayButton->setEnabled(false);
+    mPlayButton->setText(tr("Checking for updates..."));
+    mPlayPage->setPlayButtonState(tr("Checking for updates..."), false);
+
+    const UpdateController::CheckResult result = UpdateController::checkAvailable(
+        this, mBuildManifestPath, mBuildDataPath);
+
+    mUpdateCheckRunning = false;
+    mUpdateAvailable = result == UpdateController::CheckResult::UpdateAvailable;
+    mPlayButton->setText(mUpdateAvailable ? tr("Update") : tr("Play"));
+    mPlayButton->setEnabled(true);
+    mPlayPage->setPlayButtonState(mUpdateAvailable ? tr("Update") : tr("Play"), true);
 }
 
 void Launcher::MainDialog::play()
 {
-    static bool updating = false;
-    if (updating) return;
+    if (mUpdateCheckRunning)
+        return;
+
+    if (mUpdateAvailable)
+    {
+        if (!UpdateController::startUpdate(this, mBuildManifestPath, mBuildDataPath))
+            return;
+
+        mUpdateAvailable = false;
+        mPlayButton->setEnabled(false);
+        mPlayPage->setPlayButtonState(tr("Update"), false);
+        hide();
+        close();
+        QCoreApplication::exit(0);
+        return;
+    }
+
     const bool alternate = mPlayPage->alternativeServer();
     bool portOk = false;
     const int port = mPlayPage->alternativePort().toInt(&portOk);
@@ -1250,28 +1294,6 @@ void Launcher::MainDialog::play()
         msgBox.exec();
         return;
     }
-
-    // Skip exactly one check when a committed update restarts this launcher.
-    static bool resumed = QCoreApplication::arguments().contains(QStringLiteral("--arena-update-resume"));
-    if (!resumed)
-    {
-        updating = true;
-        const auto result = UpdateController::beforeLaunch(this, mBuildManifestPath, mBuildDataPath);
-        updating = false;
-        if (result == UpdateController::Result::Restarting)
-        {
-            // The installer is now waiting for this PID. Do not leave a still
-            // interactive launcher behind while the Windows client files are
-            // being replaced (a second Play click would race the transaction).
-            setEnabled(false);
-            hide();
-            close();
-            QCoreApplication::exit(0);
-            return;
-        }
-        if (result != UpdateController::Result::Continue) return;
-    }
-    resumed = false;
 
     mPendingClientAddress = alternate ? mPlayPage->alternativeAddress() : mPlayPage->serverAddress();
     mPendingClientPort = alternate ? mPlayPage->alternativePort() : mPlayPage->serverPort();
@@ -1333,49 +1355,9 @@ void Launcher::MainDialog::play()
     }
 
     if (startedNow)
-    {
-        // A fixed 900 ms delay is not reliable on Linux/Steam Deck: the
-        // server may still be loading Lua/scripts and has not bound its port
-        // yet. Wait for an actual TCP listener, with a bounded fallback so a
-        // broken server cannot leave the launcher waiting forever.
-        mServerLaunchAttempts = 0;
-        QTimer::singleShot(100, this, SLOT(launchClientWhenServerReady()));
-    }
+        QTimer::singleShot(900, this, SLOT(launchClient()));
     else
         launchClient();
-}
-
-void Launcher::MainDialog::launchClientWhenServerReady()
-{
-    if (mServerDialog == nullptr || !mServerDialog->isRunning())
-    {
-        QMessageBox::warning(this, tr("Server stopped"),
-            tr("The local server stopped before the client could connect."));
-        mPendingClientAddress.clear();
-        mPendingClientPort.clear();
-        return;
-    }
-
-    const QString address = mServerDialog->localConnectAddress();
-    const QString port = mServerDialog->configuredPort();
-    if (mServerDialog->isServerReachable(250))
-    {
-        launchClient();
-        return;
-    }
-
-    // 80 * 250 ms is about 20 seconds. Keep checking without blocking the
-    // GUI, so the server console remains responsive while it initializes.
-    if (++mServerLaunchAttempts >= 80)
-    {
-        QMessageBox::warning(this, tr("Server is not ready"),
-            tr("The local server did not open %1:%2 in time.").arg(address, port));
-        mPendingClientAddress.clear();
-        mPendingClientPort.clear();
-        return;
-    }
-
-    QTimer::singleShot(250, this, SLOT(launchClientWhenServerReady()));
 }
 
 void Launcher::MainDialog::launchClient()
@@ -1396,10 +1378,7 @@ void Launcher::MainDialog::launchClient()
     {
         if (mServerDialog != nullptr && mServerDialog->isRunning())
             return;
-        // The client is detached; terminate the launcher immediately after
-        // the hand-off so a failed update/check path cannot leave an inert
-        // launcher window in front of the game.
-        QCoreApplication::exit(0);
+        qApp->quit();
     }
 }
 

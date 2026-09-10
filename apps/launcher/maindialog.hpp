@@ -20,6 +20,7 @@ class QStackedWidget;
 class QStringList;
 class QString;
 class QLabel;
+class QPushButton;
 
 namespace Launcher
 {
@@ -57,6 +58,7 @@ namespace Launcher
 
     public slots:
         void changePage(QListWidgetItem *current, QListWidgetItem *previous);
+        void checkForUpdates();
         void play();
         void runServer();
         void stopServer();
@@ -66,7 +68,6 @@ namespace Launcher
         void wizardStarted();
         void wizardFinished(int exitCode, QProcess::ExitStatus exitStatus);
         void launchClient();
-        void launchClientWhenServerReady();
         void autoStartServerChanged(bool enabled);
         void autoRestartServerChanged(bool enabled);
         void serverRunningChanged(bool running, const QString& address, const QString& port);
@@ -114,6 +115,7 @@ namespace Launcher
         Process::ProcessInvoker *mWizardInvoker;
         ServerDialog *mServerDialog;
         QLabel *mWatermarkLabel;
+        QPushButton *mPlayButton;
 
         bool mBuildManifestLoaded;
         QString mBuildManifestPath;
@@ -124,9 +126,10 @@ namespace Launcher
         bool mBuildServerAddressSpecified;
         bool mBuildServerPortSpecified;
         bool mBuildComplete;
+        bool mUpdateAvailable;
+        bool mUpdateCheckRunning;
         QString mPendingClientAddress;
         QString mPendingClientPort;
-        int mServerLaunchAttempts;
 
         Files::ConfigurationManager mCfgMgr;
 

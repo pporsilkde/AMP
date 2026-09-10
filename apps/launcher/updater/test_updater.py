@@ -123,9 +123,11 @@ class UpdaterTests(unittest.TestCase):
             # continue and invoke tes3mp itself.
             (web/'check.ini').write_text('version=00001\nbuild=00001\n')
             equal_job = self.root/'equal-job'; equal_job.mkdir()
+            self.assertEqual(u.check(request),0)
             self.assertEqual(u.prepare(request,equal_job),0)
             self.assertFalse((mf.parent/'.arena-update-pending.json').exists())
             (web/'check.ini').write_text('version=00002\nbuild=00003\n')
+            self.assertEqual(u.check(request),10)
             self.assertEqual(u.prepare(request,job),10)
             plan=json.loads((job/'plan.json').read_text());self.assertEqual(plan['versions'],{'version':'00002','build':'00003'})
             self.assertEqual(plan['files'][-1]['relative'],'build.ini')
@@ -137,5 +139,27 @@ class UpdaterTests(unittest.TestCase):
             self.assertIn('address=178.20.47.31',mf.read_text())
             self.assertIn('version=00002',mf.read_text());self.assertIn('build=00003',mf.read_text())
         finally:server.shutdown();server.server_close();thread.join()
+
+    def test_supervisor_no_update_reopens_launcher_with_resume(self):
+        """The Update button must never leave the GUI closed on a stale check."""
+        manifest = self.root / 'build.ini'
+        manifest.write_text('[Build]\nversion=00001\nbuild=00001\n')
+        data = self.root / 'Data Files'; data.mkdir()
+        job = self.root / 'job'; job.mkdir()
+        started = []
+        original_popen = u.subprocess.Popen
+        u.subprocess.Popen = lambda args, **kwargs: started.append((args, kwargs))
+        request = {
+            'manifest': str(manifest), 'data': str(data), 'client': str(self.root),
+            'launcher': 'launcher', 'launcher_args': ['--normal-arg'],
+            'parent_pid': 0, 'engine_key': 'url_linux'
+        }
+        try:
+            self.assertEqual(u.update(request, job), 0)
+        finally:
+            u.subprocess.Popen = original_popen
+        self.assertEqual(len(started), 1)
+        self.assertEqual(started[0][0], ['launcher', '--normal-arg', '--arena-update-resume'])
+        self.assertEqual(started[0][1]['cwd'], str(self.root))
 
 if __name__=='__main__':unittest.main()

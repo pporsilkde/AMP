@@ -37,6 +37,7 @@ namespace ArenaUi
                 m.insert(QString::fromUtf8(u8"Server website"), QString::fromUtf8(u8"Сайт сервера"));
                 m.insert(QString::fromUtf8(u8"ArenaMP update"), QString::fromUtf8(u8"Обновление ArenaMP"));
                 m.insert(QString::fromUtf8(u8"Checking for updates..."), QString::fromUtf8(u8"Проверка обновлений..."));
+                m.insert(QString::fromUtf8(u8"Update"), QString::fromUtf8(u8"Обновить"));
                 m.insert(QString::fromUtf8(u8"Downloading engine update..."), QString::fromUtf8(u8"Скачивание обновления движка..."));
                 m.insert(QString::fromUtf8(u8"Downloading content update..."), QString::fromUtf8(u8"Скачивание обновления сборки..."));
                 m.insert(QString::fromUtf8(u8"Preparing update files..."), QString::fromUtf8(u8"Подготовка файлов обновления..."));

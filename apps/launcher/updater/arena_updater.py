@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Arena updater worker. Standard library only; frozen into arena-updater.exe on Windows.
+check REQUEST -> 0 unchanged/offline, 10 update available.
 prepare REQUEST -> 0 unchanged/offline, 10 staged, 1 recoverable error, 20 unsafe to launch.
+update REQUEST supervises prepare/apply after the launcher exits.
 apply REQUEST waits for the launcher, commits a journalled transaction, then restarts it.
 No shell commands or downloaded scripts are executed.
 """
@@ -462,29 +464,53 @@ def recover_pending(request):
     pointer.unlink()
 
 
+def inspect_updates(request):
+    """Return (local, remote, requested) without downloading update archives.
+
+    A missing/unreachable/malformed check.ini is deliberately represented by
+    an empty request. The launcher must remain usable when the update server
+    is offline.
+    """
+    manifest = Path(request['manifest'])
+    try:
+        local = read_ini(manifest.read_text(encoding='utf-8-sig'))
+        check_url = build_value(local, 'url_check')
+        if not check_url:
+            return local, {}, {}
+        emit('check')
+        remote = read_ini(download(check_url, limit=MAX_CHECK).decode('utf-8-sig'))
+        requested = {}
+        for key in ('version', 'build'):
+            value = build_value(remote, key)
+            if revision(value) > revision(build_value(local, key, '00000')):
+                requested[key] = value
+        if request['engine_key'] == 'url_macos' and not build_value(local, 'url_macos'):
+            requested.pop('build', None)
+        return local, remote, requested
+    except Exception as exc:
+        emit('offline', message=str(exc))
+        return {}, {}, {}
+
+
+def check(request):
+    pending = Path(request['manifest']).parent / '.arena-update-pending.json'
+    if pending.exists():
+        emit('available', recovery=True)
+        return 10
+    _local, _remote, requested = inspect_updates(request)
+    if requested:
+        emit('available', versions=requested)
+        return 10
+    return 0
+
+
 def prepare(request, job):
     manifest = Path(request['manifest'])
     with installation_lock(manifest):
         try: recover_pending(request)
         except Exception as exc:
             emit('blocked', message=str(exc)); return 20
-        local = read_ini(manifest.read_text(encoding='utf-8-sig'))
-        check_url = build_value(local, 'url_check')
-        if not check_url: return 0
-        try:
-            emit('check')
-            remote = read_ini(download(check_url, limit=MAX_CHECK).decode('utf-8-sig'))
-            requested = {}
-            for key in ('version', 'build'):
-                value = build_value(remote, key)
-                if revision(value) > revision(build_value(local, key, '00000')):
-                    requested[key] = value
-        except Exception as exc:
-            # Offline/HTTP/invalid check is deliberately non-blocking.
-            emit('offline', message=str(exc)); return 0
-        if not requested: return 0
-        if request['engine_key'] == 'url_macos' and not build_value(local, 'url_macos'):
-            requested.pop('build', None)
+        local, remote, requested = inspect_updates(request)
         if not requested: return 0
         running = other_clients(request)
         if running:
@@ -532,6 +558,20 @@ def prepare(request, job):
         return 10
 
 
+def launch_launcher(request, resume):
+    args = [request['launcher']] + request.get('launcher_args', [])
+    if resume:
+        args.append('--arena-update-resume')
+    env = os.environ.copy()
+    if getattr(sys, 'frozen', False):
+        if os.name == 'nt': ctypes.windll.kernel32.SetDllDirectoryW(None)
+        elif 'LD_LIBRARY_PATH_ORIG' in env: env['LD_LIBRARY_PATH'] = env['LD_LIBRARY_PATH_ORIG']
+        else: env.pop('LD_LIBRARY_PATH', None)
+    subprocess.Popen(args, cwd=request['client'], close_fds=True, env=env,
+                     creationflags=0x00000008 if os.name == 'nt' else 0,
+                     start_new_session=os.name != 'nt')
+
+
 def apply(request, job):
     result_path = Path(request['manifest']).parent / '.arena-update-result.json'
     pointer = Path(request['manifest']).parent / '.arena-update-pending.json'
@@ -553,18 +593,11 @@ def apply(request, job):
             atomic_json(result_path, {'ok':True, 'versions':plan['versions']})
     except Exception as exc:
         atomic_json(result_path, {'ok':False, 'message':str(exc)})
-    # Failed updates reopen the launcher, but never auto-connect.
-    args = [request['launcher']] + request.get('launcher_args', [])
-    if ok: args.append('--arena-update-resume')
     try:
-        env = os.environ.copy()
-        if getattr(sys, 'frozen', False):
-            if os.name == 'nt': ctypes.windll.kernel32.SetDllDirectoryW(None)
-            elif 'LD_LIBRARY_PATH_ORIG' in env: env['LD_LIBRARY_PATH'] = env['LD_LIBRARY_PATH_ORIG']
-            else: env.pop('LD_LIBRARY_PATH', None)
-        subprocess.Popen(args, cwd=request['client'], close_fds=True, env=env,
-                         creationflags=0x00000008 if os.name == 'nt' else 0,
-                         start_new_session=os.name != 'nt')
+        # Failed updates reopen the launcher and allow a new check. Successful
+        # or unchanged runs resume with the ordinary Play button; they never
+        # auto-connect to the server.
+        launch_launcher(request, ok)
     except Exception as exc:
         atomic_json(result_path, {'ok':False, 'message':'Update applied; reopen launcher manually. ' + str(exc)})
         return 1
@@ -574,15 +607,69 @@ def apply(request, job):
     return 0 if ok else 1
 
 
+def update(request, job):
+    """Run the complete update lifecycle after the GUI has closed.
+
+    This is the process started by the Update button. It owns the temporary
+    job, so the launcher is never responsible for staging files or starting a
+    second process after it has exited.
+    """
+    result_path = Path(request['manifest']).parent / '.arena-update-result.json'
+    try:
+        code = prepare(request, job)
+    except Exception as exc:
+        emit('error', message=str(exc))
+        atomic_json(result_path, {'ok':False, 'message':str(exc)})
+        try:
+            launch_launcher(request, False)
+        except Exception:
+            pass
+        return 1
+
+    if code == 10:
+        # apply() waits for the old launcher PID, commits atomically and then
+        # starts a fresh launcher with --arena-update-resume.
+        return apply(request, job)
+
+    if code == 0:
+        # The remote value may have changed between the lightweight check and
+        # this click, or check.ini may have gone offline. In either case the
+        # user must get the normal Play button back, not a dead GUI.
+        try:
+            launch_launcher(request, True)
+        except Exception as exc:
+            atomic_json(result_path, {'ok':False, 'message':str(exc)})
+            return 1
+        shutil.rmtree(job, ignore_errors=True)
+        return 0
+
+    # Blocked/failed preparation did not commit target files. Reopen normally
+    # so the result is shown and the next startup can recover/recheck.
+    if not result_path.exists():
+        atomic_json(result_path, {'ok':False, 'message':'The update could not be prepared.'})
+    try:
+        launch_launcher(request, False)
+    except Exception:
+        return 1
+    shutil.rmtree(job, ignore_errors=True)
+    return 1
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=('prepare', 'apply'))
+    parser.add_argument('action', choices=('check', 'prepare', 'update', 'apply'))
     parser.add_argument('request')
     args = parser.parse_args()
     path = Path(args.request).absolute()
     request = json.loads(path.read_text(encoding='utf-8'))
     try:
-        return prepare(request, path.parent) if args.action == 'prepare' else apply(request, path.parent)
+        if args.action == 'check':
+            return check(request)
+        if args.action == 'prepare':
+            return prepare(request, path.parent)
+        if args.action == 'update':
+            return update(request, path.parent)
+        return apply(request, path.parent)
     except Exception as exc:
         emit('error', message=str(exc))
         return 1
