@@ -5,6 +5,7 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDir>
+#include <QDateTime>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
@@ -29,6 +30,44 @@ namespace
         return QCoreApplication::translate("ArenaUpdater", text);
     }
 
+    QString logPath(const QString& manifestPath)
+    {
+        const QString cache = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+        if (!cache.isEmpty())
+            QDir().mkpath(cache);
+        const QStringList folders {QFileInfo(manifestPath).absolutePath(),
+            QCoreApplication::applicationDirPath(), cache};
+        for (const QString& folder : folders)
+        {
+            if (folder.isEmpty()) continue;
+            QFile file(QDir(folder).filePath(QStringLiteral("Update.log")));
+            if (file.size() > 4 * 1024 * 1024)
+            {
+                const QString previous = file.fileName() + QStringLiteral(".old");
+                QFile::remove(previous);
+                file.rename(previous);
+                file.setFileName(QDir(folder).filePath(QStringLiteral("Update.log")));
+            }
+            if (file.open(QIODevice::WriteOnly | QIODevice::Append))
+                return file.fileName();
+        }
+        return QString();
+    }
+
+    void log(const QString& path, const QString& phase, const QString& message)
+    {
+        QFile file(path);
+        if (!path.isEmpty() && file.open(QIODevice::WriteOnly | QIODevice::Append))
+        {
+            const QJsonObject event {
+                {QStringLiteral("time"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate)},
+                {QStringLiteral("pid"), double(QCoreApplication::applicationPid())},
+                {QStringLiteral("phase"), phase}, {QStringLiteral("message"), message}
+            };
+            file.write(QJsonDocument(event).toJson(QJsonDocument::Compact) + '\n');
+        }
+    }
+
     bool saveJson(const QString& path, const QJsonObject& object)
     {
         QFile file(path);
@@ -44,6 +83,7 @@ namespace
         QString program;
         QStringList prefix;
         QString requestPath;
+        QString logFile;
     };
 
     bool createWorker(QWidget* parent, const QString& manifestPath,
@@ -52,9 +92,15 @@ namespace
         if (context == nullptr || manifestPath.isEmpty())
             return false;
 
+        context->logFile = logPath(manifestPath);
+        log(context->logFile, QStringLiteral("launcher_prepare"), manifestPath);
+
         Config::BuildManifest manifest;
         if (!manifest.read(manifestPath))
+        {
+            log(context->logFile, QStringLiteral("error"), QStringLiteral("Cannot read build.ini"));
             return false;
+        }
 
         const QString client = QCoreApplication::applicationDirPath();
         QString helper;
@@ -143,6 +189,7 @@ namespace
             {QStringLiteral("launcher"), launcher},
             {QStringLiteral("launcher_args"), QJsonArray()},
             {QStringLiteral("engine_key"), key},
+            {QStringLiteral("log"), context->logFile},
             {QStringLiteral("parent_pid"), double(QCoreApplication::applicationPid())}
         };
         if (!saveJson(requestPath, request))
@@ -156,6 +203,7 @@ namespace
         context->program = program;
         context->prefix = prefix;
         context->requestPath = requestPath;
+        log(context->logFile, QStringLiteral("worker_ready"), program + QStringLiteral(" ") + requestPath);
         return true;
     }
 }
@@ -182,7 +230,10 @@ CheckResult checkAvailable(QWidget* parent, const QString& manifestPath, const Q
 {
     WorkerContext context;
     if (!createWorker(parent, manifestPath, dataPath, true, &context))
+    {
+        log(context.logFile, QStringLiteral("check_failed"), QStringLiteral("Cannot prepare updater helper; Play remains available"));
         return CheckResult::NoUpdate;
+    }
 
     QProgressDialog progress(tr("Checking for updates..."), tr("Cancel"), 0, 0, parent);
     progress.setWindowTitle(tr("ArenaMP update"));
@@ -200,10 +251,15 @@ CheckResult checkAvailable(QWidget* parent, const QString& manifestPath, const Q
 
     QObject::connect(&progress, &QProgressDialog::canceled, &worker, [&]() {
         canceled = true;
+        log(context.logFile, QStringLiteral("check_cancelled"), QStringLiteral("User cancelled the check"));
         worker.kill();
     });
     QObject::connect(&timeout, &QTimer::timeout, &worker, [&]() {
+        log(context.logFile, QStringLiteral("check_timeout"), QStringLiteral("Updater did not finish within 12 seconds"));
         worker.kill();
+    });
+    QObject::connect(&worker, &QProcess::readyReadStandardError, &progress, [&]() {
+        log(context.logFile, QStringLiteral("worker_stderr"), QString::fromUtf8(worker.readAllStandardError()));
     });
     QObject::connect(&worker, &QProcess::readyReadStandardOutput, &progress, [&]() {
         lines += worker.readAllStandardOutput();
@@ -228,6 +284,7 @@ CheckResult checkAvailable(QWidget* parent, const QString& manifestPath, const Q
         context.prefix + QStringList {QStringLiteral("check"), context.requestPath});
     if (!worker.waitForStarted(3000))
     {
+        log(context.logFile, QStringLiteral("check_start_failed"), worker.errorString());
         progress.close();
         return CheckResult::NoUpdate;
     }
@@ -242,6 +299,9 @@ CheckResult checkAvailable(QWidget* parent, const QString& manifestPath, const Q
         return CheckResult::NoUpdate;
     if (worker.exitStatus() == QProcess::NormalExit && worker.exitCode() == 10)
         available = true;
+    log(context.logFile, QStringLiteral("check_finished"),
+        QStringLiteral("exit=%1 status=%2 button=%3").arg(worker.exitCode()).arg(int(worker.exitStatus()))
+            .arg(available ? QStringLiteral("Update") : QStringLiteral("Play")));
     return available ? CheckResult::UpdateAvailable : CheckResult::NoUpdate;
 }
 
@@ -249,7 +309,10 @@ bool startUpdate(QWidget* parent, const QString& manifestPath, const QString& da
 {
     WorkerContext context;
     if (!createWorker(parent, manifestPath, dataPath, false, &context))
+    {
+        log(context.logFile, QStringLiteral("update_start_failed"), QStringLiteral("Cannot prepare updater helper"));
         return false;
+    }
 
     // The supervisor performs check/prepare/apply after this GUI exits. Keep
     // the job directory because it contains the copied worker and request.
@@ -259,12 +322,15 @@ bool startUpdate(QWidget* parent, const QString& manifestPath, const QString& da
         context.prefix + QStringList {QStringLiteral("update"), context.requestPath},
         context.job->path(), &detachedPid))
     {
+        log(context.logFile, QStringLiteral("update_start_failed"), QStringLiteral("startDetached failed"));
         context.job->setAutoRemove(true);
         QMessageBox::warning(parent, tr("Update failed"),
             tr("Could not start the update installer."));
         return false;
     }
     qDebug() << "Arena updater supervisor started" << detachedPid;
+    log(context.logFile, QStringLiteral("update_started"),
+        QStringLiteral("pid=%1; launcher is closing").arg(detachedPid));
     return true;
 }
 

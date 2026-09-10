@@ -9,6 +9,7 @@ import tarfile
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 import zipfile
 
 spec = importlib.util.spec_from_file_location('updater', Path(__file__).with_name('arena_updater.py'))
@@ -17,7 +18,10 @@ u = importlib.util.module_from_spec(spec); spec.loader.exec_module(u)
 class UpdaterTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(); self.root = Path(self.tmp.name)
-    def tearDown(self): self.tmp.cleanup()
+        self.previous_log = u.LOG_PATH
+    def tearDown(self):
+        u.LOG_PATH = self.previous_log
+        self.tmp.cleanup()
     def zip(self, entries, name='update.zip'):
         p = self.root / name
         with zipfile.ZipFile(p, 'w', zipfile.ZIP_DEFLATED) as z:
@@ -161,5 +165,100 @@ class UpdaterTests(unittest.TestCase):
         self.assertEqual(len(started), 1)
         self.assertEqual(started[0][0], ['launcher', '--normal-arg', '--arena-update-resume'])
         self.assertEqual(started[0][1]['cwd'], str(self.root))
+
+    def supervisor_fixture(self, platform):
+        web = self.root / ('web-' + platform); web.mkdir()
+        client = self.root / ('Клиент с пробелом-' + platform); client.mkdir()
+        data = client / 'Data Files'; data.mkdir()
+        job = self.root / ('job-' + platform); job.mkdir()
+        self.zip({'Textures/a.dds': b'new-content'}, 'content-' + platform + '.zip').rename(web / 'update.zip')
+        executable = 'tes3mp.exe' if platform == 'win' else 'tes3mp'
+        launcher = 'openmw-launcher.exe' if platform == 'win' else 'openmw-launcher'
+        self.zip({executable: b'new-engine', launcher: b'new-launcher', 'resources/version': b'protocol-806'},
+                 'engine-' + platform + '.zip').rename(web / 'engine.zip')
+        (web / 'check.ini').write_text('version=00002\nbuild=00003\n')
+        class Quiet(http.server.SimpleHTTPRequestHandler):
+            def log_message(self, *args): pass
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(Quiet, directory=str(web)))
+        thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+        def stop_server():
+            server.shutdown(); server.server_close(); thread.join()
+        self.addCleanup(stop_server)
+        base = 'http://127.0.0.1:' + str(server.server_port)
+        manifest = client / 'build.ini'
+        manifest.write_text('[Build]\nversion=00001\nbuild=00001\nurl_check=' + base + '/check.ini\n'
+                            'url_update=' + base + '/update.zip\nurl_' + platform + '=' + base + '/engine.zip\n'
+                            '[Server]\naddress=178.20.47.31\nport=25565\n')
+        request = {'manifest':str(manifest), 'data':str(data), 'client':str(client),
+                   'launcher':str(client / 'openmw-launcher'), 'parent_pid':0, 'engine_key':'url_' + platform}
+        return request, job, web, executable
+
+    def test_detached_supervisor_updates_both_without_stdout_and_keeps_log(self):
+        class DetachedOutput:
+            def write(self, _): raise OSError('Invalid console handle')
+            def flush(self): raise OSError('Invalid console handle')
+        for platform in ('win', 'linux'):
+            with self.subTest(platform=platform):
+                request, job, web, executable = self.supervisor_fixture(platform)
+                u.configure_log(request, job)
+                with patch.object(u.sys, 'stdout', DetachedOutput()), patch.object(u.subprocess, 'Popen') as start:
+                    self.assertEqual(u.check(request), 10)
+                    self.assertEqual(u.update(request, job), 0)
+                    self.assertEqual(u.check(request), 0)
+                client = Path(request['client'])
+                self.assertEqual((client / executable).read_bytes(), b'new-engine')
+                self.assertEqual((Path(request['data']) / 'Textures/a.dds').read_bytes(), b'new-content')
+                manifest = Path(request['manifest']).read_text()
+                self.assertIn('version=00002', manifest); self.assertIn('build=00003', manifest)
+                self.assertIn('address=178.20.47.31', manifest)
+                start.assert_called_once()
+                self.assertEqual(start.call_args[0][0][0], request['launcher'])
+                events = [json.loads(line) for line in (client / 'Update.log').read_text().splitlines()]
+                self.assertTrue(any(event['phase'] == 'installed' for event in events))
+                comparisons = [event['result'] for event in events if event['phase'] == 'comparison']
+                self.assertEqual(comparisons, ['available', 'available', 'current'])
+                u.configure_log(request, job)
+                u.emit('next_check')
+                self.assertIn('installed', (client / 'Update.log').read_text())
+
+    def test_failed_engine_download_keeps_both_revisions_and_update_available(self):
+        request, job, web, executable = self.supervisor_fixture('win')
+        (web / 'engine.zip').unlink()
+        old = Path(request['manifest']).read_text()
+        u.configure_log(request, job)
+        with patch.object(u.sys, 'stdout', None), patch.object(u.subprocess, 'Popen') as start:
+            self.assertEqual(u.update(request, job), 1)
+            self.assertEqual(u.check(request), 10)
+        self.assertEqual(Path(request['manifest']).read_text(), old)
+        self.assertFalse((Path(request['data']) / 'Textures/a.dds').exists())
+        self.assertNotIn('--arena-update-resume', start.call_args[0][0])
+        log = (Path(request['client']) / 'Update.log').read_text()
+        self.assertIn('HTTP Error 404', log)
+        self.assertIn('traceback', log)
+
+    def test_unwritable_log_target_uses_manifest_folder(self):
+        request = {'manifest': str(self.root / 'build.ini'), 'client': str(self.root), 'log': str(self.root)}
+        u.configure_log(request)
+        with patch.object(u.sys, 'stdout', None): u.emit('fallback_test')
+        self.assertEqual(u.LOG_PATH, self.root / 'Update.log')
+        self.assertIn('fallback_test', u.LOG_PATH.read_text())
+
+    def test_supervisor_waits_before_checking_or_reopening_launcher(self):
+        manifest = self.root / 'build.ini'; manifest.write_text('version=00001\nbuild=00001\n')
+        job = self.root / 'job'; job.mkdir()
+        request = {'manifest':str(manifest), 'data':str(self.root), 'client':str(self.root),
+                   'launcher':'launcher', 'parent_pid':123, 'engine_key':'url_linux'}
+        events = []
+        def parent_alive(_pid):
+            events.append('wait')
+            return events.count('wait') == 1
+        def prepare(_request, _job):
+            events.append('prepare')
+            return 0
+        with patch.object(u, 'alive', side_effect=parent_alive), patch.object(u.time, 'sleep'), \
+                patch.object(u, 'prepare', side_effect=prepare), patch.object(u.sys, 'stdout', None), \
+                patch.object(u.subprocess, 'Popen', side_effect=lambda *args, **kwargs: events.append('launcher')):
+            self.assertEqual(u.update(request, job), 0)
+        self.assertEqual(events, ['wait', 'wait', 'prepare', 'launcher'])
 
 if __name__=='__main__':unittest.main()

@@ -1230,7 +1230,10 @@ void Launcher::MainDialog::wizardFinished(int exitCode, QProcess::ExitStatus exi
 
 void Launcher::MainDialog::checkForUpdates()
 {
-    if (mUpdateCheckRunning || QCoreApplication::arguments().contains(QStringLiteral("--arena-update-resume")))
+    // A reopened launcher must compare the actual installed revisions again.
+    // The resume argument only identifies the return from the updater; it is
+    // not proof that the requested content/engine was installed successfully.
+    if (mUpdateCheckRunning)
         return;
 
     mUpdateAvailable = false;

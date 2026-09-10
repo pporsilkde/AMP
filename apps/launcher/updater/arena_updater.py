@@ -9,6 +9,7 @@ No shell commands or downloaded scripts are executed.
 import argparse
 import contextlib
 import ctypes
+import datetime
 import hashlib
 import json
 import os
@@ -20,6 +21,7 @@ import subprocess
 import sys
 import tarfile
 import time
+import traceback
 import urllib.parse
 import urllib.request
 import zipfile
@@ -30,11 +32,61 @@ MAX_EXPANDED = 128 * 1024**3
 MAX_ENTRIES = 500000
 PROTECTED_ROOTS = {'server', 'userdata', 'saves', 'screenshots', 'data files', 'datafiles', '.arena-update'}
 PROTECTED_FILES = {'build.ini', 'check.ini', 'openmw.cfg', 'settings.cfg', 'launcher.cfg',
-                   'tes3mp-client.cfg', 'tes3mp-server.cfg'}
+                   'tes3mp-client.cfg', 'tes3mp-server.cfg', 'update.log', 'update.log.old'}
+LOG_PATH = None
+LAST_PROGRESS_LOG = 0.0
+
+
+def configure_log(request, job=None):
+    """Keep diagnostics outside staging, including when stdout is detached."""
+    global LOG_PATH
+    candidates = [request.get('log'), str(Path(request['manifest']).parent / 'Update.log'),
+                  str(Path(request['client']) / 'Update.log')]
+    if job is not None:
+        candidates.append(str(Path(job).parent / 'Update.log'))
+    LOG_PATH = None
+    for candidate in candidates:
+        if not candidate:
+            continue
+        try:
+            path = Path(candidate).absolute()
+            if path.exists() and path.stat().st_size > 4 * 1024 * 1024:
+                os.replace(path, path.with_name('Update.log.old'))
+            with path.open('a', encoding='utf-8'):
+                pass
+            LOG_PATH = path
+            return
+        except OSError:
+            continue
+
+
+def log_event(phase, values):
+    global LAST_PROGRESS_LOG
+    if LOG_PATH is None:
+        return
+    if phase == 'download' and time.monotonic() - LAST_PROGRESS_LOG < 5:
+        return
+    if phase == 'download':
+        LAST_PROGRESS_LOG = time.monotonic()
+    try:
+        record = dict(time=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                      pid=os.getpid(), phase=phase, **values)
+        with LOG_PATH.open('a', encoding='utf-8') as output:
+            output.write(json.dumps(record, ensure_ascii=False) + '\n')
+    except (OSError, ValueError):
+        # Logging must never block installing or launching the game.
+        pass
 
 
 def emit(phase, **values):
-    print(json.dumps(dict(phase=phase, **values), ensure_ascii=True), flush=True)
+    log_event(phase, values)
+    try:
+        print(json.dumps(dict(phase=phase, **values), ensure_ascii=True), flush=True)
+    except (OSError, ValueError):
+        # QProcess check has a pipe; the detached Update process may have no
+        # valid console/pipe (especially on Windows). This is not a network or
+        # installation failure and must not turn an available update into Play.
+        pass
 
 
 def atomic_json(path, value):
@@ -125,7 +177,9 @@ def download(url, target=None, limit=None, expected_hash=''):
     req = urllib.request.Request(normalize_url(url), headers={'User-Agent':'ArenaMP-Updater/1', 'Cache-Control':'no-cache', 'Accept-Encoding':'identity'})
     timeout = 5 if limit else 30
     deadline = time.monotonic() + (8 if limit else 6 * 3600)
+    emit('download_start', url=req.full_url, target=str(target or 'check.ini'), sha256=expected_hash or 'not supplied')
     with opener.open(req, timeout=timeout) as response:
+        emit('http', url=response.geturl(), status=response.status)
         if response.status != 200:
             raise OSError('HTTP ' + str(response.status))
         total = int(response.headers.get('Content-Length', '-1'))
@@ -159,6 +213,7 @@ def download(url, target=None, limit=None, expected_hash=''):
         if expected_hash:
             if not re.fullmatch(r'[0-9a-fA-F]{64}', expected_hash) or digest.hexdigest() != expected_hash.lower():
                 raise ValueError('SHA-256 mismatch')
+        emit('download_complete', bytes=done, total=total, sha256=digest.hexdigest())
         return bytes(data)
 
 
@@ -474,11 +529,15 @@ def inspect_updates(request):
     manifest = Path(request['manifest'])
     try:
         local = read_ini(manifest.read_text(encoding='utf-8-sig'))
+        emit('local', manifest=str(manifest), version=build_value(local, 'version', '00000'),
+             build=build_value(local, 'build', '00000'), engine_key=request['engine_key'])
         check_url = build_value(local, 'url_check')
         if not check_url:
+            emit('no_check_url', message='No url_check in build.ini; Play remains available')
             return local, {}, {}
         emit('check')
         remote = read_ini(download(check_url, limit=MAX_CHECK).decode('utf-8-sig'))
+        emit('remote', version=build_value(remote, 'version'), build=build_value(remote, 'build'))
         requested = {}
         for key in ('version', 'build'):
             value = build_value(remote, key)
@@ -486,9 +545,10 @@ def inspect_updates(request):
                 requested[key] = value
         if request['engine_key'] == 'url_macos' and not build_value(local, 'url_macos'):
             requested.pop('build', None)
+        emit('comparison', requested=requested, result='available' if requested else 'current')
         return local, remote, requested
     except Exception as exc:
-        emit('offline', message=str(exc))
+        emit('offline', message=str(exc), traceback=traceback.format_exc())
         return {}, {}, {}
 
 
@@ -562,6 +622,7 @@ def launch_launcher(request, resume):
     args = [request['launcher']] + request.get('launcher_args', [])
     if resume:
         args.append('--arena-update-resume')
+    emit('launcher_start', executable=request['launcher'], args=args[1:], cwd=request['client'])
     env = os.environ.copy()
     if getattr(sys, 'frozen', False):
         if os.name == 'nt': ctypes.windll.kernel32.SetDllDirectoryW(None)
@@ -572,26 +633,40 @@ def launch_launcher(request, resume):
                      start_new_session=os.name != 'nt')
 
 
+def wait_for_launcher_exit(request):
+    result_path = Path(request['manifest']).parent / '.arena-update-result.json'
+    deadline = time.monotonic() + 120
+    emit('wait_launcher', parent_pid=request['parent_pid'])
+    while alive(request['parent_pid']):
+        if time.monotonic() > deadline:
+            message = 'Launcher did not exit; update was not applied'
+            emit('error', message=message)
+            atomic_json(result_path, {'ok':False, 'message':message})
+            return False
+        time.sleep(0.2)
+    emit('launcher_exited', parent_pid=request['parent_pid'])
+    return True
+
+
 def apply(request, job):
     result_path = Path(request['manifest']).parent / '.arena-update-result.json'
     pointer = Path(request['manifest']).parent / '.arena-update-pending.json'
-    deadline = time.monotonic() + 120
-    while alive(request['parent_pid']):
-        if time.monotonic() > deadline:
-            atomic_json(result_path, {'ok':False, 'message':'Launcher did not exit; update was not applied'})
-            return 1
-        time.sleep(0.2)
+    if not wait_for_launcher_exit(request):
+        return 1
     ok = False
     try:
         with installation_lock(request['manifest']):
             atomic_json(pointer, {'job':str(job), 'owner':os.getpid()})
             if other_clients(request): raise RuntimeError('A game/server/wizard is still running; no files changed')
             plan = json.loads((job / 'plan.json').read_text(encoding='utf-8'))
+            emit('apply', files=len(plan['files']), versions=plan['versions'])
             commit(job, plan)
             pointer.unlink(missing_ok=True)
             ok = True
             atomic_json(result_path, {'ok':True, 'versions':plan['versions']})
+            emit('installed', versions=plan['versions'])
     except Exception as exc:
+        emit('error', message=str(exc), traceback=traceback.format_exc())
         atomic_json(result_path, {'ok':False, 'message':str(exc)})
     try:
         # Failed updates reopen the launcher and allow a new check. Successful
@@ -615,10 +690,14 @@ def update(request, job):
     second process after it has exited.
     """
     result_path = Path(request['manifest']).parent / '.arena-update-result.json'
+    # Also wait on offline/error/no-update paths. Otherwise a fast failed check
+    # could reopen the launcher before the old GUI finishes closing.
+    if not wait_for_launcher_exit(request):
+        return 1
     try:
         code = prepare(request, job)
     except Exception as exc:
-        emit('error', message=str(exc))
+        emit('error', message=str(exc), traceback=traceback.format_exc())
         atomic_json(result_path, {'ok':False, 'message':str(exc)})
         try:
             launch_launcher(request, False)
@@ -662,16 +741,22 @@ def main():
     args = parser.parse_args()
     path = Path(args.request).absolute()
     request = json.loads(path.read_text(encoding='utf-8'))
+    configure_log(request, path.parent)
+    emit('start', action=args.action, request=str(path), client=request['client'], data=request['data'],
+         log=str(LOG_PATH), frozen=getattr(sys, 'frozen', False))
     try:
         if args.action == 'check':
-            return check(request)
-        if args.action == 'prepare':
-            return prepare(request, path.parent)
-        if args.action == 'update':
-            return update(request, path.parent)
-        return apply(request, path.parent)
+            code = check(request)
+        elif args.action == 'prepare':
+            code = prepare(request, path.parent)
+        elif args.action == 'update':
+            code = update(request, path.parent)
+        else:
+            code = apply(request, path.parent)
+        emit('finish', action=args.action, exit_code=code)
+        return code
     except Exception as exc:
-        emit('error', message=str(exc))
+        emit('error', message=str(exc), traceback=traceback.format_exc())
         return 1
 
 
