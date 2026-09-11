@@ -234,7 +234,7 @@ case "$wrapper" in
             cp -f "$gamedir/tes3mp-server-default.cfg" "$userdata/tes3mp-server.cfg"
         fi
         ;;
-    tes3mp|arenamp-launcher|openmw-wizard|*)
+    tes3mp|arenamp-launcher|*)
         if [[ ! -f "$userdata/tes3mp-client.cfg" && -f "$gamedir/tes3mp-client-default.cfg" ]]; then
             cp -f "$gamedir/tes3mp-client-default.cfg" "$userdata/tes3mp-client.cfg"
         fi
@@ -265,7 +265,7 @@ WRAPPER
     chmod +x "$path"
 }
 
-for bin in tes3mp tes3mp-server arenamp-launcher openmw-wizard openmw-iniimporter openmw-essimporter bsatool esmtool; do
+for bin in tes3mp tes3mp-server arenamp-launcher openmw-iniimporter openmw-essimporter bsatool esmtool; do
     wrap_binary "$bin"
 done
 

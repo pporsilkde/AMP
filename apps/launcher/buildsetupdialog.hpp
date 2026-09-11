@@ -36,6 +36,9 @@ namespace Launcher
             QStringList archives;
             bool manifestExists = false;
             QString manifestPath;
+            /// True when the launcher must apply the chosen language itself:
+            /// a new build, or an old build.ini without a language field.
+            bool applyLanguage = false;
         };
 
         explicit BuildSetupDialog(QWidget* parent = nullptr);
@@ -50,6 +53,10 @@ namespace Launcher
         static QString resolveDataFilesDirectory(const QString& selectedPath);
         static bool isGroundcoverCandidate(const QString& fileName);
         static QStringList archivesForDirectory(const QString& dataPath);
+        /// win1251 for Russian, win1250 for Polish, win1252 otherwise.
+        static QString encodingForLanguage(const QString& language);
+        /// Language preselected from the system locale.
+        static QString defaultLanguage();
 
     private slots:
         void browseForFolder();
@@ -73,6 +80,7 @@ namespace Launcher
         QLabel* mStatusDetailLabel;
         QLineEdit* mNameEdit;
         QComboBox* mLanguageCombo;
+        QLabel* mLanguageHintLabel;
         QLabel* mContentHintLabel;
         QListWidget* mContentList;
         QLabel* mGroundcoverLabel;

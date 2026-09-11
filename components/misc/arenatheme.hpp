@@ -48,7 +48,7 @@ namespace ArenaUi
         // Keep the shared QSS in several chunks so the launcher, wizard and
         // updater can all include this header without C2026.
         QString arenaStyleSheet;
-        arenaStyleSheet.reserve(40960);
+        arenaStyleSheet.reserve(45056);
         arenaStyleSheet += QStringLiteral(R"ARENA(
             QMainWindow, QDialog, QWizard, QWidget#centralWidget, QWidget#centralwidget {
                 background-color: #191a1d;
@@ -872,6 +872,58 @@ namespace ArenaUi
             QDialog#BuildSetupDialog { background: transparent; }
             QWidget#advancedQuickPanel { background: transparent; }
             QWidget#advancedQuickPanel QCheckBox { color: #e1dcd2; }
+        )ARENA");
+        arenaStyleSheet += QStringLiteral(R"ARENA(
+            /* U022: readable spin-box steppers instead of the tiny native arrows. */
+            QSpinBox, QDoubleSpinBox {
+                padding-right: 28px;
+            }
+            QSpinBox::up-button, QDoubleSpinBox::up-button,
+            QSpinBox::down-button, QDoubleSpinBox::down-button {
+                subcontrol-origin: border;
+                width: 22px;
+                height: 11px;
+                margin: 2px 3px;
+                border: 1px solid rgba(255,255,255,20);
+                border-radius: 6px;
+                background-color: rgba(255,255,255,12);
+            }
+            QSpinBox::up-button, QDoubleSpinBox::up-button { subcontrol-position: top right; }
+            QSpinBox::down-button, QDoubleSpinBox::down-button { subcontrol-position: bottom right; }
+            QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+            QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
+                background-color: rgba(226,193,126,46);
+                border-color: rgba(226,193,126,120);
+            }
+            QSpinBox::up-button:pressed, QDoubleSpinBox::up-button:pressed,
+            QSpinBox::down-button:pressed, QDoubleSpinBox::down-button:pressed {
+                background-color: rgba(226,193,126,92);
+            }
+            QSpinBox::up-button:disabled, QDoubleSpinBox::up-button:disabled,
+            QSpinBox::down-button:disabled, QDoubleSpinBox::down-button:disabled,
+            QSpinBox::up-button:off, QDoubleSpinBox::up-button:off,
+            QSpinBox::down-button:off, QDoubleSpinBox::down-button:off {
+                background-color: rgba(255,255,255,5);
+                border-color: rgba(255,255,255,10);
+            }
+            QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
+                image: url(:/arena/arenaicons/chevron-up.png);
+                width: 9px;
+                height: 9px;
+            }
+            QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
+                image: url(:/arena/arenaicons/chevron-down.png);
+                width: 9px;
+                height: 9px;
+            }
+            QSpinBox::up-arrow:disabled, QDoubleSpinBox::up-arrow:disabled,
+            QSpinBox::up-arrow:off, QDoubleSpinBox::up-arrow:off {
+                image: url(:/arena/arenaicons/chevron-up-muted.png);
+            }
+            QSpinBox::down-arrow:disabled, QDoubleSpinBox::down-arrow:disabled,
+            QSpinBox::down-arrow:off, QDoubleSpinBox::down-arrow:off {
+                image: url(:/arena/arenaicons/chevron-down-muted.png);
+            }
         )ARENA");
         app.setStyleSheet(arenaStyleSheet);
     }

@@ -33,6 +33,9 @@ namespace Launcher
         // U020 status column: launcher/update state and detected hardware.
         void setUpdateState(bool checking, bool updateAvailable);
         void setHardwareInfo(const QString& gpuName, const QString& gpuDetail, int logicalThreads);
+        /// U022: hosts a client option that used to live on the removed
+        /// Settings page. The widget keeps its owner, only its place changes.
+        void addLaunchOption(QWidget* widget);
 
         void setAlternativeServer(const QString& address, const QString& port, bool enabled);
         bool alternativeServer() const;

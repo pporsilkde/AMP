@@ -18,6 +18,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QLocale>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QStyle>
@@ -93,6 +94,28 @@ QString Launcher::BuildSetupDialog::resolveDataFilesDirectory(const QString& sel
     return QString();
 }
 
+QString Launcher::BuildSetupDialog::encodingForLanguage(const QString& language)
+{
+    const QString canonical = Config::BuildManifest::canonicalLanguage(language);
+    if (canonical.compare(QLatin1String("Russian"), Qt::CaseInsensitive) == 0)
+        return QStringLiteral("win1251");
+    if (canonical.compare(QLatin1String("Polish"), Qt::CaseInsensitive) == 0)
+        return QStringLiteral("win1250");
+    return QStringLiteral("win1252");
+}
+
+QString Launcher::BuildSetupDialog::defaultLanguage()
+{
+    // A Russian or Polish Morrowind installation is the common case for those
+    // systems, so preselect the matching text encoding instead of English.
+    switch (QLocale::system().language())
+    {
+        case QLocale::Russian: return QStringLiteral("Russian");
+        case QLocale::Polish: return QStringLiteral("Polish");
+        default: return QStringLiteral("English");
+    }
+}
+
 bool Launcher::BuildSetupDialog::isGroundcoverCandidate(const QString& fileName)
 {
     const QString lowered = fileName.toLower();
@@ -153,6 +176,7 @@ Launcher::BuildSetupDialog::BuildSetupDialog(QWidget* parent)
     , mStatusDetailLabel(nullptr)
     , mNameEdit(nullptr)
     , mLanguageCombo(nullptr)
+    , mLanguageHintLabel(nullptr)
     , mContentHintLabel(nullptr)
     , mContentList(nullptr)
     , mGroundcoverLabel(nullptr)
@@ -241,8 +265,15 @@ Launcher::BuildSetupDialog::BuildSetupDialog(QWidget* parent)
     mLanguageCombo->addItem(tr("English"), QStringLiteral("English"));
     mLanguageCombo->addItem(tr("Russian"), QStringLiteral("Russian"));
     mLanguageCombo->addItem(tr("Polish"), QStringLiteral("Polish"));
+    const int defaultLanguageIndex = mLanguageCombo->findData(defaultLanguage());
+    if (defaultLanguageIndex >= 0)
+        mLanguageCombo->setCurrentIndex(defaultLanguageIndex);
     nameRow->addWidget(mLanguageCombo);
     buildBody->addLayout(nameRow);
+
+    mLanguageHintLabel = makeMuted(buildCard,
+        tr("The language sets the text encoding of the build: win1251 for Russian, win1250 for Polish, win1252 otherwise."));
+    buildBody->addWidget(mLanguageHintLabel);
 
     mContentHintLabel = makeMuted(buildCard,
         tr("Tick the plug-ins the build uses and put them in load order. Grass and groundcover plug-ins are recognized by name and connected automatically."));
@@ -398,10 +429,18 @@ void Launcher::BuildSetupDialog::showManifestBuild(const QString& dataPath, cons
 
     mNameEdit->setText(mResult.buildName);
     mNameEdit->setReadOnly(true);
-    mLanguageCombo->setEnabled(false);
-    const int languageIndex = mLanguageCombo->findData(mResult.language);
+
+    // build.ini owns the language when it declares one. Older manifests
+    // without the field let the player choose it here instead.
+    mResult.applyLanguage = !manifest.languageSpecified;
+    mLanguageCombo->setEnabled(mResult.applyLanguage);
+    const int languageIndex = mLanguageCombo->findData(
+        mResult.applyLanguage ? defaultLanguage() : mResult.language);
     if (languageIndex >= 0)
         mLanguageCombo->setCurrentIndex(languageIndex);
+    mLanguageHintLabel->setText(mResult.applyLanguage
+        ? tr("build.ini has no language field: choose the encoding the build expects.")
+        : tr("The language comes from build.ini: %1.").arg(mResult.language));
 
     mContentHintLabel->setText(tr("The plug-in list and its order come from build.ini and are used exactly as they are."));
     mContentList->setDragDropMode(QAbstractItemView::NoDragDrop);
@@ -431,6 +470,9 @@ void Launcher::BuildSetupDialog::showNewBuild(const QString& dataPath)
 
     mNameEdit->setReadOnly(false);
     mLanguageCombo->setEnabled(true);
+    mResult.applyLanguage = true;
+    mLanguageHintLabel->setText(
+        tr("The language sets the text encoding of the build: win1251 for Russian, win1250 for Polish, win1252 otherwise."));
     if (mNameEdit->text().trimmed().isEmpty())
     {
         // Suggest the build folder name, not the literal "Data Files".
@@ -548,6 +590,10 @@ void Launcher::BuildSetupDialog::accept()
     if (!mValid)
         return;
 
+    if (mResult.applyLanguage)
+        mResult.language = Config::BuildManifest::canonicalLanguage(
+            mLanguageCombo->currentData().toString());
+
     if (!mResult.manifestExists)
     {
         mResult.buildName = mNameEdit->text().trimmed();
@@ -557,8 +603,6 @@ void Launcher::BuildSetupDialog::accept()
             mNameEdit->setFocus();
             return;
         }
-        mResult.language = Config::BuildManifest::canonicalLanguage(
-            mLanguageCombo->currentData().toString());
         mResult.content = checkedContent();
         if (mResult.content.isEmpty())
         {

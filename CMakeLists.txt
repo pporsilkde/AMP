@@ -35,7 +35,10 @@ endif()
 # Apps and tools
 option(BUILD_OPENMW             "Build OpenMW" ON)
 option(BUILD_LAUNCHER           "Build Launcher" ON)
-option(BUILD_WIZARD             "Build Installation Wizard" ON)
+# U021: the setup wizard is part of the launcher (Play -> build setup), so the
+# standalone openmw-wizard/arenamp-wizard executable is no longer built or
+# shipped. Set -DBUILD_WIZARD=ON to build the legacy wizard anyway.
+option(BUILD_WIZARD             "Build the legacy standalone Installation Wizard" OFF)
 option(BUILD_MWINIIMPORTER      "Build MWiniImporter" ON)
 option(BUILD_OPENCS             "Build OpenMW Construction Set" OFF)
 option(BUILD_ESSIMPORTER        "Build ESS (Morrowind save game) importer" OFF)
@@ -1088,7 +1091,9 @@ elseif(NOT APPLE)
         SET(CPACK_NSIS_HELP_LINK "https:\\\\\\\\www.openmw.org")
         SET(CPACK_NSIS_URL_INFO_ABOUT "https:\\\\\\\\www.openmw.org")
         SET(CPACK_NSIS_INSTALLED_ICON_NAME "arenamp-launcher.exe")
-        SET(CPACK_NSIS_MUI_FINISHPAGE_RUN "openmw-wizard.exe")
+        # U021: the installer finishes into the launcher; its first run opens the
+        # built-in build setup instead of a separate wizard executable.
+        SET(CPACK_NSIS_MUI_FINISHPAGE_RUN "arenamp-launcher.exe")
         # Start of tes3mp change (major)
         SET(CPACK_NSIS_MUI_ICON "${OpenMW_SOURCE_DIR}/files/tes3mp/tes3mp.ico")
         SET(CPACK_NSIS_MUI_UNIICON "${OpenMW_SOURCE_DIR}/files/tes3mp/tes3mp.ico")

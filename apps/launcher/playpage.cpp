@@ -540,6 +540,15 @@ void Launcher::PlayPage::setPlayButtonState(const QString& text, bool enabled)
     updateStatusPanel();
 }
 
+void Launcher::PlayPage::addLaunchOption(QWidget* widget)
+{
+    if (widget == nullptr)
+        return;
+    widget->setParent(launchFormFrame);
+    widget->setVisible(true);
+    launchFormLayout->addWidget(widget, launchFormLayout->rowCount(), 0, 1, 3);
+}
+
 void Launcher::PlayPage::setUpdateState(bool checking, bool updateAvailable)
 {
     mUpdateChecking = checking;

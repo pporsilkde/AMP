@@ -512,10 +512,14 @@ jobs:
             exit 1
           fi
           grep -q 'OPENMW_OSX_USE_IMAGEIO_PLUGIN:BOOL=ON' CI/macos-arm64/configure.sh
-          grep -q -- '-DBUILD_WIZARD=ON' CI/macos-arm64/configure.sh
-          grep -q "require_cache_exact 'BUILD_WIZARD:BOOL=ON'" CI/macos-arm64/configure.sh
-          grep -q 'Contents/MacOS/openmw-wizard' CI/macos-arm64/build-package.sh
-          grep -q 'arenamp-launcher openmw-wizard tes3mp' CI/macos-arm64/validate-bundle.sh
+          grep -q -- '-DBUILD_WIZARD=OFF' CI/macos-arm64/configure.sh
+          grep -q "require_cache_exact 'BUILD_WIZARD:BOOL=OFF'" CI/macos-arm64/configure.sh
+          grep -q 'Contents/MacOS/arenamp-launcher' CI/macos-arm64/build-package.sh
+          grep -q 'arenamp-launcher tes3mp tes3mp-server' CI/macos-arm64/validate-bundle.sh
+          if grep -q 'openmw-wizard' CI/macos-arm64/build-package.sh CI/macos-arm64/validate-bundle.sh; then
+            echo 'The standalone wizard must not be packaged any more.' >&2
+            exit 1
+          fi
           test -f server/scripts/serverCore.lua
           test -f server/scripts/config.lua
           test -f server/data/banlist.json
@@ -630,10 +634,14 @@ jobs:
           grep -q 'OPENMW_USE_SYSTEM_BULLET:BOOL=OFF' CI/macos-arm64/configure.sh
           grep -q 'USE_DOUBLE_PRECISION:BOOL=ON' CI/macos-arm64/configure.sh
           grep -q 'OPENMW_OSX_USE_IMAGEIO_PLUGIN:BOOL=ON' CI/macos-arm64/configure.sh
-          grep -q -- '-DBUILD_WIZARD=ON' CI/macos-arm64/configure.sh
-          grep -q "require_cache_exact 'BUILD_WIZARD:BOOL=ON'" CI/macos-arm64/configure.sh
-          grep -q 'Contents/MacOS/openmw-wizard' CI/macos-arm64/build-package.sh
-          grep -q 'arenamp-launcher openmw-wizard tes3mp' CI/macos-arm64/validate-bundle.sh
+          grep -q -- '-DBUILD_WIZARD=OFF' CI/macos-arm64/configure.sh
+          grep -q "require_cache_exact 'BUILD_WIZARD:BOOL=OFF'" CI/macos-arm64/configure.sh
+          grep -q 'Contents/MacOS/arenamp-launcher' CI/macos-arm64/build-package.sh
+          grep -q 'arenamp-launcher tes3mp tes3mp-server' CI/macos-arm64/validate-bundle.sh
+          if grep -q 'openmw-wizard' CI/macos-arm64/build-package.sh CI/macos-arm64/validate-bundle.sh; then
+            echo 'The standalone wizard must not be packaged any more.' >&2
+            exit 1
+          fi
           grep -q 'set(OSG_PLUGIN_PREFIX_DIR "osgPlugins")' CMakeLists.txt
           grep -q 'OSG_LIBRARY_PATH' apps/openmw/main.cpp
           if grep -F 'osgPlugins-${OPENSCENEGRAPH_VERSION}' CMakeLists.txt; then

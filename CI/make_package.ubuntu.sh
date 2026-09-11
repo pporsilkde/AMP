@@ -6,7 +6,6 @@ PACKAGE_BINARIES=( \
                    "tes3mp" \
                        "tes3mp-server" \
                        "arenamp-launcher" \
-                       "openmw-wizard" \
                        "openmw-iniimporter" \
     )
 

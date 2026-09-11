@@ -731,6 +731,9 @@ namespace ArenaUi
                 m.insert(QString::fromUtf8(u8"Respawn at nearest Tribunal temple"), QString::fromUtf8(u8"Возрождение у ближайшего храма Трибунала"));
                 m.insert(QString::fromUtf8(u8"Use actor-style collision for placed objects"), QString::fromUtf8(u8"Коллизия размещённых объектов как у NPC"));
                 m.insert(QString::fromUtf8(u8"Convenient editor for the main server options. It updates config.lua without forcing you to edit raw Lua by hand."), QString::fromUtf8(u8"Удобный редактор основных параметров сервера: обновляет config.lua без ручной правки Lua."));
+                m.insert(QString::fromUtf8(u8"The language sets the text encoding of the build: win1251 for Russian, win1250 for Polish, win1252 otherwise."), QString::fromUtf8(u8"Язык задаёт кодировку текста сборки: win1251 для русского, win1250 для польского, иначе win1252."));
+                m.insert(QString::fromUtf8(u8"build.ini has no language field: choose the encoding the build expects."), QString::fromUtf8(u8"В build.ini нет поля языка: выберите кодировку, которую ожидает сборка."));
+                m.insert(QString::fromUtf8(u8"The language comes from build.ini: %1."), QString::fromUtf8(u8"Язык взят из build.ini: %1."));
                 return m;
             }();
             return map;

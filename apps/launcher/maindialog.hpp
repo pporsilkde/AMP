@@ -40,8 +40,7 @@ namespace Launcher
     enum FirstRunDialogResult
     {
         FirstRunDialogResultFailure,
-        FirstRunDialogResultContinue,
-        FirstRunDialogResultWizard
+        FirstRunDialogResultContinue
     };
 
 #ifndef WIN32
@@ -71,8 +70,6 @@ namespace Launcher
         void showChangelog();
 
     private slots:
-        void wizardStarted();
-        void wizardFinished(int exitCode, QProcess::ExitStatus exitStatus);
         void launchClient();
         void autoStartServerChanged(bool enabled);
         void autoRestartServerChanged(bool enabled);
@@ -121,7 +118,6 @@ namespace Launcher
         AdvancedPage *mAdvancedPage;
 
         Process::ProcessInvoker *mGameInvoker;
-        Process::ProcessInvoker *mWizardInvoker;
         ServerDialog *mServerDialog;
         ArenaUi::HeroButton *mPlayButton;
         QLabel *mFooterStatusDot;
@@ -142,6 +138,7 @@ namespace Launcher
         bool mUpdateAvailable;
         bool mUpdateCheckRunning;
         QString mPendingSetupDataPath;
+        QString mPendingSetupLanguage;
         QString mPendingClientAddress;
         QString mPendingClientPort;
 

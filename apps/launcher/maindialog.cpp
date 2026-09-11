@@ -26,6 +26,8 @@
 #include <QJsonObject>
 #include <QSaveFile>
 #include <boost/crc.hpp>
+#include <QDesktopServices>
+#include <QUrl>
 #include <QTimer>
 #include <QElapsedTimer>
 #include <QFrame>
@@ -68,7 +70,7 @@ namespace
     // laptop screens together with the Windows taskbar.
     constexpr int sLauncherWidth = 1080;
     constexpr int sLauncherHeight = 720;
-    constexpr int sNavigationItems = 5;
+    constexpr int sNavigationItems = 4;
 
     void repolishWidget(QWidget* widget)
     {
@@ -210,7 +212,6 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     , mSettingsPage(nullptr)
     , mAdvancedPage(nullptr)
     , mGameInvoker(nullptr)
-    , mWizardInvoker(nullptr)
     , mServerDialog(nullptr)
     , mPlayButton(nullptr)
     , mFooterStatusDot(nullptr)
@@ -232,16 +233,10 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     setFixedSize(sLauncherWidth, sLauncherHeight);
 
     mGameInvoker = new ProcessInvoker();
-    mWizardInvoker = new ProcessInvoker();
     mServerDialog = new ServerDialog(this);
     // The server console is embedded directly inside the Play page.
     // Do not wrap it in a second glass window/title bar, otherwise the
     // inner traffic-light controls and extra top margin waste space.
-    connect(mWizardInvoker->getProcess(), SIGNAL(started()),
-            this, SLOT(wizardStarted()));
-
-    connect(mWizardInvoker->getProcess(), SIGNAL(finished(int,QProcess::ExitStatus)),
-            this, SLOT(wizardFinished(int,QProcess::ExitStatus)));
 
     iconWidget->setViewMode(QListView::IconMode);
     iconWidget->setWrapping(false);
@@ -343,7 +338,6 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
 Launcher::MainDialog::~MainDialog()
 {
     delete mGameInvoker;
-    delete mWizardInvoker;
 }
 
 void Launcher::MainDialog::createIcons()
@@ -372,19 +366,15 @@ void Launcher::MainDialog::createIcons()
     graphicsButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom | Qt::AlignAbsolute);
     graphicsButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
+    // U022: four sections. The old OpenMW "Settings" page (Morrowind.ini
+    // importer and wizard shortcuts) is gone; the compact engine options that
+    // used to live under "Advanced" are the Settings page now.
     QListWidgetItem *settingsButton = new QListWidgetItem(iconWidget);
     settingsButton->setSizeHint(QSize((sLauncherWidth - 20 - 18 - 12 - 30) / sNavigationItems - 4, 58));
     settingsButton->setIcon(ArenaUi::glassIcon(QStringLiteral("settings")));
     settingsButton->setText(tr("Settings"));
     settingsButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
     settingsButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
-
-    QListWidgetItem *advancedButton = new QListWidgetItem(iconWidget);
-    advancedButton->setSizeHint(QSize((sLauncherWidth - 20 - 18 - 12 - 30) / sNavigationItems - 4, 58));
-    advancedButton->setIcon(ArenaUi::glassIcon(QStringLiteral("advanced")));
-    advancedButton->setText(tr("Advanced"));
-    advancedButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
-    advancedButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
     connect(iconWidget,
             SIGNAL(currentItemChanged(QListWidgetItem*,QListWidgetItem*)),
@@ -474,12 +464,15 @@ void Launcher::MainDialog::createPages()
             updateFooterServerStatus(true, addr, port);
     }
 
-    // Add the pages to the stacked widget
+    // Add the pages to the stacked widget, in the same order as the icons.
+    // mSettingsPage stays alive (its load/save still owns launcher.cfg values)
+    // but is no longer reachable: its content was Morrowind.ini import and
+    // wizard shortcuts, both obsolete now that setup lives in the launcher.
     pagesWidget->addWidget(mPlayPage);
     pagesWidget->addWidget(mDataFilesPage);
     pagesWidget->addWidget(mGraphicsPage);
-    pagesWidget->addWidget(mSettingsPage);
     pagesWidget->addWidget(mAdvancedPage);
+    mSettingsPage->hide();
 
     applyBuildManifestRestrictions();
 
@@ -495,6 +488,22 @@ void Launcher::MainDialog::createPages()
     connect(mPlayPage, SIGNAL(clearServerCellsRequested()), this, SLOT(clearServerCells()));
     connect(mPlayPage, SIGNAL(resetServerDataRequested()), this, SLOT(resetServerData()));
     connect(mPlayPage, SIGNAL(changeBuildRequested()), this, SLOT(changeBuild()));
+
+    // U022: the removed Settings page carried two ArenaMP client options.
+    // Move them onto the Play page instead of losing them.
+    if (mSettingsPage != nullptr && mPlayPage != nullptr)
+    {
+        const QStringList wanted {
+            tr("Connect to vanilla-build server"), QStringLiteral("Connect to vanilla-build server"),
+            tr("Hide chat messages"), QStringLiteral("Hide chat messages")
+        };
+        for (QCheckBox* box : mSettingsPage->findChildren<QCheckBox*>())
+        {
+            if (!wanted.contains(box->text()))
+                continue;
+            mPlayPage->addLaunchOption(box);
+        }
+    }
 
     // U021: Data Files shows the content list only. Grass/groundcover plug-ins
     // are recognized by name and connected automatically, and the legacy
@@ -570,6 +579,17 @@ void Launcher::MainDialog::applyPendingBuildPath()
     if (!QFileInfo(path).isDir())
         return;
 
+    // A language chosen in the build setup (new build, or an old build.ini
+    // without a language field) decides the text encoding. A manifest that
+    // declares its own language still wins: loadBuildManifest() runs after.
+    if (!mPendingSetupLanguage.isEmpty())
+    {
+        mLauncherSettings.remove(QStringLiteral("Settings/language"));
+        mLauncherSettings.setValue(QStringLiteral("Settings/language"), mPendingSetupLanguage);
+        mGameSettings.setValue(QStringLiteral("encoding"),
+            BuildSetupDialog::encodingForLanguage(mPendingSetupLanguage));
+    }
+
     // One launcher owns exactly one build: replace the user-level data= entry
     // instead of stacking several Data Files folders on top of each other.
     if (!mBuildDataPath.isEmpty() && mBuildDataPath != path)
@@ -614,6 +634,7 @@ bool Launcher::MainDialog::runBuildSetup(const QString& initialPath)
     }
 
     mPendingSetupDataPath = result.dataPath;
+    mPendingSetupLanguage = result.applyLanguage ? result.language : QString();
     mLauncherSettings.remove(QStringLiteral("General/Build/name"));
     mLauncherSettings.setValue(QStringLiteral("General/Build/name"),
         result.buildName.trimmed().isEmpty() ? QStringLiteral("ArenaMP") : result.buildName.trimmed());
@@ -1516,30 +1537,6 @@ void Launcher::MainDialog::closeEvent(QCloseEvent *event)
     event->accept();
 }
 
-void Launcher::MainDialog::wizardStarted()
-{
-    hide();
-}
-
-void Launcher::MainDialog::wizardFinished(int exitCode, QProcess::ExitStatus exitStatus)
-{
-    if (exitCode != 0 || exitStatus == QProcess::CrashExit)
-        return qApp->quit();
-
-    // The Wizard has just replaced openmw.cfg and launcher.cfg. Reload both
-    // before validating the selected Data Files directory.
-    if (!setup() || !reloadSettings())
-        return qApp->quit();
-
-    if (setupGameData())
-    {
-        show();
-        raise();
-        activateWindow();
-        QTimer::singleShot(0, this, SLOT(checkForUpdates()));
-    }
-}
-
 void Launcher::MainDialog::checkForUpdates()
 {
     // A reopened launcher must compare the actual installed revisions again.
@@ -2036,5 +2033,6 @@ void Launcher::MainDialog::showChangelog()
 
 void Launcher::MainDialog::help()
 {
-    Misc::HelpViewer::openHelp("reference/index.html");
+    // U022: there is no bundled manual yet, so Help opens the ArenaMP chat.
+    QDesktopServices::openUrl(QUrl(QStringLiteral("https://t.me/arena_mp")));
 }

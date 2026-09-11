@@ -59,4 +59,10 @@
   <file>arenaicons/refresh-dark.png</file>
   <file>arenaicons/hint.svg</file>
   <file>arenaicons/hint.png</file>
+  <file>arenaicons/chevron-up.svg</file>
+  <file>arenaicons/chevron-up.png</file>
+  <file>arenaicons/chevron-down-muted.svg</file>
+  <file>arenaicons/chevron-down-muted.png</file>
+  <file>arenaicons/chevron-up-muted.svg</file>
+  <file>arenaicons/chevron-up-muted.png</file>
 </qresource></RCC>

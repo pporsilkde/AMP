@@ -1,3 +1,12 @@
+## U022 — Four sections, Settings replaces Advanced, spin-box steppers and Help link
+
+### Changed
+- Top navigation is four sections: Play, Data Files, Graphics, Settings.
+- The old OpenMW Settings page (Morrowind.ini importer, wizard shortcuts) is no longer reachable; the compact card page that used to be "Advanced" is the Settings page now. `SettingsPage` is still constructed so its load/save keeps owning the same launcher.cfg values.
+- The two ArenaMP client options from that page ("Connect to vanilla-build server", "Hide chat messages") are moved into the Play page launch card.
+- Help opens https://t.me/arena_mp until a bundled manual exists.
+- QSpinBox/QDoubleSpinBox steppers are styled as two separate keys with ArenaMP chevrons, hover/pressed feedback and muted arrows at the range limits (new chevron-up and muted chevron resources).
+
 ## U021 — Hero launch action, server-settings list, minimal Advanced, built-in build setup
 
 ### Changed
@@ -8,7 +17,11 @@
 - The setup wizard is built into the launcher: a first run opens a build-folder dialog that either loads an existing build.ini or generates one from the chosen name, language and load order. `arenamp-wizard` is no longer spawned, and the Play page can switch builds at any time.
 - Data Files keeps the content list only: grass/groundcover plug-ins are detected by name and connected automatically, and the legacy profile selector is hidden.
 
+- New builds choose their language (Russian/English/Polish, preselected from the system locale). It is stored in build.ini and decides the text encoding (win1251/win1250/win1252); an existing build.ini without a language field can be completed the same way without rewriting the file.
+- `BUILD_WIZARD` now defaults to OFF: the standalone wizard executable is not built, packaged or validated any more, and the Windows installer finishes into the launcher.
+
 ### Notes
+- The macOS `CI/macos-arm64/configure.sh` is not part of this archive: switch its `-DBUILD_WIZARD=ON` / `require_cache_exact 'BUILD_WIZARD:BOOL=ON'` to OFF to match the workflow guards.
 - `settingspage.*`, `advancedpage.ui` and `datafilespage.*` are not part of this cumulative archive, so the Advanced quick panel and the Data Files cleanup work through the existing widget pointers/object names at runtime.
 
 ## U020 — Showcase Play page, system status column and requiredDataFiles.json protection

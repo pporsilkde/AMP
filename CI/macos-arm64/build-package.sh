@@ -97,14 +97,14 @@ if [[ ! -L "$APP_PATH/Contents/MacOS/libSDL3.dylib" ]]; then
 fi
 
 # CMake BundleUtilities handles non-Qt dependencies. macdeployqt then performs
-# the Qt-specific deployment pass before the final signature is created. The
-# bundle contains more than one Qt executable, so explicitly include the
-# Wizard in the deployment scan. ArenaMP no longer ships the TES3MP browser.
+# the Qt-specific deployment pass before the final signature is created.
+# U021: the standalone wizard is gone (its flow lives in the launcher), so the
+# only Qt executable that still needs an explicit scan entry is the launcher.
 MACDEPLOYQT_ARGS=(
   "$APP_PATH"
   -always-overwrite
   -verbose=2
-  "-executable=$APP_PATH/Contents/MacOS/openmw-wizard"
+  "-executable=$APP_PATH/Contents/MacOS/arenamp-launcher"
 )
 "$QT_PREFIX/bin/macdeployqt" "${MACDEPLOYQT_ARGS[@]}"
 
