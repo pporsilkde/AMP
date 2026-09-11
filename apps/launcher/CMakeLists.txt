@@ -148,15 +148,21 @@ target_link_libraries(arena-updater
     Qt5::Widgets
     Qt5::Core
     Qt5::Gui
-    Qt5::Network
     ${ZLIB_LIBRARIES}
 )
+
+if (NOT WIN32)
+    target_link_libraries(arena-updater Qt5::Network)
+endif()
 
 if (MSVC)
     target_compile_options(arena-updater PRIVATE /utf-8)
 endif()
 
 if (WIN32)
+    # Use the Windows native HTTPS stack for updater downloads. This avoids a
+    # runtime dependency on optional OpenSSL DLLs from a particular Qt build.
+    target_link_libraries(arena-updater winhttp)
     install(TARGETS arena-updater RUNTIME DESTINATION ".")
 elseif (NOT APPLE)
     install(TARGETS arena-updater RUNTIME DESTINATION "${BINDIR}")

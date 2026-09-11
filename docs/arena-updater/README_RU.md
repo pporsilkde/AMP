@@ -1,3 +1,10 @@
+
+## U009: HTTPS на Windows без OpenSSL
+
+По фактическому `Update.log` нативный U008 worker запускался и читал `build.ini`, но Qt Network завершал запрос `check.ini` ошибкой `TLS initialization failed`. Это означает отсутствие/несовместимость runtime OpenSSL у конкретной Qt 5 Windows-сборки, а не ошибку `check.ini`.
+
+В U009 Windows-загрузки (`check.ini`, клиент и контент) переведены на системный **WinHTTP**. TLS, проверка сертификата и доверенное хранилище предоставляет Windows; `arena-updater.exe` больше не линкуется с `Qt5::Network` на Windows и не требует `libssl`/`libcrypto` для обновлений. Linux остаётся на Qt Network. В `Update.log` Windows-загрузка помечается `transport=winhttp`. Частичный `.download` удаляется при сетевой ошибке, неполной загрузке или неверном SHA-256.
+
 # U006: нативный Qt/C++ обновлятор; исправления U005 и Android сохранены
 
 Патч подготовлен относительно **GitHub(8).zip**, переданного 10.09.2026. Поддерживаемые готовые пакеты: Windows x64, Linux x86_64 / Steam Deck и Android arm64 из приложенных проектов. Это исходники для пересборки, не готовые EXE/APK.

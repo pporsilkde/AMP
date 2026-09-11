@@ -12,9 +12,11 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
+#ifndef Q_OS_WIN
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#endif
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QProgressBar>
@@ -53,6 +55,7 @@
 #ifdef Q_OS_WIN
 #  define NOMINMAX
 #  include <windows.h>
+#  include <winhttp.h>
 #  include <io.h>
 #  include <tlhelp32.h>
 #else
@@ -82,7 +85,9 @@ const QSet<QString> ProtectedFiles = {
 
 QString gLogPath;
 bool gCancelRequested = false;
+#ifndef Q_OS_WIN
 QNetworkReply* gActiveReply = nullptr;
+#endif
 
 class ProgressWindow : public QWidget
 {
@@ -150,8 +155,10 @@ public:
         });
         QObject::connect(mCancelButton, &QPushButton::clicked, this, []() {
             gCancelRequested = true;
+#ifndef Q_OS_WIN
             if (gActiveReply)
                 gActiveReply->abort();
+#endif
         });
     }
 
@@ -270,8 +277,10 @@ protected:
         if (mCancelButton->isEnabled())
         {
             gCancelRequested = true;
+#ifndef Q_OS_WIN
             if (gActiveReply)
                 gActiveReply->abort();
+#endif
             event->ignore();
             return;
         }
@@ -513,7 +522,236 @@ QString humanBytes(qint64 bytes)
     return QString::number(bytes) + QStringLiteral(" Б");
 }
 
-QByteArray download(const QString& rawUrl, const QString& target = QString(), qint64 limit = -1,
+#ifdef Q_OS_WIN
+QString winHttpError(const QString& operation, DWORD code = GetLastError())
+{
+    wchar_t* message = nullptr;
+    const DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
+    const DWORD length = FormatMessageW(flags, nullptr, code, 0, reinterpret_cast<LPWSTR>(&message), 0, nullptr);
+    QString detail;
+    if (length && message)
+        detail = QString::fromWCharArray(message, int(length)).trimmed();
+    if (detail.isEmpty())
+    {
+        if (code == ERROR_WINHTTP_SECURE_FAILURE)
+            detail = QStringLiteral("Ошибка проверки TLS-сертификата");
+        else if (code == ERROR_WINHTTP_TIMEOUT)
+            detail = QStringLiteral("Истекло время ожидания сети");
+        else if (code == ERROR_WINHTTP_NAME_NOT_RESOLVED)
+            detail = QStringLiteral("Не удалось определить адрес сервера");
+        else if (code == ERROR_WINHTTP_CANNOT_CONNECT)
+            detail = QStringLiteral("Не удалось установить соединение с сервером");
+    }
+    if (message)
+        LocalFree(message);
+    if (detail.isEmpty())
+        return QStringLiteral("%1 (WinHTTP error %2)").arg(operation).arg(code);
+    return QStringLiteral("%1: %2 (WinHTTP %3)").arg(operation, detail).arg(code);
+}
+
+class WinHttpHandle
+{
+public:
+    WinHttpHandle() = default;
+    explicit WinHttpHandle(HINTERNET handle) : mHandle(handle) {}
+    ~WinHttpHandle() { reset(); }
+    WinHttpHandle(const WinHttpHandle&) = delete;
+    WinHttpHandle& operator=(const WinHttpHandle&) = delete;
+    HINTERNET get() const { return mHandle; }
+    explicit operator bool() const { return mHandle != nullptr; }
+    void reset(HINTERNET handle = nullptr)
+    {
+        if (mHandle)
+            WinHttpCloseHandle(mHandle);
+        mHandle = handle;
+    }
+private:
+    HINTERNET mHandle = nullptr;
+};
+
+QByteArray downloadWinHttp(const QString& rawUrl, const QString& target = QString(), qint64 limit = -1,
+    const QString& expectedHash = QString())
+{
+    if (gCancelRequested)
+        fail(QStringLiteral("Обновление отменено пользователем"));
+
+    const QUrl url = normalizedUrl(rawUrl);
+    const bool secure = url.scheme() == QLatin1String("https");
+    const QString host = url.host();
+    QString objectName = url.path(QUrl::FullyEncoded);
+    if (objectName.isEmpty())
+        objectName = QStringLiteral("/");
+    if (url.hasQuery())
+        objectName += QLatin1Char('?') + url.query(QUrl::FullyEncoded);
+    const INTERNET_PORT port = INTERNET_PORT(url.port(secure ? INTERNET_DEFAULT_HTTPS_PORT : INTERNET_DEFAULT_HTTP_PORT));
+
+    WinHttpHandle session;
+#ifdef WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY
+    session.reset(WinHttpOpen(L"ArenaMP-Native-Updater/3", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+        WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
+#endif
+    if (!session)
+        session.reset(WinHttpOpen(L"ArenaMP-Native-Updater/3", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+            WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
+    if (!session)
+        fail(winHttpError(QStringLiteral("Не удалось инициализировать WinHTTP")));
+
+    // These are per-operation timeouts. Large package downloads can run for hours,
+    // but a stalled DNS/connect/read operation must not freeze the updater forever.
+    WinHttpSetTimeouts(session.get(), 10000, 10000, 30000, limit >= 0 ? 8000 : 30000);
+
+    WinHttpHandle connection(WinHttpConnect(session.get(), reinterpret_cast<LPCWSTR>(host.utf16()), port, 0));
+    if (!connection)
+        fail(winHttpError(QStringLiteral("Не удалось подключиться к серверу обновлений")));
+
+    const DWORD flags = secure ? WINHTTP_FLAG_SECURE : 0;
+    WinHttpHandle request(WinHttpOpenRequest(connection.get(), L"GET", reinterpret_cast<LPCWSTR>(objectName.utf16()),
+        nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags));
+    if (!request)
+        fail(winHttpError(QStringLiteral("Не удалось создать HTTP-запрос")));
+
+    const wchar_t headers[] = L"Cache-Control: no-cache\r\nAccept-Encoding: identity\r\n";
+    logEvent(QStringLiteral("download_start"), QJsonObject{{QStringLiteral("url"), url.toString()},
+        {QStringLiteral("target"), target.isEmpty() ? QStringLiteral("check.ini") : target},
+        {QStringLiteral("sha256"), expectedHash.isEmpty() ? QStringLiteral("not supplied") : expectedHash},
+        {QStringLiteral("transport"), QStringLiteral("winhttp")}});
+
+    if (!WinHttpSendRequest(request.get(), headers, DWORD(-1L), WINHTTP_NO_REQUEST_DATA, 0, 0, 0))
+        fail(winHttpError(QStringLiteral("Не удалось отправить запрос обновления")));
+    if (!WinHttpReceiveResponse(request.get(), nullptr))
+        fail(winHttpError(QStringLiteral("Не удалось получить ответ сервера обновлений")));
+
+    DWORD status = 0;
+    DWORD statusSize = sizeof(status);
+    if (!WinHttpQueryHeaders(request.get(), WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+            WINHTTP_HEADER_NAME_BY_INDEX, &status, &statusSize, WINHTTP_NO_HEADER_INDEX))
+        fail(winHttpError(QStringLiteral("Не удалось получить HTTP-статус")));
+    if (status != 200)
+        fail(QStringLiteral("HTTP %1 при загрузке %2").arg(status).arg(url.toString()));
+
+    qint64 total = -1;
+    DWORD lengthSize = 0;
+    WinHttpQueryHeaders(request.get(), WINHTTP_QUERY_CONTENT_LENGTH, WINHTTP_HEADER_NAME_BY_INDEX,
+        WINHTTP_NO_OUTPUT_BUFFER, &lengthSize, WINHTTP_NO_HEADER_INDEX);
+    if (GetLastError() == ERROR_INSUFFICIENT_BUFFER && lengthSize >= sizeof(wchar_t))
+    {
+        std::vector<wchar_t> lengthBuffer(size_t(lengthSize / sizeof(wchar_t)) + 1, L'\0');
+        if (WinHttpQueryHeaders(request.get(), WINHTTP_QUERY_CONTENT_LENGTH, WINHTTP_HEADER_NAME_BY_INDEX,
+                lengthBuffer.data(), &lengthSize, WINHTTP_NO_HEADER_INDEX))
+        {
+            bool ok = false;
+            const qint64 parsed = QString::fromWCharArray(lengthBuffer.data()).trimmed().toLongLong(&ok);
+            if (ok && parsed >= 0)
+                total = parsed;
+        }
+    }
+
+    QCryptographicHash digest(QCryptographicHash::Sha256);
+    QByteArray memory;
+    QFile file;
+    if (!target.isEmpty())
+    {
+        file.setFileName(target);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            fail(QStringLiteral("Не удалось создать файл загрузки %1: %2").arg(target, file.errorString()));
+    }
+
+    qint64 done = 0;
+    QElapsedTimer report;
+    report.start();
+    try
+    {
+        for (;;)
+        {
+            if (gCancelRequested)
+                fail(QStringLiteral("Обновление отменено пользователем"));
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+
+            DWORD available = 0;
+            if (!WinHttpQueryDataAvailable(request.get(), &available))
+                fail(winHttpError(QStringLiteral("Ошибка чтения ответа сервера")));
+            if (available == 0)
+                break;
+
+            while (available > 0)
+            {
+                if (gCancelRequested)
+                    fail(QStringLiteral("Обновление отменено пользователем"));
+                const DWORD wanted = std::min<DWORD>(available, DWORD(Chunk));
+                QByteArray block(int(wanted), '\0');
+                DWORD received = 0;
+                if (!WinHttpReadData(request.get(), block.data(), wanted, &received))
+                    fail(winHttpError(QStringLiteral("Ошибка загрузки данных")));
+                if (received == 0)
+                    break;
+                block.resize(int(received));
+                done += qint64(received);
+                if (limit >= 0 && done > limit)
+                    fail(QStringLiteral("check.ini превышает допустимый размер"));
+                digest.addData(block);
+                if (file.isOpen())
+                {
+                    if (file.write(block) != block.size())
+                        fail(QStringLiteral("Ошибка записи загруженного файла: %1").arg(file.errorString()));
+                }
+                else
+                    memory.append(block);
+
+                if (gWindow && !target.isEmpty())
+                    gWindow->progress(done, total, total > 0
+                        ? QStringLiteral("Загружено %1 из %2").arg(humanBytes(done), humanBytes(total))
+                        : QStringLiteral("Загружено %1").arg(humanBytes(done)));
+                if (report.elapsed() >= 1000)
+                {
+                    logEvent(QStringLiteral("download"), QJsonObject{{QStringLiteral("done"), double(done)},
+                        {QStringLiteral("total"), double(total)}, {QStringLiteral("transport"), QStringLiteral("winhttp")}});
+                    report.restart();
+                }
+                available -= received;
+                QCoreApplication::processEvents(QEventLoop::AllEvents, 20);
+            }
+        }
+        if (file.isOpen())
+            file.close();
+    }
+    catch (...)
+    {
+        if (file.isOpen())
+            file.close();
+        if (!target.isEmpty())
+            QFile::remove(target);
+        throw;
+    }
+
+    if (limit >= 0 && done > limit)
+        fail(QStringLiteral("check.ini превышает допустимый размер"));
+    if (total >= 0 && done != total)
+    {
+        if (!target.isEmpty())
+            QFile::remove(target);
+        fail(QStringLiteral("Загрузка неполная: получено %1 из %2 байт").arg(done).arg(total));
+    }
+
+    const QString actualHash = QString::fromLatin1(digest.result().toHex());
+    if (!expectedHash.isEmpty())
+    {
+        if (!QRegularExpression(QStringLiteral("^[0-9A-Fa-f]{64}$")).match(expectedHash).hasMatch()
+            || actualHash.compare(expectedHash, Qt::CaseInsensitive) != 0)
+        {
+            if (!target.isEmpty())
+                QFile::remove(target);
+            fail(QStringLiteral("SHA-256 загруженного пакета не совпадает"));
+        }
+    }
+    logEvent(QStringLiteral("download_complete"), QJsonObject{{QStringLiteral("bytes"), double(done)},
+        {QStringLiteral("total"), double(total)}, {QStringLiteral("sha256"), actualHash},
+        {QStringLiteral("transport"), QStringLiteral("winhttp")}});
+    return memory;
+}
+#endif
+
+#ifndef Q_OS_WIN
+QByteArray downloadQt(const QString& rawUrl, const QString& target = QString(), qint64 limit = -1,
     const QString& expectedHash = QString())
 {
     if (gCancelRequested)
@@ -667,8 +905,24 @@ QByteArray download(const QString& rawUrl, const QString& target = QString(), qi
             fail(QStringLiteral("SHA-256 загруженного пакета не совпадает"));
     }
     logEvent(QStringLiteral("download_complete"), QJsonObject{{QStringLiteral("bytes"), double(done)},
-        {QStringLiteral("total"), double(total)}, {QStringLiteral("sha256"), actualHash}});
+        {QStringLiteral("total"), double(total)}, {QStringLiteral("sha256"), actualHash},
+        {QStringLiteral("transport"), QStringLiteral("qtnetwork")}});
     return memory;
+}
+
+#endif
+
+QByteArray download(const QString& rawUrl, const QString& target = QString(), qint64 limit = -1,
+    const QString& expectedHash = QString())
+{
+#ifdef Q_OS_WIN
+    // Qt 5 binary distributions can require external OpenSSL DLLs at runtime.
+    // The updater must work in a freshly unpacked client without those optional
+    // DLLs, so Windows uses the OS HTTPS stack and certificate store directly.
+    return downloadWinHttp(rawUrl, target, limit, expectedHash);
+#else
+    return downloadQt(rawUrl, target, limit, expectedHash);
+#endif
 }
 
 QString safeArchiveName(QString name)
@@ -1987,7 +2241,11 @@ int selfTest()
         const QString original = QStringLiteral("#x\n[Build]\nversion=00001\nbuild=00002\n[Server]\naddress=127.0.0.1\n");
         const QString changed = stampManifest(original, {{QStringLiteral("version"), QStringLiteral("00003")}});
         if (!changed.contains(QStringLiteral("version=00003")) || !changed.contains(QStringLiteral("address=127.0.0.1"))) return 5;
-        std::fprintf(stderr, "arena-updater native self-test: OK\n");
+#ifdef Q_OS_WIN
+        std::fprintf(stderr, "arena-updater native self-test: OK; transport=winhttp\n");
+#else
+        std::fprintf(stderr, "arena-updater native self-test: OK; transport=qtnetwork\n");
+#endif
         return 0;
     }
     catch (...) { return 9; }

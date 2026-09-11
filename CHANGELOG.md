@@ -1,3 +1,11 @@
+## U009 — Windows updater HTTPS/TLS fix
+
+### Fixed
+- Fixed automatic update checks on Windows failing with `TLS initialization failed` after the updater was moved from PyInstaller/Python to native Qt.
+- `arena-updater.exe` now uses the native Windows WinHTTP HTTPS stack and Windows certificate store for `check.ini` and update package downloads, so it no longer depends on optional Qt/OpenSSL runtime DLLs.
+- Partial downloads are removed after a network/hash failure, and `Update.log` records `transport=winhttp` for Windows downloads.
+- Linux keeps the existing Qt Network transport. ArenaMP protocol is unchanged.
+
 ## U008 — Launcher Changelog window
 
 ### Added
