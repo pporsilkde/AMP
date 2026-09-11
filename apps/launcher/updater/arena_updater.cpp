@@ -90,8 +90,15 @@ public:
     ProgressWindow()
     {
         setWindowTitle(QStringLiteral("ArenaMP — Обновление"));
-        setMinimumWidth(560);
+        setMinimumSize(580, 210);
         setWindowFlag(Qt::WindowContextHelpButtonHint, false);
+        setWindowFlag(Qt::WindowMinimizeButtonHint, true);
+        // The updater is a detached supervisor. Keep its installer window above
+        // the launcher that is closing so Windows cannot silently bury it behind
+        // another application. This flag is used only for update/prepare/apply;
+        // the lightweight `check` action remains headless.
+        setWindowFlag(Qt::WindowStaysOnTopHint, true);
+        setAttribute(Qt::WA_QuitOnClose, false);
 
         auto* layout = new QVBoxLayout(this);
         mTitle = new QLabel(QStringLiteral("<b>Обновление ArenaMP</b>"), this);
@@ -104,6 +111,12 @@ public:
         mStatus->setWordWrap(true);
         layout->addWidget(mStatus);
 
+        mHint = new QLabel(QStringLiteral("Не закрывайте это окно до завершения установки."), this);
+        QFont hintFont = mHint->font();
+        hintFont.setPointSize(std::max(8, hintFont.pointSize() - 1));
+        mHint->setFont(hintFont);
+        layout->addWidget(mHint);
+
         mProgress = new QProgressBar(this);
         mProgress->setRange(0, 0);
         mProgress->setTextVisible(true);
@@ -111,6 +124,7 @@ public:
 
         mTransfer = new QLabel(this);
         mTransfer->setText(QStringLiteral("Проверка файлов и версии…"));
+        mTransfer->setWordWrap(true);
         layout->addWidget(mTransfer);
 
         mDetails = new QPlainTextEdit(this);
@@ -141,8 +155,55 @@ public:
         });
     }
 
+    void present()
+    {
+        if (!mVisibleTimer.isValid())
+            mVisibleTimer.start();
+        if (isMinimized())
+            setWindowState(windowState() & ~Qt::WindowMinimized);
+        showNormal();
+        raise();
+        activateWindow();
+        QApplication::alert(this, 0);
+#ifdef Q_OS_WIN
+        // Qt's raise()/activateWindow() can be ignored by Windows foreground
+        // restrictions for a detached child process. Explicitly make the
+        // installer visible and topmost, then flash its taskbar button as a
+        // fallback if the OS still refuses focus stealing.
+        HWND hwnd = reinterpret_cast<HWND>(winId());
+        if (hwnd)
+        {
+            ShowWindow(hwnd, SW_RESTORE);
+            SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW | SWP_NOACTIVATE);
+            SetForegroundWindow(hwnd);
+            FLASHWINFO flash{};
+            flash.cbSize = sizeof(flash);
+            flash.hwnd = hwnd;
+            flash.dwFlags = FLASHW_TRAY | FLASHW_TIMERNOFG;
+            flash.uCount = 3;
+            flash.dwTimeout = 0;
+            FlashWindowEx(&flash);
+        }
+#endif
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+    }
+
+    void linger(int minimumMs = 1200)
+    {
+        if (!mVisibleTimer.isValid())
+            return;
+        while (mVisibleTimer.elapsed() < minimumMs)
+        {
+            QCoreApplication::processEvents(QEventLoop::AllEvents, 50);
+            QThread::msleep(20);
+        }
+    }
+
     void phase(const QString& text, bool indeterminate = true)
     {
+        if (!isVisible())
+            present();
         mStatus->setText(text);
         if (indeterminate)
             mProgress->setRange(0, 0);
@@ -151,6 +212,8 @@ public:
 
     void progress(qint64 done, qint64 total, const QString& text = QString())
     {
+        if (!isVisible())
+            present();
         if (total > 0)
         {
             mProgress->setRange(0, 1000);
@@ -165,6 +228,8 @@ public:
 
     void itemProgress(int done, int total, const QString& text)
     {
+        if (!isVisible())
+            present();
         mProgress->setRange(0, std::max(1, total));
         mProgress->setValue(done);
         mTransfer->setText(text);
@@ -185,11 +250,15 @@ public:
 
     void finish(const QString& text, bool ok)
     {
+        if (!isVisible())
+            present();
         mStatus->setText(text);
         mProgress->setRange(0, 1000);
         mProgress->setValue(ok ? 1000 : 0);
         mTransfer->setText(ok ? QStringLiteral("Готово. Лаунчер будет открыт снова.")
                               : QStringLiteral("Подробности записаны в Update.log"));
+        mHint->setText(ok ? QStringLiteral("Обновление завершено. Лаунчер сейчас будет запущен снова.")
+                          : QStringLiteral("Обновление не завершено. Подробности сохранены в Update.log."));
         mCancelButton->setEnabled(false);
         mCancelButton->setText(QStringLiteral("Готово"));
         QCoreApplication::processEvents();
@@ -212,11 +281,13 @@ protected:
 private:
     QLabel* mTitle = nullptr;
     QLabel* mStatus = nullptr;
+    QLabel* mHint = nullptr;
     QProgressBar* mProgress = nullptr;
     QLabel* mTransfer = nullptr;
     QPlainTextEdit* mDetails = nullptr;
     QPushButton* mDetailsButton = nullptr;
     QPushButton* mCancelButton = nullptr;
+    QElapsedTimer mVisibleTimer;
 };
 
 ProgressWindow* gWindow = nullptr;
@@ -941,7 +1012,7 @@ void extractZip(const QString& archivePath, const QString& targetPath)
 #endif
         ++current;
         if (gWindow)
-            gWindow->itemProgress(current, fileCount, QStringLiteral("Распаковка: %1 / %2").arg(current).arg(fileCount));
+            gWindow->itemProgress(current, fileCount, QStringLiteral("Распаковка: %1 / %2 — %3").arg(current).arg(fileCount).arg(e.name));
     }
     if (fileCount == 0)
         fail(QStringLiteral("Архив не содержит файлов"));
@@ -1283,7 +1354,7 @@ void extractTar(const QString& archivePath, const QString& targetPath)
         QFile::setPermissions(dest, permissions);
 #endif
         ++current;
-        if (gWindow) gWindow->itemProgress(current, fileCount, QStringLiteral("Распаковка: %1 / %2").arg(current).arg(fileCount));
+        if (gWindow) gWindow->itemProgress(current, fileCount, QStringLiteral("Распаковка: %1 / %2 — %3").arg(current).arg(fileCount).arg(e.name));
     }
     if (fileCount == 0)
         fail(QStringLiteral("Архив не содержит файлов"));
@@ -1585,7 +1656,7 @@ void commit(const QString& job, const QJsonObject& plan)
             }
             if (!QFile::rename(temp, dest))
                 fail(QStringLiteral("Не удалось заменить %1").arg(dest));
-            if (gWindow) gWindow->itemProgress(i + 1, files.size(), QStringLiteral("Установка: %1 / %2").arg(i + 1).arg(files.size()));
+            if (gWindow) gWindow->itemProgress(i + 1, files.size(), QStringLiteral("Установка: %1 / %2 — %3").arg(i + 1).arg(files.size()).arg(entry.value(QStringLiteral("relative")).toString()));
         }
         journal.insert(QStringLiteral("state"), QStringLiteral("done"));
         atomicJson(journalPath, journal);
@@ -1935,7 +2006,15 @@ int main(int argc, char** argv)
         return selfTest();
     }
 
+#ifdef Q_OS_WIN
+    // The updater is a native Windows GUI. Do not inherit an accidental
+    // QT_QPA_PLATFORM=offscreen/minimal from a development environment; such
+    // a setting would make the update work while its progress window remained
+    // completely invisible.
+    qputenv("QT_QPA_PLATFORM", QByteArray("windows"));
+#endif
     QApplication app(argc, argv);
+    app.setQuitOnLastWindowClosed(false);
     QCoreApplication::setApplicationName(QStringLiteral("ArenaMP Updater"));
     QCoreApplication::setOrganizationName(QStringLiteral("ArenaMP"));
 
@@ -1961,8 +2040,7 @@ int main(int argc, char** argv)
     if (action != QLatin1String("check"))
     {
         gWindow = &window;
-        window.show();
-        QCoreApplication::processEvents();
+        window.present();
     }
 
     logEvent(QStringLiteral("start"), QJsonObject{{QStringLiteral("action"), action},
@@ -1986,6 +2064,8 @@ int main(int argc, char** argv)
         code = 1;
     }
     logEvent(QStringLiteral("finish"), QJsonObject{{QStringLiteral("action"), action}, {QStringLiteral("exit_code"), code}});
+    if (gWindow)
+        gWindow->linger();
     gWindow = nullptr;
     return code;
 }
