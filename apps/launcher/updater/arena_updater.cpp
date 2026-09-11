@@ -86,6 +86,13 @@ const QSet<QString> ProtectedFiles = {
     QStringLiteral("settings.cfg"), QStringLiteral("launcher.cfg"), QStringLiteral("tes3mp-client.cfg"),
     QStringLiteral("tes3mp-server.cfg"), QStringLiteral("update.log"), QStringLiteral("update.log.old")
 };
+// U020: host-generated server manifests are user state, never engine payload.
+// requiredDataFiles.json is produced by "Update Hash" from the host's exact
+// content order/CRC32 list, so an engine archive must not replace it even if a
+// future package layout stops treating the whole server/ root as protected.
+const QSet<QString> EngineProtectedFileNames = {
+    QStringLiteral("requireddatafiles.json")
+};
 
 QString gLogPath;
 bool gCancelRequested = false;
@@ -1657,7 +1664,7 @@ QString payloadRoot(QString root, const QString& kind)
     for (int level = 0; level < 4; ++level)
     {
         QDir current(root);
-        const QStringList launchers { QStringLiteral("openmw-launcher.exe"), QStringLiteral("openmw-launcher"), QStringLiteral("openmw-launcher.x86_64") };
+        const QStringList launchers { QStringLiteral("arenamp-launcher.exe"), QStringLiteral("arenamp-launcher"), QStringLiteral("arenamp-launcher.x86_64") };
         for (const QString& launcher : launchers)
             if (QFileInfo(current.filePath(launcher)).isFile())
                 return root;
@@ -1666,7 +1673,7 @@ QString payloadRoot(QString root, const QString& kind)
             break;
         root = children.first().absoluteFilePath();
     }
-    fail(QStringLiteral("Архив движка должен содержать openmw-launcher в корне"));
+    fail(QStringLiteral("Архив движка должен содержать arenamp-launcher в корне"));
 }
 
 bool isProtected(const QString& relative, const QString& kind)
@@ -1675,7 +1682,8 @@ bool isProtected(const QString& relative, const QString& kind)
     const QString first = normalized.section(QLatin1Char('/'), 0, 0).toCaseFolded();
     const QString name = QFileInfo(normalized).fileName().toCaseFolded();
     if (kind == QLatin1String("engine"))
-        return ProtectedRoots.contains(first) || ProtectedFiles.contains(name) || first.startsWith(QStringLiteral(".arena-"));
+        return ProtectedRoots.contains(first) || ProtectedFiles.contains(name)
+            || EngineProtectedFileNames.contains(name) || first.startsWith(QStringLiteral(".arena-"));
     if (ProtectedFiles.contains(first) || first.startsWith(QStringLiteral(".arena-")))
         fail(QStringLiteral("Контентный архив содержит конфигурацию клиента: %1").arg(relative));
     return false;
@@ -2254,6 +2262,10 @@ int selfTest()
         const QString original = QStringLiteral("#x\n[Build]\nversion=00001\nbuild=00002\n[Server]\naddress=127.0.0.1\n");
         const QString changed = stampManifest(original, {{QStringLiteral("version"), QStringLiteral("00003")}});
         if (!changed.contains(QStringLiteral("version=00003")) || !changed.contains(QStringLiteral("address=127.0.0.1"))) return 5;
+        // U020: engine packages never replace the host's data-file manifest.
+        if (!isProtected(QStringLiteral("server/data/requiredDataFiles.json"), QStringLiteral("engine"))) return 6;
+        if (!isProtected(QStringLiteral("Resources/server/data/RequiredDataFiles.json"), QStringLiteral("engine"))) return 7;
+        if (isProtected(QStringLiteral("tes3mp.exe"), QStringLiteral("engine"))) return 8;
 #ifdef Q_OS_WIN
         std::fprintf(stderr, "arena-updater native self-test: OK; transport=winhttp\n");
 #else

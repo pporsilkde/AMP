@@ -99,12 +99,11 @@ fi
 # CMake BundleUtilities handles non-Qt dependencies. macdeployqt then performs
 # the Qt-specific deployment pass before the final signature is created. The
 # bundle contains more than one Qt executable, so explicitly include the
-# launcher and browser in the deployment scan.
+# Wizard in the deployment scan. ArenaMP no longer ships the TES3MP browser.
 MACDEPLOYQT_ARGS=(
   "$APP_PATH"
   -always-overwrite
   -verbose=2
-  "-executable=$APP_PATH/Contents/MacOS/tes3mp-browser"
   "-executable=$APP_PATH/Contents/MacOS/openmw-wizard"
 )
 "$QT_PREFIX/bin/macdeployqt" "${MACDEPLOYQT_ARGS[@]}"

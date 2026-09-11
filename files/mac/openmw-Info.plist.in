@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>English</string>
 	<key>CFBundleExecutable</key>
-	<string>openmw-launcher</string>
+	<string>arenamp-launcher</string>
     <key>CFBundleIdentifier</key>
     <string>org.arenamp.client</string>
 	<key>CFBundleInfoDictionaryVersion</key>

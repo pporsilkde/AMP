@@ -24,6 +24,14 @@ namespace Launcher
         bool saveSettings();
         bool loadSettings();
 
+        // U020: shared with the Play page status column.
+        QString hardwareGpuName() const;
+        QString hardwareGpuDetail() const;
+        int hardwareLogicalThreads() const;
+
+    signals:
+        void hardwareInfoChanged();
+
     public slots:
         void screenChanged(int screen);
 

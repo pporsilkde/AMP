@@ -4,9 +4,8 @@ set -e
 
 PACKAGE_BINARIES=( \
                    "tes3mp" \
-                       "tes3mp-browser" \
                        "tes3mp-server" \
-                       "openmw-launcher" \
+                       "arenamp-launcher" \
                        "openmw-wizard" \
                        "openmw-iniimporter" \
     )

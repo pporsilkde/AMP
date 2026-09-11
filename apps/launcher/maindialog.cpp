@@ -23,6 +23,9 @@
 #include <QSaveFile>
 #include <boost/crc.hpp>
 #include <QTimer>
+#include <QElapsedTimer>
+#include <QFrame>
+#include <QHBoxLayout>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QTextBrowser>
@@ -55,8 +58,33 @@ void cfgError(const QString& title, const QString& msg) {
 
 namespace
 {
-    constexpr int sLauncherWidth = 960;
-    constexpr int sLauncherHeight = 660;
+    // U020 showcase layout: two cards plus a status column need a little more
+    // room than the former 960x660 window. 1080x720 still fits 1366x768
+    // laptop screens together with the Windows taskbar.
+    constexpr int sLauncherWidth = 1080;
+    constexpr int sLauncherHeight = 720;
+    constexpr int sNavigationItems = 5;
+
+    void repolishWidget(QWidget* widget)
+    {
+        if (widget == nullptr)
+            return;
+        widget->style()->unpolish(widget);
+        widget->style()->polish(widget);
+        widget->update();
+    }
+
+    QString formatSessionTime(qint64 milliseconds)
+    {
+        const qint64 totalSeconds = qMax<qint64>(0, milliseconds / 1000);
+        const qint64 hours = totalSeconds / 3600;
+        const qint64 minutes = (totalSeconds / 60) % 60;
+        const qint64 seconds = totalSeconds % 60;
+        if (hours > 0)
+            return QStringLiteral("%1:%2:%3").arg(hours)
+                .arg(minutes, 2, 10, QLatin1Char('0')).arg(seconds, 2, 10, QLatin1Char('0'));
+        return QStringLiteral("%1:%2").arg(minutes, 2, 10, QLatin1Char('0')).arg(seconds, 2, 10, QLatin1Char('0'));
+    }
 
     bool containsGameContent(const QDir& dir)
     {
@@ -180,6 +208,10 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     , mWizardInvoker(nullptr)
     , mServerDialog(nullptr)
     , mPlayButton(nullptr)
+    , mFooterStatusDot(nullptr)
+    , mFooterStatusDetail(nullptr)
+    , mSessionLabel(nullptr)
+    , mSessionTimer(nullptr)
     , mBuildManifestLoaded(false)
     , mBuildName(QStringLiteral("ArenaMP"))
     , mBuildServerAddress(QStringLiteral("127.0.0.1"))
@@ -210,7 +242,9 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     iconWidget->setWrapping(false);
     iconWidget->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); // Just to be sure
     iconWidget->setIconSize(QSize(27, 27));
-    iconWidget->setGridSize(QSize(178, 58));
+    // Five equal toolbar cells across the full window width.
+    const int navigationCell = (sLauncherWidth - 20 - 18 - 12 - 30) / sNavigationItems;
+    iconWidget->setGridSize(QSize(navigationCell, 60));
     iconWidget->setWordWrap(false);
     iconWidget->setTextElideMode(Qt::ElideNone);
     iconWidget->setMovement(QListView::Static);
@@ -220,35 +254,77 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     iconWidget->setCurrentRow(0);
     iconWidget->setFlow(QListView::LeftToRight);
 
-    QPushButton *helpButton = new QPushButton(tr("Help"));
-    QPushButton *changelogButton = new QPushButton(QStringLiteral("Changelog"));
+    // U020 footer: status dot + two-line server state, session time and the
+    // global actions in a fixed, predictable order (the platform-dependent
+    // QDialogButtonBox ordering is no longer used).
+    buttonBox->hide();
+    QPushButton *playButton = new QPushButton(tr("Play"), footerBar);
+    QPushButton *changelogButton = new QPushButton(QStringLiteral("Changelog"), footerBar);
+    QPushButton *serverButton = new QPushButton(tr("Run Server"), footerBar);
+    QPushButton *helpButton = new QPushButton(tr("Help"), footerBar);
     changelogButton->setToolTip(tr("Open the ArenaMP changelog"));
-    QPushButton *playButton = new QPushButton(tr("Play"));
-    QPushButton *serverButton = new QPushButton(tr("Run Server"));
-    buttonBox->addButton(helpButton, QDialogButtonBox::HelpRole);
-    buttonBox->addButton(changelogButton, QDialogButtonBox::ActionRole);
-    buttonBox->addButton(serverButton, QDialogButtonBox::ActionRole);
-    buttonBox->addButton(playButton, QDialogButtonBox::AcceptRole);
     mPlayButton = playButton;
     playButton->setProperty("arenaPrimary", true);
     helpButton->setProperty("arenaQuiet", true);
     changelogButton->setProperty("arenaQuiet", true);
     serverButton->setProperty("arenaQuiet", true);
-    playButton->setIcon(ArenaUi::glassIcon(QStringLiteral("play")));
+    playButton->setIcon(ArenaUi::glassIcon(QStringLiteral("play-dark")));
     helpButton->setIcon(ArenaUi::glassIcon(QStringLiteral("help")));
     changelogButton->setIcon(ArenaUi::glassIcon(QStringLiteral("changelog")));
     serverButton->setIcon(ArenaUi::glassIcon(QStringLiteral("server")));
-    playButton->setMinimumWidth(108);
-    serverButton->setMinimumWidth(122);
-    changelogButton->setMinimumWidth(98);
-    helpButton->setMinimumWidth(88);
-    versionLabel->setProperty("arenaStatus", QStringLiteral("offline"));
-    versionLabel->setMinimumWidth(210);
+    playButton->setMinimumWidth(150);
+    changelogButton->setMinimumWidth(112);
+    serverButton->setMinimumWidth(150);
+    helpButton->setMinimumWidth(104);
+    for (QPushButton* button : { playButton, changelogButton, serverButton, helpButton })
+    {
+        button->setProperty("arenaFooterButton", true);
+        button->setCursor(Qt::PointingHandCursor);
+        horizontalLayout->addWidget(button);
+    }
 
-    connect(buttonBox, SIGNAL(accepted()), this, SLOT(play()));
+    horizontalLayout->removeWidget(versionLabel);
+    mFooterStatusDot = new QLabel(footerBar);
+    mFooterStatusDot->setObjectName(QStringLiteral("footerStatusDot"));
+    mFooterStatusDot->setFixedSize(12, 12);
+    mFooterStatusDot->setProperty("arenaStatusDot", true);
+    mFooterStatusDot->setProperty("arenaStatus", QStringLiteral("ready"));
+    versionLabel->setProperty("arenaStatus", QStringLiteral("offline"));
+    mFooterStatusDetail = new QLabel(footerBar);
+    mFooterStatusDetail->setObjectName(QStringLiteral("footerStatusDetail"));
+    mFooterStatusDetail->setProperty("arenaMuted", true);
+    mFooterStatusDetail->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    QVBoxLayout* footerStatusText = new QVBoxLayout();
+    footerStatusText->setContentsMargins(0, 0, 0, 0);
+    footerStatusText->setSpacing(0);
+    footerStatusText->addStretch(1);
+    footerStatusText->addWidget(versionLabel);
+    footerStatusText->addWidget(mFooterStatusDetail);
+    footerStatusText->addStretch(1);
+    QFrame* footerDivider = new QFrame(footerBar);
+    footerDivider->setProperty("arenaVDivider", true);
+    footerDivider->setFixedSize(1, 28);
+    mSessionLabel = new QLabel(footerBar);
+    mSessionLabel->setObjectName(QStringLiteral("footerSessionLabel"));
+    mSessionLabel->setProperty("arenaMuted", true);
+    mSessionLabel->setToolTip(tr("Uptime of the local server started from this launcher"));
+    mSessionLabel->setText(tr("Session time: %1").arg(formatSessionTime(0)));
+    horizontalLayout->insertWidget(0, mFooterStatusDot, 0, Qt::AlignVCenter);
+    horizontalLayout->insertSpacing(1, 2);
+    horizontalLayout->insertLayout(2, footerStatusText);
+    horizontalLayout->insertSpacing(3, 12);
+    horizontalLayout->insertWidget(4, footerDivider, 0, Qt::AlignVCenter);
+    horizontalLayout->insertSpacing(5, 12);
+    horizontalLayout->insertWidget(6, mSessionLabel, 0, Qt::AlignVCenter);
+
+    mSessionTimer = new QTimer(this);
+    mSessionTimer->setInterval(1000);
+    connect(mSessionTimer, SIGNAL(timeout()), this, SLOT(updateSessionTime()));
+
+    connect(playButton, SIGNAL(clicked()), this, SLOT(play()));
     connect(serverButton, SIGNAL(clicked()), this, SLOT(runServer()));
     connect(changelogButton, SIGNAL(clicked()), this, SLOT(showChangelog()));
-    connect(buttonBox, SIGNAL(helpRequested()), this, SLOT(help()));
+    connect(helpButton, SIGNAL(clicked()), this, SLOT(help()));
 
     // Remove what's this? button
     setWindowFlags(this->windowFlags() & ~Qt::WindowContextHelpButtonHint);
@@ -268,35 +344,35 @@ void Launcher::MainDialog::createIcons()
         QIcon::setThemeName("tango");
 
     QListWidgetItem *playButton = new QListWidgetItem(iconWidget);
-    playButton->setSizeHint(QSize(176, 56));
+    playButton->setSizeHint(QSize((sLauncherWidth - 20 - 18 - 12 - 30) / sNavigationItems - 4, 58));
     playButton->setIcon(ArenaUi::glassIcon(QStringLiteral("play")));
     playButton->setText(tr("Play"));
     playButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
     playButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
     QListWidgetItem *dataFilesButton = new QListWidgetItem(iconWidget);
-    dataFilesButton->setSizeHint(QSize(176, 56));
+    dataFilesButton->setSizeHint(QSize((sLauncherWidth - 20 - 18 - 12 - 30) / sNavigationItems - 4, 58));
     dataFilesButton->setIcon(ArenaUi::glassIcon(QStringLiteral("browse")));
     dataFilesButton->setText(tr("Data Files"));
     dataFilesButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
     dataFilesButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
     QListWidgetItem *graphicsButton = new QListWidgetItem(iconWidget);
-    graphicsButton->setSizeHint(QSize(176, 56));
+    graphicsButton->setSizeHint(QSize((sLauncherWidth - 20 - 18 - 12 - 30) / sNavigationItems - 4, 58));
     graphicsButton->setIcon(ArenaUi::glassIcon(QStringLiteral("graphics")));
     graphicsButton->setText(tr("Graphics"));
     graphicsButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom | Qt::AlignAbsolute);
     graphicsButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
     QListWidgetItem *settingsButton = new QListWidgetItem(iconWidget);
-    settingsButton->setSizeHint(QSize(176, 56));
+    settingsButton->setSizeHint(QSize((sLauncherWidth - 20 - 18 - 12 - 30) / sNavigationItems - 4, 58));
     settingsButton->setIcon(ArenaUi::glassIcon(QStringLiteral("settings")));
     settingsButton->setText(tr("Settings"));
     settingsButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
     settingsButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
     QListWidgetItem *advancedButton = new QListWidgetItem(iconWidget);
-    advancedButton->setSizeHint(QSize(176, 56));
+    advancedButton->setSizeHint(QSize((sLauncherWidth - 20 - 18 - 12 - 30) / sNavigationItems - 4, 58));
     advancedButton->setIcon(ArenaUi::glassIcon(QStringLiteral("advanced")));
     advancedButton->setText(tr("Advanced"));
     advancedButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
@@ -321,6 +397,12 @@ void Launcher::MainDialog::createPages()
     mSettingsPage = new SettingsPage(mCfgMgr, mGameSettings, mLauncherSettings, this);
     mAdvancedPage = new AdvancedPage(mGameSettings, this);
     mPlayPage->setServerConsoleWidget(mServerDialog);
+    connect(mGraphicsPage, &GraphicsPage::hardwareInfoChanged, this, [this]()
+    {
+        if (mPlayPage != nullptr && mGraphicsPage != nullptr)
+            mPlayPage->setHardwareInfo(mGraphicsPage->hardwareGpuName(),
+                mGraphicsPage->hardwareGpuDetail(), mGraphicsPage->hardwareLogicalThreads());
+    });
 
     auto readLauncherBool = [this](const QString& key, const QString& defaultValue) -> bool
     {
@@ -419,41 +501,20 @@ Launcher::FirstRunDialogResult Launcher::MainDialog::showFirstRunDialog()
     if (!setupLauncherSettings())
         return FirstRunDialogResultFailure;
 
-    if (mLauncherSettings.value(QString("General/firstrun"), QString("true")) == QLatin1String("true"))
+    // ArenaMP presents the setup flow as one product: on a fresh install the
+    // Wizard opens first, then this same launcher instance reloads the result
+    // and becomes visible. No intermediate OpenMW-style first-run dialog.
+    if (mLauncherSettings.value(QStringLiteral("General/firstrun"), QStringLiteral("true")) == QLatin1String("true"))
     {
-        QMessageBox msgBox;
-        msgBox.setWindowTitle(tr("First run"));
-        msgBox.setIcon(QMessageBox::Question);
-        msgBox.setStandardButtons(QMessageBox::NoButton);
-        msgBox.setText(tr("<html><head/><body><p><b>Welcome to OpenMW!</b></p> \
-                          <p>It is recommended to run the Installation Wizard.</p> \
-                          <p>The Wizard will let you select an existing Morrowind installation, \
-                          or install Morrowind for OpenMW to use.</p></body></html>"));
-
-        QAbstractButton *wizardButton =
-                msgBox.addButton(tr("Run &Installation Wizard"), QMessageBox::AcceptRole); // ActionRole doesn't work?!
-        QAbstractButton *skipButton =
-                msgBox.addButton(tr("Skip"), QMessageBox::RejectRole);
-
-        msgBox.exec();
-
-        if (msgBox.clickedButton() == wizardButton)
-        {
-            if (mWizardInvoker->startProcess(QLatin1String("openmw-wizard"), false))
-                return FirstRunDialogResultWizard;
-        }
-        else if (msgBox.clickedButton() == skipButton)
-        {
-            // Don't bother setting up absent game data.
-            if (setup())
-                return FirstRunDialogResultContinue;
-        }
+        const QStringList args { QStringLiteral("--from-launcher") };
+        if (mWizardInvoker->startProcess(QStringLiteral("arenamp-wizard"), args, false)
+            || mWizardInvoker->startProcess(QStringLiteral("openmw-wizard"), args, false))
+            return FirstRunDialogResultWizard;
         return FirstRunDialogResultFailure;
     }
 
-    if (!setup() || !setupGameData()) {
+    if (!setup() || !setupGameData())
         return FirstRunDialogResultFailure;
-    }
     return FirstRunDialogResultContinue;
 }
 
@@ -468,13 +529,40 @@ void Launcher::MainDialog::updateFooterServerStatus(bool running, const QString&
         return;
 
     versionLabel->setProperty("arenaStatus", running ? QStringLiteral("online") : QStringLiteral("offline"));
-    versionLabel->setText(running
-        ? tr("● Server online · %1:%2").arg(address, port)
-        : tr("● Server stopped · ready to launch"));
+    versionLabel->setText(running ? tr("Server online") : tr("Server stopped"));
+    if (mFooterStatusDetail != nullptr)
+        mFooterStatusDetail->setText(running && !address.isEmpty()
+            ? QStringLiteral("%1:%2").arg(address, port) : tr("Ready to launch"));
+    if (mFooterStatusDot != nullptr)
+    {
+        mFooterStatusDot->setProperty("arenaStatus", running ? QStringLiteral("online") : QStringLiteral("ready"));
+        repolishWidget(mFooterStatusDot);
+    }
     // Dynamic properties do not automatically repolish an existing widget.
-    versionLabel->style()->unpolish(versionLabel);
-    versionLabel->style()->polish(versionLabel);
-    versionLabel->update();
+    repolishWidget(versionLabel);
+
+    // Session time follows the local server lifetime.
+    if (running && (mSessionTimer == nullptr || !mSessionTimer->isActive()))
+    {
+        mSessionClock.start();
+        if (mSessionTimer != nullptr)
+            mSessionTimer->start();
+    }
+    else if (!running)
+    {
+        if (mSessionTimer != nullptr)
+            mSessionTimer->stop();
+        mSessionClock.invalidate();
+    }
+    updateSessionTime();
+}
+
+void Launcher::MainDialog::updateSessionTime()
+{
+    if (mSessionLabel == nullptr)
+        return;
+    const qint64 elapsed = mSessionClock.isValid() ? mSessionClock.elapsed() : 0;
+    mSessionLabel->setText(tr("Session time: %1").arg(formatSessionTime(elapsed)));
 }
 
 bool Launcher::MainDialog::setup()
@@ -551,6 +639,14 @@ void Launcher::MainDialog::changePage(QListWidgetItem *current, QListWidgetItem 
 
     int currentIndex = iconWidget->row(current);
     pagesWidget->setCurrentIndex(currentIndex);
+    // The Play page draws its own cards and status column, so the shared
+    // glass panel behind the stacked pages is disabled only there.
+    const bool bare = pagesWidget->currentWidget() == mPlayPage;
+    if (pagesWidget->property("arenaBare").toBool() != bare)
+    {
+        pagesWidget->setProperty("arenaBare", bare);
+        repolishWidget(pagesWidget);
+    }
     mSettingsPage->resetProgressBar();
 }
 
@@ -716,7 +812,8 @@ bool Launcher::MainDialog::setupGameData()
 
         if (msgBox.clickedButton() == wizardButton)
         {
-            if (!mWizardInvoker->startProcess(QLatin1String("openmw-wizard"), false))
+            if (!mWizardInvoker->startProcess(QStringLiteral("arenamp-wizard"), QStringList() << QStringLiteral("--from-launcher"), false)
+                && !mWizardInvoker->startProcess(QStringLiteral("openmw-wizard"), QStringList() << QStringLiteral("--from-launcher"), false))
                 return false;
         }
     }
@@ -1325,6 +1422,7 @@ void Launcher::MainDialog::checkForUpdates()
     mPlayButton->setEnabled(false);
     mPlayButton->setText(tr("Checking for updates..."));
     mPlayPage->setPlayButtonState(tr("Checking for updates..."), false);
+    mPlayPage->setUpdateState(true, false);
 
     const UpdateController::CheckResult result = UpdateController::checkAvailable(
         this, mBuildManifestPath, mBuildDataPath);
@@ -1332,9 +1430,10 @@ void Launcher::MainDialog::checkForUpdates()
     mUpdateCheckRunning = false;
     mUpdateAvailable = result == UpdateController::CheckResult::UpdateAvailable;
     mPlayButton->setText(mUpdateAvailable ? tr("Update") : tr("Play"));
-    mPlayButton->setIcon(ArenaUi::glassIcon(mUpdateAvailable ? QStringLiteral("update") : QStringLiteral("play")));
+    mPlayButton->setIcon(ArenaUi::glassIcon(mUpdateAvailable ? QStringLiteral("update-dark") : QStringLiteral("play-dark")));
     mPlayButton->setEnabled(true);
-    mPlayPage->setPlayButtonState(mUpdateAvailable ? tr("Update") : tr("Play"), true);
+    mPlayPage->setPlayButtonState(mUpdateAvailable ? tr("Update") : tr("Start game"), true);
+    mPlayPage->setUpdateState(false, mUpdateAvailable);
 }
 
 void Launcher::MainDialog::play()
@@ -1375,7 +1474,7 @@ void Launcher::MainDialog::play()
         msgBox.setIcon(QMessageBox::Warning);
         msgBox.setStandardButtons(QMessageBox::Ok);
         msgBox.setText(tr("<br><b>You do not have a game file selected.</b><br><br> "
-                          "OpenMW will not start without a game file selected.<br>"));
+                          "ArenaMP will not start without a game file selected.<br>"));
         msgBox.exec();
         return;
     }

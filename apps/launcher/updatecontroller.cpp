@@ -234,7 +234,7 @@ namespace
         QString launcher = QCoreApplication::applicationFilePath();
 #ifndef Q_OS_WIN
         // Linux portable builds use a wrapper to set the bundled library paths.
-        const QString wrapper = QDir(client).filePath(QStringLiteral("openmw-launcher"));
+        const QString wrapper = QDir(client).filePath(QStringLiteral("arenamp-launcher"));
         if (QFileInfo::exists(wrapper))
             launcher = wrapper;
 #endif

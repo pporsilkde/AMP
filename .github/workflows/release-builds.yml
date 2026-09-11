@@ -216,6 +216,7 @@ jobs:
         shell: pwsh
         run: |
           $requiredFiles = @(
+            "install\arenamp-launcher.exe",
             "install\arena-updater.exe",
             "install\tes3mp.exe",
             "install\tes3mp-server.exe",
@@ -239,6 +240,7 @@ jobs:
             }
           }
 
+          if (Test-Path "install\tes3mp-browser.exe") { throw "TES3MP browser must not be shipped by ArenaMP" }
           Get-Item $requiredFiles | Format-Table Name, Length, LastWriteTime
 
       - name: Create ZIP
@@ -391,6 +393,7 @@ jobs:
             -DOPENMW_USE_SYSTEM_MYGUI=ON \
             -DOPENMW_USE_SYSTEM_OSG=ON \
             -DOPENMW_USE_SYSTEM_BULLET=ON \
+            -DBUILD_BROWSER=OFF \
             -DRakNet_LIBRARY_RELEASE="$RUNNER_TEMP/CrabNet/build/lib/libRakNetLibStatic.a" \
             -DRakNet_LIBRARY_DEBUG="$RUNNER_TEMP/CrabNet/build/lib/libRakNetLibStatic.a" \
             -DRakNet_INCLUDE_DIR="$RUNNER_TEMP/CrabNet/include/raknet"
@@ -512,7 +515,7 @@ jobs:
           grep -q -- '-DBUILD_WIZARD=ON' CI/macos-arm64/configure.sh
           grep -q "require_cache_exact 'BUILD_WIZARD:BOOL=ON'" CI/macos-arm64/configure.sh
           grep -q 'Contents/MacOS/openmw-wizard' CI/macos-arm64/build-package.sh
-          grep -q 'openmw-launcher openmw-wizard tes3mp' CI/macos-arm64/validate-bundle.sh
+          grep -q 'arenamp-launcher openmw-wizard tes3mp' CI/macos-arm64/validate-bundle.sh
           test -f server/scripts/serverCore.lua
           test -f server/scripts/config.lua
           test -f server/data/banlist.json
@@ -630,7 +633,7 @@ jobs:
           grep -q -- '-DBUILD_WIZARD=ON' CI/macos-arm64/configure.sh
           grep -q "require_cache_exact 'BUILD_WIZARD:BOOL=ON'" CI/macos-arm64/configure.sh
           grep -q 'Contents/MacOS/openmw-wizard' CI/macos-arm64/build-package.sh
-          grep -q 'openmw-launcher openmw-wizard tes3mp' CI/macos-arm64/validate-bundle.sh
+          grep -q 'arenamp-launcher openmw-wizard tes3mp' CI/macos-arm64/validate-bundle.sh
           grep -q 'set(OSG_PLUGIN_PREFIX_DIR "osgPlugins")' CMakeLists.txt
           grep -q 'OSG_LIBRARY_PATH' apps/openmw/main.cpp
           if grep -F 'osgPlugins-${OPENSCENEGRAPH_VERSION}' CMakeLists.txt; then

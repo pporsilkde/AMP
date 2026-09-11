@@ -15,11 +15,15 @@
 #endif
 #include "ui_mainwindow.h"
 
+#include <QElapsedTimer>
+
 class QListWidgetItem;
 class QStackedWidget;
 class QStringList;
 class QString;
 class QPushButton;
+class QLabel;
+class QTimer;
 
 namespace Launcher
 {
@@ -74,6 +78,7 @@ namespace Launcher
         void updateServerDataFileHashes();
         void clearServerCells();
         void resetServerData();
+        void updateSessionTime();
 
     private:
         bool setup();
@@ -113,6 +118,11 @@ namespace Launcher
         Process::ProcessInvoker *mWizardInvoker;
         ServerDialog *mServerDialog;
         QPushButton *mPlayButton;
+        QLabel *mFooterStatusDot;
+        QLabel *mFooterStatusDetail;
+        QLabel *mSessionLabel;
+        QTimer *mSessionTimer;
+        QElapsedTimer mSessionClock;
 
         bool mBuildManifestLoaded;
         QString mBuildManifestPath;

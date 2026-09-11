@@ -22,6 +22,7 @@ int main(int argc, char *argv[])
     try
     {
         QApplication app(argc, argv);
+        QCoreApplication::setApplicationName(QStringLiteral("ArenaMP Launcher"));
 
         ArenaUi::applyMorrowindGlassPalette(app);
 

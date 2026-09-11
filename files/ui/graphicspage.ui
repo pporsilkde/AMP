@@ -89,7 +89,7 @@
             <item>
              <widget class="QLabel" name="qualityQuickTitle">
               <property name="text">
-               <string>Quick graphics setup</string>
+               <string>Graphics quick setup</string>
               </property>
               <property name="arenaTitle" stdset="0">
                <bool>true</bool>
@@ -99,7 +99,7 @@
             <item>
              <widget class="QLabel" name="qualityQuickSubtitle">
               <property name="text">
-               <string>Choose a preset, then fine-tune only the settings you need.</string>
+               <string>Start with one preset, then adjust only the visual details you really want to change.</string>
               </property>
               <property name="wordWrap">
                <bool>true</bool>
@@ -575,7 +575,7 @@
             <item>
              <widget class="QLabel" name="qualityHardwareTitle">
               <property name="text">
-               <string>Detected hardware</string>
+               <string>Your hardware</string>
               </property>
               <property name="arenaTitle" stdset="0">
                <bool>true</bool>

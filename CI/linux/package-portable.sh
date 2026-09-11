@@ -200,7 +200,7 @@ while IFS= read -r -d '' exe; do
 done < <(find "$package_dir" -maxdepth 1 -type f -perm -111 -print0)
 
 # OSG loads format plugins dynamically at runtime; they usually do not show up
-# in ldd output for tes3mp/openmw-launcher, so copy the plugin directory too.
+# in ldd output for tes3mp/arenamp-launcher, so copy the plugin directory too.
 for dir in /usr/lib/x86_64-linux-gnu/osgPlugins-* /usr/local/lib/osgPlugins-* /usr/lib/osgPlugins-*; do
     [[ -d "$dir" ]] || continue
     cp -a "$dir" "$package_dir/lib/"
@@ -234,7 +234,7 @@ case "$wrapper" in
             cp -f "$gamedir/tes3mp-server-default.cfg" "$userdata/tes3mp-server.cfg"
         fi
         ;;
-    tes3mp|tes3mp-browser|openmw-launcher|openmw-wizard|*)
+    tes3mp|arenamp-launcher|openmw-wizard|*)
         if [[ ! -f "$userdata/tes3mp-client.cfg" && -f "$gamedir/tes3mp-client-default.cfg" ]]; then
             cp -f "$gamedir/tes3mp-client-default.cfg" "$userdata/tes3mp-client.cfg"
         fi
@@ -265,13 +265,13 @@ WRAPPER
     chmod +x "$path"
 }
 
-for bin in tes3mp tes3mp-browser tes3mp-server openmw-launcher openmw-wizard openmw-iniimporter openmw-essimporter bsatool esmtool; do
+for bin in tes3mp tes3mp-server arenamp-launcher openmw-wizard openmw-iniimporter openmw-essimporter bsatool esmtool; do
     wrap_binary "$bin"
 done
 
 cat > "$package_dir/STEAM_DECK_README.txt" <<'README'
 ArenaMP Linux x86_64 portable build for Steam Deck Desktop Mode / SteamOS.
-Run ./openmw-launcher from this folder, or add it as a Non-Steam Game.
+Run ./arenamp-launcher from this folder, or add it as a Non-Steam Game.
 Runtime libraries are bundled in ./lib and loaded through the wrapper scripts.
 Morrowind data files are not included.
 README

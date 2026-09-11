@@ -1,3 +1,17 @@
+## U020 — Showcase Play page, system status column and requiredDataFiles.json protection
+
+### Changed
+- Launcher window is now 1080×720 (still fits 1366×768 laptops with the taskbar).
+- Play page rebuilt: a left glass panel with Connection / Server Console / Server Settings pills, a **Start the game** card and a **Local server** card side by side, and a permanent **System status** column.
+- Removed duplicated controls: host mode, bind interface and alternative server live only in the launch card; gameplay preset, hashes, website, auto-restart, DataFiles enforcement, clear/reset and Start/Stop live only in the server card. The server card no longer empties itself when Host mode is off.
+- The hero **Start game** button shows the actual target (local server + port, alternative server, selected server) and switches to update/checking hints.
+- System status shows launcher state (ready / checking / update available / server running), detected GPU and VRAM, CPU threads, mode, bind interface or target server, build and preset, plus a contextual tip.
+- Footer: status dot with two-line server state, server session uptime and fixed action order Update/Play · Changelog · Run Server · Help.
+- New Arena Glass icons and Russian strings for all new UI text.
+
+### Fixed
+- Desktop engine updates now explicitly skip `requiredDataFiles.json` regardless of its path inside the engine archive (in addition to the protected `server/` root). Self-test covers the rule.
+
 ## 2026-09-11 — U016 main launcher Mac glass navigation
 
 - Main launcher navigation received a second polish pass: stronger glass toolbar, compact status footer and consistent gold selection.

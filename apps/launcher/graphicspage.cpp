@@ -14,6 +14,7 @@
 #include <QSignalBlocker>
 #include <QPushButton>
 #include <QSpinBox>
+#include <QStringList>
 #include <QThread>
 #include <QTabBar>
 
@@ -967,6 +968,29 @@ void Launcher::GraphicsPage::updateHardwareLabels()
     qualityCpuLabel->setText(tr("%1 logical threads, %2 MP primary display")
         .arg(mHardwareInfo.logicalCores).arg(megapixels, 0, 'f', 2));
     qualityRecommendationLabel->setText(qualityName(mRecommendedQuality));
+    emit hardwareInfoChanged();
+}
+
+QString Launcher::GraphicsPage::hardwareGpuName() const
+{
+    return mHardwareInfo.renderer.trimmed();
+}
+
+QString Launcher::GraphicsPage::hardwareGpuDetail() const
+{
+    QStringList parts;
+    if (mHardwareInfo.dedicatedVramMb > 0)
+        parts << tr("%1 MB dedicated VRAM").arg(mHardwareInfo.dedicatedVramMb);
+    if (mHardwareInfo.integrated)
+        parts << tr("integrated");
+    if (mHardwareInfo.softwareRenderer)
+        parts << tr("software renderer");
+    return parts.join(QStringLiteral(", "));
+}
+
+int Launcher::GraphicsPage::hardwareLogicalThreads() const
+{
+    return mHardwareInfo.logicalCores;
 }
 
 void Launcher::GraphicsPage::initializeQualityPage()

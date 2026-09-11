@@ -142,7 +142,7 @@ See [Feature overview](docs/FEATURES.md) and [Differences from TES3MP](docs/TES3
 ### Playing
 
 1. Download a package for your platform from the repository's [Releases](https://github.com/MrZer0x0/TES3MP/releases) page or build it from source.
-2. Run `openmw-launcher` and point it to a legal Morrowind installation.
+2. Run `arenamp-launcher` and point it to a legal Morrowind installation.
 3. Configure the same content files and load order used by the server.
 4. Start `tes3mp`, select a matching ArenaMP server, and sign in.
 

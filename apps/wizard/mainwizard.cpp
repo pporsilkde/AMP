@@ -1,5 +1,6 @@
 #include <QStandardPaths>
 #include <QSaveFile>
+#include <QProcess>
 #include <QRegularExpression>
 #include "mainwizard.hpp"
 
@@ -240,7 +241,7 @@ Wizard::MainWizard::MainWizard(QWidget *parent) :
     setWizardStyle(QWizard::ClassicStyle);
 #endif
 
-    setWindowTitle(tr("OpenMW Wizard"));
+    setWindowTitle(tr("ArenaMP Setup Wizard"));
     setWindowIcon(QIcon(QLatin1String(":/images/openmw-wizard.png")));
     setMinimumWidth(550);
 
@@ -302,7 +303,7 @@ void Wizard::MainWizard::setupLog()
         return qApp->quit();
     }
 
-    addLogText(QString("Started OpenMW Wizard on %1").arg(QDateTime::currentDateTime().toString()));
+    addLogText(QString("Started ArenaMP Setup Wizard on %1").arg(QDateTime::currentDateTime().toString()));
 
     qDebug() << logPath;
 }
@@ -952,7 +953,7 @@ void Wizard::MainWizard::accept()
     name = name.left(100);
     const QDir application(QCoreApplication::applicationDirPath());
 #ifdef Q_OS_WIN
-    const QString launcher = application.filePath(QStringLiteral("openmw-launcher.exe"));
+    const QString launcher = application.filePath(QStringLiteral("arenamp-launcher.exe"));
     const QString shortcut = QDir(desktop).filePath(name + QStringLiteral(".lnk"));
     if (!desktop.isEmpty() && QFileInfo::exists(launcher) && !QFileInfo::exists(shortcut))
     {
@@ -960,7 +961,7 @@ void Wizard::MainWizard::accept()
         if (!QFile::link(launcher, shortcut)) addLogText(tr("Could not create the desktop shortcut."));
     }
 #elif defined(Q_OS_LINUX)
-    const QString launcher = application.filePath(QStringLiteral("openmw-launcher"));
+    const QString launcher = application.filePath(QStringLiteral("arenamp-launcher"));
     const QString shortcut = QDir(desktop).filePath(name + QStringLiteral(".desktop"));
     if (!desktop.isEmpty() && QFileInfo::exists(launcher) && !QFileInfo::exists(shortcut))
     {
@@ -987,6 +988,26 @@ void Wizard::MainWizard::accept()
         }
     }
 #endif
+
+    // When the Wizard is started directly (for example from the installer),
+    // continue into ArenaMP automatically. When it was spawned by the hidden
+    // launcher, that launcher will reload the new configuration and reveal
+    // itself after the Wizard exits, so do not create a duplicate process.
+    if (!QCoreApplication::arguments().contains(QStringLiteral("--from-launcher")))
+    {
+#ifdef Q_OS_WIN
+        const QString launcherPath = application.filePath(QStringLiteral("arenamp-launcher.exe"));
+#else
+        const QString launcherPath = application.filePath(QStringLiteral("arenamp-launcher"));
+#endif
+        if (QFileInfo::exists(launcherPath))
+        {
+            if (!QProcess::startDetached(launcherPath, QStringList() << QStringLiteral("--arena-after-wizard"), application.absolutePath()))
+                addLogText(tr("Could not start ArenaMP Launcher after the Wizard."));
+        }
+        else
+            addLogText(tr("ArenaMP Launcher was not found next to the Wizard."));
+    }
 
     QWizard::accept();
 }

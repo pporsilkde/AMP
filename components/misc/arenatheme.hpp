@@ -48,7 +48,7 @@ namespace ArenaUi
         // Keep the shared QSS in several chunks so the launcher, wizard and
         // updater can all include this header without C2026.
         QString arenaStyleSheet;
-        arenaStyleSheet.reserve(25201);
+        arenaStyleSheet.reserve(32768);
         arenaStyleSheet += QStringLiteral(R"ARENA(
             QMainWindow, QDialog, QWizard, QWidget#centralWidget, QWidget#centralwidget {
                 background-color: #191a1d;
@@ -77,7 +77,7 @@ namespace ArenaUi
             }
             QLabel#versionLabel {
                 padding: 5px 9px;
-                border-radius: 8px;
+                border-radius: 10px;
                 font-size: 11px;
                 font-weight: 600;
             }
@@ -108,11 +108,12 @@ namespace ArenaUi
 
             QPushButton {
                 color: #eee8dd;
-                background-color: rgba(255, 255, 255, 18);
-                border: 1px solid rgba(226, 193, 126, 72);
-                border-radius: 9px;
-                padding: 5px 11px;
-                min-height: 20px;
+                background-color: rgba(255, 255, 255, 14);
+                border: 1px solid rgba(226, 193, 126, 68);
+                border-radius: 11px;
+                padding: 6px 12px;
+                min-height: 22px;
+                font-weight: 500;
             }
             QPushButton:hover {
                 background-color: rgba(226, 193, 126, 28);
@@ -143,14 +144,14 @@ namespace ArenaUi
                 background: #3c3933; color: #8d887e; border-color: #555048;
             }
             QPushButton[arenaQuiet="true"] {
-                background-color: rgba(255, 255, 255, 8);
-                border-color: rgba(255, 255, 255, 22);
+                background-color: rgba(255, 255, 255, 7);
+                border-color: rgba(255, 255, 255, 20);
             }
             QPushButton[arenaQuiet="true"]:hover {
                 background-color: rgba(255, 255, 255, 16);
                 border-color: rgba(226, 193, 126, 82);
             }
-            QDialogButtonBox QPushButton { min-width: 82px; }
+            QDialogButtonBox QPushButton { min-width: 82px; min-height: 24px; }
 
             QToolButton {
                 color: #ece5d8;
@@ -185,14 +186,13 @@ namespace ArenaUi
             QListView:focus, QTreeView:focus, QTableView:focus {
                 border-color: #c9a562;
             }
-            QComboBox { padding-right: 30px; }
+            QComboBox { padding-right: 28px; }
             QComboBox::drop-down {
                 subcontrol-origin: padding;
                 subcontrol-position: top right;
-                width: 26px;
+                width: 24px;
                 border: 0;
-                border-left: 1px solid rgba(255,255,255,18);
-                background-color: rgba(255,255,255,6);
+                background-color: transparent;
                 border-top-right-radius: 8px;
                 border-bottom-right-radius: 8px;
             }
@@ -306,6 +306,7 @@ namespace ArenaUi
                 border-radius: 9px;
                 font-size: 12px;
                 font-weight: 600;
+                min-width: 96px;
             }
             QTabWidget#pageTabs QTabBar::tab:hover {
                 color: #eee7da;
@@ -325,14 +326,15 @@ namespace ArenaUi
             }
             QTabWidget#playModeTabs QTabBar::tab,
             QTabWidget#serverSettingsModeTabs QTabBar::tab {
-                min-width: 0px;
-                min-height: 20px;
-                padding: 4px 8px;
+                min-width: 104px;
+                min-height: 22px;
+                padding: 5px 10px;
                 margin: 2px 2px 4px 0;
                 border: 1px solid transparent;
-                border-radius: 8px;
+                border-radius: 10px;
                 color: #b0aca4;
                 font-size: 12px;
+                font-weight: 600;
                 background: transparent;
             }
             QTabWidget#playModeTabs QTabBar::tab:hover,
@@ -377,12 +379,14 @@ namespace ArenaUi
                 border-radius: 12px;
             }
             QTabWidget#AdvancedTabWidget QTabBar::tab {
-                min-width: 0px;
-                padding: 6px 8px;
+                min-width: 92px;
+                padding: 5px 10px;
                 margin: 2px 2px 4px 0;
-                border-radius: 8px;
+                border-radius: 10px;
                 border: 1px solid transparent;
-                color: #aaa69e;
+                color: #b0aca4;
+                font-size: 12px;
+                font-weight: 600;
                 background: transparent;
             }
             QTabWidget#AdvancedTabWidget QTabBar::tab:hover {
@@ -405,11 +409,13 @@ namespace ArenaUi
             }
             QTabWidget#DisplayTabWidget QTabBar::tab {
                 min-width: 92px;
-                padding: 6px 15px;
-                margin: 2px 3px 4px 0;
-                color: #aaa69e;
+                padding: 5px 12px;
+                margin: 2px 2px 4px 0;
+                color: #b0aca4;
                 border: 1px solid transparent;
-                border-radius: 9px;
+                border-radius: 10px;
+                font-size: 12px;
+                font-weight: 600;
                 background: transparent;
             }
             QTabWidget#DisplayTabWidget QTabBar::tab:hover {
@@ -430,9 +436,9 @@ namespace ArenaUi
                 border-radius: 12px;
             }
             QLabel[arenaTitle="true"] {
-                color: #f0e9dc;
-                font-size: 14px;
-                font-weight: 600;
+                color: #f2ecdf;
+                font-size: 15px;
+                font-weight: 650;
             }
             QLabel[arenaMuted="true"] {
                 color: #b3afa8;
@@ -450,14 +456,14 @@ namespace ArenaUi
                 max-height: 1px;
             }
             QPushButton[arenaPresetButton="true"] {
-                min-height: 25px;
-                padding: 3px 7px;
-                border-radius: 8px;
-                color: #d9d4ca;
-                background-color: rgba(255,255,255,9);
-                border: 1px solid rgba(255,255,255,20);
+                min-height: 28px;
+                padding: 4px 8px;
+                border-radius: 10px;
+                color: #ddd8cf;
+                background-color: rgba(255,255,255,8);
+                border: 1px solid rgba(255,255,255,18);
                 font-size: 11px;
-                font-weight: 500;
+                font-weight: 600;
             }
             QPushButton[arenaPresetButton="true"]:hover {
                 color: #f1e9da;
@@ -472,6 +478,18 @@ namespace ArenaUi
                 font-weight: 650;
             }
             QWidget#qualityPresetButtonsHost { background: transparent; }
+
+            QFrame#qualityQuickCard, QFrame#buildHeaderCard {
+                border-radius: 14px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 rgba(205,164,94,18), stop:0.5 rgba(255,255,255,10), stop:1 rgba(96,114,132,10));
+                border: 1px solid rgba(226,193,126,38);
+            }
+            QLabel[arenaSectionTitle="true"] {
+                color: #f0e7d7;
+                font-size: 15px;
+                font-weight: 650;
+            }
 
             QListWidget#iconWidget {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
@@ -606,12 +624,14 @@ namespace ArenaUi
                 border-radius: 11px;
             }
             QTabWidget#serverSettingsCategoryTabs QTabBar::tab {
-                min-width: 0px;
-                padding: 5px 11px;
+                min-width: 92px;
+                padding: 5px 10px;
                 margin: 2px 2px 4px 0;
-                color: #aaa69e;
+                color: #b0aca4;
                 border: 1px solid transparent;
-                border-radius: 8px;
+                border-radius: 10px;
+                font-size: 12px;
+                font-weight: 600;
                 background: transparent;
             }
             QTabWidget#serverSettingsCategoryTabs QTabBar::tab:hover {
@@ -661,6 +681,111 @@ namespace ArenaUi
             QToolButton#arenaClose:hover { background-color: #ff756e; }
             QToolButton#arenaMinimize:hover { background-color: #ffca55; }
             QToolButton#arenaMaximize:hover { background-color: #4bd361; }
+        )ARENA");
+        arenaStyleSheet += QStringLiteral(R"ARENA(
+            /* U020 showcase layout: panels, insets, hero action, status column, footer. */
+            QStackedWidget#pagesWidget[arenaBare="true"] { background: transparent; border: 0; }
+            QFrame[arenaPanel="true"], QTabWidget#pageTabs {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(40,41,45,218), stop:1 rgba(21,22,25,228));
+                border: 1px solid rgba(233,216,182,36);
+                border-radius: 15px;
+            }
+            QTabWidget#pageTabs::pane { border: 0; background: transparent; top: 0px; }
+            QTabWidget#pageTabs::tab-bar { left: 10px; }
+            QTabWidget#pageTabs QTabBar::tab {
+                min-width: 150px;
+                min-height: 22px;
+                padding: 5px 16px;
+                margin: 10px 6px 0 0;
+                color: #cfc9be;
+                background-color: rgba(255,255,255,8);
+                border: 1px solid rgba(255,255,255,20);
+                border-radius: 11px;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QTabWidget#pageTabs QTabBar::tab:hover {
+                color: #f1eadc;
+                background-color: rgba(255,255,255,14);
+                border-color: rgba(226,193,126,72);
+            }
+            QTabWidget#pageTabs QTabBar::tab:selected {
+                color: #fff1d2;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(224,182,106,158), stop:1 rgba(146,105,52,128));
+                border: 1px solid #e6c07a;
+            }
+            QFrame[arenaInset="true"] {
+                background-color: rgba(9,10,12,112);
+                border: 1px solid rgba(255,255,255,17);
+                border-radius: 11px;
+            }
+            QLabel[arenaFieldLabel="true"] { color: #e4dfd5; }
+            QLabel[arenaHint="true"] { background: transparent; }
+            QFrame[arenaVDivider="true"] { border: 0; background-color: rgba(255,255,255,28); }
+
+            QPushButton[arenaHero="true"] {
+                padding: 0;
+                border-radius: 13px;
+                border: 1px solid #f6dfaa;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #f1d598, stop:0.55 #d7ae67, stop:1 #b3843f);
+            }
+            QPushButton[arenaHero="true"]:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #f7dea8, stop:0.55 #e0b973, stop:1 #c08f4b);
+            }
+            QPushButton[arenaHero="true"]:pressed { background: #a97b3f; }
+            QPushButton[arenaHero="true"]:disabled { background: #3c3933; border-color: #555048; }
+            QLabel[arenaHeroTitle="true"] { color: #211910; font-size: 16px; font-weight: 700; }
+            QLabel[arenaHeroSubtitle="true"] { color: rgba(33,25,16,190); font-size: 11px; }
+            QLabel[arenaHeroTitle="true"]:disabled, QLabel[arenaHeroSubtitle="true"]:disabled { color: #8d887e; }
+
+            QLabel[arenaStatusDot="true"] {
+                border-radius: 6px;
+                background-color: #3fbf6e;
+                border: 2px solid rgba(63,191,110,70);
+            }
+            QLabel#statusDotLabel { border-radius: 7px; }
+            QLabel[arenaStatusDot="true"][arenaStatus="online"] { background-color: #5fe08f; border-color: rgba(95,224,143,95); }
+            QLabel[arenaStatusDot="true"][arenaStatus="warn"] { background-color: #e2b75c; border-color: rgba(226,183,92,90); }
+            QLabel[arenaStatusDot="true"][arenaStatus="busy"] { background-color: #78aee0; border-color: rgba(120,174,224,90); }
+            QLabel[arenaStatusHeadline="true"] { color: #5fd88a; font-size: 15px; font-weight: 700; }
+            QLabel[arenaStatusHeadline="true"][arenaStatus="online"] { color: #74e59d; }
+            QLabel[arenaStatusHeadline="true"][arenaStatus="warn"] { color: #ebc476; }
+            QLabel[arenaStatusHeadline="true"][arenaStatus="busy"] { color: #93c1ec; }
+            QLabel[arenaStatusKey="true"] { color: #aaa59c; font-size: 12px; }
+            QLabel[arenaStatusValue="true"] { color: #ece6da; font-size: 12px; }
+            QLabel[arenaStatusValue="true"][arenaAccent="true"] { color: #e9c272; font-weight: 700; }
+            QLabel[arenaTipTitle="true"] { color: #f0e9dc; font-size: 13px; font-weight: 650; }
+
+            QFrame[arenaFooter="true"] { border-radius: 14px; }
+            QLabel#versionLabel,
+            QLabel#versionLabel[arenaStatus="online"],
+            QLabel#versionLabel[arenaStatus="offline"] {
+                padding: 0;
+                border: 0;
+                background: transparent;
+                font-size: 13px;
+                font-weight: 650;
+            }
+            QLabel#versionLabel[arenaStatus="offline"] { color: #5cc985; }
+            QLabel#versionLabel[arenaStatus="online"] { color: #7be3a0; }
+            QPushButton[arenaFooterButton="true"] {
+                min-height: 24px;
+                padding: 6px 14px;
+                border-radius: 11px;
+                font-size: 13px;
+            }
+
+            QListWidget#iconWidget::item:selected {
+                color: #fff0cf;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(218,176,102,125), stop:1 rgba(132,94,46,98));
+                border: 1px solid rgba(236,197,124,170);
+            }
+            QListWidget#iconWidget::item { font-size: 13px; }
         )ARENA");
         app.setStyleSheet(arenaStyleSheet);
     }

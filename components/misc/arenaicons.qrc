@@ -25,4 +25,38 @@
   <file>arenaicons/chevron-down.png</file>
   <file>arenaicons/radio-dot.svg</file>
   <file>arenaicons/radio-dot.png</file>
+  <file>arenaicons/gamepad.svg</file>
+  <file>arenaicons/gamepad.png</file>
+  <file>arenaicons/database.svg</file>
+  <file>arenaicons/database.png</file>
+  <file>arenaicons/cpu.svg</file>
+  <file>arenaicons/cpu.png</file>
+  <file>arenaicons/drive.svg</file>
+  <file>arenaicons/drive.png</file>
+  <file>arenaicons/wifi.svg</file>
+  <file>arenaicons/wifi.png</file>
+  <file>arenaicons/cube.svg</file>
+  <file>arenaicons/cube.png</file>
+  <file>arenaicons/users.svg</file>
+  <file>arenaicons/users.png</file>
+  <file>arenaicons/info.svg</file>
+  <file>arenaicons/info.png</file>
+  <file>arenaicons/trash.svg</file>
+  <file>arenaicons/trash.png</file>
+  <file>arenaicons/refresh.svg</file>
+  <file>arenaicons/refresh.png</file>
+  <file>arenaicons/stop.svg</file>
+  <file>arenaicons/stop.png</file>
+  <file>arenaicons/stop-muted.svg</file>
+  <file>arenaicons/stop-muted.png</file>
+  <file>arenaicons/play-dark.svg</file>
+  <file>arenaicons/play-dark.png</file>
+  <file>arenaicons/update-dark.svg</file>
+  <file>arenaicons/update-dark.png</file>
+  <file>arenaicons/server-dark.svg</file>
+  <file>arenaicons/server-dark.png</file>
+  <file>arenaicons/refresh-dark.svg</file>
+  <file>arenaicons/refresh-dark.png</file>
+  <file>arenaicons/hint.svg</file>
+  <file>arenaicons/hint.png</file>
 </qresource></RCC>

@@ -88,7 +88,7 @@ if(NOT WIN32)
 endif(NOT WIN32)
 
 # Main executable
-openmw_add_executable(openmw-launcher
+openmw_add_executable(arenamp-launcher
     ${GUI_TYPE}
     ${LAUNCHER}
     ${LAUNCHER_HEADER}
@@ -102,34 +102,34 @@ openmw_add_executable(openmw-launcher
 # interprets non-ASCII literals using the build machine code page, which
 # produces mojibake (D0/D1-style text) on Russian UI builds.
 if (MSVC)
-    target_compile_options(openmw-launcher PRIVATE /utf-8)
+    target_compile_options(arenamp-launcher PRIVATE /utf-8)
 endif()
 
 if (WIN32)
-    INSTALL(TARGETS openmw-launcher RUNTIME DESTINATION ".")
+    INSTALL(TARGETS arenamp-launcher RUNTIME DESTINATION ".")
 endif (WIN32)
 
-target_link_libraries(openmw-launcher
+target_link_libraries(arenamp-launcher
     ${SDL2_LIBRARY_ONLY}
     ${OPENAL_LIBRARY}
     components
 )
 
-target_link_libraries(openmw-launcher Qt5::Widgets Qt5::Core Qt5::Gui Qt5::Network)
+target_link_libraries(arenamp-launcher Qt5::Widgets Qt5::Core Qt5::Gui Qt5::Network)
 
 if (WIN32)
-    target_link_libraries(openmw-launcher dxgi advapi32)
+    target_link_libraries(arenamp-launcher dxgi advapi32)
 endif (WIN32)
 
 if (BUILD_WITH_CODE_COVERAGE)
   add_definitions (--coverage)
-  target_link_libraries(openmw-launcher gcov)
+  target_link_libraries(arenamp-launcher gcov)
 endif()
 
 
 # ArenaMP native updater. It is a normal Qt/C++ target, not a PyInstaller
 # bundle. Keeping it as a separate process is intentional: on Windows it must
-# remain alive after openmw-launcher exits so it can replace the launcher and
+# remain alive after arenamp-launcher exits so it can replace the launcher and
 # its DLLs transactionally.
 find_package(ZLIB REQUIRED)
 

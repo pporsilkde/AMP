@@ -30,6 +30,9 @@ namespace Launcher
         void setServerRunning(bool running, const QString& address = QString(), const QString& port = QString(), bool managed = true);
         void setBuildManifestComplete(bool complete);
         void setPlayButtonState(const QString& text, bool enabled);
+        // U020 status column: launcher/update state and detected hardware.
+        void setUpdateState(bool checking, bool updateAvailable);
+        void setHardwareInfo(const QString& gpuName, const QString& gpuDetail, int logicalThreads);
 
         void setAlternativeServer(const QString& address, const QString& port, bool enabled);
         bool alternativeServer() const;
@@ -99,6 +102,7 @@ namespace Launcher
         void refreshHostInterfaces(const QString& preferredAddress = QString());
         void updateHostModeUi(bool enabled);
         void applyServerModePreset(int index);
+        void updateStatusPanel();
         QWidget* mEmbeddedServerConsole;
         bool mSyncingServerSettingsTabs;
         QLabel* mHostInterfaceLabel;
@@ -111,6 +115,18 @@ namespace Launcher
         QPushButton* mClearCellsButton;
         QPushButton* mResetServerButton;
         bool mSyncingXpControls;
+
+        QLabel* mPlayIconLabel;
+        QLabel* mPlayTitleLabel;
+        QLabel* mPlaySubtitleLabel;
+        bool mServerRunning;
+        bool mUpdateChecking;
+        bool mUpdateAvailable;
+        QString mRunningAddress;
+        QString mRunningPort;
+        QString mGpuName;
+        QString mGpuDetail;
+        int mLogicalThreads;
     };
 }
 #endif

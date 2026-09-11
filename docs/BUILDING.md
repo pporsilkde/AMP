@@ -62,7 +62,7 @@ Remove the old build directory before changing generator, architecture, or depen
 | `BUILD_OPENMW` | `ON` | Build the ArenaMP/TES3MP client |
 | `BUILD_OPENMW_MP` | `ON` | Build the dedicated server |
 | `BUILD_LAUNCHER` | `ON` | Build the launcher |
-| `BUILD_BROWSER` | `ON` | Build the server browser |
+| `BUILD_BROWSER` | `OFF` | Disabled in ArenaMP; TES3MP browser is not shipped |
 | `BUILD_MASTER` | `ON` | Build the master server |
 | `BUILD_OPENCS` | `OFF` | Build OpenMW-CS |
 | `BUILD_UNITTESTS` | `OFF` | Build unit tests |

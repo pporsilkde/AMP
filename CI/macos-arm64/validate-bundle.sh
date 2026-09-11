@@ -80,7 +80,7 @@ BUNDLE_EXECUTABLE="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$PL
 [[ -n "$BUNDLE_EXECUTABLE" ]] || fail "CFBundleExecutable is empty"
 [[ -x "$APP_PATH/Contents/MacOS/$BUNDLE_EXECUTABLE" ]] || fail "CFBundleExecutable does not exist: $BUNDLE_EXECUTABLE"
 
-for required in openmw-launcher openmw-wizard tes3mp tes3mp-server tes3mp-browser; do
+for required in arenamp-launcher openmw-wizard tes3mp tes3mp-server; do
   [[ -x "$APP_PATH/Contents/MacOS/$required" ]] || fail "required executable is missing: $required"
 done
 for required_server_file in \

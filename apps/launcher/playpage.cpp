@@ -40,8 +40,10 @@
 #include <QSizePolicy>
 #include <QStandardPaths>
 #include <QSpinBox>
+#include <QStyle>
 #include <QStringList>
 #include <QTextStream>
+#include <QThread>
 #include <QVBoxLayout>
 
 namespace
@@ -145,41 +147,53 @@ namespace
         tabs->tabBar()->setDrawBase(false);
     }
 
-    QFrame* makeSectionHeader(QWidget* parent, const QIcon& icon,
-        const QString& title, const QString& subtitle)
+    // Dynamic properties are read by the shared QSS. Changing one on a widget
+    // that is already polished needs an explicit re-polish.
+    void repolish(QWidget* widget)
     {
-        auto* header = new QFrame(parent);
-        header->setProperty("arenaSectionHeader", true);
-        auto* row = new QHBoxLayout(header);
-        row->setContentsMargins(0, 0, 0, 0);
-        row->setSpacing(10);
+        if (widget == nullptr)
+            return;
+        widget->style()->unpolish(widget);
+        widget->style()->polish(widget);
+        widget->update();
+    }
 
-        auto* iconLabel = new QLabel(header);
-        iconLabel->setPixmap(icon.pixmap(24, 24));
-        iconLabel->setFixedSize(28, 28);
-        iconLabel->setAlignment(Qt::AlignCenter);
-        row->addWidget(iconLabel);
+    void setStatusProperty(QWidget* widget, const QString& state)
+    {
+        if (widget == nullptr || widget->property("arenaStatus").toString() == state)
+            return;
+        widget->setProperty("arenaStatus", state);
+        repolish(widget);
+    }
 
-        auto* textColumn = new QVBoxLayout();
-        textColumn->setContentsMargins(0, 0, 0, 0);
-        textColumn->setSpacing(1);
-        auto* titleLabel = new QLabel(title, header);
-        titleLabel->setProperty("arenaSectionTitle", true);
-        auto* subtitleLabel = new QLabel(subtitle, header);
-        subtitleLabel->setProperty("arenaMuted", true);
-        subtitleLabel->setWordWrap(true);
-        textColumn->addWidget(titleLabel);
-        textColumn->addWidget(subtitleLabel);
-        row->addLayout(textColumn, 1);
-        return header;
+    void setIconLabel(QLabel* label, const QString& icon, int size)
+    {
+        if (label == nullptr)
+            return;
+        label->setPixmap(ArenaUi::glassIcon(icon).pixmap(size, size));
+    }
+
+    // Small "(?)" markers next to options. The explanation lives in the
+    // tooltip, so the cards stay compact in the fixed-size launcher.
+    void configureHintLabel(QLabel* label)
+    {
+        if (label == nullptr)
+            return;
+        setIconLabel(label, QStringLiteral("hint"), 16);
+        label->setFixedSize(18, 18);
+        label->setAlignment(Qt::AlignCenter);
+        label->setCursor(Qt::WhatsThisCursor);
     }
 }
 
 Launcher::PlayPage::PlayPage(QWidget *parent)
     : QWidget(parent)
+    , mAlternativeServer(nullptr)
+    , mAlternativeAddress(nullptr)
+    , mAlternativePort(nullptr)
+    , mProjectLink(nullptr)
     , mEmbeddedServerConsole(nullptr)
     , mSyncingServerSettingsTabs(false)
-    , mSyncingXpControls(false)
     , mHostInterfaceLabel(nullptr)
     , mHostInterfaceCombo(nullptr)
     , mRefreshHostInterfacesButton(nullptr)
@@ -189,88 +203,126 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     , mServerModeCombo(nullptr)
     , mClearCellsButton(nullptr)
     , mResetServerButton(nullptr)
+    , mSyncingXpControls(false)
+    , mPlayIconLabel(nullptr)
+    , mPlayTitleLabel(nullptr)
+    , mPlaySubtitleLabel(nullptr)
+    , mServerRunning(false)
+    , mUpdateChecking(false)
+    , mUpdateAvailable(false)
+    , mLogicalThreads(QThread::idealThreadCount())
 {
     setObjectName("PlayPage");
     setupUi(this);
     serverPortEdit->setValidator(new QIntValidator(1, 65535, serverPortEdit));
 
-    // U016: every horizontal switch is a true equal-width segmented control.
-    // This avoids clipped Russian labels in the fixed 960 px launcher and makes
-    // the navigation behave like a compact macOS toolbar.
+    // U020 showcase layout. All controls now live in playpage.ui: a launch
+    // card, a local-server card and a permanent system-status column. The
+    // member pointers below are kept so the existing config/load/save code
+    // continues to operate on exactly the same widgets.
+    mAlternativeServer = alternativeServerCheckBox;
+    mAlternativeAddress = alternativeAddressEdit;
+    mAlternativePort = alternativePortEdit;
+    mProjectLink = projectLinkButton;
+    mHostInterfaceLabel = hostInterfaceLabel;
+    mHostInterfaceCombo = hostInterfaceCombo;
+    mRefreshHostInterfacesButton = refreshHostInterfacesButton;
+    mUpdateHashesButton = updateHashesButton;
+    mEnforceRequiredCheckBox = enforceRequiredCheckBox;
+    mServerModeLabel = serverModeLabel;
+    mServerModeCombo = serverModeCombo;
+    mClearCellsButton = clearCellsButton;
+    mResetServerButton = resetServerButton;
+
+    // Page switch: compact pills in the top-left corner of the left panel.
     pageTabs->setProperty("arenaPrimaryTabs", true);
-    playModeTabs->setProperty("arenaModeTabs", true);
+    pageTabs->setProperty("arenaSegmented", true);
     serverSettingsModeTabs->setProperty("arenaModeTabs", true);
     configureHorizontalTabs(pageTabs);
-    configureHorizontalTabs(playModeTabs);
     configureHorizontalTabs(serverSettingsModeTabs);
-    pageTabs->setTabIcon(pageTabs->indexOf(playTab), ArenaUi::glassIcon(QStringLiteral("play")));
-    pageTabs->setTabIcon(pageTabs->indexOf(serverConsoleTab), ArenaUi::glassIcon(QStringLiteral("server")));
-    pageTabs->setTabIcon(pageTabs->indexOf(serverSettingsTab), ArenaUi::glassIcon(QStringLiteral("settings")));
-    playModeTabs->setTabIcon(playModeTabs->indexOf(connectionTab), ArenaUi::glassIcon(QStringLiteral("globe")));
-    playModeTabs->setTabIcon(playModeTabs->indexOf(hostTab), ArenaUi::glassIcon(QStringLiteral("server")));
+    pageTabs->tabBar()->setExpanding(false);
+    // Paint the left panel (rounded glass) behind the pills and the cards.
+    pageTabs->setAttribute(Qt::WA_StyledBackground, true);
+    pageTabs->setTabText(pageTabs->indexOf(playTab), tr("Connection"));
+    pageTabs->setTabText(pageTabs->indexOf(serverConsoleTab), tr("Server Console"));
+    pageTabs->setTabText(pageTabs->indexOf(serverSettingsTab), tr("Server Settings"));
 
-    buildHeaderCard->setProperty("arenaHeroCard", true);
-    buildNameLabel->setProperty("arenaMuted", true);
+    // The status column belongs to the overview only. Console and server
+    // settings need the full width of the fixed window.
+    connect(pageTabs, &QTabWidget::currentChanged, this, [this](int index) {
+        statusPanel->setVisible(pageTabs->widget(index) == playTab);
+    });
+
+    // Card headers, status icons and "(?)" markers.
+    setIconLabel(launchIconLabel, QStringLiteral("gamepad"), 30);
+    setIconLabel(serverIconLabel, QStringLiteral("database"), 28);
+    setIconLabel(statusPanelIconLabel, QStringLiteral("cpu"), 28);
+    setIconLabel(gpuIconLabel, QStringLiteral("graphics"), 18);
+    setIconLabel(cpuIconLabel, QStringLiteral("cpu"), 18);
+    setIconLabel(modeIconLabel, QStringLiteral("drive"), 18);
+    setIconLabel(endpointIconLabel, QStringLiteral("wifi"), 18);
+    setIconLabel(buildIconLabel, QStringLiteral("cube"), 18);
+    setIconLabel(presetIconLabel, QStringLiteral("users"), 18);
+    setIconLabel(tipIconLabel, QStringLiteral("info"), 20);
+    for (QLabel* hint : { hostModeHintLabel, alternativeServerHintLabel, autoRestartHintLabel, enforceRequiredHintLabel })
+        configureHintLabel(hint);
+
+    buildNameLabel->setProperty("arenaFieldLabel", true);
+    serverLabel->setProperty("arenaFieldLabel", true);
+    hostInterfaceLabel->setProperty("arenaFieldLabel", true);
+    serverModeLabel->setProperty("arenaFieldLabel", true);
     buildNameEdit->setProperty("arenaBuildName", true);
-    connectionTabLayout->insertWidget(0, makeSectionHeader(connectionTab, ArenaUi::glassIcon(QStringLiteral("globe")),
-        tr("Connect to ArenaMP"), tr("Choose the server endpoint or open the alternate-server fields.")));
 
-    // The first page should let the player start immediately without
-    // hunting for the footer action. Reuse the existing Play button so the
-    // established signal/slot behavior stays unchanged.
-    hostServerButtonsLayout->removeWidget(playButton);
-    playButton->setParent(connectionTab);
-    playButton->setVisible(true);
-    playButton->setProperty("arenaPrimary", true);
-    playButton->setIcon(ArenaUi::glassIcon(QStringLiteral("play")));
-    playButton->setMinimumHeight(42);
-    playButton->setMinimumWidth(0);
-    playButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    playButton->setText(tr("Play now"));
+    // Hero "Start game" button: title + subtitle drawn by child labels so the
+    // subtitle can show the real connection target in a smaller font.
+    playButton->setText(QString());
+    playButton->setToolTip(tr("Start ArenaMP with the current connection settings"));
+    QVBoxLayout* heroLayout = new QVBoxLayout(playButton);
+    heroLayout->setContentsMargins(12, 7, 12, 7);
+    heroLayout->setSpacing(1);
+    QHBoxLayout* heroTitleRow = new QHBoxLayout();
+    heroTitleRow->setSpacing(8);
+    mPlayIconLabel = new QLabel(playButton);
+    mPlayIconLabel->setPixmap(ArenaUi::glassIcon(QStringLiteral("play-dark")).pixmap(18, 18));
+    mPlayTitleLabel = new QLabel(tr("Start game"), playButton);
+    mPlayTitleLabel->setProperty("arenaHeroTitle", true);
+    mPlaySubtitleLabel = new QLabel(playButton);
+    mPlaySubtitleLabel->setProperty("arenaHeroSubtitle", true);
+    mPlaySubtitleLabel->setAlignment(Qt::AlignCenter);
+    for (QLabel* label : { mPlayIconLabel, mPlayTitleLabel, mPlaySubtitleLabel })
+        label->setAttribute(Qt::WA_TransparentForMouseEvents);
+    heroTitleRow->addStretch(1);
+    heroTitleRow->addWidget(mPlayIconLabel);
+    heroTitleRow->addWidget(mPlayTitleLabel);
+    heroTitleRow->addStretch(1);
+    heroLayout->addLayout(heroTitleRow);
+    heroLayout->addWidget(mPlaySubtitleLabel);
 
-    QFrame* quickStartCard = new QFrame(connectionTab);
-    quickStartCard->setProperty("arenaCard", true);
-    QVBoxLayout* quickStartLayout = new QVBoxLayout(quickStartCard);
-    quickStartLayout->setContentsMargins(12, 10, 12, 10);
-    quickStartLayout->setSpacing(8);
-    QLabel* quickStartTitle = new QLabel(tr("Quick start"), quickStartCard);
-    quickStartTitle->setProperty("arenaSectionTitle", true);
-    QLabel* quickStartSubtitle = new QLabel(tr("Launch the client immediately using the current server address and port."), quickStartCard);
-    quickStartSubtitle->setProperty("arenaMuted", true);
-    quickStartSubtitle->setWordWrap(true);
-    quickStartLayout->addWidget(quickStartTitle);
-    quickStartLayout->addWidget(quickStartSubtitle);
-    quickStartLayout->addWidget(playButton);
-    connectionTabLayout->insertWidget(2, quickStartCard);
-
-    mAlternativeServer = new QCheckBox(tr("Connect to another server"), this);
-    mAlternativeAddress = new QLineEdit(this);
-    mAlternativeAddress->setPlaceholderText(tr("Server address"));
-    mAlternativePort = new QLineEdit(QStringLiteral("25565"), this);
-    mAlternativePort->setMaximumWidth(90);
-    mAlternativePort->setValidator(new QIntValidator(1, 65535, this));
-    mProjectLink = new QPushButton(tr("Server website"), this);
-    mProjectLink->setProperty("arenaQuiet", true);
-    mProjectLink->setIcon(ArenaUi::glassIcon(QStringLiteral("globe")));
-    mProjectUrl = QStringLiteral("https://t.me/arena_mp");
-    mProjectLink->setVisible(true);
-    serverConnectionLayout->addWidget(mAlternativeServer, 2, 0, 1, 2);
-    QHBoxLayout* alternativeFields = new QHBoxLayout();
-    alternativeFields->setSpacing(8);
-    alternativeFields->addWidget(mAlternativeAddress, 1);
-    alternativeFields->addWidget(mAlternativePort);
-    serverConnectionLayout->addLayout(alternativeFields, 3, 0, 1, 2);
-    serverConnectionLayout->addWidget(mProjectLink, 4, 0, 1, 2);
+    // Connection card.
+    mAlternativePort->setValidator(new QIntValidator(1, 65535, mAlternativePort));
     mAlternativeAddress->setVisible(false);
     mAlternativePort->setVisible(false);
+    mRefreshHostInterfacesButton->setIcon(ArenaUi::glassIcon(QStringLiteral("refresh")));
     connect(mAlternativeServer, &QCheckBox::toggled, this, [this](bool checked) {
         mAlternativeAddress->setVisible(checked);
         mAlternativePort->setVisible(checked);
         if (checked) autoStartServerCheckBox->setChecked(false);
+        updateStatusPanel();
     });
     connect(autoStartServerCheckBox, &QCheckBox::toggled, this, [this](bool checked) {
         if (checked) mAlternativeServer->setChecked(false);
     });
+    connect(mAlternativeAddress, &QLineEdit::textChanged, this, [this]() { updateStatusPanel(); });
+    connect(mAlternativePort, &QLineEdit::textChanged, this, [this]() { updateStatusPanel(); });
+    connect(serverAddressEdit, &QLineEdit::textChanged, this, [this]() { updateStatusPanel(); });
+    connect(serverPortEdit, &QLineEdit::textChanged, this, [this]() { updateStatusPanel(); });
+    connect(buildNameEdit, &QLineEdit::textChanged, this, [this]() { updateStatusPanel(); });
+    connect(mHostInterfaceCombo, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+        this, [this](int) { updateStatusPanel(); });
+
+    // Local server card.
+    mProjectUrl = QStringLiteral("https://t.me/arena_mp");
+    mProjectLink->setIcon(ArenaUi::glassIcon(QStringLiteral("globe")));
     connect(mProjectLink, &QPushButton::clicked, this, [this]() {
         QString link = mProjectUrl.trimmed();
         if (!link.contains(QStringLiteral("://"))) link.prepend(QStringLiteral("https://"));
@@ -279,94 +331,24 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
             QDesktopServices::openUrl(url);
     });
 
-    // Host mode has a separate bind-interface selector.  The public/share
-    // address must not be confused with the address the local socket binds to:
-    // a router-owned WAN IP usually cannot be bound by the host machine.
-    mHostInterfaceLabel = new QLabel(tr("Server network interface:"), this);
-    mHostInterfaceCombo = new QComboBox(this);
-    mHostInterfaceCombo->setMinimumHeight(30);
-    mHostInterfaceCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    mRefreshHostInterfacesButton = new QPushButton(tr("Refresh"), this);
-    mRefreshHostInterfacesButton->setMinimumHeight(30);
-    mRefreshHostInterfacesButton->setProperty("arenaQuiet", true);
-
     // Host-only helper: regenerate server/data/requiredDataFiles.json from the
     // exact content=/groundcover= selection currently active in the launcher.
-    mUpdateHashesButton = new QPushButton(tr("Update Hash"), this);
-    mUpdateHashesButton->setMinimumHeight(28);
-    mUpdateHashesButton->setProperty("arenaQuiet", true);
+    mUpdateHashesButton->setIcon(ArenaUi::glassIcon(QStringLiteral("refresh")));
     mUpdateHashesButton->setToolTip(tr("Generate the server data-file manifest from the current Content Files order and CRC32 hashes."));
 
-    mEnforceRequiredCheckBox = new QCheckBox(tr("Enforce required DataFiles"), this);
-    mEnforceRequiredCheckBox->setToolTip(tr("Reject clients whose required content list, order or CRC32 hashes do not match the server manifest."));
-
-    mServerModeLabel = new QLabel(tr("Gameplay preset:"), this);
-    mServerModeCombo = new QComboBox(this);
     mServerModeCombo->addItem(tr("MMO (default)"), QStringLiteral("MMO"));
     mServerModeCombo->addItem(tr("CO-OP"), QStringLiteral("CO-OP"));
     mServerModeCombo->addItem(tr("Custom / mixed"), QStringLiteral("CUSTOM"));
-    mServerModeCombo->setMinimumHeight(28);
     mServerModeCombo->setToolTip(tr("MMO keeps journal, factions, topics and reputation personal. CO-OP shares story progression between players. This preset changes server gameplay only and never touches graphics settings."));
 
-    mClearCellsButton = new QPushButton(tr("Clear server cells"), this);
-    mResetServerButton = new QPushButton(tr("Full server reset"), this);
-    mClearCellsButton->setMinimumHeight(28);
-    mResetServerButton->setMinimumHeight(28);
-    mClearCellsButton->setProperty("arenaQuiet", true);
-    mResetServerButton->setProperty("arenaDanger", true);
+    mClearCellsButton->setIcon(ArenaUi::glassIcon(QStringLiteral("trash")));
+    mResetServerButton->setIcon(ArenaUi::glassIcon(QStringLiteral("refresh")));
     mClearCellsButton->setToolTip(tr("Delete saved cell state while keeping player accounts and world data."));
     mResetServerButton->setToolTip(tr("Delete all persistent gameplay data. The data-file manifest and ban list are preserved."));
 
-    // Host controls live in their own compact tab instead of sharing one long
-    // connection form. This keeps the launcher fixed-size and removes the
-    // crowded vertical layout from the old Play page.
-    hostSettingsLayout->removeWidget(autoStartServerCheckBox);
-    hostSettingsLayout->removeWidget(autoRestartServerCheckBox);
-
-    QHBoxLayout* hostModeLayout = new QHBoxLayout();
-    hostModeLayout->setSpacing(8);
-    hostModeLayout->addWidget(autoStartServerCheckBox);
-    hostModeLayout->addStretch(1);
-    hostModeLayout->addWidget(mUpdateHashesButton);
-    hostSettingsLayout->insertLayout(0, hostModeLayout);
-
-    QHBoxLayout* hostInterfaceLayout = new QHBoxLayout();
-    hostInterfaceLayout->setSpacing(8);
-    hostInterfaceLayout->addWidget(mHostInterfaceLabel);
-    hostInterfaceLayout->addWidget(mHostInterfaceCombo, 1);
-    hostInterfaceLayout->addWidget(mRefreshHostInterfacesButton);
-    hostSettingsLayout->insertLayout(1, hostInterfaceLayout);
-
-    QHBoxLayout* hostOptionsLayout = new QHBoxLayout();
-    hostOptionsLayout->setSpacing(18);
-    hostOptionsLayout->addWidget(autoRestartServerCheckBox);
-    hostOptionsLayout->addWidget(mEnforceRequiredCheckBox);
-    hostOptionsLayout->addStretch(1);
-    hostSettingsLayout->insertLayout(2, hostOptionsLayout);
-
-    QHBoxLayout* serverModeLayout = new QHBoxLayout();
-    serverModeLayout->setSpacing(8);
-    serverModeLayout->addWidget(mServerModeLabel);
-    serverModeLayout->addWidget(mServerModeCombo, 1);
-    hostSettingsLayout->insertLayout(3, serverModeLayout);
-
-    QHBoxLayout* maintenanceLayout = new QHBoxLayout();
-    maintenanceLayout->setSpacing(8);
-    maintenanceLayout->addWidget(mClearCellsButton);
-    maintenanceLayout->addWidget(mResetServerButton);
-    maintenanceLayout->addStretch(1);
-    hostSettingsLayout->insertLayout(4, maintenanceLayout);
-
-    hostSettingsLayout->insertWidget(0, makeSectionHeader(hostTab, ArenaUi::glassIcon(QStringLiteral("server")),
-        tr("Local ArenaMP server"), tr("Host a session, choose the network interface and maintain server data.")));
-    serverButton->setProperty("arenaPrimary", true);
-    stopServerButton->setProperty("arenaDanger", true);
-    serverButton->setIcon(ArenaUi::glassIcon(QStringLiteral("server")));
-    stopServerButton->setIcon(ArenaUi::glassIcon(QStringLiteral("server")));
-    serverButton->setMinimumWidth(0);
-    stopServerButton->setMinimumWidth(0);
-    serverButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    stopServerButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    serverButton->setIcon(ArenaUi::glassIcon(QStringLiteral("play-dark")));
+    stopServerButton->setIcon(ArenaUi::glassIcon(QStringLiteral("stop-muted")));
+    serverButton->setCursor(Qt::PointingHandCursor);
 
     refreshHostInterfaces(QStringLiteral("0.0.0.0"));
     updateHostModeUi(autoStartServerCheckBox->isChecked());
@@ -404,7 +386,6 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
         this, &PlayPage::slotXpGainMultiplierChanged);
 
     pageTabs->setProperty("arenaSegmented", true);
-    playModeTabs->setProperty("arenaSegmented", true);
     serverSettingsModeTabs->setProperty("arenaSegmented", true);
 
     // U015: keep the fixed-size launcher usable by replacing the former single
@@ -492,17 +473,176 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     serverSettingsModeTabs->setTabText(serverSettingsModeTabs->indexOf(formServerSettingsTab), tr("Visual editor"));
     serverSettingsModeTabs->setTabText(serverSettingsModeTabs->indexOf(rawServerSettingsTab), tr("Raw config.lua"));
 
+    connect(mServerModeCombo, static_cast<void (QComboBox::*)(int)>(&QComboBox::currentIndexChanged),
+        this, [this](int) { updateStatusPanel(); });
+
     pageTabs->setCurrentIndex(0);
-    playModeTabs->setCurrentIndex(0);
     serverSettingsModeTabs->setCurrentIndex(0);
     categoryTabs->setCurrentIndex(0);
     loadServerSettings();
+    updateStatusPanel();
 }
 
 void Launcher::PlayPage::setPlayButtonState(const QString& text, bool enabled)
 {
-    playButton->setText(text);
+    // The hero button draws its caption with child labels (title + target).
+    if (mPlayTitleLabel != nullptr)
+        mPlayTitleLabel->setText(text);
+    else
+        playButton->setText(text);
     playButton->setEnabled(enabled);
+    updateStatusPanel();
+}
+
+void Launcher::PlayPage::setUpdateState(bool checking, bool updateAvailable)
+{
+    mUpdateChecking = checking;
+    mUpdateAvailable = updateAvailable;
+    updateStatusPanel();
+}
+
+void Launcher::PlayPage::setHardwareInfo(const QString& gpuName, const QString& gpuDetail, int logicalThreads)
+{
+    mGpuName = gpuName.trimmed();
+    mGpuDetail = gpuDetail.trimmed();
+    mLogicalThreads = logicalThreads;
+    updateStatusPanel();
+}
+
+void Launcher::PlayPage::updateStatusPanel()
+{
+    if (statusHeadlineLabel == nullptr)
+        return;
+
+    const bool host = autoStartServerCheckBox->isChecked();
+    const bool alternate = mAlternativeServer != nullptr && mAlternativeServer->isChecked();
+
+    // Headline: the single most important launcher state.
+    QString state;
+    QString headline;
+    QString detail;
+    if (mUpdateChecking)
+    {
+        state = QStringLiteral("busy");
+        headline = tr("Checking for updates...");
+        detail = tr("Comparing the installed build with the update server");
+    }
+    else if (mUpdateAvailable)
+    {
+        state = QStringLiteral("warn");
+        headline = tr("Update available");
+        detail = tr("Press Update at the bottom of the window to install it");
+    }
+    else if (mServerRunning)
+    {
+        state = QStringLiteral("online");
+        headline = tr("Server is running");
+        detail = mRunningAddress.isEmpty()
+            ? tr("The local server accepts connections")
+            : tr("Players connect to %1:%2").arg(mRunningAddress, mRunningPort);
+    }
+    else
+    {
+        state = QStringLiteral("ready");
+        headline = tr("Ready to launch");
+        detail = tr("All systems are working normally");
+    }
+    statusHeadlineLabel->setText(headline);
+    statusDetailLabel->setText(detail);
+    setStatusProperty(statusHeadlineLabel, state);
+    setStatusProperty(statusDotLabel, state);
+
+    // Hardware (filled by MainDialog from the Graphics page detection).
+    if (mGpuName.isEmpty())
+        gpuValueLabel->setText(tr("Detecting..."));
+    else if (mGpuDetail.isEmpty())
+        gpuValueLabel->setText(mGpuName.toHtmlEscaped());
+    else
+        gpuValueLabel->setText(QStringLiteral("%1<br><span style=\"color:#8f8a82; font-size:10px;\">%2</span>")
+            .arg(mGpuName.toHtmlEscaped(), mGpuDetail.toHtmlEscaped()));
+    gpuValueLabel->setToolTip(mGpuDetail.isEmpty() ? mGpuName : mGpuName + QLatin1Char('\n') + mGpuDetail);
+    cpuValueLabel->setText(mLogicalThreads > 0
+        ? tr("Threads: %1").arg(mLogicalThreads) : tr("Detecting..."));
+
+    // Mode and the endpoint that the next launch will use.
+    const QString bind = hostBindAddress();
+    if (host)
+    {
+        modeValueLabel->setText(tr("Host"));
+        endpointKeyLabel->setText(tr("Interface:"));
+        QString bindHint;
+        if (bind == QLatin1String("0.0.0.0"))
+            bindHint = tr("all interfaces");
+        else if (bind == QLatin1String("127.0.0.1"))
+            bindHint = tr("this PC only");
+        endpointValueLabel->setText(bindHint.isEmpty() ? bind
+            : QStringLiteral("%1<br><span style=\"color:#8f8a82; font-size:10px;\">(%2)</span>").arg(bind, bindHint.toHtmlEscaped()));
+    }
+    else
+    {
+        modeValueLabel->setText(alternate ? tr("Another server") : tr("Client"));
+        endpointKeyLabel->setText(tr("Server:"));
+        const QString address = alternate ? alternativeAddress() : serverAddress();
+        const QString port = alternate ? alternativePort() : serverPort();
+        endpointValueLabel->setText(address.isEmpty() ? QStringLiteral("\u2014")
+            : QStringLiteral("%1:%2").arg(address, port.isEmpty() ? QStringLiteral("25565") : port).toHtmlEscaped());
+    }
+    buildValueLabel->setText(buildName());
+
+    const QString mode = mServerModeCombo != nullptr ? mServerModeCombo->currentData().toString() : QString();
+    if (mode == QLatin1String("CUSTOM"))
+        presetValueLabel->setText(tr("Custom"));
+    else
+        presetValueLabel->setText(mode.isEmpty() ? QStringLiteral("\u2014") : mode);
+
+    // Hero button subtitle: where "Start game" is going to connect.
+    if (mPlayIconLabel != nullptr)
+        mPlayIconLabel->setPixmap(ArenaUi::glassIcon(mUpdateAvailable
+            ? QStringLiteral("update-dark") : QStringLiteral("play-dark")).pixmap(18, 18));
+    if (mPlaySubtitleLabel != nullptr)
+    {
+        if (mUpdateChecking)
+            mPlaySubtitleLabel->setText(tr("Please wait a moment"));
+        else if (mUpdateAvailable)
+            mPlaySubtitleLabel->setText(tr("Install the new build version first"));
+        else if (host)
+            mPlaySubtitleLabel->setText(tr("Local server + game on port %1").arg(serverPort()));
+        else if (alternate)
+            mPlaySubtitleLabel->setText(alternativeAddress().isEmpty()
+                ? tr("Enter the server address")
+                : tr("Connect to %1:%2").arg(alternativeAddress(), alternativePort()));
+        else
+            mPlaySubtitleLabel->setText(tr("Connect to the selected server"));
+    }
+
+    // Contextual tip instead of static marketing text.
+    if (mUpdateAvailable)
+    {
+        tipTitleLabel->setText(tr("A new version is ready"));
+        tipTextLabel->setText(tr("The update keeps your saves, server data and settings. The launcher restarts by itself when it is done."));
+    }
+    else if (mServerRunning)
+    {
+        tipTitleLabel->setText(tr("Your server is online"));
+        tipTextLabel->setText(tr("Give friends your Radmin VPN or public IP and port %1. The live log is on the Server Console tab.")
+            .arg(mRunningPort.isEmpty() ? serverPort() : mRunningPort));
+    }
+    else if (host)
+    {
+        tipTitleLabel->setText(tr("Playing with friends?"));
+        tipTextLabel->setText(tr("Start game launches the local server first. For Internet play forward UDP port %1 on the router or use Radmin VPN.")
+            .arg(serverPort()));
+    }
+    else if (alternate)
+    {
+        tipTitleLabel->setText(tr("Another server"));
+        tipTextLabel->setText(tr("This launch ignores the server from build.ini. The build's content files must match that server."));
+    }
+    else
+    {
+        tipTitleLabel->setText(tr("Ready for adventure?"));
+        tipTextLabel->setText(tr("Adjust the settings, start the game or host your own server. Have a good game on ArenaMP!"));
+    }
 }
 
 namespace
@@ -644,7 +784,6 @@ void Launcher::PlayPage::setBuildManifestComplete(bool complete)
         ? tr("The build name is locked by build.ini (complete=true).") : QString());
 
     serverLabel->setVisible(!complete);
-    portLabel->setVisible(!complete);
     serverAddressEdit->setVisible(!complete);
     serverPortEdit->setVisible(!complete);
 
@@ -680,10 +819,15 @@ bool Launcher::PlayPage::enforceDataFiles() const
 
 
 
-void Launcher::PlayPage::setServerRunning(bool running, const QString&, const QString&, bool managed)
+void Launcher::PlayPage::setServerRunning(bool running, const QString& address, const QString& port, bool managed)
 {
     stopServerButton->setEnabled(running && managed);
     serverButton->setEnabled(!running);
+    stopServerButton->setIcon(ArenaUi::glassIcon(running && managed ? QStringLiteral("stop") : QStringLiteral("stop-muted")));
+    mServerRunning = running;
+    mRunningAddress = running ? address : QString();
+    mRunningPort = running ? port : QString();
+    updateStatusPanel();
 
     // The running server endpoint is status information only. Do not write it
     // back into the editable fields: doing so used to replace the user's
@@ -804,25 +948,9 @@ void Launcher::PlayPage::refreshHostInterfaces(const QString& preferredAddress)
 
 void Launcher::PlayPage::updateHostModeUi(bool enabled)
 {
-    if (mHostInterfaceLabel != nullptr)
-        mHostInterfaceLabel->setVisible(enabled);
-    if (mHostInterfaceCombo != nullptr)
-        mHostInterfaceCombo->setVisible(enabled);
-    if (mRefreshHostInterfacesButton != nullptr)
-        mRefreshHostInterfacesButton->setVisible(enabled);
-    if (mUpdateHashesButton != nullptr)
-        mUpdateHashesButton->setVisible(enabled);
-    autoRestartServerCheckBox->setVisible(enabled);
-    if (mEnforceRequiredCheckBox != nullptr)
-        mEnforceRequiredCheckBox->setVisible(enabled);
-    if (mServerModeLabel != nullptr)
-        mServerModeLabel->setVisible(enabled);
-    if (mServerModeCombo != nullptr)
-        mServerModeCombo->setVisible(enabled);
-    if (mClearCellsButton != nullptr)
-        mClearCellsButton->setVisible(enabled);
-    if (mResetServerButton != nullptr)
-        mResetServerButton->setVisible(enabled);
+    // U020: the local-server card is always visible, because "Run Server"
+    // works with and without Host mode. Host mode only changes what the
+    // "Start game" button does and how the address field is interpreted.
 
     serverLabel->setText(enabled ? tr("Address for players:") : tr("Server Address:"));
     serverAddressEdit->setPlaceholderText(enabled
@@ -1237,6 +1365,7 @@ void Launcher::PlayPage::slotAutoStartServerToggled(bool enabled)
     updateHostModeUi(enabled);
     if (enabled)
         refreshHostInterfaces();
+    updateStatusPanel();
     emit autoStartServerChanged(enabled);
 }
 

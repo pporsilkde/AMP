@@ -43,7 +43,7 @@ int main(int argc, char** argv)
 
     QMainWindow launcher;
     launcher.setWindowTitle(QStringLiteral("ArenaMP • Launcher"));
-    launcher.setFixedSize(960, 660);
+    launcher.setFixedSize(1080, 720);
     auto* central = new QWidget(&launcher);
     central->setObjectName(QStringLiteral("centralwidget"));
     launcher.setCentralWidget(central);
@@ -63,6 +63,10 @@ int main(int argc, char** argv)
     // otherwise checked boxes degrade to an empty gold square.
     if (QPixmap(QStringLiteral(":/arena/arenaicons/check.png")).isNull()) return 7;
     if (QPixmap(QStringLiteral(":/arena/arenaicons/chevron-down.png")).isNull()) return 8;
+    // U020 showcase Play page icons (status column, cards, dark-on-gold actions).
+    for (const char* icon : {"gamepad", "database", "cpu", "drive", "wifi", "cube", "users", "info",
+                             "trash", "refresh", "stop", "stop-muted", "play-dark", "update-dark", "hint"})
+        if (ArenaUi::glassIcon(QString::fromLatin1(icon)).pixmap(24, 24).isNull()) return 14;
 
     const QStringList names{"play", "browse", "graphics", "settings", "advanced"};
     const QStringList labels{"Play", "Data Files", "Graphics", "Settings", "Advanced"};

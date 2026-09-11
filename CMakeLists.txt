@@ -47,7 +47,7 @@ option(BUILD_WITH_CODE_COVERAGE "Enable code coverage with gconv" OFF)
 option(BUILD_UNITTESTS          "Enable Unittests with Google C++ Unittest" OFF)
 option(BUILD_BENCHMARKS         "Build benchmarks with Google Benchmark" OFF)
 option(BUILD_OPENMW_MP          "Build OpenMW-MP" ON)
-option(BUILD_BROWSER            "Build tes3mp Server Browser" ON)
+set(BUILD_BROWSER OFF CACHE BOOL "TES3MP server browser is not shipped by ArenaMP" FORCE)
 option(BUILD_MASTER             "Build tes3mp Master Server" ON)
 
 set(OpenGL_GL_PREFERENCE LEGACY)  # Use LEGACY as we use GL2; GLNVD is for GL3 and up.
@@ -583,12 +583,10 @@ configure_resource_file(${OpenMW_SOURCE_DIR}/files/gamecontrollerdb.txt
     "${OpenMW_BINARY_DIR}" "gamecontrollerdb.txt")
 
 if (NOT WIN32 AND NOT APPLE)
-    configure_file(${OpenMW_SOURCE_DIR}/files/org.openmw.launcher.desktop
-        "${OpenMW_BINARY_DIR}/org.openmw.launcher.desktop")
+    configure_file(${OpenMW_SOURCE_DIR}/files/org.arenamp.launcher.desktop
+        "${OpenMW_BINARY_DIR}/org.arenamp.launcher.desktop")
     configure_file(${OpenMW_SOURCE_DIR}/files/openmw.appdata.xml
         "${OpenMW_BINARY_DIR}/openmw.appdata.xml")
-    configure_file(${OpenMW_SOURCE_DIR}/files/tes3mp-browser.desktop
-	    "${OpenMW_BINARY_DIR}/tes3mp-browser.desktop")
     configure_file(${OpenMW_SOURCE_DIR}/files/org.openmw.cs.desktop
         "${OpenMW_BINARY_DIR}/org.openmw.cs.desktop")
 endif()
@@ -690,10 +688,6 @@ endif()
 
 if (BUILD_LAUNCHER)
    add_subdirectory( apps/launcher )
-endif()
-
-if (BUILD_BROWSER)
-    add_subdirectory( apps/browser )
 endif()
 
 if (BUILD_MWINIIMPORTER)
@@ -802,11 +796,7 @@ if (WIN32)
     endif()
 
     if (BUILD_LAUNCHER)
-        set_target_properties(openmw-launcher PROPERTIES COMPILE_FLAGS "${WARNINGS} ${MT_BUILD}")
-    endif()
-
-    if (BUILD_BROWSER)
-        set_target_properties(tes3mp-browser PROPERTIES COMPILE_FLAGS "${WARNINGS} ${MT_BUILD}")
+        set_target_properties(arenamp-launcher PROPERTIES COMPILE_FLAGS "${WARNINGS} ${MT_BUILD}")
     endif()
 
     if (BUILD_MWINIIMPORTER)
@@ -863,7 +853,7 @@ if (OPENMW_OSX_DEPLOYMENT AND APPLE)
 
     # Bundle the ArenaMP server core as application resources, not beside the
     # Mach-O executables. A plain data directory under Contents/MacOS is treated
-    # by codesign as nested code and breaks sealing of openmw-launcher.
+    # by codesign as nested code and breaks sealing of arenamp-launcher.
     install(DIRECTORY "${OpenMW_SOURCE_DIR}/server/"
             USE_SOURCE_PERMISSIONS
             DESTINATION "${APP_BUNDLE_NAME}/Contents/Resources/server"
@@ -1078,13 +1068,8 @@ elseif(NOT APPLE)
         SET(CPACK_PACKAGE_VERSION_PATCH ${OPENMW_VERSION_RELEASE})
         SET(CPACK_PACKAGE_EXECUTABLES "openmw;OpenMW")
         IF(BUILD_LAUNCHER)
-            SET(CPACK_PACKAGE_EXECUTABLES "${CPACK_PACKAGE_EXECUTABLES};openmw-launcher;OpenMW Launcher")
+            SET(CPACK_PACKAGE_EXECUTABLES "${CPACK_PACKAGE_EXECUTABLES};arenamp-launcher;ArenaMP Launcher")
         ENDIF(BUILD_LAUNCHER)
-        # Start of tes3mp addition
-        IF(BUILD_BROWSER)
-            SET(CPACK_PACKAGE_EXECUTABLES "${CPACK_PACKAGE_EXECUTABLES};tes3mp-browser;tes3mp Launcher")
-        ENDIF(BUILD_BROWSER)
-        # End of tes3mp addition
         IF(BUILD_OPENCS)
             SET(CPACK_PACKAGE_EXECUTABLES "${CPACK_PACKAGE_EXECUTABLES};openmw-cs;OpenMW Construction Set")
         ENDIF(BUILD_OPENCS)
@@ -1102,8 +1087,8 @@ elseif(NOT APPLE)
         SET(CPACK_NSIS_DISPLAY_NAME "OpenMW ${OPENMW_VERSION}")
         SET(CPACK_NSIS_HELP_LINK "https:\\\\\\\\www.openmw.org")
         SET(CPACK_NSIS_URL_INFO_ABOUT "https:\\\\\\\\www.openmw.org")
-        SET(CPACK_NSIS_INSTALLED_ICON_NAME "openmw-launcher.exe")
-        SET(CPACK_NSIS_MUI_FINISHPAGE_RUN "openmw-launcher.exe")
+        SET(CPACK_NSIS_INSTALLED_ICON_NAME "arenamp-launcher.exe")
+        SET(CPACK_NSIS_MUI_FINISHPAGE_RUN "openmw-wizard.exe")
         # Start of tes3mp change (major)
         SET(CPACK_NSIS_MUI_ICON "${OpenMW_SOURCE_DIR}/files/tes3mp/tes3mp.ico")
         SET(CPACK_NSIS_MUI_UNIICON "${OpenMW_SOURCE_DIR}/files/tes3mp/tes3mp.ico")
@@ -1153,15 +1138,8 @@ elseif(NOT APPLE)
         ENDIF(BUILD_OPENMW_MP)
         # End of tes3mp addition
         IF(BUILD_LAUNCHER)
-            INSTALL(PROGRAMS "${INSTALL_SOURCE}/openmw-launcher" DESTINATION "${BINDIR}" )
+            INSTALL(PROGRAMS "${INSTALL_SOURCE}/arenamp-launcher" DESTINATION "${BINDIR}" )
         ENDIF(BUILD_LAUNCHER)
-        # Start of tes3mp addition
-        #
-        # Add a setting related to building the server browser
-        IF(BUILD_BROWSER)
-            INSTALL(PROGRAMS "${INSTALL_SOURCE}/tes3mp-browser" DESTINATION "${BINDIR}" )
-        ENDIF(BUILD_BROWSER)
-        # End of tes3mp addition
         IF(BUILD_BSATOOL)
             INSTALL(PROGRAMS "${INSTALL_SOURCE}/bsatool" DESTINATION "${BINDIR}" )
         ENDIF(BUILD_BSATOOL)
@@ -1188,14 +1166,9 @@ elseif(NOT APPLE)
         INSTALL(FILES "files/mygui/DejaVuFontLicense.txt" DESTINATION "${LICDIR}" )
 
         # Install icon and desktop file
-        INSTALL(FILES "${OpenMW_BINARY_DIR}/org.openmw.launcher.desktop" DESTINATION "${DATAROOTDIR}/applications" COMPONENT "openmw")
+        INSTALL(FILES "${OpenMW_BINARY_DIR}/org.arenamp.launcher.desktop" DESTINATION "${DATAROOTDIR}/applications" COMPONENT "openmw")
         INSTALL(FILES "${OpenMW_SOURCE_DIR}/files/launcher/images/openmw.png" DESTINATION "${ICONDIR}" COMPONENT "openmw")
         INSTALL(FILES "${OpenMW_BINARY_DIR}/openmw.appdata.xml" DESTINATION "${DATAROOTDIR}/metainfo" COMPONENT "openmw")
-        # Start of tes3mp addition
-        IF(BUILD_BROWSER)
-            INSTALL(FILES "${OpenMW_BINARY_DIR}/tes3mp-browser.desktop" DESTINATION "${DATAROOTDIR}/applications" COMPONENT "browser")
-        ENDIF(BUILD_BROWSER)
-        # End of tes3mp addition
         IF(BUILD_OPENCS)
             INSTALL(FILES "${OpenMW_BINARY_DIR}/org.openmw.cs.desktop" DESTINATION "${DATAROOTDIR}/applications" COMPONENT "opencs")
             INSTALL(FILES "${OpenMW_SOURCE_DIR}/files/opencs/openmw-cs.png" DESTINATION "${ICONDIR}" COMPONENT "opencs")
