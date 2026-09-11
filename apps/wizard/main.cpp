@@ -2,6 +2,8 @@
 #include <QDir>
 
 #include <components/misc/arenarussiantranslator.hpp>
+#include <components/misc/arenatheme.hpp>
+#include <components/misc/arenaglasswindow.hpp>
 
 #include "mainwizard.hpp"
 
@@ -15,6 +17,8 @@ int main(int argc, char *argv[])
 {
 
     QApplication app(argc, argv);
+
+    ArenaUi::applyMorrowindGlassPalette(app);
 
     // Use Russian only on a Russian Windows/system locale. All other
     // locales deliberately stay English to avoid partial/mixed UI.
@@ -39,6 +43,7 @@ int main(int argc, char *argv[])
     QDir::setCurrent(dir.absolutePath());
 
     Wizard::MainWizard wizard;
+    ArenaUi::installGlassWindow(wizard);
 
     wizard.show();
     return app.exec();

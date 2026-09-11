@@ -1,3 +1,5 @@
+#include <components/misc/arenaglassicons.hpp>
+#include <components/misc/arenaglasswindow.hpp>
 #include "updatecontroller.hpp"
 #include "maindialog.hpp"
 
@@ -55,7 +57,7 @@ void cfgError(const QString& title, const QString& msg) {
 namespace
 {
     constexpr int sLauncherWidth = 1024;
-    constexpr int sLauncherHeight = 650;
+    constexpr int sLauncherHeight = 714;
 
     bool containsGameContent(const QDir& dir)
     {
@@ -197,6 +199,7 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     mGameInvoker = new ProcessInvoker();
     mWizardInvoker = new ProcessInvoker();
     mServerDialog = new ServerDialog(this);
+    ArenaUi::installGlassWindow(*mServerDialog);
     mWatermarkLabel = new QLabel(centralwidget);
     const QByteArray watermarkEncoded = QByteArray("VEVTM01QIDAuOC4xIFplcjBDdXN0b20=");
     const QString watermarkText = QString::fromUtf8(QByteArray::fromBase64(watermarkEncoded));
@@ -217,7 +220,10 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     iconWidget->setViewMode(QListView::IconMode);
     iconWidget->setWrapping(false);
     iconWidget->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); // Just to be sure
-    iconWidget->setIconSize(QSize(48, 48));
+    iconWidget->setIconSize(QSize(32, 32));
+    iconWidget->setGridSize(QSize(166, 76));
+    iconWidget->setWordWrap(false);
+    iconWidget->setTextElideMode(Qt::ElideNone);
     iconWidget->setMovement(QListView::Static);
 
     iconWidget->setSpacing(4);
@@ -235,6 +241,11 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     buttonBox->addButton(serverButton, QDialogButtonBox::ActionRole);
     buttonBox->addButton(playButton, QDialogButtonBox::AcceptRole);
     mPlayButton = playButton;
+    playButton->setProperty("arenaPrimary", true);
+    playButton->setIcon(ArenaUi::glassIcon(QStringLiteral("play")));
+    helpButton->setIcon(ArenaUi::glassIcon(QStringLiteral("help")));
+    changelogButton->setIcon(ArenaUi::glassIcon(QStringLiteral("changelog")));
+    serverButton->setIcon(ArenaUi::glassIcon(QStringLiteral("server")));
 
     connect(buttonBox, SIGNAL(rejected()), this, SLOT(close()));
     connect(buttonBox, SIGNAL(accepted()), this, SLOT(play()));
@@ -261,31 +272,36 @@ void Launcher::MainDialog::createIcons()
         QIcon::setThemeName("tango");
 
     QListWidgetItem *playButton = new QListWidgetItem(iconWidget);
-    playButton->setIcon(QIcon(":/images/openmw.png"));
+    playButton->setSizeHint(QSize(162, 72));
+    playButton->setIcon(ArenaUi::glassIcon(QStringLiteral("play")));
     playButton->setText(tr("Play"));
     playButton->setTextAlignment(Qt::AlignCenter);
     playButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
     QListWidgetItem *dataFilesButton = new QListWidgetItem(iconWidget);
-    dataFilesButton->setIcon(QIcon(":/images/openmw-plugin.png"));
+    dataFilesButton->setSizeHint(QSize(162, 72));
+    dataFilesButton->setIcon(ArenaUi::glassIcon(QStringLiteral("browse")));
     dataFilesButton->setText(tr("Data Files"));
     dataFilesButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
     dataFilesButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
     QListWidgetItem *graphicsButton = new QListWidgetItem(iconWidget);
-    graphicsButton->setIcon(QIcon(":/images/preferences-video.png"));
+    graphicsButton->setSizeHint(QSize(162, 72));
+    graphicsButton->setIcon(ArenaUi::glassIcon(QStringLiteral("graphics")));
     graphicsButton->setText(tr("Graphics"));
     graphicsButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom | Qt::AlignAbsolute);
     graphicsButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
     QListWidgetItem *settingsButton = new QListWidgetItem(iconWidget);
-    settingsButton->setIcon(QIcon(":/images/preferences.png"));
+    settingsButton->setSizeHint(QSize(162, 72));
+    settingsButton->setIcon(ArenaUi::glassIcon(QStringLiteral("settings")));
     settingsButton->setText(tr("Settings"));
     settingsButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
     settingsButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
     QListWidgetItem *advancedButton = new QListWidgetItem(iconWidget);
-    advancedButton->setIcon(QIcon(":/images/preferences-advanced.png"));
+    advancedButton->setSizeHint(QSize(162, 72));
+    advancedButton->setIcon(ArenaUi::glassIcon(QStringLiteral("advanced")));
     advancedButton->setText(tr("Advanced"));
     advancedButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
     advancedButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
@@ -1326,6 +1342,7 @@ void Launcher::MainDialog::checkForUpdates()
     mUpdateCheckRunning = false;
     mUpdateAvailable = result == UpdateController::CheckResult::UpdateAvailable;
     mPlayButton->setText(mUpdateAvailable ? tr("Update") : tr("Play"));
+    mPlayButton->setIcon(ArenaUi::glassIcon(mUpdateAvailable ? QStringLiteral("update") : QStringLiteral("play")));
     mPlayButton->setEnabled(true);
     mPlayPage->setPlayButtonState(mUpdateAvailable ? tr("Update") : tr("Play"), true);
 }
@@ -1800,6 +1817,7 @@ void Launcher::MainDialog::showChangelog()
     connect(buttons, SIGNAL(rejected()), &dialog, SLOT(reject()));
     layout->addWidget(buttons);
 
+    ArenaUi::installGlassWindow(dialog);
     dialog.exec();
 }
 

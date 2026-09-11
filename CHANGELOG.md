@@ -1,3 +1,26 @@
+## U011 — Compiled-in Arena Glass UI
+
+- Launcher, Wizard, Server dialog and native Qt Updater share the same compiled-in glass material, rounded window chrome and warm gold controls.
+- Launcher actions and tabs use minimal SVG icons, with embedded PNG fallbacks when Qt SVG support is unavailable.
+- Android launcher, server controls, changelog and updater dialogs share rounded resources and matching colors. Android 12+ dialog background blur is requested through public APIs, with an opaque fallback and unchanged SDK requirements.
+- The Windows compositor is asked for Acrylic on supported systems; painted material remains the portable fallback. Native compositor effects still require device testing.
+- Updater progress cannot be hidden by closing the window while transaction application has disabled cancellation.
+- U010 Android server recovery and the existing update transport, storage and verification logic are retained.
+- Added a standalone Qt UI smoke test and Linux CI gate. See `docs/arena-ui/README_RU.md` for integration and validation limits.
+
+## U010 — Android server post-update recovery + Arena palette foundation
+
+### Fixed
+- Android local/dedicated server now recovers after an APK replacement instead of trusting a stale external `android-server.status` left by the killed `:arenamp_server` process. Active states are checked against the actual process and the package install time.
+- APK asset fingerprints are now cached together with the installed APK identity (`lastUpdateTime`/APK file metadata), so a PackageInstaller return to an existing launcher process cannot reuse client/server fingerprints from the previous APK.
+- A newly installed APK invalidates the managed server-asset stamp before the next server start. Saved `server/data`, player/world data and persistent server configuration remain preserved.
+- Server start/native-load/runtime failures are written to `Update.log` (`server_start_error`, `server_native_load_error`, `server_service_error`) and host-mode launch no longer silently enters the game when the server already reports an error.
+
+### UI palette foundation
+- Desktop ArenaMP Launcher and Wizard now share one restrained Morrowind-inspired Qt palette: obsidian surfaces, warm brass/gold accents, parchment text and softer dark controls. Native window frames are intentionally kept for this first visual pass.
+- Android launcher/server UI uses the matching obsidian/brass palette so desktop and mobile begin from the same colour system before the later liquid-glass/blur stage.
+- No ArenaMP network protocol changes.
+
 ## U009 — Windows updater HTTPS/TLS fix
 
 ### Fixed

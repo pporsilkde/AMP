@@ -78,6 +78,7 @@ if(WIN32)
 endif(WIN32)
 
 QT5_ADD_RESOURCES(RCC_SRCS ${CMAKE_SOURCE_DIR}/files/launcher/launcher.qrc)
+QT5_ADD_RESOURCES(ARENA_GLASS_RCC ${CMAKE_SOURCE_DIR}/components/misc/arenaicons.qrc)
 QT5_WRAP_CPP(MOC_SRCS ${LAUNCHER_HEADER_MOC})
 QT5_WRAP_UI(UI_HDRS ${LAUNCHER_UI})
 
@@ -92,6 +93,7 @@ openmw_add_executable(openmw-launcher
     ${LAUNCHER}
     ${LAUNCHER_HEADER}
     ${RCC_SRCS}
+    ${ARENA_GLASS_RCC}
     ${MOC_SRCS}
     ${UI_HDRS}
 )
@@ -141,6 +143,7 @@ endif()
 openmw_add_executable(arena-updater
     ${GUI_TYPE}
     ${ARENA_UPDATER}
+    ${ARENA_GLASS_RCC}
 )
 
 target_include_directories(arena-updater PRIVATE ${ZLIB_INCLUDE_DIRS})

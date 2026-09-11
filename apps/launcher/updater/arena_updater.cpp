@@ -39,6 +39,8 @@
 #include <QElapsedTimer>
 
 #include <zlib.h>
+#include "../../../components/misc/arenatheme.hpp"
+#include "../../../components/misc/arenaglasswindow.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -53,7 +55,9 @@
 #include <vector>
 
 #ifdef Q_OS_WIN
-#  define NOMINMAX
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
 #  include <windows.h>
 #  include <winhttp.h>
 #  include <io.h>
@@ -106,6 +110,7 @@ public:
         setAttribute(Qt::WA_QuitOnClose, false);
 
         auto* layout = new QVBoxLayout(this);
+        layout->setSpacing(14);
         mTitle = new QLabel(QStringLiteral("<b>Обновление ArenaMP</b>"), this);
         QFont titleFont = mTitle->font();
         titleFont.setPointSize(titleFont.pointSize() + 2);
@@ -257,6 +262,7 @@ public:
 
     void finish(const QString& text, bool ok)
     {
+        mFinished = true;
         if (!isVisible())
             present();
         mStatus->setText(text);
@@ -284,10 +290,17 @@ protected:
             event->ignore();
             return;
         }
+        if (!mFinished)
+        {
+            // File application cannot be cancelled: keep its progress visible.
+            event->ignore();
+            return;
+        }
         QWidget::closeEvent(event);
     }
 
 private:
+    bool mFinished = false;
     QLabel* mTitle = nullptr;
     QLabel* mStatus = nullptr;
     QLabel* mHint = nullptr;
@@ -2272,6 +2285,7 @@ int main(int argc, char** argv)
     qputenv("QT_QPA_PLATFORM", QByteArray("windows"));
 #endif
     QApplication app(argc, argv);
+    ArenaUi::applyMorrowindGlassPalette(app);
     app.setQuitOnLastWindowClosed(false);
     QCoreApplication::setApplicationName(QStringLiteral("ArenaMP Updater"));
     QCoreApplication::setOrganizationName(QStringLiteral("ArenaMP"));
@@ -2295,6 +2309,7 @@ int main(int argc, char** argv)
     configureLog(request, job);
 
     ProgressWindow window;
+    ArenaUi::installGlassWindow(window);
     if (action != QLatin1String("check"))
     {
         gWindow = &window;

@@ -6,6 +6,8 @@
 #include <QDir>
 
 #include <components/misc/arenarussiantranslator.hpp>
+#include <components/misc/arenatheme.hpp>
+#include <components/misc/arenaglasswindow.hpp>
 
 #ifdef MAC_OS_X_VERSION_MIN_REQUIRED
 #undef MAC_OS_X_VERSION_MIN_REQUIRED
@@ -21,6 +23,8 @@ int main(int argc, char *argv[])
     {
         QApplication app(argc, argv);
 
+        ArenaUi::applyMorrowindGlassPalette(app);
+
         // ArenaMW UI language follows the Windows system language. Russian
         // Windows gets the built-in Russian UI; every other locale uses English.
         ArenaUi::RussianTranslator arenaTranslator;
@@ -33,6 +37,7 @@ int main(int argc, char *argv[])
         QDir::setCurrent(dir.absolutePath());
 
         Launcher::MainDialog mainWin;
+    ArenaUi::installGlassWindow(mainWin);
 
         Launcher::FirstRunDialogResult result = mainWin.showFirstRunDialog();
         if (result == Launcher::FirstRunDialogResultFailure)

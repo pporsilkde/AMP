@@ -341,6 +341,12 @@ jobs:
           cmake --build "$RUNNER_TEMP/arena-updater-ui" --parallel 2
           ctest --test-dir "$RUNNER_TEMP/arena-updater-ui" --output-on-failure
 
+      - name: Check built-in glass windows and updater close guards
+        run: |
+          cmake -S components/misc/arena-ui-tests -B "$RUNNER_TEMP/arena-glass-ui" -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/arena-glass-ui" --parallel 2
+          ctest --test-dir "$RUNNER_TEMP/arena-glass-ui" --output-on-failure
+
       - name: Prepare clean Release tree
         if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || inputs.clear_build_cache == true
         run: rm -rf build stage package actions-artifacts
@@ -692,6 +698,12 @@ jobs:
 
       - name: Verify SimpleWeb with modern Boost.Asio
         run: bash CI/macos-arm64/check-simpleweb-modern.sh
+
+      - name: Check built-in glass windows and updater close guards
+        run: |
+          cmake -S components/misc/arena-ui-tests -B "$RUNNER_TEMP/arena-glass-ui" -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/arena-glass-ui" --parallel 2
+          ctest --test-dir "$RUNNER_TEMP/arena-glass-ui" --output-on-failure
 
       - name: Prepare clean Release tree
         if: github.event_name == 'push' || inputs.clear_build_cache == true

@@ -1,0 +1,22 @@
+<RCC><qresource prefix="/arena">
+  <file>arenaicons/play.svg</file>
+  <file>arenaicons/play.png</file>
+  <file>arenaicons/update.svg</file>
+  <file>arenaicons/update.png</file>
+  <file>arenaicons/changelog.svg</file>
+  <file>arenaicons/changelog.png</file>
+  <file>arenaicons/settings.svg</file>
+  <file>arenaicons/settings.png</file>
+  <file>arenaicons/server.svg</file>
+  <file>arenaicons/server.png</file>
+  <file>arenaicons/browse.svg</file>
+  <file>arenaicons/browse.png</file>
+  <file>arenaicons/graphics.svg</file>
+  <file>arenaicons/graphics.png</file>
+  <file>arenaicons/advanced.svg</file>
+  <file>arenaicons/advanced.png</file>
+  <file>arenaicons/help.svg</file>
+  <file>arenaicons/help.png</file>
+  <file>arenaicons/globe.svg</file>
+  <file>arenaicons/globe.png</file>
+</qresource></RCC>
