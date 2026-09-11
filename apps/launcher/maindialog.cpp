@@ -22,8 +22,6 @@
 #include <QJsonObject>
 #include <QSaveFile>
 #include <boost/crc.hpp>
-#include <QResizeEvent>
-#include <QByteArray>
 #include <QTimer>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -56,8 +54,8 @@ void cfgError(const QString& title, const QString& msg) {
 
 namespace
 {
-    constexpr int sLauncherWidth = 1024;
-    constexpr int sLauncherHeight = 714;
+    constexpr int sLauncherWidth = 960;
+    constexpr int sLauncherHeight = 660;
 
     bool containsGameContent(const QDir& dir)
     {
@@ -180,7 +178,6 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     , mGameInvoker(nullptr)
     , mWizardInvoker(nullptr)
     , mServerDialog(nullptr)
-    , mWatermarkLabel(nullptr)
     , mPlayButton(nullptr)
     , mBuildManifestLoaded(false)
     , mBuildName(QStringLiteral("ArenaMP"))
@@ -200,17 +197,6 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     mWizardInvoker = new ProcessInvoker();
     mServerDialog = new ServerDialog(this);
     ArenaUi::installGlassWindow(*mServerDialog);
-    mWatermarkLabel = new QLabel(centralwidget);
-    const QByteArray watermarkEncoded = QByteArray("VEVTM01QIDAuOC4xIFplcjBDdXN0b20=");
-    const QString watermarkText = QString::fromUtf8(QByteArray::fromBase64(watermarkEncoded));
-    mWatermarkLabel->setText(watermarkText);
-    mWatermarkLabel->setObjectName(QStringLiteral("zer0customWatermark"));
-    mWatermarkLabel->setProperty("wm_b64", QString::fromUtf8(watermarkEncoded));
-    mWatermarkLabel->setProperty("wm_guard", QString::number(qHash(QString::fromUtf8(watermarkEncoded))));
-    mWatermarkLabel->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-    mWatermarkLabel->setStyleSheet(QStringLiteral("QLabel#zer0customWatermark { color: rgba(255, 255, 255, 88); font-size: 16px; font-weight: 600; background: transparent; }"));
-    mWatermarkLabel->adjustSize();
-
     connect(mWizardInvoker->getProcess(), SIGNAL(started()),
             this, SLOT(wizardStarted()));
 
@@ -220,13 +206,13 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     iconWidget->setViewMode(QListView::IconMode);
     iconWidget->setWrapping(false);
     iconWidget->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); // Just to be sure
-    iconWidget->setIconSize(QSize(32, 32));
-    iconWidget->setGridSize(QSize(166, 76));
+    iconWidget->setIconSize(QSize(25, 25));
+    iconWidget->setGridSize(QSize(172, 52));
     iconWidget->setWordWrap(false);
     iconWidget->setTextElideMode(Qt::ElideNone);
     iconWidget->setMovement(QListView::Static);
 
-    iconWidget->setSpacing(4);
+    iconWidget->setSpacing(2);
     iconWidget->setCurrentRow(0);
     iconWidget->setFlow(QListView::LeftToRight);
 
@@ -235,19 +221,20 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     changelogButton->setToolTip(tr("Open the ArenaMP changelog"));
     QPushButton *playButton = new QPushButton(tr("Play"));
     QPushButton *serverButton = new QPushButton(tr("Run Server"));
-    buttonBox->button(QDialogButtonBox::Close)->setText(tr("Close"));
     buttonBox->addButton(helpButton, QDialogButtonBox::HelpRole);
     buttonBox->addButton(changelogButton, QDialogButtonBox::ActionRole);
     buttonBox->addButton(serverButton, QDialogButtonBox::ActionRole);
     buttonBox->addButton(playButton, QDialogButtonBox::AcceptRole);
     mPlayButton = playButton;
     playButton->setProperty("arenaPrimary", true);
+    helpButton->setProperty("arenaQuiet", true);
+    changelogButton->setProperty("arenaQuiet", true);
+    serverButton->setProperty("arenaQuiet", true);
     playButton->setIcon(ArenaUi::glassIcon(QStringLiteral("play")));
     helpButton->setIcon(ArenaUi::glassIcon(QStringLiteral("help")));
     changelogButton->setIcon(ArenaUi::glassIcon(QStringLiteral("changelog")));
     serverButton->setIcon(ArenaUi::glassIcon(QStringLiteral("server")));
 
-    connect(buttonBox, SIGNAL(rejected()), this, SLOT(close()));
     connect(buttonBox, SIGNAL(accepted()), this, SLOT(play()));
     connect(serverButton, SIGNAL(clicked()), this, SLOT(runServer()));
     connect(changelogButton, SIGNAL(clicked()), this, SLOT(showChangelog()));
@@ -257,7 +244,6 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     setWindowFlags(this->windowFlags() & ~Qt::WindowContextHelpButtonHint);
 
     createIcons();
-    updateWatermarkPosition();
 }
 
 Launcher::MainDialog::~MainDialog()
@@ -272,35 +258,35 @@ void Launcher::MainDialog::createIcons()
         QIcon::setThemeName("tango");
 
     QListWidgetItem *playButton = new QListWidgetItem(iconWidget);
-    playButton->setSizeHint(QSize(162, 72));
+    playButton->setSizeHint(QSize(170, 50));
     playButton->setIcon(ArenaUi::glassIcon(QStringLiteral("play")));
     playButton->setText(tr("Play"));
-    playButton->setTextAlignment(Qt::AlignCenter);
+    playButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
     playButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
     QListWidgetItem *dataFilesButton = new QListWidgetItem(iconWidget);
-    dataFilesButton->setSizeHint(QSize(162, 72));
+    dataFilesButton->setSizeHint(QSize(170, 50));
     dataFilesButton->setIcon(ArenaUi::glassIcon(QStringLiteral("browse")));
     dataFilesButton->setText(tr("Data Files"));
     dataFilesButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
     dataFilesButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
     QListWidgetItem *graphicsButton = new QListWidgetItem(iconWidget);
-    graphicsButton->setSizeHint(QSize(162, 72));
+    graphicsButton->setSizeHint(QSize(170, 50));
     graphicsButton->setIcon(ArenaUi::glassIcon(QStringLiteral("graphics")));
     graphicsButton->setText(tr("Graphics"));
     graphicsButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom | Qt::AlignAbsolute);
     graphicsButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
     QListWidgetItem *settingsButton = new QListWidgetItem(iconWidget);
-    settingsButton->setSizeHint(QSize(162, 72));
+    settingsButton->setSizeHint(QSize(170, 50));
     settingsButton->setIcon(ArenaUi::glassIcon(QStringLiteral("settings")));
     settingsButton->setText(tr("Settings"));
     settingsButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
     settingsButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
     QListWidgetItem *advancedButton = new QListWidgetItem(iconWidget);
-    advancedButton->setSizeHint(QSize(162, 72));
+    advancedButton->setSizeHint(QSize(170, 50));
     advancedButton->setIcon(ArenaUi::glassIcon(QStringLiteral("advanced")));
     advancedButton->setText(tr("Advanced"));
     advancedButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
@@ -983,10 +969,12 @@ bool Launcher::MainDialog::writeBuildManifest()
 void Launcher::MainDialog::applyBuildManifestRestrictions()
 {
     Config::BuildManifest linkManifest;
+    if (mPlayPage)
+        mPlayPage->setProjectUrl(Config::BuildManifest::websiteForManifest(mBuildManifestPath));
     if (mPlayPage && !mBuildManifestPath.isEmpty() && linkManifest.read(mBuildManifestPath))
     {
         mPlayPage->setAlternativeServer(linkManifest.altAddress, linkManifest.altPort, linkManifest.useAlternativeServer);
-        mPlayPage->setProjectUrl(linkManifest.projectUrl);
+
     }
 
     if (mPlayPage != nullptr)
@@ -1268,25 +1256,6 @@ bool Launcher::MainDialog::writeSettings()
         return false;
 
     return true;
-}
-
-void Launcher::MainDialog::updateWatermarkPosition()
-{
-    if (mWatermarkLabel == nullptr)
-        return;
-
-    mWatermarkLabel->adjustSize();
-    const int margin = 14;
-    const QSize size = mWatermarkLabel->sizeHint();
-    mWatermarkLabel->move(centralwidget->width() - size.width() - margin,
-                          centralwidget->height() - size.height() - margin);
-    mWatermarkLabel->raise();
-}
-
-void Launcher::MainDialog::resizeEvent(QResizeEvent *event)
-{
-    QMainWindow::resizeEvent(event);
-    updateWatermarkPosition();
 }
 
 void Launcher::MainDialog::closeEvent(QCloseEvent *event)

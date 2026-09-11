@@ -152,13 +152,15 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     mAlternativePort->setMaximumWidth(90);
     mAlternativePort->setValidator(new QIntValidator(1, 65535, this));
     mProjectLink = new QPushButton(tr("Server website"), this);
-    mProjectLink->setVisible(false);
-    serverConnectionLayout->addWidget(mAlternativeServer, 7, 0, 1, 2);
+    mProjectUrl = QStringLiteral("https://t.me/arena_mp");
+    mProjectLink->setVisible(true);
+    serverConnectionLayout->addWidget(mAlternativeServer, 2, 0, 1, 2);
     QHBoxLayout* alternativeFields = new QHBoxLayout();
+    alternativeFields->setSpacing(8);
     alternativeFields->addWidget(mAlternativeAddress, 1);
     alternativeFields->addWidget(mAlternativePort);
-    serverConnectionLayout->addLayout(alternativeFields, 8, 0, 1, 2);
-    serverConnectionLayout->addWidget(mProjectLink, 9, 0, 1, 2);
+    serverConnectionLayout->addLayout(alternativeFields, 3, 0, 1, 2);
+    serverConnectionLayout->addWidget(mProjectLink, 4, 0, 1, 2);
     mAlternativeAddress->setVisible(false);
     mAlternativePort->setVisible(false);
     connect(mAlternativeServer, &QCheckBox::toggled, this, [this](bool checked) {
@@ -181,7 +183,6 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     // address must not be confused with the address the local socket binds to:
     // a router-owned WAN IP usually cannot be bound by the host machine.
     mHostInterfaceLabel = new QLabel(tr("Server network interface:"), this);
-    mHostInterfaceLabel->setStyleSheet(QStringLiteral("font-size: 11pt; font-weight: 500;"));
     mHostInterfaceCombo = new QComboBox(this);
     mHostInterfaceCombo->setMinimumHeight(30);
     mHostInterfaceCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -198,7 +199,6 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     mEnforceRequiredCheckBox->setToolTip(tr("Reject clients whose required content list, order or CRC32 hashes do not match the server manifest."));
 
     mServerModeLabel = new QLabel(tr("Gameplay preset:"), this);
-    mServerModeLabel->setStyleSheet(QStringLiteral("font-size: 11pt; font-weight: 500;"));
     mServerModeCombo = new QComboBox(this);
     mServerModeCombo->addItem(tr("MMO (default)"), QStringLiteral("MMO"));
     mServerModeCombo->addItem(tr("CO-OP"), QStringLiteral("CO-OP"));
@@ -213,39 +213,45 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     mClearCellsButton->setToolTip(tr("Delete saved cell state while keeping player accounts and world data."));
     mResetServerButton->setToolTip(tr("Delete all persistent gameplay data. The data-file manifest and ban list are preserved."));
 
-    serverConnectionLayout->removeWidget(autoStartServerCheckBox);
+    // Host controls live in their own compact tab instead of sharing one long
+    // connection form. This keeps the launcher fixed-size and removes the
+    // crowded vertical layout from the old Play page.
+    hostSettingsLayout->removeWidget(autoStartServerCheckBox);
+    hostSettingsLayout->removeWidget(autoRestartServerCheckBox);
+
     QHBoxLayout* hostModeLayout = new QHBoxLayout();
     hostModeLayout->setSpacing(8);
     hostModeLayout->addWidget(autoStartServerCheckBox);
     hostModeLayout->addStretch(1);
     hostModeLayout->addWidget(mUpdateHashesButton);
-    serverConnectionLayout->addLayout(hostModeLayout, 2, 0, 1, 2);
+    hostSettingsLayout->insertLayout(0, hostModeLayout);
 
     QHBoxLayout* hostInterfaceLayout = new QHBoxLayout();
     hostInterfaceLayout->setSpacing(8);
     hostInterfaceLayout->addWidget(mHostInterfaceLabel);
     hostInterfaceLayout->addWidget(mHostInterfaceCombo, 1);
     hostInterfaceLayout->addWidget(mRefreshHostInterfacesButton);
-    serverConnectionLayout->addLayout(hostInterfaceLayout, 3, 0, 1, 2);
+    hostSettingsLayout->insertLayout(1, hostInterfaceLayout);
 
-    // Compact two-column host controls.
-    serverConnectionLayout->removeWidget(autoRestartServerCheckBox);
-    serverConnectionLayout->addWidget(autoRestartServerCheckBox, 4, 0);
-    serverConnectionLayout->addWidget(mEnforceRequiredCheckBox, 4, 1);
+    QHBoxLayout* hostOptionsLayout = new QHBoxLayout();
+    hostOptionsLayout->setSpacing(18);
+    hostOptionsLayout->addWidget(autoRestartServerCheckBox);
+    hostOptionsLayout->addWidget(mEnforceRequiredCheckBox);
+    hostOptionsLayout->addStretch(1);
+    hostSettingsLayout->insertLayout(2, hostOptionsLayout);
 
     QHBoxLayout* serverModeLayout = new QHBoxLayout();
     serverModeLayout->setSpacing(8);
     serverModeLayout->addWidget(mServerModeLabel);
     serverModeLayout->addWidget(mServerModeCombo, 1);
-    serverConnectionLayout->addLayout(serverModeLayout, 5, 0, 1, 2);
+    hostSettingsLayout->insertLayout(3, serverModeLayout);
 
     QHBoxLayout* maintenanceLayout = new QHBoxLayout();
     maintenanceLayout->setSpacing(8);
     maintenanceLayout->addWidget(mClearCellsButton);
     maintenanceLayout->addWidget(mResetServerButton);
     maintenanceLayout->addStretch(1);
-    serverConnectionLayout->addLayout(maintenanceLayout, 6, 0, 1, 2);
-
+    hostSettingsLayout->insertLayout(4, maintenanceLayout);
 
     refreshHostInterfaces(QStringLiteral("0.0.0.0"));
     updateHostModeUi(autoStartServerCheckBox->isChecked());
@@ -282,7 +288,12 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     connect(xpGainMultiplierSpinBox, static_cast<void (QDoubleSpinBox::*)(double)>(&QDoubleSpinBox::valueChanged),
         this, &PlayPage::slotXpGainMultiplierChanged);
 
+    pageTabs->setProperty("arenaSegmented", true);
+    serverSettingsModeTabs->setProperty("arenaSegmented", true);
+    pageTabs->setDocumentMode(true);
+    serverSettingsModeTabs->setDocumentMode(true);
     pageTabs->setCurrentIndex(0);
+    playModeTabs->setCurrentIndex(0);
     serverSettingsModeTabs->setCurrentIndex(0);
     loadServerSettings();
 }
@@ -1145,6 +1156,7 @@ QString Launcher::PlayPage::alternativeAddress() const { return mAlternativeAddr
 QString Launcher::PlayPage::alternativePort() const { return mAlternativePort->text().trimmed(); }
 void Launcher::PlayPage::setProjectUrl(const QString& url)
 {
-    mProjectUrl = url;
-    mProjectLink->setVisible(!url.trimmed().isEmpty());
+    mProjectUrl = url.trimmed().isEmpty() ? QStringLiteral("https://t.me/arena_mp") : url.trimmed();
+    mProjectLink->setToolTip(mProjectUrl);
+    mProjectLink->setVisible(true);
 }

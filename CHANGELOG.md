@@ -1,3 +1,26 @@
+## U013 — Compact macOS-style Launcher layout
+
+- Desktop Launcher is now a fixed **960×660** window with a denser top navigation strip, a compact glass content surface and one persistent footer action bar.
+- The Play page is reorganized into **Connection** and **Local server** sub-tabs. Host-only controls, maintenance actions and server start/stop controls no longer compete with client connection fields in one long form.
+- Check boxes, radio buttons, combo boxes, edit fields, tab bars, cards, scroll bars and footer actions now use one consistent macOS-inspired dark glass style with Morrowind brass/gold accents.
+- The custom window chrome uses compact macOS-style traffic-light controls and a shorter title bar while preserving the existing inexpensive painted fallback and supported Windows compositor request.
+- Removed the legacy `TES3MP 0.8.1 Zer0Custom` watermark from the bottom of the launcher.
+- Removed the duplicate page-level Play/Update action from view; the footer remains the single persistent primary Play/Update action.
+- Existing U012 Android server recovery, updater transport and build-manifest behavior are retained. ArenaMP network protocol is unchanged.
+
+## U012 — Android Server asset recovery and separate launcher title
+
+- PC and Android website buttons use build.com/url (optional override), then build.ini/url, with https://t.me/arena_mp as the fallback.
+
+- Server preparation runs off the Activity UI thread; preparation/configuration failures show a persistent retry screen and the Update.log path instead of escaping onCreate or refresh.
+- ServerActivity uses its original MyTheme and platform dialogs. Other U011 UI work is retained.
+- Read file/directory identity and bytes from installed base/split APK ZIPs. Server staging keeps an APK snapshot open, verifies sizes/CRC and reports precise missing paths.
+- Serialize server installation across launcher/service processes with a file lock. Preserve server/data and persistent configuration while swapping managed resources.
+- Check required server payload before swapping assets; use an APK fingerprint if optional runtime-stamp metadata is absent.
+- Verify server resources and native libraries inside the final APK in CI; add JVM asset installation regression tests.
+- Place the Android launcher server/build title in its own full-width, wrapping glass card above the action toolbar. Long names no longer compete with Changelog, website and update buttons.
+- Full APK/device validation still requires the complete Android project. See Android/tests/U012_VALIDATION_RU.md in this cumulative archive.
+
 ## U011 — Compiled-in Arena Glass UI
 
 - Launcher, Wizard, Server dialog and native Qt Updater share the same compiled-in glass material, rounded window chrome and warm gold controls.

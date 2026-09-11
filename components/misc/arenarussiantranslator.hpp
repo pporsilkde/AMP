@@ -75,6 +75,11 @@ namespace ArenaUi
                 m.insert(QString::fromUtf8(u8"Address for players:"), QString::fromUtf8(u8"\u0410\u0434\u0440\u0435\u0441 \u0434\u043B\u044F \u0438\u0433\u0440\u043E\u043A\u043E\u0432:"));
                 m.insert(QString::fromUtf8(u8"Port:"), QString::fromUtf8(u8"\u041F\u043E\u0440\u0442:"));
                 m.insert(QString::fromUtf8(u8"Build name:"), QString::fromUtf8(u8"\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435 \u0441\u0431\u043E\u0440\u043A\u0438:"));
+                m.insert(QString::fromUtf8(u8"Connection"), QString::fromUtf8(u8"Подключение"));
+                m.insert(QString::fromUtf8(u8"Local server"), QString::fromUtf8(u8"Локальный сервер"));
+                m.insert(QString::fromUtf8(u8"Gameplay preset:"), QString::fromUtf8(u8"Игровой режим:"));
+                m.insert(QString::fromUtf8(u8"MMO (default)"), QString::fromUtf8(u8"MMO (по умолчанию)"));
+                m.insert(QString::fromUtf8(u8"Custom / mixed"), QString::fromUtf8(u8"Пользовательский / смешанный"));
                 m.insert(QString::fromUtf8(u8"Server network interface:"), QString::fromUtf8(u8"\u0421\u0435\u0442\u0435\u0432\u043E\u0439 \u0438\u043D\u0442\u0435\u0440\u0444\u0435\u0439\u0441 \u0441\u0435\u0440\u0432\u0435\u0440\u0430:"));
                 m.insert(QString::fromUtf8(u8"Refresh"), QString::fromUtf8(u8"\u041E\u0431\u043D\u043E\u0432\u0438\u0442\u044C"));
                 m.insert(QString::fromUtf8(u8"All interfaces (recommended) - 0.0.0.0"), QString::fromUtf8(u8"\u0412\u0441\u0435 \u0438\u043D\u0442\u0435\u0440\u0444\u0435\u0439\u0441\u044B (\u0440\u0435\u043A\u043E\u043C\u0435\u043D\u0434\u0443\u0435\u0442\u0441\u044F) - 0.0.0.0"));

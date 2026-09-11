@@ -21,274 +21,310 @@
        <string>Play</string>
       </attribute>
       <layout class="QVBoxLayout" name="playTabLayout">
+       <property name="spacing">
+        <number>8</number>
+       </property>
        <property name="leftMargin">
-        <number>24</number>
+        <number>12</number>
        </property>
        <property name="topMargin">
-        <number>24</number>
+        <number>12</number>
        </property>
        <property name="rightMargin">
-        <number>24</number>
+        <number>12</number>
        </property>
        <property name="bottomMargin">
-        <number>18</number>
+        <number>10</number>
        </property>
        <item>
-        <spacer name="playTopSpacer">
-         <property name="orientation">
-          <enum>Qt::Vertical</enum>
+        <widget class="QFrame" name="buildHeaderCard">
+         <property name="frameShape">
+          <enum>QFrame::NoFrame</enum>
          </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>20</width>
-           <height>38</height>
-          </size>
+         <property name="arenaCard" stdset="0">
+          <bool>true</bool>
          </property>
-        </spacer>
+         <layout class="QHBoxLayout" name="buildNameLayout">
+          <property name="spacing">
+           <number>10</number>
+          </property>
+          <property name="leftMargin">
+           <number>12</number>
+          </property>
+          <property name="topMargin">
+           <number>8</number>
+          </property>
+          <property name="rightMargin">
+           <number>12</number>
+          </property>
+          <property name="bottomMargin">
+           <number>8</number>
+          </property>
+          <item>
+           <widget class="QLabel" name="buildNameLabel">
+            <property name="text">
+             <string>Build name:</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLineEdit" name="buildNameEdit">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+              <horstretch>1</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="minimumSize">
+             <size>
+              <width>280</width>
+              <height>30</height>
+             </size>
+            </property>
+            <property name="text">
+             <string>ArenaMP</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
        </item>
        <item>
-        <layout class="QHBoxLayout" name="buildNameLayout">
-         <property name="spacing">
-          <number>12</number>
+        <widget class="QTabWidget" name="playModeTabs">
+         <property name="currentIndex">
+          <number>0</number>
          </property>
-         <item>
-          <widget class="QLabel" name="buildNameLabel">
-           <property name="text">
-            <string>Build name:</string>
-           </property>
-           <property name="styleSheet">
-            <string notr="true">font-size: 12pt; font-weight: 500;</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QLineEdit" name="buildNameEdit">
-           <property name="text">
-            <string>ArenaMP</string>
-           </property>
-           <property name="minimumSize">
-            <size>
-             <width>320</width>
-             <height>32</height>
-            </size>
-           </property>
-           <property name="styleSheet">
-            <string notr="true">font-size: 11pt; padding: 3px 7px;</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <spacer name="buildNameSpacer">
-           <property name="orientation">
-            <enum>Qt::Horizontal</enum>
-           </property>
-           <property name="sizeHint" stdset="0">
-            <size>
-             <width>40</width>
-             <height>20</height>
-            </size>
-           </property>
-          </spacer>
-         </item>
-        </layout>
-       </item>
-       <item>
-        <layout class="QGridLayout" name="serverConnectionLayout">
-         <property name="horizontalSpacing">
-          <number>28</number>
+         <property name="documentMode">
+          <bool>true</bool>
          </property>
-         <property name="verticalSpacing">
-          <number>8</number>
+         <property name="arenaSegmented" stdset="0">
+          <bool>true</bool>
          </property>
-         <item row="0" column="0">
-          <widget class="QLabel" name="serverLabel">
-           <property name="text">
-            <string>Server Address:</string>
+         <widget class="QWidget" name="connectionTab">
+          <attribute name="title">
+           <string>Connection</string>
+          </attribute>
+          <layout class="QVBoxLayout" name="connectionTabLayout">
+           <property name="spacing">
+            <number>8</number>
            </property>
-           <property name="styleSheet">
-            <string notr="true">font-size: 12pt; font-weight: 500;</string>
+           <property name="leftMargin">
+            <number>12</number>
            </property>
-          </widget>
-         </item>
-         <item row="0" column="1">
-          <widget class="QLabel" name="portLabel">
-           <property name="text">
-            <string>Port:</string>
+           <property name="topMargin">
+            <number>12</number>
            </property>
-           <property name="styleSheet">
-            <string notr="true">font-size: 12pt; font-weight: 500;</string>
+           <property name="rightMargin">
+            <number>12</number>
            </property>
-          </widget>
-         </item>
-         <item row="1" column="0">
-          <widget class="QLineEdit" name="serverAddressEdit">
-           <property name="minimumSize">
-            <size>
-             <width>300</width>
-             <height>32</height>
-            </size>
+           <property name="bottomMargin">
+            <number>12</number>
            </property>
-           <property name="placeholderText">
-            <string>192.168.x.x</string>
+           <item>
+            <layout class="QGridLayout" name="serverConnectionLayout">
+             <property name="horizontalSpacing">
+              <number>10</number>
+             </property>
+             <property name="verticalSpacing">
+              <number>6</number>
+             </property>
+             <item row="0" column="0">
+              <widget class="QLabel" name="serverLabel">
+               <property name="text">
+                <string>Server Address:</string>
+               </property>
+              </widget>
+             </item>
+             <item row="0" column="1">
+              <widget class="QLabel" name="portLabel">
+               <property name="text">
+                <string>Port:</string>
+               </property>
+              </widget>
+             </item>
+             <item row="1" column="0">
+              <widget class="QLineEdit" name="serverAddressEdit">
+               <property name="sizePolicy">
+                <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
+                 <horstretch>1</horstretch>
+                 <verstretch>0</verstretch>
+                </sizepolicy>
+               </property>
+               <property name="minimumSize">
+                <size>
+                 <width>260</width>
+                 <height>30</height>
+                </size>
+               </property>
+               <property name="placeholderText">
+                <string>192.168.x.x</string>
+               </property>
+              </widget>
+             </item>
+             <item row="1" column="1">
+              <widget class="QLineEdit" name="serverPortEdit">
+               <property name="minimumSize">
+                <size>
+                 <width>105</width>
+                 <height>30</height>
+                </size>
+               </property>
+               <property name="maximumSize">
+                <size>
+                 <width>125</width>
+                 <height>30</height>
+                </size>
+               </property>
+               <property name="placeholderText">
+                <string>25565</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <spacer name="connectionBottomSpacer">
+             <property name="orientation">
+              <enum>Qt::Vertical</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>20</width>
+               <height>10</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </widget>
+         <widget class="QWidget" name="hostTab">
+          <attribute name="title">
+           <string>Local server</string>
+          </attribute>
+          <layout class="QVBoxLayout" name="hostSettingsLayout">
+           <property name="spacing">
+            <number>8</number>
            </property>
-           <property name="styleSheet">
-            <string notr="true">font-size: 11pt; padding: 3px 7px;</string>
+           <property name="leftMargin">
+            <number>12</number>
            </property>
-          </widget>
-         </item>
-         <item row="1" column="1">
-          <widget class="QLineEdit" name="serverPortEdit">
-           <property name="minimumSize">
-            <size>
-             <width>130</width>
-             <height>32</height>
-            </size>
+           <property name="topMargin">
+            <number>12</number>
            </property>
-           <property name="maximumSize">
-            <size>
-             <width>160</width>
-             <height>32</height>
-            </size>
+           <property name="rightMargin">
+            <number>12</number>
            </property>
-           <property name="placeholderText">
-            <string>25565</string>
+           <property name="bottomMargin">
+            <number>12</number>
            </property>
-           <property name="styleSheet">
-            <string notr="true">font-size: 11pt; padding: 3px 7px;</string>
-           </property>
-          </widget>
-         </item>
-         <item row="2" column="0" colspan="2">
-          <widget class="QCheckBox" name="autoStartServerCheckBox">
-           <property name="text">
-            <string>Host mode</string>
-           </property>
-           <property name="checked">
-            <bool>true</bool>
-           </property>
-          </widget>
-         </item>
-         <item row="3" column="0" colspan="2">
-          <widget class="QCheckBox" name="autoRestartServerCheckBox">
-           <property name="text">
-            <string>Auto restart and backup</string>
-           </property>
-           <property name="checked">
-            <bool>true</bool>
-           </property>
-          </widget>
-         </item>
-        </layout>
-       </item>
-       <item>
-        <spacer name="playMiddleSpacer">
-         <property name="orientation">
-          <enum>Qt::Vertical</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>20</width>
-           <height>55</height>
-          </size>
-         </property>
-        </spacer>
-       </item>
-       <item>
-        <layout class="QHBoxLayout" name="playButtonsLayout">
-         <property name="spacing">
-          <number>30</number>
-         </property>
-         <item>
-          <spacer name="playButtonsLeftSpacer">
-           <property name="orientation">
-            <enum>Qt::Horizontal</enum>
-           </property>
-           <property name="sizeHint" stdset="0">
-            <size>
-             <width>30</width>
-             <height>20</height>
-            </size>
-           </property>
-          </spacer>
-         </item>
-         <item>
-          <widget class="QPushButton" name="playButton">
-           <property name="minimumSize">
-            <size>
-             <width>165</width>
-             <height>54</height>
-            </size>
-           </property>
-           <property name="text">
-            <string>Play</string>
-           </property>
-           <property name="styleSheet">
-            <string notr="true">font-size: 17pt;</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QPushButton" name="serverButton">
-           <property name="minimumSize">
-            <size>
-             <width>165</width>
-             <height>54</height>
-            </size>
-           </property>
-           <property name="text">
-            <string>Run Server</string>
-           </property>
-           <property name="styleSheet">
-            <string notr="true">font-size: 17pt;</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QPushButton" name="stopServerButton">
-           <property name="minimumSize">
-            <size>
-             <width>165</width>
-             <height>54</height>
-            </size>
-           </property>
-           <property name="text">
-            <string>Stop Server</string>
-           </property>
-           <property name="enabled">
-            <bool>false</bool>
-           </property>
-           <property name="styleSheet">
-            <string notr="true">font-size: 15pt;</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <spacer name="playButtonsRightSpacer">
-           <property name="orientation">
-            <enum>Qt::Horizontal</enum>
-           </property>
-           <property name="sizeHint" stdset="0">
-            <size>
-             <width>30</width>
-             <height>20</height>
-            </size>
-           </property>
-          </spacer>
-         </item>
-        </layout>
-       </item>
-       <item>
-        <spacer name="playBottomSpacer">
-         <property name="orientation">
-          <enum>Qt::Vertical</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>20</width>
-           <height>30</height>
-          </size>
-         </property>
-        </spacer>
+           <item>
+            <widget class="QCheckBox" name="autoStartServerCheckBox">
+             <property name="text">
+              <string>Host mode</string>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QCheckBox" name="autoRestartServerCheckBox">
+             <property name="text">
+              <string>Auto restart and backup</string>
+             </property>
+             <property name="checked">
+              <bool>true</bool>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <layout class="QHBoxLayout" name="hostServerButtonsLayout">
+             <property name="spacing">
+              <number>8</number>
+             </property>
+             <item>
+              <widget class="QPushButton" name="playButton">
+               <property name="visible">
+                <bool>false</bool>
+               </property>
+               <property name="text">
+                <string>Play</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <spacer name="playButtonsLeftSpacer">
+               <property name="orientation">
+                <enum>Qt::Horizontal</enum>
+               </property>
+               <property name="sizeHint" stdset="0">
+                <size>
+                 <width>40</width>
+                 <height>20</height>
+                </size>
+               </property>
+              </spacer>
+             </item>
+             <item>
+              <widget class="QPushButton" name="serverButton">
+               <property name="minimumSize">
+                <size>
+                 <width>150</width>
+                 <height>36</height>
+                </size>
+               </property>
+               <property name="text">
+                <string>Run Server</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QPushButton" name="stopServerButton">
+               <property name="minimumSize">
+                <size>
+                 <width>150</width>
+                 <height>36</height>
+                </size>
+               </property>
+               <property name="text">
+                <string>Stop Server</string>
+               </property>
+               <property name="enabled">
+                <bool>false</bool>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <spacer name="playButtonsRightSpacer">
+               <property name="orientation">
+                <enum>Qt::Horizontal</enum>
+               </property>
+               <property name="sizeHint" stdset="0">
+                <size>
+                 <width>40</width>
+                 <height>20</height>
+                </size>
+               </property>
+              </spacer>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <spacer name="hostBottomSpacer">
+             <property name="orientation">
+              <enum>Qt::Vertical</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>20</width>
+               <height>10</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </widget>
+        </widget>
        </item>
       </layout>
      </widget>
@@ -439,7 +475,7 @@
                     </item>
                     <item>
                      <property name="text">
-                      <string>&#x420;&#x443;&#x441;&#x441;&#x43A;&#x438;&#x439;</string>
+                      <string>Русский</string>
                      </property>
                      <property name="userData" stdset="0">
                       <string>RU</string>
@@ -711,48 +747,274 @@
                   <string>ArenaMP NPC and combat mechanics</string>
                  </property>
                  <layout class="QGridLayout" name="arenaMechanicsGridLayout">
-                  <property name="horizontalSpacing"><number>16</number></property>
-                  <property name="verticalSpacing"><number>5</number></property>
+                  <property name="horizontalSpacing">
+                   <number>16</number>
+                  </property>
+                  <property name="verticalSpacing">
+                   <number>5</number>
+                  </property>
                   <item row="0" column="0" colspan="2">
                    <widget class="QCheckBox" name="arenaTacticalCombatCheckBox">
-                    <property name="text"><string>Tactical NPC combat</string></property>
-                    <property name="toolTip"><string>Enable ArenaMP strafing, circling, retreats, dodge jumps and stuck recovery while AiCombat stays active.</string></property>
+                    <property name="text">
+                     <string>Tactical NPC combat</string>
+                    </property>
+                    <property name="toolTip">
+                     <string>Enable ArenaMP strafing, circling, retreats, dodge jumps and stuck recovery while AiCombat stays active.</string>
+                    </property>
                    </widget>
                   </item>
                   <item row="0" column="2" colspan="2">
                    <widget class="QCheckBox" name="arenaCombatPursuitThroughDoorsCheckBox">
-                    <property name="text"><string>Hostile NPC pursuit through doors</string></property>
+                    <property name="text">
+                     <string>Hostile NPC pursuit through doors</string>
+                    </property>
                    </widget>
                   </item>
-                  <item row="1" column="0"><widget class="QLabel" name="label_arenaPursuitGuaranteed"><property name="text"><string>Guaranteed distance</string></property></widget></item>
-                  <item row="1" column="1"><widget class="QSpinBox" name="arenaCombatPursuitGuaranteedDistanceSpinBox"><property name="maximum"><number>100000</number></property><property name="suffix"><string> units</string></property></widget></item>
-                  <item row="1" column="2"><widget class="QLabel" name="label_arenaPursuitDoorMax"><property name="text"><string>Door maximum distance</string></property></widget></item>
-                  <item row="1" column="3"><widget class="QSpinBox" name="arenaCombatPursuitDoorMaxDistanceSpinBox"><property name="maximum"><number>100000</number></property><property name="suffix"><string> units</string></property></widget></item>
-                  <item row="2" column="0"><widget class="QLabel" name="label_arenaPursuitChance"><property name="text"><string>Minimum pursuit chance</string></property></widget></item>
-                  <item row="2" column="1"><widget class="QDoubleSpinBox" name="arenaCombatPursuitMinimumChanceDoubleSpinBox"><property name="decimals"><number>2</number></property><property name="maximum"><double>1.000000000000000</double></property><property name="singleStep"><double>0.050000000000000</double></property></widget></item>
-                  <item row="2" column="2"><widget class="QLabel" name="label_arenaPursuitMaxActors"><property name="text"><string>Maximum door pursuers</string></property></widget></item>
-                  <item row="2" column="3"><widget class="QSpinBox" name="arenaCombatPursuitMaxActorsSpinBox"><property name="maximum"><number>100</number></property></widget></item>
-                  <item row="3" column="0"><widget class="QLabel" name="label_arenaPursuitLeash"><property name="text"><string>Same-cell pursuit leash</string></property></widget></item>
-                  <item row="3" column="1"><widget class="QSpinBox" name="arenaCombatPursuitMaxDistanceSpinBox"><property name="maximum"><number>1000000</number></property><property name="specialValueText"><string>Unlimited</string></property><property name="suffix"><string> units</string></property></widget></item>
-                  <item row="3" column="2"><widget class="QLabel" name="label_arenaSheatheDelay"><property name="text"><string>Weapon sheathe delay</string></property></widget></item>
-                  <item row="3" column="3"><widget class="QDoubleSpinBox" name="arenaCombatWeaponSheatheDelayDoubleSpinBox"><property name="decimals"><number>1</number></property><property name="maximum"><double>60.000000000000000</double></property><property name="singleStep"><double>0.500000000000000</double></property><property name="suffix"><string> sec</string></property></widget></item>
-                  <item row="4" column="0" colspan="2"><widget class="QCheckBox" name="arenaFollowersAttackOnSightCheckBox"><property name="text"><string>Followers defend immediately</string></property></widget></item>
-                  <item row="4" column="2" colspan="2"><widget class="QCheckBox" name="arenaAllowActorsFollowOverWaterCheckBox"><property name="text"><string>Allow NPC following over water</string></property></widget></item>
-                  <item row="5" column="0" colspan="2"><widget class="QCheckBox" name="arenaNpcAvoidCollisionsCheckBox"><property name="text"><string>NPCs avoid collisions</string></property></widget></item>
-                  <item row="5" column="2" colspan="2"><widget class="QCheckBox" name="arenaNpcGiveWayCheckBox"><property name="text"><string>NPCs give way</string></property></widget></item>
-                  <item row="6" column="0" colspan="2"><widget class="QCheckBox" name="arenaLongBladesUseAgilityCheckBox"><property name="text"><string>Long blades use Agility scaling</string></property></widget></item>
-                  <item row="6" column="2" colspan="2"><widget class="QCheckBox" name="arenaTwoHandedAccuracyPenaltyCheckBox"><property name="text"><string>Two-handed accuracy penalty</string></property></widget></item>
-                  <item row="7" column="0" colspan="2"><widget class="QCheckBox" name="arenaStavesAccuracyBonusCheckBox"><property name="text"><string>Staves use accuracy bonus</string></property></widget></item>
-                  <item row="7" column="2" colspan="2"><widget class="QCheckBox" name="arenaSkillBooksLevelLimitCheckBox"><property name="text"><string>Skill books have level limits</string></property></widget></item>
-                  <item row="8" column="0" colspan="2"><widget class="QCheckBox" name="arenaNewConstantEffectDifficultyCheckBox"><property name="text"><string>New constant-effect difficulty</string></property></widget></item>
-                  <item row="8" column="2"><widget class="QLabel" name="label_arenaXpMultiplier"><property name="text"><string>Global XP multiplier</string></property></widget></item>
-                  <item row="8" column="3"><widget class="QDoubleSpinBox" name="arenaGlobalXpMultiplierDoubleSpinBox"><property name="decimals"><number>2</number></property><property name="minimum"><double>0.010000000000000</double></property><property name="maximum"><double>100.000000000000000</double></property><property name="singleStep"><double>0.100000000000000</double></property></widget></item>
-                  <item row="9" column="0"><widget class="QLabel" name="label_arenaActorsProcessingRange"><property name="text"><string>Actor processing range</string></property></widget></item>
-                  <item row="9" column="1"><widget class="QSpinBox" name="arenaActorsProcessingRangeSpinBox"><property name="minimum"><number>500</number></property><property name="maximum"><number>1000000</number></property><property name="suffix"><string> units</string></property></widget></item>
-                  <item row="9" column="2" colspan="2"><widget class="QCheckBox" name="arenaCanLootDuringDeathAnimationCheckBox"><property name="text"><string>Loot during death animation</string></property></widget></item>
-                  <item row="10" column="0" colspan="2"><widget class="QCheckBox" name="arenaWeaponSheathingCheckBox"><property name="text"><string>Weapon sheathing</string></property></widget></item>
-                  <item row="10" column="2" colspan="2"><widget class="QCheckBox" name="arenaShieldSheathingCheckBox"><property name="text"><string>Shield sheathing</string></property></widget></item>
-                  <item row="11" column="0" colspan="2"><widget class="QCheckBox" name="arenaGraphicHerbalismCheckBox"><property name="text"><string>Graphic herbalism</string></property></widget></item>
+                  <item row="1" column="0">
+                   <widget class="QLabel" name="label_arenaPursuitGuaranteed">
+                    <property name="text">
+                     <string>Guaranteed distance</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="1" column="1">
+                   <widget class="QSpinBox" name="arenaCombatPursuitGuaranteedDistanceSpinBox">
+                    <property name="maximum">
+                     <number>100000</number>
+                    </property>
+                    <property name="suffix">
+                     <string> units</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="1" column="2">
+                   <widget class="QLabel" name="label_arenaPursuitDoorMax">
+                    <property name="text">
+                     <string>Door maximum distance</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="1" column="3">
+                   <widget class="QSpinBox" name="arenaCombatPursuitDoorMaxDistanceSpinBox">
+                    <property name="maximum">
+                     <number>100000</number>
+                    </property>
+                    <property name="suffix">
+                     <string> units</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="2" column="0">
+                   <widget class="QLabel" name="label_arenaPursuitChance">
+                    <property name="text">
+                     <string>Minimum pursuit chance</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="2" column="1">
+                   <widget class="QDoubleSpinBox" name="arenaCombatPursuitMinimumChanceDoubleSpinBox">
+                    <property name="decimals">
+                     <number>2</number>
+                    </property>
+                    <property name="maximum">
+                     <double>1.000000000000000</double>
+                    </property>
+                    <property name="singleStep">
+                     <double>0.050000000000000</double>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="2" column="2">
+                   <widget class="QLabel" name="label_arenaPursuitMaxActors">
+                    <property name="text">
+                     <string>Maximum door pursuers</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="2" column="3">
+                   <widget class="QSpinBox" name="arenaCombatPursuitMaxActorsSpinBox">
+                    <property name="maximum">
+                     <number>100</number>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="3" column="0">
+                   <widget class="QLabel" name="label_arenaPursuitLeash">
+                    <property name="text">
+                     <string>Same-cell pursuit leash</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="3" column="1">
+                   <widget class="QSpinBox" name="arenaCombatPursuitMaxDistanceSpinBox">
+                    <property name="maximum">
+                     <number>1000000</number>
+                    </property>
+                    <property name="specialValueText">
+                     <string>Unlimited</string>
+                    </property>
+                    <property name="suffix">
+                     <string> units</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="3" column="2">
+                   <widget class="QLabel" name="label_arenaSheatheDelay">
+                    <property name="text">
+                     <string>Weapon sheathe delay</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="3" column="3">
+                   <widget class="QDoubleSpinBox" name="arenaCombatWeaponSheatheDelayDoubleSpinBox">
+                    <property name="decimals">
+                     <number>1</number>
+                    </property>
+                    <property name="maximum">
+                     <double>60.000000000000000</double>
+                    </property>
+                    <property name="singleStep">
+                     <double>0.500000000000000</double>
+                    </property>
+                    <property name="suffix">
+                     <string> sec</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="4" column="0" colspan="2">
+                   <widget class="QCheckBox" name="arenaFollowersAttackOnSightCheckBox">
+                    <property name="text">
+                     <string>Followers defend immediately</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="4" column="2" colspan="2">
+                   <widget class="QCheckBox" name="arenaAllowActorsFollowOverWaterCheckBox">
+                    <property name="text">
+                     <string>Allow NPC following over water</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="5" column="0" colspan="2">
+                   <widget class="QCheckBox" name="arenaNpcAvoidCollisionsCheckBox">
+                    <property name="text">
+                     <string>NPCs avoid collisions</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="5" column="2" colspan="2">
+                   <widget class="QCheckBox" name="arenaNpcGiveWayCheckBox">
+                    <property name="text">
+                     <string>NPCs give way</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="6" column="0" colspan="2">
+                   <widget class="QCheckBox" name="arenaLongBladesUseAgilityCheckBox">
+                    <property name="text">
+                     <string>Long blades use Agility scaling</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="6" column="2" colspan="2">
+                   <widget class="QCheckBox" name="arenaTwoHandedAccuracyPenaltyCheckBox">
+                    <property name="text">
+                     <string>Two-handed accuracy penalty</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="7" column="0" colspan="2">
+                   <widget class="QCheckBox" name="arenaStavesAccuracyBonusCheckBox">
+                    <property name="text">
+                     <string>Staves use accuracy bonus</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="7" column="2" colspan="2">
+                   <widget class="QCheckBox" name="arenaSkillBooksLevelLimitCheckBox">
+                    <property name="text">
+                     <string>Skill books have level limits</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="8" column="0" colspan="2">
+                   <widget class="QCheckBox" name="arenaNewConstantEffectDifficultyCheckBox">
+                    <property name="text">
+                     <string>New constant-effect difficulty</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="8" column="2">
+                   <widget class="QLabel" name="label_arenaXpMultiplier">
+                    <property name="text">
+                     <string>Global XP multiplier</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="8" column="3">
+                   <widget class="QDoubleSpinBox" name="arenaGlobalXpMultiplierDoubleSpinBox">
+                    <property name="decimals">
+                     <number>2</number>
+                    </property>
+                    <property name="minimum">
+                     <double>0.010000000000000</double>
+                    </property>
+                    <property name="maximum">
+                     <double>100.000000000000000</double>
+                    </property>
+                    <property name="singleStep">
+                     <double>0.100000000000000</double>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="9" column="0">
+                   <widget class="QLabel" name="label_arenaActorsProcessingRange">
+                    <property name="text">
+                     <string>Actor processing range</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="9" column="1">
+                   <widget class="QSpinBox" name="arenaActorsProcessingRangeSpinBox">
+                    <property name="minimum">
+                     <number>500</number>
+                    </property>
+                    <property name="maximum">
+                     <number>1000000</number>
+                    </property>
+                    <property name="suffix">
+                     <string> units</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="9" column="2" colspan="2">
+                   <widget class="QCheckBox" name="arenaCanLootDuringDeathAnimationCheckBox">
+                    <property name="text">
+                     <string>Loot during death animation</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="10" column="0" colspan="2">
+                   <widget class="QCheckBox" name="arenaWeaponSheathingCheckBox">
+                    <property name="text">
+                     <string>Weapon sheathing</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="10" column="2" colspan="2">
+                   <widget class="QCheckBox" name="arenaShieldSheathingCheckBox">
+                    <property name="text">
+                     <string>Shield sheathing</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="11" column="0" colspan="2">
+                   <widget class="QCheckBox" name="arenaGraphicHerbalismCheckBox">
+                    <property name="text">
+                     <string>Graphic herbalism</string>
+                    </property>
+                   </widget>
+                  </item>
                  </layout>
                 </widget>
                </item>

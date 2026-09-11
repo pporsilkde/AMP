@@ -19,7 +19,6 @@ class QListWidgetItem;
 class QStackedWidget;
 class QStringList;
 class QString;
-class QLabel;
 class QPushButton;
 
 namespace Launcher
@@ -95,8 +94,6 @@ namespace Launcher
         QString resolveSelectedDataFilePath(const QString& fileName, const QStringList& selectedPaths) const;
 
         void setVersionLabel();
-        void updateWatermarkPosition();
-
         void loadSettings();
         void saveSettings();
 
@@ -104,7 +101,6 @@ namespace Launcher
         bool startProgram(const QString &name, const QStringList &arguments, bool detached = false);
 
         void closeEvent(QCloseEvent *event) override;
-        void resizeEvent(QResizeEvent *event) override;
 
         PlayPage *mPlayPage;
         GraphicsPage *mGraphicsPage;
@@ -115,7 +111,6 @@ namespace Launcher
         Process::ProcessInvoker *mGameInvoker;
         Process::ProcessInvoker *mWizardInvoker;
         ServerDialog *mServerDialog;
-        QLabel *mWatermarkLabel;
         QPushButton *mPlayButton;
 
         bool mBuildManifestLoaded;

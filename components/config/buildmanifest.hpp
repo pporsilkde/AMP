@@ -22,6 +22,7 @@ namespace Config
 
         static QString canonicalPathForDataDir(const QString& dataDir);
         static QString findForDataDir(const QString& dataDir);
+        static QString websiteForManifest(const QString& manifestPath);
         static QString portableDataPath(const QString& manifestPath, const QString& dataDir);
         static QString canonicalLanguage(const QString& language);
 

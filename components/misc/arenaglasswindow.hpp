@@ -56,21 +56,22 @@ namespace ArenaUi
         {
             setObjectName(QStringLiteral("arenaGlassTitleBar"));
             auto* row = new QHBoxLayout(this);
-            row->setContentsMargins(16, 5, 16, 5);
-            row->setSpacing(8);
-            auto button = [this, row](const QString& name, const QString& text, const QString& label) {
+            row->setContentsMargins(13, 4, 13, 4);
+            row->setSpacing(7);
+            auto button = [this, row](const QString& name, const QString& label) {
                 auto* b = new QToolButton(this);
                 b->setObjectName(name);
-                b->setText(text);
-                b->setFixedSize(24, 24);
+                b->setText(QString());
+                b->setFixedSize(14, 14);
                 b->setToolTip(label);
                 b->setAccessibleName(label);
+                b->setFocusPolicy(Qt::NoFocus);
                 row->addWidget(b);
                 return b;
             };
-            auto* close = button(QStringLiteral("arenaClose"), QStringLiteral("×"), tr("Close"));
-            auto* minimize = button(QStringLiteral("arenaMinimize"), QStringLiteral("−"), tr("Minimize"));
-            auto* maximize = button(QStringLiteral("arenaMaximize"), QStringLiteral("+"), tr("Maximize / restore"));
+            auto* close = button(QStringLiteral("arenaClose"), tr("Close"));
+            auto* minimize = button(QStringLiteral("arenaMinimize"), tr("Minimize"));
+            auto* maximize = button(QStringLiteral("arenaMaximize"), tr("Maximize / restore"));
             minimize->setVisible(window->windowFlags().testFlag(Qt::WindowMinimizeButtonHint));
             maximize->setVisible(window->minimumSize() != window->maximumSize()
                 && window->windowFlags().testFlag(Qt::WindowMaximizeButtonHint));
@@ -84,7 +85,9 @@ namespace ArenaUi
             title->setAttribute(Qt::WA_TransparentForMouseEvents);
             title->setAlignment(Qt::AlignCenter);
             row->addWidget(title, 1);
-            row->addSpacing(32);
+            // Balance the traffic-light cluster so the title remains visually
+            // centred rather than centred in only the remaining free space.
+            row->addSpacing(50);
             connect(window, &QWidget::windowTitleChanged, title, &QLabel::setText);
         }
     protected:
@@ -133,9 +136,9 @@ namespace ArenaUi
                 mWizardBody->setGeometry(mWindow->contentsRect());
             setGeometry(mWindow->rect());
             lower();
-            mTitle->setGeometry(6, 6, qMax(0, width() - 12), 42);
+            mTitle->setGeometry(7, 7, qMax(0, width() - 14), 34);
             mTitle->raise();
-            mGrip->move(width() - 24, height() - 24);
+            mGrip->move(width() - 22, height() - 22);
             mGrip->setVisible(!mWindow->isMaximized() && mWindow->minimumSize() != mWindow->maximumSize());
             mGrip->raise();
             update();
@@ -146,7 +149,7 @@ namespace ArenaUi
         {
             setAttribute(Qt::WA_TransparentForMouseEvents);
             setAttribute(Qt::WA_NoSystemBackground);
-            mGrip->setFixedSize(18, 18);
+            mGrip->setFixedSize(16, 16);
             if (qobject_cast<QWizard*>(window))
             {
                 for (auto* child : window->findChildren<QWidget*>(QString(), Qt::FindDirectChildrenOnly))
@@ -186,35 +189,38 @@ namespace ArenaUi
             QPainter p(this);
             p.setRenderHint(QPainter::Antialiasing);
             const QRectF panel = QRectF(rect()).adjusted(6, 6, -6, -6);
-            const qreal radius = mWindow->isMaximized() ? 0 : 18;
-            // A cheap static shadow; no full-window live GPU blur pass.
-            for (int i = 5; i > 0; --i)
+            const qreal radius = mWindow->isMaximized() ? 0 : 17;
+
+            // Static inexpensive shadow. Real compositor blur is requested on
+            // supported Windows versions but is never required for readability.
+            for (int i = 4; i > 0; --i)
             {
-                p.setPen(QPen(QColor(0, 0, 0, 12), 2));
+                p.setPen(QPen(QColor(0, 0, 0, 13), 2));
                 p.setBrush(Qt::NoBrush);
                 p.drawRoundedRect(panel.adjusted(-i, -i, i, i), radius + i, radius + i);
             }
+
             QLinearGradient material(panel.topLeft(), panel.bottomRight());
-            // Dense tint stays readable if the compositor declines acrylic.
-            material.setColorAt(0, QColor(49, 48, 47, mSystemGlass ? 240 : 255));
-            material.setColorAt(.48, QColor(27, 28, 31, mSystemGlass ? 244 : 255));
-            material.setColorAt(1, QColor(29, 25, 22, 255));
-            p.setPen(QPen(QColor(232, 215, 178, 65), 1));
+            material.setColorAt(0, QColor(48, 48, 48, mSystemGlass ? 232 : 255));
+            material.setColorAt(.50, QColor(27, 28, 31, mSystemGlass ? 238 : 255));
+            material.setColorAt(1, QColor(24, 24, 26, 255));
+            p.setPen(QPen(QColor(239, 225, 197, 48), 1));
             p.setBrush(material);
             p.drawRoundedRect(panel, radius, radius);
+
             QPainterPath clip;
             clip.addRoundedRect(panel, radius, radius);
             p.setClipPath(clip);
-            QRadialGradient amber(QPointF(width() * .12, 0), width() * .7);
-            amber.setColorAt(0, QColor(197, 150, 73, 44));
-            amber.setColorAt(1, Qt::transparent);
-            p.fillRect(panel, amber);
-            QRadialGradient blue(QPointF(width(), height() * .55), width() * .65);
-            blue.setColorAt(0, QColor(111, 140, 160, 23));
-            blue.setColorAt(1, Qt::transparent);
-            p.fillRect(panel, blue);
-            p.setPen(QColor(232, 215, 178, 27));
-            p.drawLine(22, 48, width() - 22, 48);
+            QRadialGradient warm(QPointF(width() * .10, 0), width() * .72);
+            warm.setColorAt(0, QColor(197, 151, 77, 31));
+            warm.setColorAt(1, Qt::transparent);
+            p.fillRect(panel, warm);
+            QRadialGradient cool(QPointF(width(), height() * .45), width() * .72);
+            cool.setColorAt(0, QColor(107, 133, 151, 17));
+            cool.setColorAt(1, Qt::transparent);
+            p.fillRect(panel, cool);
+            p.setPen(QColor(255, 255, 255, 19));
+            p.drawLine(20, 42, width() - 20, 42);
         }
     };
 
@@ -228,7 +234,7 @@ namespace ArenaUi
         window.setWindowFlag(Qt::FramelessWindowHint);
         window.setAttribute(Qt::WA_TranslucentBackground);
         const QMargins old = window.contentsMargins();
-        window.setContentsMargins(old.left() + 12, old.top() + 52, old.right() + 12, old.bottom() + 12);
+        window.setContentsMargins(old.left() + 10, old.top() + 44, old.right() + 10, old.bottom() + 10);
         new GlassWindowMaterial(&window);
     }
 }

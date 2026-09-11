@@ -446,3 +446,23 @@ QString Config::BuildManifest::portableDataPath(const QString& manifestPath, con
         relative = QStringLiteral(".");
     return QDir::fromNativeSeparators(relative);
 }
+
+QString Config::BuildManifest::websiteForManifest(const QString& manifestPath)
+{
+    const QDir directory = manifestPath.isEmpty()
+        ? QDir(QCoreApplication::applicationDirPath()) : QFileInfo(manifestPath).absoluteDir();
+    // build.com is a website-only override; never execute it or use it to
+    // replace the update/content manifest and its ordered content lists.
+    const auto files = directory.entryInfoList(QDir::Files | QDir::Readable);
+    for (const QFileInfo& file : files)
+    {
+        if (file.fileName().compare(QStringLiteral("build.com"), Qt::CaseInsensitive) != 0) continue;
+        BuildManifest site;
+        if (site.read(file.absoluteFilePath()) && !site.projectUrl.trimmed().isEmpty())
+            return site.projectUrl.trimmed();
+    }
+    BuildManifest site;
+    if (!manifestPath.isEmpty() && site.read(manifestPath) && !site.projectUrl.trimmed().isEmpty())
+        return site.projectUrl.trimmed();
+    return QStringLiteral("https://t.me/arena_mp");
+}
