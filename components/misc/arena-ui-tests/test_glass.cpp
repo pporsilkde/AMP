@@ -12,6 +12,8 @@
 #include <QWizard>
 #include <QWizardPage>
 #include <QToolButton>
+#include <QTabWidget>
+#include <QTabBar>
 
 int main(int argc, char** argv)
 {
@@ -51,12 +53,12 @@ int main(int argc, char** argv)
     tabs->setObjectName(QStringLiteral("iconWidget"));
     tabs->setViewMode(QListView::IconMode);
     tabs->setFlow(QListView::LeftToRight);
-    tabs->setIconSize(QSize(25, 25));
+    tabs->setIconSize(QSize(27, 27));
     tabs->setWrapping(false);
-    tabs->setGridSize(QSize(172, 52));
+    tabs->setGridSize(QSize(178, 58));
     tabs->setWordWrap(false);
     tabs->setTextElideMode(Qt::ElideNone);
-    tabs->setFixedHeight(64);
+    tabs->setFixedHeight(70);
     // U014 custom controls must be available from the compiled resource bundle;
     // otherwise checked boxes degrade to an empty gold square.
     if (QPixmap(QStringLiteral(":/arena/arenaicons/check.png")).isNull()) return 7;
@@ -68,7 +70,7 @@ int main(int argc, char** argv)
     {
         const auto icon = ArenaUi::glassIcon(names[i]);
         if (icon.pixmap(32, 32).isNull()) return 9;
-        (new QListWidgetItem(icon, labels[i], tabs))->setSizeHint(QSize(170, 50));
+        (new QListWidgetItem(icon, labels[i], tabs))->setSizeHint(QSize(176, 56));
     }
     tabs->setCurrentRow(0);
     layout->addWidget(tabs);
@@ -96,8 +98,19 @@ int main(int argc, char** argv)
     ArenaUi::installGlassWindow(launcher);
     launcher.show();
     app.processEvents();
-    if (!launcher.findChild<QToolButton*>(QStringLiteral("arenaMaximize"))->isHidden()) return 10;
+    auto* maximize = launcher.findChild<QToolButton*>(QStringLiteral("arenaMaximize"));
+    if (!maximize || maximize->isHidden() || maximize->isEnabled()) return 10;
     if (central->geometry().top() < 44) return 11;
+    auto* modeTabs = new QTabWidget(central);
+    modeTabs->setGeometry(20, 180, 720, 120);
+    modeTabs->addTab(new QWidget(modeTabs), QStringLiteral("Play"));
+    modeTabs->addTab(new QWidget(modeTabs), QStringLiteral("Server Console"));
+    modeTabs->addTab(new QWidget(modeTabs), QStringLiteral("Server Settings"));
+    modeTabs->tabBar()->setExpanding(true);
+    modeTabs->tabBar()->setUsesScrollButtons(false);
+    modeTabs->show();
+    app.processEvents();
+    if (modeTabs->tabBar()->width() > modeTabs->width()) return 13;
     launcher.grab().save(QStringLiteral("launcher-component-preview.png"));
     launcher.hide();
     QWizard wizard;

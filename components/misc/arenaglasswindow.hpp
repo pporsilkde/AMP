@@ -73,8 +73,11 @@ namespace ArenaUi
             auto* minimize = button(QStringLiteral("arenaMinimize"), tr("Minimize"));
             auto* maximize = button(QStringLiteral("arenaMaximize"), tr("Maximize / restore"));
             minimize->setVisible(window->windowFlags().testFlag(Qt::WindowMinimizeButtonHint));
-            maximize->setVisible(window->minimumSize() != window->maximumSize()
-                && window->windowFlags().testFlag(Qt::WindowMaximizeButtonHint));
+            const bool canResize = window->minimumSize() != window->maximumSize();
+            maximize->setVisible(window->windowFlags().testFlag(Qt::WindowMaximizeButtonHint) || !canResize);
+            maximize->setEnabled(canResize);
+            if (!canResize)
+                maximize->setToolTip(tr("Fixed window size"));
             connect(close, &QToolButton::clicked, window, [window]() { window->close(); });
             connect(minimize, &QToolButton::clicked, window, &QWidget::showMinimized);
             connect(maximize, &QToolButton::clicked, window, [window]() {

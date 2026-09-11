@@ -15,6 +15,7 @@
 #include <QPushButton>
 #include <QSpinBox>
 #include <QThread>
+#include <QTabBar>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -68,6 +69,17 @@ Launcher::GraphicsPage::GraphicsPage(Config::LauncherSettings& launcherSettings,
 {
     setObjectName ("GraphicsPage");
     setupUi(this);
+
+    // U016: graphics sub-pages use the same equal-width macOS segmented
+    // navigation as the main launcher. Five tabs always remain on one line.
+    if (DisplayTabWidget->tabBar() != nullptr)
+    {
+        DisplayTabWidget->setDocumentMode(true);
+        DisplayTabWidget->tabBar()->setExpanding(true);
+        DisplayTabWidget->tabBar()->setUsesScrollButtons(false);
+        DisplayTabWidget->tabBar()->setElideMode(Qt::ElideRight);
+        DisplayTabWidget->tabBar()->setDrawBase(false);
+    }
 
     // X041: the streaming/occlusion budget used to sit in Advanced -> Arena
     // Settings, whose save path was never wired up, so nothing the user typed

@@ -7,11 +7,15 @@
 #include <QCoreApplication>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QColor>
 #include <QDateTime>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFont>
+#include <QFontDatabase>
+#include <QFrame>
 #include <QHostAddress>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -24,17 +28,73 @@
 #include <QProcessEnvironment>
 #include <QPushButton>
 #include <QScrollBar>
+#include <QSizePolicy>
 #include <QStringList>
 #include <QTextCodec>
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QTextStream>
+#include <QSyntaxHighlighter>
+#include <QTextCharFormat>
 #include <QTimer>
 #include <QTcpSocket>
 #include <QVBoxLayout>
 
 namespace
 {
+    class ServerLogHighlighter final : public QSyntaxHighlighter
+    {
+    public:
+        explicit ServerLogHighlighter(QTextDocument* document)
+            : QSyntaxHighlighter(document)
+        {
+        }
+
+    protected:
+        void highlightBlock(const QString& text) override
+        {
+            if (text.isEmpty())
+                return;
+
+            QTextCharFormat format;
+            format.setForeground(QColor(QStringLiteral("#cfc9bf")));
+
+            const QString lower = text.toLower();
+            if (lower.contains(QStringLiteral("[error]"))
+                || lower.contains(QStringLiteral("fatal"))
+                || lower.contains(QStringLiteral("exception"))
+                || lower.contains(QStringLiteral("crash"))
+                || lower.contains(QString::fromUtf8(u8"ошибка"))
+                || lower.contains(QString::fromUtf8(u8"аварийн")))
+            {
+                format.setForeground(QColor(QStringLiteral("#ff8078")));
+                format.setFontWeight(QFont::DemiBold);
+            }
+            else if (lower.contains(QStringLiteral("[warn]"))
+                || lower.contains(QStringLiteral("warning"))
+                || lower.contains(QString::fromUtf8(u8"предупрежд")))
+            {
+                format.setForeground(QColor(QStringLiteral("#e6b966")));
+            }
+            else if (lower.contains(QStringLiteral("started"))
+                || lower.contains(QStringLiteral("listening"))
+                || lower.contains(QStringLiteral("connected"))
+                || lower.contains(QStringLiteral("backup created"))
+                || lower.contains(QString::fromUtf8(u8"запущ"))
+                || lower.contains(QString::fromUtf8(u8"подключ"))
+                || lower.contains(QString::fromUtf8(u8"резервная копия создана")))
+            {
+                format.setForeground(QColor(QStringLiteral("#71c78b")));
+            }
+            else if (lower.contains(QStringLiteral("[info]")))
+            {
+                format.setForeground(QColor(QStringLiteral("#aaa69e")));
+            }
+
+            setFormat(0, text.size(), format);
+        }
+    };
+
     bool copyFileReplacing(const QString& sourcePath, const QString& destinationPath, QString* errorMessage)
     {
         const QFileInfo sourceInfo(sourcePath);
@@ -227,48 +287,108 @@ Launcher::ServerDialog::ServerDialog(QWidget* parent)
     , mLastStartMs(0)
     , mCachedDisplayAddressAtMs(0)
 {
-    setWindowTitle(tr("TES3MP Server"));
-    resize(860, 620);
-    
+    setObjectName(QStringLiteral("serverConsolePanel"));
+    setProperty("arenaServerConsole", true);
+    setWindowTitle(tr("Server Console"));
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
     QVBoxLayout* mainLayout = new QVBoxLayout(this);
+    mainLayout->setContentsMargins(8, 8, 8, 8);
+    mainLayout->setSpacing(8);
 
-    QHBoxLayout* infoLayout = new QHBoxLayout();
-    mAddressLabel = new QLabel(this);
-    mPortLabel = new QLabel(this);
-    infoLayout->addWidget(mAddressLabel, 1);
-    infoLayout->addWidget(mPortLabel, 0);
-    mainLayout->addLayout(infoLayout);
+    // Compact status card.  The live endpoint stays visible while the console
+    // remains the dominant element of the page.
+    QFrame* statusCard = new QFrame(this);
+    statusCard->setObjectName(QStringLiteral("serverConsoleStatusCard"));
+    statusCard->setProperty("arenaCard", true);
+    QHBoxLayout* statusLayout = new QHBoxLayout(statusCard);
+    statusLayout->setContentsMargins(12, 8, 12, 8);
+    statusLayout->setSpacing(10);
 
-    QHBoxLayout* optionsLayout = new QHBoxLayout();
-    mEncodingLabel = new QLabel(tr("Log encoding:"), this);
-    mEncodingCombo = new QComboBox(this);
+    QVBoxLayout* titleLayout = new QVBoxLayout();
+    titleLayout->setSpacing(1);
+    QLabel* title = new QLabel(tr("Server Console"), statusCard);
+    title->setProperty("arenaTitle", true);
+    QLabel* subtitle = new QLabel(tr("Live server output and process controls"), statusCard);
+    subtitle->setProperty("arenaMuted", true);
+    titleLayout->addWidget(title);
+    titleLayout->addWidget(subtitle);
+    statusLayout->addLayout(titleLayout, 1);
+
+    mAddressLabel = new QLabel(statusCard);
+    mAddressLabel->setProperty("arenaConsoleAddress", true);
+    mAddressLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    mPortLabel = new QLabel(statusCard);
+    mPortLabel->setProperty("arenaConsolePort", true);
+    mPortLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    statusLayout->addWidget(mAddressLabel, 0, Qt::AlignVCenter);
+    statusLayout->addWidget(mPortLabel, 0, Qt::AlignVCenter);
+    mainLayout->addWidget(statusCard);
+
+    const ServerConfig initialConfig = readServerConfig();
+    mAddressLabel->setText(tr("Connect IP: %1").arg(resolveDisplayAddress(initialConfig.localAddress)));
+    mPortLabel->setText(tr("Port: %1").arg(initialConfig.port));
+
+    // Toolbar-style options replace the old loose row of controls.
+    QFrame* toolbar = new QFrame(this);
+    toolbar->setObjectName(QStringLiteral("serverConsoleToolbar"));
+    toolbar->setProperty("arenaToolbar", true);
+    QHBoxLayout* optionsLayout = new QHBoxLayout(toolbar);
+    optionsLayout->setContentsMargins(10, 6, 10, 6);
+    optionsLayout->setSpacing(8);
+
+    mEncodingLabel = new QLabel(tr("Log encoding:"), toolbar);
+    mEncodingLabel->setProperty("arenaMuted", true);
+    mEncodingCombo = new QComboBox(toolbar);
+    mEncodingCombo->setMinimumWidth(130);
     mEncodingCombo->addItem(tr("UTF-8"), QStringLiteral("UTF-8"));
     mEncodingCombo->addItem(tr("System"), QStringLiteral("System"));
     mEncodingCombo->addItem(tr("Windows-1251"), QStringLiteral("Windows-1251"));
     mEncodingCombo->addItem(tr("CP866"), QStringLiteral("CP866"));
-    mRestartCheckBox = new QCheckBox(tr("Auto restart and backup"), this);
+    mRestartCheckBox = new QCheckBox(tr("Auto restart and backup"), toolbar);
     mRestartCheckBox->setChecked(false);
 
     optionsLayout->addWidget(mEncodingLabel);
     optionsLayout->addWidget(mEncodingCombo);
-    optionsLayout->addSpacing(16);
+    optionsLayout->addSpacing(6);
     optionsLayout->addWidget(mRestartCheckBox);
     optionsLayout->addStretch(1);
-    mainLayout->addLayout(optionsLayout);
 
-    mLogView = new QPlainTextEdit(this);
+    mCloseButton = new QPushButton(tr("Clear Log"), toolbar);
+    mCloseButton->setProperty("arenaQuiet", true);
+    mStopButton = new QPushButton(tr("Stop Server"), toolbar);
+    mStopButton->setProperty("arenaDanger", true);
+    mStopButton->setMinimumWidth(122);
+    mStopButton->setEnabled(false);
+    optionsLayout->addWidget(mCloseButton);
+    optionsLayout->addWidget(mStopButton);
+    mainLayout->addWidget(toolbar);
+
+    QFrame* consoleCard = new QFrame(this);
+    consoleCard->setObjectName(QStringLiteral("serverConsoleCard"));
+    consoleCard->setProperty("arenaConsoleCard", true);
+    QVBoxLayout* consoleLayout = new QVBoxLayout(consoleCard);
+    consoleLayout->setContentsMargins(0, 0, 0, 0);
+    consoleLayout->setSpacing(0);
+
+    mLogView = new QPlainTextEdit(consoleCard);
+    mLogView->setObjectName(QStringLiteral("serverConsoleLog"));
+    mLogView->setProperty("arenaConsole", true);
     mLogView->setReadOnly(true);
     mLogView->setLineWrapMode(QPlainTextEdit::NoWrap);
-    // Y050: never let a long-lived server turn the launcher into a second log
-    // database. The previous unbounded QTextDocument + QByteArray could grow
-    // beyond the server's own working set and was rebuilt for every output chunk.
+    mLogView->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    mLogView->setFrameShape(QFrame::NoFrame);
+    mLogView->setPlaceholderText(tr("Server output will appear here."));
+    // Y050/U015: bounded console RAM usage is preserved despite the richer UI.
     mLogView->document()->setMaximumBlockCount(5000);
-    mainLayout->addWidget(mLogView, 1);
+    new ServerLogHighlighter(mLogView->document());
+    consoleLayout->addWidget(mLogView, 1);
+    mainLayout->addWidget(consoleCard, 1);
 
-    QDialogButtonBox* buttons = new QDialogButtonBox(this);
-    mStopButton = buttons->addButton(tr("Stop Server"), QDialogButtonBox::ActionRole);
-    mCloseButton = buttons->addButton(tr("Clear Log"), QDialogButtonBox::ResetRole);
-    mainLayout->addWidget(buttons);
+    QLabel* memoryHint = new QLabel(tr("The console keeps only the latest 5000 lines in memory; the server log remains on disk."), this);
+    memoryHint->setProperty("arenaMuted", true);
+    memoryHint->setWordWrap(true);
+    mainLayout->addWidget(memoryHint);
 
     connect(mStopButton, SIGNAL(clicked()), this, SLOT(stopServer()));
     connect(mCloseButton, &QPushButton::clicked, this, &ServerDialog::clearLogView);
@@ -281,7 +401,6 @@ Launcher::ServerDialog::ServerDialog(QWidget* parent)
     connect(mBackupProcess, SIGNAL(finished(int,QProcess::ExitStatus)), this, SLOT(backupProcessFinished(int,QProcess::ExitStatus)));
     connect(mBackupProcess, SIGNAL(error(QProcess::ProcessError)), this, SLOT(backupProcessError(QProcess::ProcessError)));
 }
-
 Launcher::ServerDialog::~ServerDialog()
 {
 }

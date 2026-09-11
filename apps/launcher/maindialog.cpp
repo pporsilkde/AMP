@@ -28,6 +28,7 @@
 #include <QTextBrowser>
 #include <QVBoxLayout>
 #include <QRegularExpression>
+#include <QStyle>
 
 
 #include "playpage.hpp"
@@ -206,13 +207,14 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     iconWidget->setViewMode(QListView::IconMode);
     iconWidget->setWrapping(false);
     iconWidget->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff); // Just to be sure
-    iconWidget->setIconSize(QSize(25, 25));
-    iconWidget->setGridSize(QSize(172, 52));
+    iconWidget->setIconSize(QSize(27, 27));
+    iconWidget->setGridSize(QSize(178, 58));
     iconWidget->setWordWrap(false);
     iconWidget->setTextElideMode(Qt::ElideNone);
     iconWidget->setMovement(QListView::Static);
 
-    iconWidget->setSpacing(2);
+    iconWidget->setSpacing(3);
+    iconWidget->setUniformItemSizes(true);
     iconWidget->setCurrentRow(0);
     iconWidget->setFlow(QListView::LeftToRight);
 
@@ -234,6 +236,12 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     helpButton->setIcon(ArenaUi::glassIcon(QStringLiteral("help")));
     changelogButton->setIcon(ArenaUi::glassIcon(QStringLiteral("changelog")));
     serverButton->setIcon(ArenaUi::glassIcon(QStringLiteral("server")));
+    playButton->setMinimumWidth(118);
+    serverButton->setMinimumWidth(132);
+    changelogButton->setMinimumWidth(104);
+    helpButton->setMinimumWidth(92);
+    versionLabel->setProperty("arenaStatus", QStringLiteral("offline"));
+    versionLabel->setMinimumWidth(210);
 
     connect(buttonBox, SIGNAL(accepted()), this, SLOT(play()));
     connect(serverButton, SIGNAL(clicked()), this, SLOT(runServer()));
@@ -258,35 +266,35 @@ void Launcher::MainDialog::createIcons()
         QIcon::setThemeName("tango");
 
     QListWidgetItem *playButton = new QListWidgetItem(iconWidget);
-    playButton->setSizeHint(QSize(170, 50));
+    playButton->setSizeHint(QSize(176, 56));
     playButton->setIcon(ArenaUi::glassIcon(QStringLiteral("play")));
     playButton->setText(tr("Play"));
     playButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
     playButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
     QListWidgetItem *dataFilesButton = new QListWidgetItem(iconWidget);
-    dataFilesButton->setSizeHint(QSize(170, 50));
+    dataFilesButton->setSizeHint(QSize(176, 56));
     dataFilesButton->setIcon(ArenaUi::glassIcon(QStringLiteral("browse")));
     dataFilesButton->setText(tr("Data Files"));
     dataFilesButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
     dataFilesButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
     QListWidgetItem *graphicsButton = new QListWidgetItem(iconWidget);
-    graphicsButton->setSizeHint(QSize(170, 50));
+    graphicsButton->setSizeHint(QSize(176, 56));
     graphicsButton->setIcon(ArenaUi::glassIcon(QStringLiteral("graphics")));
     graphicsButton->setText(tr("Graphics"));
     graphicsButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom | Qt::AlignAbsolute);
     graphicsButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
     QListWidgetItem *settingsButton = new QListWidgetItem(iconWidget);
-    settingsButton->setSizeHint(QSize(170, 50));
+    settingsButton->setSizeHint(QSize(176, 56));
     settingsButton->setIcon(ArenaUi::glassIcon(QStringLiteral("settings")));
     settingsButton->setText(tr("Settings"));
     settingsButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
     settingsButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
     QListWidgetItem *advancedButton = new QListWidgetItem(iconWidget);
-    advancedButton->setSizeHint(QSize(170, 50));
+    advancedButton->setSizeHint(QSize(176, 56));
     advancedButton->setIcon(ArenaUi::glassIcon(QStringLiteral("advanced")));
     advancedButton->setText(tr("Advanced"));
     advancedButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
@@ -371,10 +379,7 @@ void Launcher::MainDialog::createPages()
             || (autoStartServer && mServerDialog->isServerReachable(120));
         mPlayPage->setServerRunning(reachableServer, addr, port, managedServer);
         if (reachableServer)
-        {
-            versionLabel->setText(tr("Online server - %1:%2").arg(addr, port));
-            versionLabel->setStyleSheet(QStringLiteral("color: #188a3b; font-weight: 600;"));
-        }
+            updateFooterServerStatus(true, addr, port);
     }
 
     // Add the pages to the stacked widget
@@ -452,8 +457,22 @@ Launcher::FirstRunDialogResult Launcher::MainDialog::showFirstRunDialog()
 
 void Launcher::MainDialog::setVersionLabel()
 {
-    versionLabel->setText(tr("Server stopped"));
-    versionLabel->setStyleSheet(QStringLiteral("color: #777777; font-weight: 600;"));
+    updateFooterServerStatus(false);
+}
+
+void Launcher::MainDialog::updateFooterServerStatus(bool running, const QString& address, const QString& port)
+{
+    if (versionLabel == nullptr)
+        return;
+
+    versionLabel->setProperty("arenaStatus", running ? QStringLiteral("online") : QStringLiteral("offline"));
+    versionLabel->setText(running
+        ? tr("● Server online · %1:%2").arg(address, port)
+        : tr("● Server stopped · ready to launch"));
+    // Dynamic properties do not automatically repolish an existing widget.
+    versionLabel->style()->unpolish(versionLabel);
+    versionLabel->style()->polish(versionLabel);
+    versionLabel->update();
 }
 
 bool Launcher::MainDialog::setup()
@@ -1705,19 +1724,7 @@ void Launcher::MainDialog::serverRunningChanged(bool running, const QString& add
         mPlayPage->setServerRunning(running, address, port);
     }
 
-    if (versionLabel != nullptr)
-    {
-        if (running)
-        {
-            versionLabel->setText(tr("Online server - %1:%2").arg(address, port));
-            versionLabel->setStyleSheet(QStringLiteral("color: #188a3b; font-weight: 600;"));
-        }
-        else
-        {
-            versionLabel->setText(tr("Server stopped"));
-            versionLabel->setStyleSheet(QStringLiteral("color: #777777; font-weight: 600;"));
-        }
-    }
+    updateFooterServerStatus(running, address, port);
 }
 
 void Launcher::MainDialog::showChangelog()

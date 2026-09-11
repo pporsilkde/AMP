@@ -7,6 +7,7 @@
 #include <QFileDialog>
 #include <QCompleter>
 #include <QString>
+#include <QTabBar>
 #include <components/contentselector/view/contentselector.hpp>
 #include <components/contentselector/model/esmfile.hpp>
 
@@ -34,6 +35,17 @@ Launcher::AdvancedPage::AdvancedPage(Config::GameSettings &gameSettings, QWidget
 
     if (AdvancedTabWidget)
     {
+        // U016: six remaining advanced sections share the horizontal strip
+        // equally. This keeps Russian labels on one line in the fixed launcher.
+        AdvancedTabWidget->setDocumentMode(true);
+        if (AdvancedTabWidget->tabBar() != nullptr)
+        {
+            AdvancedTabWidget->tabBar()->setExpanding(true);
+            AdvancedTabWidget->tabBar()->setUsesScrollButtons(false);
+            AdvancedTabWidget->tabBar()->setElideMode(Qt::ElideRight);
+            AdvancedTabWidget->tabBar()->setDrawBase(false);
+        }
+
         const int bugFixesIndex = AdvancedTabWidget->indexOf(BugFixes);
         if (bugFixesIndex != -1)
             AdvancedTabWidget->removeTab(bugFixesIndex);

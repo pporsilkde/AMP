@@ -94,6 +94,7 @@ namespace Launcher
         QString resolveSelectedDataFilePath(const QString& fileName, const QStringList& selectedPaths) const;
 
         void setVersionLabel();
+        void updateFooterServerStatus(bool running, const QString& address = QString(), const QString& port = QString());
         void loadSettings();
         void saveSettings();
 

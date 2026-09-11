@@ -1,3 +1,23 @@
+## 2026-09-11 — U016 main launcher Mac glass navigation
+
+- Main launcher navigation received a second polish pass: stronger glass toolbar, compact status footer and consistent gold selection.
+- Play / Server Console / Server Settings, Connection / Local server, Graphics, Advanced and server-settings category switches now expand to equal widths and disable scroll arrows, so Russian labels remain inside the fixed 960 px window.
+- Play page now has compact section headers for connection and local hosting, with clearer primary/destructive actions and a dedicated build hero card.
+- Footer server state is shown as a compact green/neutral status pill instead of raw colored text.
+- Fixed-size glass windows keep the familiar third macOS traffic light visible as a disabled green control rather than dropping it entirely.
+
+## U015 — Server console and settings UI polish
+
+### Changed
+- Rebuilt the embedded local-server console as compact glass cards with endpoint status, encoding/restart controls and a terminal-style log surface.
+- Added monospace rendering plus lightweight INFO/WARN/ERROR/success highlighting without changing the bounded 5000-line console memory behavior.
+- Reorganized the server settings editor into category tabs: Overview, Players, Combat & NPC, Progress and Network. Each category scrolls independently inside the fixed-size launcher.
+- Kept form/config.lua synchronization actions permanently visible and styled Save as the primary action.
+- Raw config.lua now uses a dedicated code-editor presentation with no line wrapping.
+
+### Compatibility
+- Existing widget IDs, config.lua keys, persistent/runtime synchronization and ArenaMP protocol are unchanged. This is a UI/layout-only server-management pass.
+
 ## U014 — Compact Mac Glass graphics UI polish
 
 ### Changed

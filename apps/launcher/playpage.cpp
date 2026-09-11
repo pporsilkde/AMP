@@ -6,7 +6,9 @@
 #include <array>
 #include <cmath>
 #include <exception>
+#include <initializer_list>
 
+#include <components/misc/arenaglassicons.hpp>
 #include <components/settings/parser.hpp>
 #include <components/settings/settings.hpp>
 
@@ -25,10 +27,17 @@
 #include <QNetworkInterface>
 #include <QHostAddress>
 #include <QHBoxLayout>
+#include <QFontDatabase>
+#include <QFrame>
+#include <QGroupBox>
+#include <QScrollArea>
+#include <QTabBar>
+#include <QTabWidget>
 #include <QPushButton>
 #include <QPlainTextEdit>
 #include <QRegularExpression>
 #include <QSignalBlocker>
+#include <QSizePolicy>
 #include <QStandardPaths>
 #include <QSpinBox>
 #include <QStringList>
@@ -124,6 +133,46 @@ namespace
         if (index >= 0)
             widget->setCurrentIndex(index);
     }
+
+    void configureHorizontalTabs(QTabWidget* tabs)
+    {
+        if (tabs == nullptr || tabs->tabBar() == nullptr)
+            return;
+        tabs->setDocumentMode(true);
+        tabs->tabBar()->setExpanding(true);
+        tabs->tabBar()->setUsesScrollButtons(false);
+        tabs->tabBar()->setElideMode(Qt::ElideRight);
+        tabs->tabBar()->setDrawBase(false);
+    }
+
+    QFrame* makeSectionHeader(QWidget* parent, const QIcon& icon,
+        const QString& title, const QString& subtitle)
+    {
+        auto* header = new QFrame(parent);
+        header->setProperty("arenaSectionHeader", true);
+        auto* row = new QHBoxLayout(header);
+        row->setContentsMargins(0, 0, 0, 0);
+        row->setSpacing(10);
+
+        auto* iconLabel = new QLabel(header);
+        iconLabel->setPixmap(icon.pixmap(24, 24));
+        iconLabel->setFixedSize(28, 28);
+        iconLabel->setAlignment(Qt::AlignCenter);
+        row->addWidget(iconLabel);
+
+        auto* textColumn = new QVBoxLayout();
+        textColumn->setContentsMargins(0, 0, 0, 0);
+        textColumn->setSpacing(1);
+        auto* titleLabel = new QLabel(title, header);
+        titleLabel->setProperty("arenaSectionTitle", true);
+        auto* subtitleLabel = new QLabel(subtitle, header);
+        subtitleLabel->setProperty("arenaMuted", true);
+        subtitleLabel->setWordWrap(true);
+        textColumn->addWidget(titleLabel);
+        textColumn->addWidget(subtitleLabel);
+        row->addLayout(textColumn, 1);
+        return header;
+    }
 }
 
 Launcher::PlayPage::PlayPage(QWidget *parent)
@@ -145,6 +194,27 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     setupUi(this);
     serverPortEdit->setValidator(new QIntValidator(1, 65535, serverPortEdit));
 
+    // U016: every horizontal switch is a true equal-width segmented control.
+    // This avoids clipped Russian labels in the fixed 960 px launcher and makes
+    // the navigation behave like a compact macOS toolbar.
+    pageTabs->setProperty("arenaPrimaryTabs", true);
+    playModeTabs->setProperty("arenaModeTabs", true);
+    serverSettingsModeTabs->setProperty("arenaModeTabs", true);
+    configureHorizontalTabs(pageTabs);
+    configureHorizontalTabs(playModeTabs);
+    configureHorizontalTabs(serverSettingsModeTabs);
+    pageTabs->setTabIcon(pageTabs->indexOf(playTab), ArenaUi::glassIcon(QStringLiteral("play")));
+    pageTabs->setTabIcon(pageTabs->indexOf(serverConsoleTab), ArenaUi::glassIcon(QStringLiteral("server")));
+    pageTabs->setTabIcon(pageTabs->indexOf(serverSettingsTab), ArenaUi::glassIcon(QStringLiteral("settings")));
+    playModeTabs->setTabIcon(playModeTabs->indexOf(connectionTab), ArenaUi::glassIcon(QStringLiteral("globe")));
+    playModeTabs->setTabIcon(playModeTabs->indexOf(hostTab), ArenaUi::glassIcon(QStringLiteral("server")));
+
+    buildHeaderCard->setProperty("arenaHeroCard", true);
+    buildNameLabel->setProperty("arenaMuted", true);
+    buildNameEdit->setProperty("arenaBuildName", true);
+    connectionTabLayout->insertWidget(0, makeSectionHeader(connectionTab, ArenaUi::glassIcon(QStringLiteral("globe")),
+        tr("Connect to ArenaMP"), tr("Choose the server endpoint or open the alternate-server fields.")));
+
     mAlternativeServer = new QCheckBox(tr("Connect to another server"), this);
     mAlternativeAddress = new QLineEdit(this);
     mAlternativeAddress->setPlaceholderText(tr("Server address"));
@@ -152,6 +222,8 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     mAlternativePort->setMaximumWidth(90);
     mAlternativePort->setValidator(new QIntValidator(1, 65535, this));
     mProjectLink = new QPushButton(tr("Server website"), this);
+    mProjectLink->setProperty("arenaQuiet", true);
+    mProjectLink->setIcon(ArenaUi::glassIcon(QStringLiteral("globe")));
     mProjectUrl = QStringLiteral("https://t.me/arena_mp");
     mProjectLink->setVisible(true);
     serverConnectionLayout->addWidget(mAlternativeServer, 2, 0, 1, 2);
@@ -188,11 +260,13 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     mHostInterfaceCombo->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     mRefreshHostInterfacesButton = new QPushButton(tr("Refresh"), this);
     mRefreshHostInterfacesButton->setMinimumHeight(30);
+    mRefreshHostInterfacesButton->setProperty("arenaQuiet", true);
 
     // Host-only helper: regenerate server/data/requiredDataFiles.json from the
     // exact content=/groundcover= selection currently active in the launcher.
     mUpdateHashesButton = new QPushButton(tr("Update Hash"), this);
     mUpdateHashesButton->setMinimumHeight(28);
+    mUpdateHashesButton->setProperty("arenaQuiet", true);
     mUpdateHashesButton->setToolTip(tr("Generate the server data-file manifest from the current Content Files order and CRC32 hashes."));
 
     mEnforceRequiredCheckBox = new QCheckBox(tr("Enforce required DataFiles"), this);
@@ -210,6 +284,8 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     mResetServerButton = new QPushButton(tr("Full server reset"), this);
     mClearCellsButton->setMinimumHeight(28);
     mResetServerButton->setMinimumHeight(28);
+    mClearCellsButton->setProperty("arenaQuiet", true);
+    mResetServerButton->setProperty("arenaDanger", true);
     mClearCellsButton->setToolTip(tr("Delete saved cell state while keeping player accounts and world data."));
     mResetServerButton->setToolTip(tr("Delete all persistent gameplay data. The data-file manifest and ban list are preserved."));
 
@@ -253,6 +329,13 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     maintenanceLayout->addStretch(1);
     hostSettingsLayout->insertLayout(4, maintenanceLayout);
 
+    hostSettingsLayout->insertWidget(0, makeSectionHeader(hostTab, ArenaUi::glassIcon(QStringLiteral("server")),
+        tr("Local ArenaMP server"), tr("Host a session, choose the network interface and maintain server data.")));
+    serverButton->setProperty("arenaPrimary", true);
+    stopServerButton->setProperty("arenaDanger", true);
+    serverButton->setIcon(ArenaUi::glassIcon(QStringLiteral("server")));
+    stopServerButton->setIcon(ArenaUi::glassIcon(QStringLiteral("server")));
+
     refreshHostInterfaces(QStringLiteral("0.0.0.0"));
     updateHostModeUi(autoStartServerCheckBox->isChecked());
 
@@ -289,12 +372,98 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
         this, &PlayPage::slotXpGainMultiplierChanged);
 
     pageTabs->setProperty("arenaSegmented", true);
+    playModeTabs->setProperty("arenaSegmented", true);
     serverSettingsModeTabs->setProperty("arenaSegmented", true);
-    pageTabs->setDocumentMode(true);
-    serverSettingsModeTabs->setDocumentMode(true);
+
+    // U015: keep the fixed-size launcher usable by replacing the former single
+    // 980px-tall server-settings form with compact category pages.  Every
+    // original widget is reparented rather than recreated, so the existing
+    // config.lua load/save code keeps the same object pointers and behavior.
+    serverSettingsTitleLabel->setProperty("arenaTitle", true);
+    serverSettingsPathLabel->setProperty("arenaMuted", true);
+    serverSettingsFormInfoLabel->setProperty("arenaMuted", true);
+    serverSettingsStatusLabel->setProperty("arenaMuted", true);
+    reloadServerSettingsButton->setProperty("arenaQuiet", true);
+    saveServerSettingsButton->setProperty("arenaPrimary", true);
+    applyServerSettingsFormButton->setProperty("arenaQuiet", true);
+    syncServerSettingsFormButton->setProperty("arenaQuiet", true);
+    serverSettingsFormInfoLabel->setText(tr("Main server settings grouped by category. Changes are saved to the persistent config and synchronized to runtime."));
+    serverSettingsFormInfoLabel->setWordWrap(true);
+    serverSettingsEditor->setProperty("arenaCodeEditor", true);
+    serverSettingsEditor->setLineWrapMode(QPlainTextEdit::NoWrap);
+    serverSettingsEditor->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    serverSettingsEditor->setTabStopWidth(32);
+
+    QTabWidget* categoryTabs = new QTabWidget(formServerSettingsTab);
+    categoryTabs->setObjectName(QStringLiteral("serverSettingsCategoryTabs"));
+    categoryTabs->setProperty("arenaSegmented", true);
+    categoryTabs->setProperty("arenaCategoryTabs", true);
+    configureHorizontalTabs(categoryTabs);
+    categoryTabs->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+
+    auto addSettingsCategory = [this, categoryTabs](const QString& title,
+        std::initializer_list<QGroupBox*> groups)
+    {
+        QWidget* page = new QWidget(categoryTabs);
+        QVBoxLayout* pageLayout = new QVBoxLayout(page);
+        pageLayout->setContentsMargins(0, 0, 0, 0);
+        pageLayout->setSpacing(0);
+
+        QScrollArea* scroll = new QScrollArea(page);
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        scroll->setProperty("arenaSettingsScroll", true);
+
+        QWidget* content = new QWidget(scroll);
+        QVBoxLayout* layout = new QVBoxLayout(content);
+        layout->setContentsMargins(7, 7, 7, 7);
+        layout->setSpacing(8);
+
+        for (QGroupBox* group : groups)
+        {
+            if (group == nullptr)
+                continue;
+            serverSettingsFormLayout->removeWidget(group);
+            group->setParent(content);
+            group->setProperty("arenaSettingsGroup", true);
+            layout->addWidget(group);
+        }
+        layout->addStretch(1);
+        scroll->setWidget(content);
+        pageLayout->addWidget(scroll);
+        categoryTabs->addTab(page, title);
+    };
+
+    addSettingsCategory(tr("Overview"), { generalSettingsGroupBox, timeSettingsGroupBox });
+    addSettingsCategory(tr("Players"), { playerPermissionsGroupBox, spawnAndRespawnGroupBox });
+    addSettingsCategory(tr("Combat / NPC"), { arenaMechanicsGroupBox, collisionGroupBox });
+    addSettingsCategory(tr("Progress"), { sharingGroupBox, xpLevelingGroupBox });
+    addSettingsCategory(tr("Network"), { networkGroupBox });
+
+    // The old scroll-area becomes only a compatibility container.  The widgets
+    // above have been moved out of it and it is no longer shown.
+    serverSettingsScrollArea->hide();
+    formServerSettingsTabLayout->insertWidget(1, categoryTabs, 1);
+
+    // Keep synchronization actions visible at the bottom instead of burying
+    // them below a long scrolling form.
+    serverSettingsFormButtonLayout->removeWidget(applyServerSettingsFormButton);
+    serverSettingsFormButtonLayout->removeWidget(syncServerSettingsFormButton);
+    QHBoxLayout* settingsActions = new QHBoxLayout();
+    settingsActions->setSpacing(8);
+    settingsActions->addStretch(1);
+    settingsActions->addWidget(syncServerSettingsFormButton);
+    settingsActions->addWidget(applyServerSettingsFormButton);
+    formServerSettingsTabLayout->addLayout(settingsActions);
+
+    serverSettingsModeTabs->setTabText(serverSettingsModeTabs->indexOf(formServerSettingsTab), tr("Visual editor"));
+    serverSettingsModeTabs->setTabText(serverSettingsModeTabs->indexOf(rawServerSettingsTab), tr("Raw config.lua"));
+
     pageTabs->setCurrentIndex(0);
     playModeTabs->setCurrentIndex(0);
     serverSettingsModeTabs->setCurrentIndex(0);
+    categoryTabs->setCurrentIndex(0);
     loadServerSettings();
 }
 
