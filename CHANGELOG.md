@@ -1,3 +1,14 @@
+## U008 — Launcher Changelog window
+
+### Added
+- Desktop ArenaMP launcher now has a dedicated **Changelog** button. It opens the installed project changelog in a scrollable Qt window with formatted headings and lists.
+- Android launcher now has the same **Changelog** action in the toolbar and a scrollable, formatted changelog dialog.
+- Android ships the same changelog text inside the APK so it remains available offline.
+
+### Update system
+- The changelog is part of the normal build/update payload. Windows reads the installed `CHANGELOG.txt`; Android reads its packaged changelog asset.
+- No ArenaMP network protocol changes.
+
 ## Y057 — Incapacitated Skill-Point Anti-Abuse
 
 - Server rejects every `PlayerSkill` packet while `deathRecoveryActive` is true and immediately restores authoritative skills.

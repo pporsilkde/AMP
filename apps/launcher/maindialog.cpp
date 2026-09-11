@@ -23,6 +23,11 @@
 #include <QResizeEvent>
 #include <QByteArray>
 #include <QTimer>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QTextBrowser>
+#include <QVBoxLayout>
+#include <QRegularExpression>
 
 
 #include "playpage.hpp"
@@ -95,6 +100,72 @@ namespace
         }
         return QString();
     }
+
+    QString formatChangelogInline(QString text)
+    {
+        text = text.toHtmlEscaped();
+        text.replace(QRegularExpression(QStringLiteral("\\*\\*(.+?)\\*\\*")),
+            QStringLiteral("<b>\\1</b>"));
+        text.replace(QRegularExpression(QStringLiteral("`([^`]+)`")),
+            QStringLiteral("<code>\\1</code>"));
+        return text;
+    }
+
+    QString changelogMarkdownToHtml(const QString& markdown)
+    {
+        QString html = QStringLiteral(
+            "<html><head><style>"
+            "body{font-family:'Segoe UI',sans-serif;font-size:10.5pt;line-height:1.45;margin:18px;color:#e8e8e8;background:#252525;}"
+            "h1,h2,h3{color:#ffffff;margin-top:18px;margin-bottom:8px;}"
+            "h2{font-size:17pt;border-bottom:1px solid #555;padding-bottom:5px;}"
+            "h3{font-size:12.5pt;color:#f0d58a;}"
+            "ul{margin-top:4px;margin-bottom:10px;} li{margin-bottom:5px;}"
+            "code{font-family:Consolas,monospace;background:#333;padding:1px 4px;border-radius:2px;color:#f4f4f4;}"
+            "a{color:#7fb7ff;} .paragraph{margin:6px 0 10px 0;}"
+            "</style></head><body>");
+
+        bool listOpen = false;
+        const QStringList lines = markdown.split(QLatin1Char('\n'));
+        for (QString line : lines)
+        {
+            if (line.endsWith(QLatin1Char('\r')))
+                line.chop(1);
+            const QString trimmed = line.trimmed();
+
+            if (trimmed.startsWith(QStringLiteral("- ")))
+            {
+                if (!listOpen)
+                {
+                    html += QStringLiteral("<ul>");
+                    listOpen = true;
+                }
+                html += QStringLiteral("<li>") + formatChangelogInline(trimmed.mid(2)) + QStringLiteral("</li>");
+                continue;
+            }
+
+            if (listOpen)
+            {
+                html += QStringLiteral("</ul>");
+                listOpen = false;
+            }
+
+            if (trimmed.startsWith(QStringLiteral("### ")))
+                html += QStringLiteral("<h3>") + formatChangelogInline(trimmed.mid(4)) + QStringLiteral("</h3>");
+            else if (trimmed.startsWith(QStringLiteral("## ")))
+                html += QStringLiteral("<h2>") + formatChangelogInline(trimmed.mid(3)) + QStringLiteral("</h2>");
+            else if (trimmed.startsWith(QStringLiteral("# ")))
+                html += QStringLiteral("<h1>") + formatChangelogInline(trimmed.mid(2)) + QStringLiteral("</h1>");
+            else if (trimmed == QStringLiteral("---"))
+                html += QStringLiteral("<hr>");
+            else if (!trimmed.isEmpty())
+                html += QStringLiteral("<div class='paragraph'>") + formatChangelogInline(trimmed) + QStringLiteral("</div>");
+        }
+
+        if (listOpen)
+            html += QStringLiteral("</ul>");
+        html += QStringLiteral("</body></html>");
+        return html;
+    }
 }
 
 Launcher::MainDialog::MainDialog(QWidget *parent)
@@ -154,10 +225,13 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     iconWidget->setFlow(QListView::LeftToRight);
 
     QPushButton *helpButton = new QPushButton(tr("Help"));
+    QPushButton *changelogButton = new QPushButton(QStringLiteral("Changelog"));
+    changelogButton->setToolTip(tr("Open the ArenaMP changelog"));
     QPushButton *playButton = new QPushButton(tr("Play"));
     QPushButton *serverButton = new QPushButton(tr("Run Server"));
     buttonBox->button(QDialogButtonBox::Close)->setText(tr("Close"));
     buttonBox->addButton(helpButton, QDialogButtonBox::HelpRole);
+    buttonBox->addButton(changelogButton, QDialogButtonBox::ActionRole);
     buttonBox->addButton(serverButton, QDialogButtonBox::ActionRole);
     buttonBox->addButton(playButton, QDialogButtonBox::AcceptRole);
     mPlayButton = playButton;
@@ -165,6 +239,7 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     connect(buttonBox, SIGNAL(rejected()), this, SLOT(close()));
     connect(buttonBox, SIGNAL(accepted()), this, SLOT(play()));
     connect(serverButton, SIGNAL(clicked()), this, SLOT(runServer()));
+    connect(changelogButton, SIGNAL(clicked()), this, SLOT(showChangelog()));
     connect(buttonBox, SIGNAL(helpRequested()), this, SLOT(help()));
 
     // Remove what's this? button
@@ -1657,6 +1732,75 @@ void Launcher::MainDialog::serverRunningChanged(bool running, const QString& add
             versionLabel->setStyleSheet(QStringLiteral("color: #777777; font-weight: 600;"));
         }
     }
+}
+
+void Launcher::MainDialog::showChangelog()
+{
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QStringList candidates = {
+        QDir(appDir).filePath(QStringLiteral("CHANGELOG.txt")),
+        QDir(appDir).filePath(QStringLiteral("CHANGELOG.md")),
+        QDir::current().filePath(QStringLiteral("CHANGELOG.txt")),
+        QDir::current().filePath(QStringLiteral("CHANGELOG.md"))
+    };
+
+    QString changelogPath;
+    for (const QString& candidate : candidates)
+    {
+        if (QFileInfo(candidate).isFile())
+        {
+            changelogPath = candidate;
+            break;
+        }
+    }
+
+    if (changelogPath.isEmpty())
+    {
+        QMessageBox::information(this, QStringLiteral("Changelog"),
+            tr("CHANGELOG.txt was not found in the ArenaMP installation."));
+        return;
+    }
+
+    QFile file(changelogPath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        QMessageBox::warning(this, QStringLiteral("Changelog"),
+            tr("Could not open the changelog file: %1").arg(changelogPath));
+        return;
+    }
+
+    QTextStream stream(&file);
+    stream.setCodec(QTextCodec::codecForName("UTF-8"));
+    const QString markdown = stream.readAll();
+
+    QDialog dialog(this);
+    dialog.setObjectName(QStringLiteral("arenaChangelogDialog"));
+    dialog.setWindowTitle(QStringLiteral("%1 — Changelog").arg(mBuildName));
+    dialog.resize(860, 600);
+    dialog.setMinimumSize(620, 420);
+
+    QVBoxLayout* layout = new QVBoxLayout(&dialog);
+    layout->setContentsMargins(12, 12, 12, 12);
+    layout->setSpacing(10);
+
+    QLabel* header = new QLabel(QStringLiteral("<b>%1 — Changelog</b>").arg(mBuildName.toHtmlEscaped()), &dialog);
+    QFont headerFont = header->font();
+    headerFont.setPointSizeF(headerFont.pointSizeF() + 2.0);
+    header->setFont(headerFont);
+    layout->addWidget(header);
+
+    QTextBrowser* browser = new QTextBrowser(&dialog);
+    browser->setOpenExternalLinks(true);
+    browser->setReadOnly(true);
+    browser->setHtml(changelogMarkdownToHtml(markdown));
+    layout->addWidget(browser, 1);
+
+    QDialogButtonBox* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    buttons->button(QDialogButtonBox::Close)->setText(tr("Close"));
+    connect(buttons, SIGNAL(rejected()), &dialog, SLOT(reject()));
+    layout->addWidget(buttons);
+
+    dialog.exec();
 }
 
 void Launcher::MainDialog::help()

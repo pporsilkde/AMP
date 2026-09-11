@@ -63,6 +63,7 @@ namespace Launcher
         void runServer();
         void stopServer();
         void help();
+        void showChangelog();
 
     private slots:
         void wizardStarted();

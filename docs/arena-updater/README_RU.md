@@ -226,3 +226,10 @@ Windows-пакет должен содержать `openmw-launcher.exe` и `tes
 Полная компиляция Qt-лаунчера и Android-приложения, создание готовых EXE/APK, реальная системная установка APK и создание ярлыков в Windows/Linux здесь не выполнялись: в среде нет Qt SDK/Android SDK. Добавленные тесты включены в существующие CI-сборки. После наложения исходников следует запустить эти сборки и проверить установку на целевых устройствах.
 
 Справочные требования платформ: [подпись Android-приложений](https://developer.android.com/studio/publish/app-signing), [разрешение на установку APK](https://developer.android.com/reference/android/content/pm/PackageManager#canRequestPackageInstalls()), [FileProvider](https://developer.android.com/reference/androidx/core/content/FileProvider).
+
+
+## U008: Changelog
+
+`openmw-launcher` показывает установленный `CHANGELOG.txt` через кнопку **Changelog**.
+Android показывает тот же пользовательский changelog из `app/src/main/assets/arena_changelog.md`.
+Это только интерфейс просмотра истории изменений и не влияет на `check.ini`, версии `version/build` или транзакционную установку.
