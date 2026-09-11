@@ -1,3 +1,16 @@
+## U014 — Compact Mac Glass graphics UI polish
+
+### Changed
+- Checked boxes now render a real high-contrast check mark instead of a filled square; radio buttons and combo arrows use matching embedded Arena Glass resources.
+- Rebuilt Graphics → Quality into a compact two-column card layout that fits the fixed 960×660 launcher without overlapping controls.
+- Added segmented quality preset buttons while preserving the original hidden preset combo as the persistence/logic source.
+- Hardware recommendation, profile explanation, terrain/PBR/water quick controls and streaming/occlusion are grouped into clearer sections.
+- Moved “Link shadow distance to viewing distance” into the Shadows tab.
+- Added RU strings for the new compact graphics UI and preset descriptions.
+
+### Compatibility
+- No ArenaMP protocol changes. No graphics setting key was renamed or removed. Existing profiles and `settings.cfg` remain compatible.
+
 ## U013 — Compact macOS-style Launcher layout
 
 - Desktop Launcher is now a fixed **960×660** window with a denser top navigation strip, a compact glass content surface and one persistent footer action bar.

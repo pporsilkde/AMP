@@ -141,3 +141,14 @@ cmake -S apps/launcher/updater/qt-tests -B build-updater-ui
 cmake --build build-updater-ui
 ctest --test-dir build-updater-ui --output-on-failure
 ```
+## U014 — checkbox и Graphics / Quality
+
+В Qt-стиле checkbox больше не кодируется одним `background-color`: состояние `checked`
+использует встроенный `:/arena/arenaicons/check.png`, поэтому отметка видна на Windows,
+Linux и portable-сборках без зависимости от системной темы. ComboBox аналогично использует
+`chevron-down.png`. SVG остаются рядом как исходники/HiDPI-ресурсы.
+
+`GraphicsPage` сохраняет прежние имена и ключи настроек. Сегментированные кнопки пресетов
+только синхронизируют скрытый `qualityPresetComboBox`, поэтому существующий C++ код
+применения/сохранения пресетов не дублируется.
+

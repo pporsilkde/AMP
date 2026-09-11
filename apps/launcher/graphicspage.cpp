@@ -12,6 +12,7 @@
 #include <QOpenGLFunctions>
 #include <QScreen>
 #include <QSignalBlocker>
+#include <QPushButton>
 #include <QSpinBox>
 #include <QThread>
 
@@ -103,6 +104,24 @@ Launcher::GraphicsPage::GraphicsPage(Config::LauncherSettings& launcherSettings,
         updateShadowControls();
     });
     connect(qualityPresetComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(slotQualityPresetChanged(int)));
+
+    // U014: the compact macOS-like Quality page uses a segmented row of
+    // preset buttons. The original combo box stays hidden in the .ui and
+    // remains the single source of truth, so all existing persistence and
+    // preset-application code continues to work unchanged.
+    const std::array<QPushButton*, 7> qualityPresetButtons = {
+        presetAutoButton, presetMinimumButton, presetLowButton, presetBalancedButton,
+        presetMediumButton, presetHighButton, presetUltraButton
+    };
+    for (std::size_t i = 0; i < qualityPresetButtons.size(); ++i)
+    {
+        connect(qualityPresetButtons[i], &QPushButton::clicked, this, [this, i]()
+        {
+            qualityPresetComboBox->setCurrentIndex(static_cast<int>(i));
+            syncQualityPresetButtons();
+        });
+    }
+
     connect(autoSelectQualityCheckBox, &QCheckBox::toggled, this, [this](bool)
     {
         if (!mInitializingQuality)
@@ -986,6 +1005,7 @@ void Launcher::GraphicsPage::initializeQualityPage()
 
     updateHardwareLabels();
     updateQualityDescription();
+    syncQualityPresetButtons();
 
     // A fresh Wizard run requests exactly one initial quality application.
     // After that, opening the Launcher, changing hardware, pressing Play or
@@ -1046,8 +1066,23 @@ void Launcher::GraphicsPage::updateQualityDescription()
     qualityDescriptionLabel->setText(text);
 }
 
+void Launcher::GraphicsPage::syncQualityPresetButtons()
+{
+    const std::array<QPushButton*, 7> buttons = {
+        presetAutoButton, presetMinimumButton, presetLowButton, presetBalancedButton,
+        presetMediumButton, presetHighButton, presetUltraButton
+    };
+    const int selected = std::max(0, std::min(6, qualityPresetComboBox->currentIndex()));
+    for (std::size_t i = 0; i < buttons.size(); ++i)
+    {
+        const QSignalBlocker blocker(buttons[i]);
+        buttons[i]->setChecked(static_cast<int>(i) == selected);
+    }
+}
+
 void Launcher::GraphicsPage::slotQualityPresetChanged(int)
 {
+    syncQualityPresetButtons();
     if (!mInitializingQuality)
         updateQualityDescription();
 }

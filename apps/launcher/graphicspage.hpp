@@ -83,6 +83,7 @@ namespace Launcher
         void applyVendorOptimizations(int level);
         void updateQualityDescription();
         void updateHardwareLabels();
+        void syncQualityPresetButtons();
         bool reloadUserSettingsFromDisk();
         bool saveUserSettingsToDisk();
         void storeLauncherValue(const QString& key, const QString& value);

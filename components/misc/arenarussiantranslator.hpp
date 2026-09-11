@@ -432,6 +432,25 @@ namespace ArenaUi
                 m.insert(QString::fromUtf8(u8"Miscellaneous"), QString::fromUtf8(u8"\u041F\u0440\u043E\u0447\u0435\u0435"));
                 m.insert(QString::fromUtf8(u8"Testing helpers"), QString::fromUtf8(u8"\u0422\u0435\u0441\u0442\u043E\u0432\u044B\u0435 \u0444\u0443\u043D\u043A\u0446\u0438\u0438"));
                 m.insert(QString::fromUtf8(u8"Graphics quality"), QString::fromUtf8(u8"\u041A\u0430\u0447\u0435\u0441\u0442\u0432\u043E \u0433\u0440\u0430\u0444\u0438\u043A\u0438"));
+                // U014 compact Quality page / macOS-like segmented controls.
+                m.insert(QString::fromUtf8(u8"Quick graphics setup"), QString::fromUtf8(u8"Быстрая настройка графики"));
+                m.insert(QString::fromUtf8(u8"Choose a preset, then fine-tune only the settings you need."), QString::fromUtf8(u8"Выберите пресет, затем при необходимости измените только нужные параметры."));
+                m.insert(QString::fromUtf8(u8"Auto"), QString::fromUtf8(u8"Авто"));
+                m.insert(QString::fromUtf8(u8"Balance"), QString::fromUtf8(u8"Баланс"));
+                m.insert(QString::fromUtf8(u8"Material / PBR quality:"), QString::fromUtf8(u8"Материалы / PBR:"));
+                m.insert(QString::fromUtf8(u8"Use hardware recommendation in Auto mode"), QString::fromUtf8(u8"Использовать рекомендацию по оборудованию в режиме «Авто»"));
+                m.insert(QString::fromUtf8(u8"Apply safe GPU/driver optimizations"), QString::fromUtf8(u8"Применять безопасные оптимизации GPU и драйвера"));
+                m.insert(QString::fromUtf8(u8"Hardware summary and the recommended profile."), QString::fromUtf8(u8"Сведения о компьютере и рекомендуемый профиль качества."));
+                m.insert(QString::fromUtf8(u8"Streaming and visibility"), QString::fromUtf8(u8"Стриминг и видимость"));
+                m.insert(QString::fromUtf8(u8"Cull terrain occluders outside the camera view"), QString::fromUtf8(u8"Отсекать окклюдеры ландшафта вне поля зрения камеры"));
+                m.insert(QString::fromUtf8(u8"Automatic hardware selection is disabled; using Balanced fallback. "), QString::fromUtf8(u8"Автоматический подбор по оборудованию отключён; используется профиль «Баланс». "));
+                m.insert(QString::fromUtf8(u8" Resolution, screen, fullscreen mode, GUI scale and field of view are not changed."), QString::fromUtf8(u8" Разрешение, монитор, полноэкранный режим, масштаб интерфейса и поле зрения не изменяются."));
+                m.insert(QString::fromUtf8(u8"Maximum performance for software renderers and very old integrated graphics. Uses simple non-PBR water, shorter view distance, small terrain budget and no realtime shadows."), QString::fromUtf8(u8"Максимальная производительность для программного рендера и очень старой встроенной графики: простая вода без PBR, небольшая дальность обзора и без динамических теней."));
+                m.insert(QString::fromUtf8(u8"For older integrated GPUs. Uses simple non-PBR water, modest view distance, actor shadows and lightweight grass without expensive object shadows."), QString::fromUtf8(u8"Для старых встроенных GPU: простая вода без PBR, умеренная дальность обзора, тени персонажей и облегчённая трава без тяжёлых теней объектов."));
+                m.insert(QString::fromUtf8(u8"A stable default for entry-level hardware. Enables distant terrain, normal maps, actor shadows and conservative paging."), QString::fromUtf8(u8"Стабильный базовый профиль для начального уровня: дальний ландшафт, normal map, тени персонажей и щадящая подгрузка мира."));
+                m.insert(QString::fromUtf8(u8"Balanced visual quality for modern integrated graphics and mainstream discrete GPUs. Enables object shadows, improved water and denser grass."), QString::fromUtf8(u8"Сбалансированное качество для современной встроенной и массовой дискретной графики: тени объектов, улучшенная вода и более плотная трава."));
+                m.insert(QString::fromUtf8(u8"For powerful discrete GPUs. Uses longer view distance, detailed terrain, terrain shadows, higher anisotropy and larger shadow maps."), QString::fromUtf8(u8"Для мощных дискретных GPU: увеличенная дальность обзора, детальный ландшафт, тени земли, повышенная анизотропия и крупные карты теней."));
+                m.insert(QString::fromUtf8(u8"Maximum detail for high-end GPUs. Uses the longest draw distances, dense groundcover, high light counts and very large shadow maps."), QString::fromUtf8(u8"Максимальная детализация для производительных GPU: наибольшая дальность прорисовки, густая растительность, больше источников света и очень большие карты теней."));
                 m.insert(QString::fromUtf8(u8"Preset:"), QString::fromUtf8(u8"\u041F\u0440\u0435\u0441\u0435\u0442:"));
                 m.insert(QString::fromUtf8(u8"Presets"), QString::fromUtf8(u8"\u041F\u0440\u0435\u0441\u0435\u0442\u044B"));
                 m.insert(QString::fromUtf8(u8"Apply preset"), QString::fromUtf8(u8"\u041F\u0440\u0438\u043C\u0435\u043D\u0438\u0442\u044C \u043F\u0440\u0435\u0441\u0435\u0442"));

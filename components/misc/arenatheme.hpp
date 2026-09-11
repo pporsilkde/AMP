@@ -173,6 +173,12 @@ namespace ArenaUi
                 border-bottom-right-radius: 8px;
             }
             QComboBox::drop-down:hover { background-color: rgba(226,193,126,18); }
+            QComboBox::down-arrow {
+                image: url(:/arena/arenaicons/chevron-down.png);
+                width: 10px;
+                height: 10px;
+            }
+            QComboBox::down-arrow:on { top: 1px; }
             QComboBox QAbstractItemView {
                 background-color: #25262a;
                 border: 1px solid #5b5245;
@@ -184,29 +190,49 @@ namespace ArenaUi
             QAbstractItemView::item:hover { background-color: rgba(226, 193, 126, 30); }
             QAbstractItemView::item:selected { background-color: #b99254; color: #201a12; }
 
-            QCheckBox, QRadioButton { color: #e1dcd2; spacing: 7px; }
+            QCheckBox, QRadioButton { color: #e1dcd2; spacing: 8px; }
             QCheckBox::indicator {
-                width: 16px; height: 16px;
-                border: 1px solid #69665f;
+                width: 18px; height: 18px;
+                border: 1px solid #6b685f;
                 border-radius: 5px;
-                background-color: #25262a;
+                background-color: rgba(24, 25, 28, 235);
             }
-            QCheckBox::indicator:hover { border-color: #bd9b61; background-color: #2d2c2b; }
+            QCheckBox::indicator:hover {
+                border-color: #c9a562;
+                background-color: rgba(226, 193, 126, 18);
+            }
             QCheckBox::indicator:checked {
-                background-color: #d1aa63;
-                border: 4px solid #d1aa63;
+                image: url(:/arena/arenaicons/check.png);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #efd18c, stop:1 #bd8c4a);
+                border: 1px solid #f1d79d;
             }
-            QCheckBox::indicator:disabled { background-color: #222326; border-color: #44443f; }
+            QCheckBox::indicator:checked:hover {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #f5d99a, stop:1 #ca9855);
+                border-color: #ffe5af;
+            }
+            QCheckBox::indicator:disabled {
+                background-color: #222326;
+                border-color: #44443f;
+            }
+            QCheckBox::indicator:checked:disabled {
+                image: url(:/arena/arenaicons/check.png);
+                background-color: #6f624d;
+                border-color: #81735b;
+            }
             QRadioButton::indicator {
-                width: 16px; height: 16px;
-                border: 1px solid #69665f;
-                border-radius: 9px;
-                background-color: #25262a;
+                width: 18px; height: 18px;
+                border: 1px solid #6b685f;
+                border-radius: 10px;
+                background-color: rgba(24, 25, 28, 235);
             }
-            QRadioButton::indicator:hover { border-color: #bd9b61; }
+            QRadioButton::indicator:hover { border-color: #c9a562; }
             QRadioButton::indicator:checked {
-                background-color: #d1aa63;
-                border: 4px solid #474038;
+                image: url(:/arena/arenaicons/radio-dot.png);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #efd18c, stop:1 #bd8c4a);
+                border: 1px solid #f1d79d;
             }
             QCheckBox:focus, QRadioButton:focus { color: #f0d7a4; }
 
@@ -236,6 +262,83 @@ namespace ArenaUi
                 border-color: rgba(216, 178, 111, 70);
             }
             QTabWidget[arenaSegmented="true"] QTabBar::tab { padding: 5px 11px; }
+
+            /* U014 compact graphics page: segmented macOS-like inner navigation. */
+            QTabWidget#DisplayTabWidget::pane {
+                top: -1px;
+                background-color: rgba(16, 17, 19, 130);
+                border: 1px solid rgba(233, 216, 182, 27);
+                border-radius: 13px;
+            }
+            QTabWidget#DisplayTabWidget QTabBar::tab {
+                min-width: 92px;
+                padding: 6px 15px;
+                margin: 2px 3px 4px 0;
+                color: #aaa69e;
+                border: 1px solid transparent;
+                border-radius: 9px;
+                background: transparent;
+            }
+            QTabWidget#DisplayTabWidget QTabBar::tab:hover {
+                color: #eee7da;
+                background-color: rgba(255,255,255,9);
+            }
+            QTabWidget#DisplayTabWidget QTabBar::tab:selected {
+                color: #f0d7a4;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(205, 164, 94, 46), stop:1 rgba(144, 104, 55, 28));
+                border-color: rgba(226, 193, 126, 93);
+            }
+
+            QFrame[arenaCard="true"] {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                    stop:0 rgba(255,255,255,12), stop:1 rgba(255,255,255,6));
+                border: 1px solid rgba(237, 220, 187, 28);
+                border-radius: 12px;
+            }
+            QLabel[arenaTitle="true"] {
+                color: #f0e9dc;
+                font-size: 14px;
+                font-weight: 600;
+            }
+            QLabel[arenaMuted="true"] {
+                color: #aaa69e;
+                font-size: 11px;
+            }
+            QLabel[arenaAccent="true"] {
+                color: #e3bd70;
+                font-weight: 600;
+            }
+            QLabel[arenaSettingLabel="true"] { color: #d8d2c8; }
+            QFrame[arenaDivider="true"] {
+                border: 0;
+                background-color: rgba(255,255,255,20);
+                min-height: 1px;
+                max-height: 1px;
+            }
+            QPushButton[arenaPresetButton="true"] {
+                min-height: 25px;
+                padding: 3px 7px;
+                border-radius: 8px;
+                color: #d9d4ca;
+                background-color: rgba(255,255,255,9);
+                border: 1px solid rgba(255,255,255,20);
+                font-size: 11px;
+                font-weight: 500;
+            }
+            QPushButton[arenaPresetButton="true"]:hover {
+                color: #f1e9da;
+                background-color: rgba(226,193,126,18);
+                border-color: rgba(226,193,126,75);
+            }
+            QPushButton[arenaPresetButton="true"]:checked {
+                color: #261d12;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #efd18c, stop:1 #b98949);
+                border: 1px solid #f2d79b;
+                font-weight: 650;
+            }
+            QWidget#qualityPresetButtonsHost { background: transparent; }
 
             QListWidget#iconWidget {
                 background-color: rgba(255,255,255,7);

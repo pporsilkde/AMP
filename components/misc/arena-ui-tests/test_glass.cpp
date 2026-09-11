@@ -5,6 +5,8 @@
 #include "../arenaglassicons.hpp"
 #include <QMainWindow>
 #include <QGroupBox>
+#include <QCheckBox>
+#include <QPixmap>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QWizard>
@@ -55,12 +57,17 @@ int main(int argc, char** argv)
     tabs->setWordWrap(false);
     tabs->setTextElideMode(Qt::ElideNone);
     tabs->setFixedHeight(64);
+    // U014 custom controls must be available from the compiled resource bundle;
+    // otherwise checked boxes degrade to an empty gold square.
+    if (QPixmap(QStringLiteral(":/arena/arenaicons/check.png")).isNull()) return 7;
+    if (QPixmap(QStringLiteral(":/arena/arenaicons/chevron-down.png")).isNull()) return 8;
+
     const QStringList names{"play", "browse", "graphics", "settings", "advanced"};
     const QStringList labels{"Play", "Data Files", "Graphics", "Settings", "Advanced"};
     for (int i = 0; i < names.size(); ++i)
     {
         const auto icon = ArenaUi::glassIcon(names[i]);
-        if (icon.pixmap(32, 32).isNull()) return 7;
+        if (icon.pixmap(32, 32).isNull()) return 9;
         (new QListWidgetItem(icon, labels[i], tabs))->setSizeHint(QSize(170, 50));
     }
     tabs->setCurrentRow(0);
@@ -70,6 +77,9 @@ int main(int argc, char** argv)
     fields->addWidget(new QLabel(QStringLiteral("ArenaMP — Morrowind multiplayer"), group));
     fields->addWidget(new QLineEdit(QStringLiteral("play.example.org"), group));
     fields->addWidget(new QLineEdit(QStringLiteral("25565"), group));
+    auto* checked = new QCheckBox(QStringLiteral("Use hardware recommendation"), group);
+    checked->setChecked(true);
+    fields->addWidget(checked);
     layout->addWidget(group);
     layout->addStretch();
     auto* bar = new QProgressBar(central);
@@ -86,8 +96,8 @@ int main(int argc, char** argv)
     ArenaUi::installGlassWindow(launcher);
     launcher.show();
     app.processEvents();
-    if (!launcher.findChild<QToolButton*>(QStringLiteral("arenaMaximize"))->isHidden()) return 8;
-    if (central->geometry().top() < 44) return 9;
+    if (!launcher.findChild<QToolButton*>(QStringLiteral("arenaMaximize"))->isHidden()) return 10;
+    if (central->geometry().top() < 44) return 11;
     launcher.grab().save(QStringLiteral("launcher-component-preview.png"));
     launcher.hide();
     QWizard wizard;
@@ -101,7 +111,7 @@ int main(int argc, char** argv)
     ArenaUi::installGlassWindow(wizard);
     wizard.show();
     app.processEvents();
-    if (page->mapTo(&wizard, QPoint()).y() < 44) return 10;
+    if (page->mapTo(&wizard, QPoint()).y() < 44) return 12;
     wizard.grab().save(QStringLiteral("wizard-component-preview.png"));
     return 0;
 }
