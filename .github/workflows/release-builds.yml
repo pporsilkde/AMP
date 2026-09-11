@@ -205,19 +205,12 @@ jobs:
             ccache --show-stats || true
           fi
 
-      - name: Set up updater Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Build standalone Windows updater
+      - name: Verify native Qt Windows updater
         shell: pwsh
         run: |
-          python apps/launcher/updater/test_updater.py
-          python -m pip install --disable-pip-version-check pyinstaller==6.16.0
-          $icon = Join-Path $env:GITHUB_WORKSPACE 'files/windows/openmw-wizard.ico'
-          python -m PyInstaller --noconfirm --clean --onefile --console --hide-console hide-early --icon "$icon" --name arena-updater --distpath install --workpath updater-build --specpath updater-build apps/launcher/updater/arena_updater.py
-          if (!(Test-Path "install/arena-updater.exe")) { throw "Updater build failed" }
+          if (!(Test-Path "install/arena-updater.exe")) { throw "Native updater was not installed" }
+          $process = Start-Process -FilePath "install/arena-updater.exe" -ArgumentList "--self-test" -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Native updater self-test failed with code $($process.ExitCode)" }
 
       - name: Verify Windows install tree
         shell: pwsh
@@ -402,17 +395,10 @@ jobs:
           cmake --install build
           ccache --show-stats || true
 
-      - name: Set up updater Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Build standalone Linux updater
+      - name: Verify native Qt Linux updater
         run: |
-          python apps/launcher/updater/test_updater.py
-          python -m pip install --disable-pip-version-check pyinstaller==6.16.0
-          python -m PyInstaller --noconfirm --clean --onefile --console --name arena-updater --distpath stage/bin --workpath updater-build --specpath updater-build apps/launcher/updater/arena_updater.py
           test -x stage/bin/arena-updater
+          QT_QPA_PLATFORM=offscreen stage/bin/arena-updater --self-test
 
       - name: Create portable Steam Deck archive
         run: |

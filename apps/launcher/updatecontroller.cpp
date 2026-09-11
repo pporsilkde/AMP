@@ -5,6 +5,7 @@
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDir>
+#include <QDirIterator>
 #include <QDateTime>
 #include <QEventLoop>
 #include <QFile>
@@ -78,6 +79,74 @@ namespace
         return file.write(data) == data.size() && file.flush();
     }
 
+    bool copyTree(const QString& sourceRoot, const QString& targetRoot)
+    {
+        QDir source(sourceRoot);
+        if (!source.exists())
+            return true;
+        if (!QDir().mkpath(targetRoot))
+            return false;
+
+        QDirIterator it(sourceRoot, QDir::AllEntries | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+        while (it.hasNext())
+        {
+            const QString sourcePath = it.next();
+            const QFileInfo info = it.fileInfo();
+            const QString relative = source.relativeFilePath(sourcePath);
+            const QString targetPath = QDir(targetRoot).filePath(relative);
+            if (info.isDir())
+            {
+                if (!QDir().mkpath(targetPath))
+                    return false;
+            }
+            else if (info.isFile() && !info.isSymLink())
+            {
+                if (!QDir().mkpath(QFileInfo(targetPath).absolutePath()) || !QFile::copy(sourcePath, targetPath))
+                    return false;
+                QFile::setPermissions(targetPath, info.permissions());
+            }
+        }
+        return true;
+    }
+
+#ifdef Q_OS_WIN
+    bool stageWindowsUpdaterRuntime(const QString& client, const QString& helper, const QString& job, QString* program)
+    {
+        if (program == nullptr)
+            return false;
+        *program = QDir(job).filePath(QStringLiteral("arena-updater.exe"));
+        if (!QFile::copy(helper, *program))
+            return false;
+        QFile::setPermissions(*program, QFile::permissions(helper));
+
+        // Qt is dynamically linked in the normal Windows package. Copy the
+        // runtime used by the updater into staging so engine updates may safely
+        // replace the original launcher, updater and DLL files after it exits.
+        QDir clientDir(client);
+        const QFileInfoList dlls = clientDir.entryInfoList(QStringList() << QStringLiteral("*.dll"), QDir::Files);
+        for (const QFileInfo& dll : dlls)
+        {
+            const QString target = QDir(job).filePath(dll.fileName());
+            if (!QFile::copy(dll.absoluteFilePath(), target))
+                return false;
+            QFile::setPermissions(target, dll.permissions());
+        }
+        const QString qtConf = clientDir.filePath(QStringLiteral("qt.conf"));
+        if (QFileInfo::exists(qtConf) && !QFile::copy(qtConf, QDir(job).filePath(QStringLiteral("qt.conf"))))
+            return false;
+
+        const QStringList pluginDirs {QStringLiteral("platforms"), QStringLiteral("styles"), QStringLiteral("bearer"),
+            QStringLiteral("tls"), QStringLiteral("imageformats"), QStringLiteral("iconengines")};
+        for (const QString& pluginDir : pluginDirs)
+        {
+            const QString source = clientDir.filePath(pluginDir);
+            if (QFileInfo(source).isDir() && !copyTree(source, QDir(job).filePath(pluginDir)))
+                return false;
+        }
+        return true;
+    }
+#endif
+
     struct WorkerContext
     {
         std::unique_ptr<QTemporaryDir> job;
@@ -88,7 +157,7 @@ namespace
     };
 
     bool createWorker(QWidget* parent, const QString& manifestPath,
-        const QString& dataPath, bool quiet, WorkerContext* context)
+        const QString& dataPath, bool quiet, bool stageRuntime, WorkerContext* context)
     {
         if (context == nullptr || manifestPath.isEmpty())
             return false;
@@ -133,46 +202,34 @@ namespace
             return false;
         }
 
-        if (QFileInfo::exists(helper))
+        if (!QFileInfo::exists(helper))
         {
-            // The detached worker must not execute an updater that is going
-            // to be replaced by the engine package itself.
-            program = QDir(context->job->path()).filePath(QFileInfo(helper).fileName());
-            if (!QFile::copy(helper, program))
+            log(context->logFile, QStringLiteral("error"), QStringLiteral("Native arena-updater is missing"));
+            if (!quiet)
+                QMessageBox::warning(parent, tr("Update failed"),
+                    tr("Native updater is missing. Install the complete client package."));
+            return false;
+        }
+
+#ifdef Q_OS_WIN
+        if (stageRuntime)
+        {
+            if (!stageWindowsUpdaterRuntime(client, helper, context->job->path(), &program))
             {
                 if (!quiet)
                     QMessageBox::warning(parent, tr("Update failed"),
-                        tr("Could not copy the updater to its staging folder."));
+                        tr("Could not prepare the native updater runtime."));
                 return false;
             }
-            QFile::setPermissions(program, QFile::permissions(helper));
         }
         else
-        {
-            helper = QDir(client).filePath(QStringLiteral("arena_updater.py"));
-            program = QStandardPaths::findExecutable(QStringLiteral("python3"));
-#ifdef Q_OS_WIN
-            if (program.isEmpty())
-                program = QStandardPaths::findExecutable(QStringLiteral("python"));
+            program = helper;
+#else
+        Q_UNUSED(stageRuntime);
+        // POSIX permits replacing an executing file. Running the installed
+        // helper directly also preserves its rpath/library environment.
+        program = helper;
 #endif
-            if (!QFileInfo::exists(helper) || program.isEmpty())
-            {
-                if (!quiet)
-                    QMessageBox::warning(parent, tr("Update failed"),
-                        tr("Updater is missing. Install the complete client package."));
-                return false;
-            }
-
-            const QString script = QDir(context->job->path()).filePath(QStringLiteral("arena_updater.py"));
-            if (!QFile::copy(helper, script))
-            {
-                if (!quiet)
-                    QMessageBox::warning(parent, tr("Update failed"),
-                        tr("Could not copy the updater script to its staging folder."));
-                return false;
-            }
-            prefix << script;
-        }
 
         QString launcher = QCoreApplication::applicationFilePath();
 #ifndef Q_OS_WIN
@@ -230,7 +287,7 @@ void showResult(QWidget* parent, const QString& manifestPath)
 CheckResult checkAvailable(QWidget* parent, const QString& manifestPath, const QString& dataPath)
 {
     WorkerContext context;
-    if (!createWorker(parent, manifestPath, dataPath, true, &context))
+    if (!createWorker(parent, manifestPath, dataPath, true, false, &context))
     {
         log(context.logFile, QStringLiteral("check_failed"), QStringLiteral("Cannot prepare updater helper; Play remains available"));
         return CheckResult::NoUpdate;
@@ -318,7 +375,7 @@ CheckResult checkAvailable(QWidget* parent, const QString& manifestPath, const Q
 bool startUpdate(QWidget* parent, const QString& manifestPath, const QString& dataPath)
 {
     WorkerContext context;
-    if (!createWorker(parent, manifestPath, dataPath, false, &context))
+    if (!createWorker(parent, manifestPath, dataPath, false, true, &context))
     {
         log(context.logFile, QStringLiteral("update_start_failed"), QStringLiteral("Cannot prepare updater helper"));
         return false;

@@ -125,12 +125,39 @@ if (BUILD_WITH_CODE_COVERAGE)
 endif()
 
 
+# ArenaMP native updater. It is a normal Qt/C++ target, not a PyInstaller
+# bundle. Keeping it as a separate process is intentional: on Windows it must
+# remain alive after openmw-launcher exits so it can replace the launcher and
+# its DLLs transactionally.
+find_package(ZLIB REQUIRED)
 
-# Worker has no dependency on the running client's Qt/DLL files. Release CI
-# freezes this standard-library script into a standalone executable.
-configure_file(updater/arena_updater.py ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/arena_updater.py COPYONLY)
+set(ARENA_UPDATER
+    updater/arena_updater.cpp
+)
 if (WIN32)
-    install(FILES updater/arena_updater.py DESTINATION ".")
+    list(APPEND ARENA_UPDATER ${CMAKE_SOURCE_DIR}/files/windows/launcher.rc)
+endif()
+
+openmw_add_executable(arena-updater
+    ${GUI_TYPE}
+    ${ARENA_UPDATER}
+)
+
+target_include_directories(arena-updater PRIVATE ${ZLIB_INCLUDE_DIRS})
+target_link_libraries(arena-updater
+    Qt5::Widgets
+    Qt5::Core
+    Qt5::Gui
+    Qt5::Network
+    ${ZLIB_LIBRARIES}
+)
+
+if (MSVC)
+    target_compile_options(arena-updater PRIVATE /utf-8)
+endif()
+
+if (WIN32)
+    install(TARGETS arena-updater RUNTIME DESTINATION ".")
 elseif (NOT APPLE)
-    install(FILES updater/arena_updater.py DESTINATION "${BINDIR}")
+    install(TARGETS arena-updater RUNTIME DESTINATION "${BINDIR}")
 endif()

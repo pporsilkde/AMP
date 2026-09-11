@@ -7,8 +7,8 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin")
 find_package(Qt5 5.10 REQUIRED COMPONENTS Widgets)
 get_filename_component(ARENA_SOURCE_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../.." ABSOLUTE)
 
-# This tiny standalone fixture is copied to staging by the real controller,
-# just like the frozen production helper. It deliberately does not link Qt.
+# This tiny standalone fixture is used only by the controller regression test.
+# Production U006 uses the separately built native Qt arena-updater target.
 add_executable(arena-updater worker_fixture.cpp)
 add_executable(arena-updater-ui-test
     test_updatecontroller.cpp
