@@ -197,7 +197,9 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     mGameInvoker = new ProcessInvoker();
     mWizardInvoker = new ProcessInvoker();
     mServerDialog = new ServerDialog(this);
-    ArenaUi::installGlassWindow(*mServerDialog);
+    // The server console is embedded directly inside the Play page.
+    // Do not wrap it in a second glass window/title bar, otherwise the
+    // inner traffic-light controls and extra top margin waste space.
     connect(mWizardInvoker->getProcess(), SIGNAL(started()),
             this, SLOT(wizardStarted()));
 
@@ -236,10 +238,10 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     helpButton->setIcon(ArenaUi::glassIcon(QStringLiteral("help")));
     changelogButton->setIcon(ArenaUi::glassIcon(QStringLiteral("changelog")));
     serverButton->setIcon(ArenaUi::glassIcon(QStringLiteral("server")));
-    playButton->setMinimumWidth(118);
-    serverButton->setMinimumWidth(132);
-    changelogButton->setMinimumWidth(104);
-    helpButton->setMinimumWidth(92);
+    playButton->setMinimumWidth(108);
+    serverButton->setMinimumWidth(122);
+    changelogButton->setMinimumWidth(98);
+    helpButton->setMinimumWidth(88);
     versionLabel->setProperty("arenaStatus", QStringLiteral("offline"));
     versionLabel->setMinimumWidth(210);
 

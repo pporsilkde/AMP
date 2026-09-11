@@ -340,7 +340,7 @@ Launcher::ServerDialog::ServerDialog(QWidget* parent)
     mEncodingLabel = new QLabel(tr("Log encoding:"), toolbar);
     mEncodingLabel->setProperty("arenaMuted", true);
     mEncodingCombo = new QComboBox(toolbar);
-    mEncodingCombo->setMinimumWidth(130);
+    mEncodingCombo->setMinimumWidth(118);
     mEncodingCombo->addItem(tr("UTF-8"), QStringLiteral("UTF-8"));
     mEncodingCombo->addItem(tr("System"), QStringLiteral("System"));
     mEncodingCombo->addItem(tr("Windows-1251"), QStringLiteral("Windows-1251"));
@@ -356,9 +356,10 @@ Launcher::ServerDialog::ServerDialog(QWidget* parent)
 
     mCloseButton = new QPushButton(tr("Clear Log"), toolbar);
     mCloseButton->setProperty("arenaQuiet", true);
+    mCloseButton->setMinimumWidth(98);
     mStopButton = new QPushButton(tr("Stop Server"), toolbar);
     mStopButton->setProperty("arenaDanger", true);
-    mStopButton->setMinimumWidth(122);
+    mStopButton->setMinimumWidth(110);
     mStopButton->setEnabled(false);
     optionsLayout->addWidget(mCloseButton);
     optionsLayout->addWidget(mStopButton);

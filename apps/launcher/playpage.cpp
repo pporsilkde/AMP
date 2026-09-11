@@ -215,6 +215,34 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     connectionTabLayout->insertWidget(0, makeSectionHeader(connectionTab, ArenaUi::glassIcon(QStringLiteral("globe")),
         tr("Connect to ArenaMP"), tr("Choose the server endpoint or open the alternate-server fields.")));
 
+    // The first page should let the player start immediately without
+    // hunting for the footer action. Reuse the existing Play button so the
+    // established signal/slot behavior stays unchanged.
+    hostServerButtonsLayout->removeWidget(playButton);
+    playButton->setParent(connectionTab);
+    playButton->setVisible(true);
+    playButton->setProperty("arenaPrimary", true);
+    playButton->setIcon(ArenaUi::glassIcon(QStringLiteral("play")));
+    playButton->setMinimumHeight(42);
+    playButton->setMinimumWidth(0);
+    playButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    playButton->setText(tr("Play now"));
+
+    QFrame* quickStartCard = new QFrame(connectionTab);
+    quickStartCard->setProperty("arenaCard", true);
+    QVBoxLayout* quickStartLayout = new QVBoxLayout(quickStartCard);
+    quickStartLayout->setContentsMargins(12, 10, 12, 10);
+    quickStartLayout->setSpacing(8);
+    QLabel* quickStartTitle = new QLabel(tr("Quick start"), quickStartCard);
+    quickStartTitle->setProperty("arenaSectionTitle", true);
+    QLabel* quickStartSubtitle = new QLabel(tr("Launch the client immediately using the current server address and port."), quickStartCard);
+    quickStartSubtitle->setProperty("arenaMuted", true);
+    quickStartSubtitle->setWordWrap(true);
+    quickStartLayout->addWidget(quickStartTitle);
+    quickStartLayout->addWidget(quickStartSubtitle);
+    quickStartLayout->addWidget(playButton);
+    connectionTabLayout->insertWidget(2, quickStartCard);
+
     mAlternativeServer = new QCheckBox(tr("Connect to another server"), this);
     mAlternativeAddress = new QLineEdit(this);
     mAlternativeAddress->setPlaceholderText(tr("Server address"));
@@ -335,6 +363,10 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     stopServerButton->setProperty("arenaDanger", true);
     serverButton->setIcon(ArenaUi::glassIcon(QStringLiteral("server")));
     stopServerButton->setIcon(ArenaUi::glassIcon(QStringLiteral("server")));
+    serverButton->setMinimumWidth(0);
+    stopServerButton->setMinimumWidth(0);
+    serverButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    stopServerButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
     refreshHostInterfaces(QStringLiteral("0.0.0.0"));
     updateHostModeUi(autoStartServerCheckBox->isChecked());

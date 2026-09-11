@@ -297,13 +297,14 @@ namespace ArenaUi
             }
             QTabWidget#pageTabs QTabBar::tab {
                 min-width: 0px;
-                min-height: 24px;
-                padding: 6px 10px;
-                margin: 2px 3px 4px 0;
-                color: #aaa69e;
+                min-height: 22px;
+                padding: 5px 8px;
+                margin: 2px 2px 4px 0;
+                color: #b7b2aa;
                 background: transparent;
                 border: 1px solid transparent;
                 border-radius: 9px;
+                font-size: 12px;
                 font-weight: 600;
             }
             QTabWidget#pageTabs QTabBar::tab:hover {
@@ -325,12 +326,13 @@ namespace ArenaUi
             QTabWidget#playModeTabs QTabBar::tab,
             QTabWidget#serverSettingsModeTabs QTabBar::tab {
                 min-width: 0px;
-                min-height: 22px;
-                padding: 5px 10px;
-                margin: 2px 3px 4px 0;
+                min-height: 20px;
+                padding: 4px 8px;
+                margin: 2px 2px 4px 0;
                 border: 1px solid transparent;
                 border-radius: 8px;
-                color: #aaa69e;
+                color: #b0aca4;
+                font-size: 12px;
                 background: transparent;
             }
             QTabWidget#playModeTabs QTabBar::tab:hover,
@@ -423,8 +425,8 @@ namespace ArenaUi
 
             QFrame[arenaCard="true"] {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(255,255,255,12), stop:1 rgba(255,255,255,6));
-                border: 1px solid rgba(237, 220, 187, 28);
+                    stop:0 rgba(255,255,255,13), stop:1 rgba(255,255,255,7));
+                border: 1px solid rgba(237, 220, 187, 34);
                 border-radius: 12px;
             }
             QLabel[arenaTitle="true"] {
@@ -433,7 +435,7 @@ namespace ArenaUi
                 font-weight: 600;
             }
             QLabel[arenaMuted="true"] {
-                color: #aaa69e;
+                color: #b3afa8;
                 font-size: 11px;
             }
             QLabel[arenaAccent="true"] {
