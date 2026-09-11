@@ -5,6 +5,7 @@
 #include <QColor>
 #include <QPalette>
 #include <QStyleFactory>
+#include <QString>
 
 namespace ArenaUi
 {
@@ -43,7 +44,12 @@ namespace ArenaUi
         palette.setColor(QPalette::Disabled, QPalette::ButtonText, disabled);
         app.setPalette(palette);
 
-        app.setStyleSheet(QStringLiteral(R"ARENA(
+        // MSVC has a relatively small limit for a single string literal.
+        // Keep the shared QSS in several chunks so the launcher, wizard and
+        // updater can all include this header without C2026.
+        QString arenaStyleSheet;
+        arenaStyleSheet.reserve(25201);
+        arenaStyleSheet += QStringLiteral(R"ARENA(
             QMainWindow, QDialog, QWizard, QWidget#centralWidget, QWidget#centralwidget {
                 background-color: #191a1d;
                 color: #ebe6dc;
@@ -210,7 +216,8 @@ namespace ArenaUi
 
             QCheckBox, QRadioButton { color: #e1dcd2; spacing: 8px; }
             QCheckBox::indicator {
-                width: 18px; height: 18px;
+)ARENA");
+        arenaStyleSheet += QStringLiteral(R"ARENA(                width: 18px; height: 18px;
                 border: 1px solid #6b685f;
                 border-radius: 5px;
                 background-color: rgba(24, 25, 28, 235);
@@ -382,7 +389,8 @@ namespace ArenaUi
             }
             QTabWidget#AdvancedTabWidget QTabBar::tab:selected {
                 color: #f0d7a4;
-                background-color: rgba(198,158,91,25);
+)ARENA");
+        arenaStyleSheet += QStringLiteral(R"ARENA(                background-color: rgba(198,158,91,25);
                 border-color: rgba(226,193,126,78);
             }
 
@@ -562,7 +570,8 @@ namespace ArenaUi
                 border: 0;
                 border-radius: 11px;
                 padding: 8px;
-                selection-background-color: #725b36;
+)ARENA");
+        arenaStyleSheet += QStringLiteral(R"ARENA(                selection-background-color: #725b36;
                 selection-color: #fff4df;
             }
             QPlainTextEdit[arenaCodeEditor="true"] {
@@ -650,7 +659,8 @@ namespace ArenaUi
             QToolButton#arenaClose:hover { background-color: #ff756e; }
             QToolButton#arenaMinimize:hover { background-color: #ffca55; }
             QToolButton#arenaMaximize:hover { background-color: #4bd361; }
-        )ARENA"));
+        )ARENA");
+        app.setStyleSheet(arenaStyleSheet);
     }
 }
 

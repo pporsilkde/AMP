@@ -751,12 +751,12 @@ void Launcher::ServerDialog::refreshDecodedLog()
     updateLogView();
 }
 
-void Launcher::ServerDialog::appendRawLog(const QByteArray& data)
+void Launcher::ServerDialog::appendRawLog(const QByteArray& logData)
 {
-    if (data.isEmpty())
+    if (logData.isEmpty())
         return;
 
-    mRawLog.append(data);
+    mRawLog.append(logData);
 
     // Y050: keep only the recent tail. Before this cap a 40+ MB server log was
     // duplicated in mRawLog and QPlainTextEdit, and setPlainText rebuilt all of
@@ -1004,7 +1004,8 @@ QString Launcher::ServerDialog::resolveDisplayAddress(const QString& bindAddress
     QString bestAddress;
     int bestScore = -1;
 
-    foreach (const QNetworkInterface& iface, QNetworkInterface::allInterfaces())
+    const QList<QNetworkInterface> interfaces = QNetworkInterface::allInterfaces();
+    for (const QNetworkInterface& iface : interfaces)
     {
         if (!(iface.flags() & QNetworkInterface::IsUp) || !(iface.flags() & QNetworkInterface::IsRunning))
             continue;
@@ -1020,7 +1021,8 @@ QString Launcher::ServerDialog::resolveDisplayAddress(const QString& bindAddress
             || interfaceName.contains(QLatin1String("docker"))
             || interfaceName.contains(QLatin1String("loopback"));
 
-        foreach (const QNetworkAddressEntry& entry, iface.addressEntries())
+        const QList<QNetworkAddressEntry> addressEntries = iface.addressEntries();
+        for (const QNetworkAddressEntry& entry : addressEntries)
         {
             if (entry.ip().protocol() != QAbstractSocket::IPv4Protocol)
                 continue;

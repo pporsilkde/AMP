@@ -1381,7 +1381,7 @@ void Launcher::GraphicsPage::applyVendorOptimizations(int level)
         {
             const QString appDir = QCoreApplication::applicationDirPath();
             const QStringList executables = { QStringLiteral("tes3mp.exe"), QStringLiteral("openmw.exe") };
-            const wchar_t data[] = L"GpuPreference=2;";
+            const wchar_t gpuPreferenceData[] = L"GpuPreference=2;";
             for (const QString& executable : executables)
             {
                 const QString path = QDir::toNativeSeparators(appDir + QLatin1Char('/') + executable);
@@ -1389,7 +1389,7 @@ void Launcher::GraphicsPage::applyVendorOptimizations(int level)
                     continue;
                 const std::wstring valueName = path.toStdWString();
                 RegSetValueExW(key, valueName.c_str(), 0, REG_SZ,
-                    reinterpret_cast<const BYTE*>(data), sizeof(data));
+                    reinterpret_cast<const BYTE*>(gpuPreferenceData), sizeof(gpuPreferenceData));
             }
             RegCloseKey(key);
         }
