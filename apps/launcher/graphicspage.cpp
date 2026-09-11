@@ -980,7 +980,7 @@ QString Launcher::GraphicsPage::hardwareGpuDetail() const
 {
     QStringList parts;
     if (mHardwareInfo.dedicatedVramMb > 0)
-        parts << tr("%1 MB dedicated VRAM").arg(mHardwareInfo.dedicatedVramMb);
+        parts << tr("%1 MB VRAM").arg(mHardwareInfo.dedicatedVramMb);
     if (mHardwareInfo.integrated)
         parts << tr("integrated");
     if (mHardwareInfo.softwareRenderer)

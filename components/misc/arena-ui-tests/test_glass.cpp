@@ -3,6 +3,7 @@
 #include "../../../apps/launcher/updater/arena_updater.cpp"
 #undef main
 #include "../arenaglassicons.hpp"
+#include "../arenaherobutton.hpp"
 #include <QMainWindow>
 #include <QGroupBox>
 #include <QCheckBox>
@@ -102,8 +103,14 @@ int main(int argc, char** argv)
     ArenaUi::installGlassWindow(launcher);
     launcher.show();
     app.processEvents();
-    auto* maximize = launcher.findChild<QToolButton*>(QStringLiteral("arenaMaximize"));
-    if (!maximize || maximize->isHidden() || maximize->isEnabled()) return 10;
+    // U021: Windows-style controls live on the right and the maximize control
+    // is gone from the fixed-size launcher chrome.
+    if (launcher.findChild<QToolButton*>(QStringLiteral("arenaMaximize")) != nullptr) return 10;
+    auto* closeButton = launcher.findChild<QToolButton*>(QStringLiteral("arenaClose"));
+    auto* minimizeButton = launcher.findChild<QToolButton*>(QStringLiteral("arenaMinimize"));
+    if (!closeButton || !minimizeButton || closeButton->isHidden()) return 12;
+    if (closeButton->mapTo(&launcher, QPoint(0, 0)).x() <= launcher.width() / 2) return 15;
+    if (closeButton->mapTo(&launcher, QPoint(0, 0)).x() <= minimizeButton->mapTo(&launcher, QPoint(0, 0)).x()) return 16;
     if (central->geometry().top() < 44) return 11;
     auto* modeTabs = new QTabWidget(central);
     modeTabs->setGeometry(20, 180, 720, 120);
@@ -115,6 +122,18 @@ int main(int argc, char** argv)
     modeTabs->show();
     app.processEvents();
     if (modeTabs->tabBar()->width() > modeTabs->width()) return 13;
+    // U021: the hero action must report its own size instead of collapsing to
+    // the stylesheet minimum used by ordinary push buttons.
+    ArenaUi::HeroButton hero(central);
+    hero.setText(QStringLiteral("Start game"));
+    hero.setSubtitle(QStringLiteral("Local server + game on port 25565"));
+    hero.setPulse(true);
+    hero.setGeometry(20, 320, 320, hero.sizeHint().height());
+    hero.show();
+    app.processEvents();
+    if (hero.sizeHint().height() < 64) return 17;
+    if (hero.height() < 64) return 18;
+
     launcher.grab().save(QStringLiteral("launcher-component-preview.png"));
     launcher.hide();
     QWizard wizard;

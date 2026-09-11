@@ -48,7 +48,7 @@ namespace ArenaUi
         // Keep the shared QSS in several chunks so the launcher, wizard and
         // updater can all include this header without C2026.
         QString arenaStyleSheet;
-        arenaStyleSheet.reserve(32768);
+        arenaStyleSheet.reserve(40960);
         arenaStyleSheet += QStringLiteral(R"ARENA(
             QMainWindow, QDialog, QWizard, QWidget#centralWidget, QWidget#centralwidget {
                 background-color: #191a1d;
@@ -786,6 +786,92 @@ namespace ArenaUi
                 border: 1px solid rgba(236,197,124,170);
             }
             QListWidget#iconWidget::item { font-size: 13px; }
+        )ARENA");
+        arenaStyleSheet += QStringLiteral(R"ARENA(
+            /* U021: Windows-style window controls, vertical settings navigation,
+               quick panels and list surfaces. */
+            QToolButton#arenaClose, QToolButton#arenaMinimize {
+                color: #d8d2c8;
+                background-color: transparent;
+                border: 0;
+                border-radius: 7px;
+                font-size: 13px;
+                padding: 0;
+            }
+            QToolButton#arenaMinimize:hover { background-color: rgba(255,255,255,22); color: #fff3da; }
+            QToolButton#arenaMinimize:pressed { background-color: rgba(255,255,255,34); }
+            QToolButton#arenaClose:hover { background-color: #c4392c; color: #fff5f2; }
+            QToolButton#arenaClose:pressed { background-color: #a12d22; color: #fff5f2; }
+            QLabel#arenaWindowTitle { color: #ded7cb; font-weight: 600; font-size: 13px; }
+
+            QPushButton[arenaHero="true"] {
+                min-height: 0px;
+                padding: 0;
+                border: 0;
+                background: transparent;
+            }
+
+            QListWidget#serverSettingsNav {
+                background-color: rgba(9,10,12,110);
+                border: 1px solid rgba(255,255,255,17);
+                border-radius: 11px;
+                padding: 6px;
+                outline: 0;
+                font-size: 13px;
+            }
+            QListWidget#serverSettingsNav::item {
+                color: #cfc9be;
+                border: 1px solid transparent;
+                border-radius: 9px;
+                padding: 5px 8px;
+                margin: 1px 0;
+            }
+            QListWidget#serverSettingsNav::item:hover {
+                color: #f1eadc;
+                background-color: rgba(255,255,255,12);
+            }
+            QListWidget#serverSettingsNav::item:selected {
+                color: #fff1d2;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 rgba(224,182,106,140), stop:1 rgba(146,105,52,96));
+                border-color: rgba(236,197,124,150);
+            }
+
+            QListWidget#buildContentList {
+                background-color: rgba(9,10,12,150);
+                border: 1px solid rgba(255,255,255,20);
+                border-radius: 10px;
+                padding: 4px;
+                outline: 0;
+            }
+            QListWidget#buildContentList::item {
+                color: #e3ded4;
+                border-radius: 7px;
+                padding: 4px 6px;
+            }
+            QListWidget#buildContentList::item:selected {
+                background-color: rgba(226,193,126,42);
+                color: #f7ecd7;
+            }
+            QListWidget#buildContentList::indicator,
+            QTreeView::indicator, QListView::indicator, QTableView::indicator {
+                width: 16px;
+                height: 16px;
+                border: 1px solid #6b685f;
+                border-radius: 4px;
+                background-color: rgba(24,25,28,235);
+            }
+            QListWidget#buildContentList::indicator:checked,
+            QTreeView::indicator:checked, QListView::indicator:checked, QTableView::indicator:checked {
+                image: url(:/arena/arenaicons/check.png);
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #efd18c, stop:1 #bd8c4a);
+                border: 1px solid #f1d79d;
+            }
+
+            QDialog#BuildSetupDialog { background: transparent; }
+            QWidget#advancedQuickPanel { background: transparent; }
+            QWidget#advancedQuickPanel QCheckBox { color: #e1dcd2; }
         )ARENA");
         app.setStyleSheet(arenaStyleSheet);
     }

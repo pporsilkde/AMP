@@ -1,3 +1,16 @@
+## U021 — Hero launch action, server-settings list, minimal Advanced, built-in build setup
+
+### Changed
+- `ArenaUi::HeroButton`: a self-painted primary action with a soft pulsing glow. The shared QSS `min-height` rule used to override the .ui height and collapse the "Start game" button to ~22 px; the widget now reports its own size. The footer Play/Update button uses the compact variant and pulses stronger when an update is waiting.
+- Window controls moved to the right in Windows order (minimize, close); the green maximize control is gone and the title is left-aligned.
+- Server settings: a vertical category list (Overview, Players, Combat / NPC, Progress, Network, Raw config.lua) drives the existing form/raw state machine. Both tab bars are hidden, the manual form<->raw buttons are gone (switching synchronizes automatically) and value fields no longer stretch across the page.
+- Advanced is now a short card page: Visuals, Gameplay, Sound, Interface, Performance. Normal/specular maps, sheathing and modern movement are single switches in front of the original settings; everything else stays behind "All engine parameters".
+- The setup wizard is built into the launcher: a first run opens a build-folder dialog that either loads an existing build.ini or generates one from the chosen name, language and load order. `arenamp-wizard` is no longer spawned, and the Play page can switch builds at any time.
+- Data Files keeps the content list only: grass/groundcover plug-ins are detected by name and connected automatically, and the legacy profile selector is hidden.
+
+### Notes
+- `settingspage.*`, `advancedpage.ui` and `datafilespage.*` are not part of this cumulative archive, so the Advanced quick panel and the Data Files cleanup work through the existing widget pointers/object names at runtime.
+
 ## U020 — Showcase Play page, system status column and requiredDataFiles.json protection
 
 ### Changed

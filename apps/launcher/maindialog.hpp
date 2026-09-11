@@ -15,6 +15,8 @@
 #endif
 #include "ui_mainwindow.h"
 
+#include <components/misc/arenaherobutton.hpp>
+
 #include <QElapsedTimer>
 
 class QListWidgetItem;
@@ -79,9 +81,13 @@ namespace Launcher
         void clearServerCells();
         void resetServerData();
         void updateSessionTime();
+        void changeBuild();
 
     private:
         bool setup();
+        // U021: built-in replacement for the standalone setup wizard.
+        bool runBuildSetup(const QString& initialPath);
+        void applyPendingBuildPath();
 
         void createIcons();
         void createPages();
@@ -117,7 +123,7 @@ namespace Launcher
         Process::ProcessInvoker *mGameInvoker;
         Process::ProcessInvoker *mWizardInvoker;
         ServerDialog *mServerDialog;
-        QPushButton *mPlayButton;
+        ArenaUi::HeroButton *mPlayButton;
         QLabel *mFooterStatusDot;
         QLabel *mFooterStatusDetail;
         QLabel *mSessionLabel;
@@ -135,6 +141,7 @@ namespace Launcher
         bool mBuildComplete;
         bool mUpdateAvailable;
         bool mUpdateCheckRunning;
+        QString mPendingSetupDataPath;
         QString mPendingClientAddress;
         QString mPendingClientPort;
 

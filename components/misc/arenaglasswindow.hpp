@@ -56,41 +56,35 @@ namespace ArenaUi
         {
             setObjectName(QStringLiteral("arenaGlassTitleBar"));
             auto* row = new QHBoxLayout(this);
-            row->setContentsMargins(13, 4, 13, 4);
-            row->setSpacing(7);
-            auto button = [this, row](const QString& name, const QString& label) {
-                auto* b = new QToolButton(this);
-                b->setObjectName(name);
-                b->setText(QString());
-                b->setFixedSize(14, 14);
-                b->setToolTip(label);
-                b->setAccessibleName(label);
-                b->setFocusPolicy(Qt::NoFocus);
-                row->addWidget(b);
-                return b;
-            };
-            auto* close = button(QStringLiteral("arenaClose"), tr("Close"));
-            auto* minimize = button(QStringLiteral("arenaMinimize"), tr("Minimize"));
-            auto* maximize = button(QStringLiteral("arenaMaximize"), tr("Maximize / restore"));
-            minimize->setVisible(window->windowFlags().testFlag(Qt::WindowMinimizeButtonHint));
-            const bool canResize = window->minimumSize() != window->maximumSize();
-            maximize->setVisible(window->windowFlags().testFlag(Qt::WindowMaximizeButtonHint) || !canResize);
-            maximize->setEnabled(canResize);
-            if (!canResize)
-                maximize->setToolTip(tr("Fixed window size"));
-            connect(close, &QToolButton::clicked, window, [window]() { window->close(); });
-            connect(minimize, &QToolButton::clicked, window, &QWidget::showMinimized);
-            connect(maximize, &QToolButton::clicked, window, [window]() {
-                if (window->isMaximized()) window->showNormal(); else window->showMaximized();
-            });
+            row->setContentsMargins(14, 3, 4, 3);
+            row->setSpacing(2);
+
+            // U021: Windows-style window controls on the right. The launcher is
+            // a fixed-size window, so only Minimize and Close are offered and
+            // the former green maximize control is gone.
             auto* title = new QLabel(window->windowTitle(), this);
             title->setObjectName(QStringLiteral("arenaWindowTitle"));
             title->setAttribute(Qt::WA_TransparentForMouseEvents);
-            title->setAlignment(Qt::AlignCenter);
+            title->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
             row->addWidget(title, 1);
-            // Balance the traffic-light cluster so the title remains visually
-            // centred rather than centred in only the remaining free space.
-            row->addSpacing(50);
+
+            auto button = [this, row](const QString& name, const QString& label, const QString& glyph) {
+                auto* b = new QToolButton(this);
+                b->setObjectName(name);
+                b->setText(glyph);
+                b->setFixedSize(42, 26);
+                b->setToolTip(label);
+                b->setAccessibleName(label);
+                b->setFocusPolicy(Qt::NoFocus);
+                b->setCursor(Qt::ArrowCursor);
+                row->addWidget(b);
+                return b;
+            };
+            auto* minimize = button(QStringLiteral("arenaMinimize"), tr("Minimize"), QStringLiteral("\u2500"));
+            auto* close = button(QStringLiteral("arenaClose"), tr("Close"), QStringLiteral("\u2715"));
+            minimize->setVisible(window->windowFlags().testFlag(Qt::WindowMinimizeButtonHint));
+            connect(close, &QToolButton::clicked, window, [window]() { window->close(); });
+            connect(minimize, &QToolButton::clicked, window, &QWidget::showMinimized);
             connect(window, &QWidget::windowTitleChanged, title, &QLabel::setText);
         }
     protected:

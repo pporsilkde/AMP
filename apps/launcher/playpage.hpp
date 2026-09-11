@@ -68,6 +68,7 @@ namespace Launcher
         void updateHashesRequested();
         void clearServerCellsRequested();
         void resetServerDataRequested();
+        void changeBuildRequested();
 
     private slots:
         void slotPlayClicked();
@@ -116,9 +117,6 @@ namespace Launcher
         QPushButton* mResetServerButton;
         bool mSyncingXpControls;
 
-        QLabel* mPlayIconLabel;
-        QLabel* mPlayTitleLabel;
-        QLabel* mPlaySubtitleLabel;
         bool mServerRunning;
         bool mUpdateChecking;
         bool mUpdateAvailable;

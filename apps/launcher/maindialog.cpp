@@ -17,6 +17,10 @@
 #include <QCloseEvent>
 #include <QTextCodec>
 #include <QLabel>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QGroupBox>
+#include <QAbstractItemView>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -34,6 +38,7 @@
 #include <QStyle>
 
 
+#include "buildsetupdialog.hpp"
 #include "playpage.hpp"
 #include "graphicspage.hpp"
 #include <QTextStream>
@@ -258,13 +263,15 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     // global actions in a fixed, predictable order (the platform-dependent
     // QDialogButtonBox ordering is no longer used).
     buttonBox->hide();
-    QPushButton *playButton = new QPushButton(tr("Play"), footerBar);
+    ArenaUi::HeroButton *playButton = new ArenaUi::HeroButton(footerBar);
+    playButton->setText(tr("Play"));
+    playButton->setCompact(true);
+    playButton->setPulse(true);
     QPushButton *changelogButton = new QPushButton(QStringLiteral("Changelog"), footerBar);
     QPushButton *serverButton = new QPushButton(tr("Run Server"), footerBar);
     QPushButton *helpButton = new QPushButton(tr("Help"), footerBar);
     changelogButton->setToolTip(tr("Open the ArenaMP changelog"));
     mPlayButton = playButton;
-    playButton->setProperty("arenaPrimary", true);
     helpButton->setProperty("arenaQuiet", true);
     changelogButton->setProperty("arenaQuiet", true);
     serverButton->setProperty("arenaQuiet", true);
@@ -272,11 +279,12 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     helpButton->setIcon(ArenaUi::glassIcon(QStringLiteral("help")));
     changelogButton->setIcon(ArenaUi::glassIcon(QStringLiteral("changelog")));
     serverButton->setIcon(ArenaUi::glassIcon(QStringLiteral("server")));
-    playButton->setMinimumWidth(150);
+    playButton->setMinimumWidth(168);
     changelogButton->setMinimumWidth(112);
     serverButton->setMinimumWidth(150);
     helpButton->setMinimumWidth(104);
-    for (QPushButton* button : { playButton, changelogButton, serverButton, helpButton })
+    horizontalLayout->addWidget(playButton);
+    for (QPushButton* button : { changelogButton, serverButton, helpButton })
     {
         button->setProperty("arenaFooterButton", true);
         button->setCursor(Qt::PointingHandCursor);
@@ -486,6 +494,42 @@ void Launcher::MainDialog::createPages()
     connect(mPlayPage, SIGNAL(updateHashesRequested()), this, SLOT(updateServerDataFileHashes()));
     connect(mPlayPage, SIGNAL(clearServerCellsRequested()), this, SLOT(clearServerCells()));
     connect(mPlayPage, SIGNAL(resetServerDataRequested()), this, SLOT(resetServerData()));
+    connect(mPlayPage, SIGNAL(changeBuildRequested()), this, SLOT(changeBuild()));
+
+    // U021: Data Files shows the content list only. Grass/groundcover plug-ins
+    // are recognized by name and connected automatically, and the legacy
+    // launcher profile selector is redundant now that one build.ini describes
+    // exactly one build.
+    if (mDataFilesPage != nullptr)
+    {
+        for (QCheckBox* box : mDataFilesPage->findChildren<QCheckBox*>())
+        {
+            const bool groundcover = box->objectName().contains(QLatin1String("groundcover"), Qt::CaseInsensitive)
+                || box->text().contains(QLatin1String("groundcover"), Qt::CaseInsensitive)
+                || box->text().contains(QLatin1String("grass"), Qt::CaseInsensitive);
+            if (!groundcover)
+                continue;
+            if (!box->isChecked())
+                box->setChecked(true);
+            box->hide();
+        }
+
+        for (QComboBox* combo : mDataFilesPage->findChildren<QComboBox*>())
+        {
+            if (!combo->objectName().contains(QLatin1String("profile"), Qt::CaseInsensitive))
+                continue;
+            QWidget* container = combo->parentWidget();
+            while (container != nullptr && container != mDataFilesPage
+                && qobject_cast<QGroupBox*>(container) == nullptr)
+                container = container->parentWidget();
+            // Never hide a container that also holds the content list itself.
+            if (container != nullptr && container != mDataFilesPage
+                && container->findChildren<QAbstractItemView*>().isEmpty())
+                container->hide();
+            else
+                combo->hide();
+        }
+    }
     connect(mServerDialog, SIGNAL(runningChanged(bool,QString,QString)),
             this, SLOT(serverRunningChanged(bool,QString,QString)));
     connect(mServerDialog, SIGNAL(autoRestartChanged(bool)),
@@ -501,21 +545,110 @@ Launcher::FirstRunDialogResult Launcher::MainDialog::showFirstRunDialog()
     if (!setupLauncherSettings())
         return FirstRunDialogResultFailure;
 
-    // ArenaMP presents the setup flow as one product: on a fresh install the
-    // Wizard opens first, then this same launcher instance reloads the result
-    // and becomes visible. No intermediate OpenMW-style first-run dialog.
-    if (mLauncherSettings.value(QStringLiteral("General/firstrun"), QStringLiteral("true")) == QLatin1String("true"))
-    {
-        const QStringList args { QStringLiteral("--from-launcher") };
-        if (mWizardInvoker->startProcess(QStringLiteral("arenamp-wizard"), args, false)
-            || mWizardInvoker->startProcess(QStringLiteral("openmw-wizard"), args, false))
-            return FirstRunDialogResultWizard;
+    // U021: the setup wizard is part of the launcher now. On a fresh install
+    // the player picks the build folder in one dialog; an existing build.ini
+    // is used as is and a new build gets one generated from the chosen order.
+    const bool firstRun = mLauncherSettings.value(
+        QStringLiteral("General/firstrun"), QStringLiteral("true")) == QLatin1String("true");
+    if (firstRun && !runBuildSetup(QString()))
         return FirstRunDialogResultFailure;
-    }
 
     if (!setup() || !setupGameData())
         return FirstRunDialogResultFailure;
+
+    if (firstRun)
+        writeSettings();
     return FirstRunDialogResultContinue;
+}
+
+void Launcher::MainDialog::applyPendingBuildPath()
+{
+    if (mPendingSetupDataPath.isEmpty())
+        return;
+
+    const QString path = QDir::cleanPath(mPendingSetupDataPath);
+    if (!QFileInfo(path).isDir())
+        return;
+
+    // One launcher owns exactly one build: replace the user-level data= entry
+    // instead of stacking several Data Files folders on top of each other.
+    if (!mBuildDataPath.isEmpty() && mBuildDataPath != path)
+        mGameSettings.removeDataDir(mBuildDataPath);
+    mGameSettings.remove(QStringLiteral("data"));
+    mGameSettings.removeDataDir(path);
+    mGameSettings.addDataDir(path);
+    mGameSettings.setMultiValue(QStringLiteral("data"), path);
+}
+
+bool Launcher::MainDialog::runBuildSetup(const QString& initialPath)
+{
+    BuildSetupDialog dialog(this);
+    if (!initialPath.isEmpty())
+        dialog.setInitialPath(initialPath);
+    if (dialog.exec() != QDialog::Accepted)
+        return false;
+
+    const BuildSetupDialog::Result result = dialog.result();
+    if (result.dataPath.isEmpty())
+        return false;
+
+    if (!result.manifestExists)
+    {
+        // A new build description. Existing manifests are never rewritten
+        // here: they are the authoritative, user-owned build definition.
+        Config::BuildManifest manifest;
+        manifest.buildName = result.buildName;
+        manifest.dataPath = Config::BuildManifest::portableDataPath(result.manifestPath, result.dataPath);
+        manifest.language = result.language;
+        manifest.languageSpecified = true;
+        manifest.contentFiles = result.content;
+        manifest.groundcoverFiles = result.groundcover;
+        manifest.archives = result.archives;
+
+        QString error;
+        if (!manifest.write(result.manifestPath, &error))
+        {
+            QMessageBox::warning(this, tr("Could not create build.ini"), error);
+            return false;
+        }
+    }
+
+    mPendingSetupDataPath = result.dataPath;
+    mLauncherSettings.remove(QStringLiteral("General/Build/name"));
+    mLauncherSettings.setValue(QStringLiteral("General/Build/name"),
+        result.buildName.trimmed().isEmpty() ? QStringLiteral("ArenaMP") : result.buildName.trimmed());
+    mLauncherSettings.remove(QStringLiteral("General/firstrun"));
+    mLauncherSettings.setValue(QStringLiteral("General/firstrun"), QStringLiteral("false"));
+    if (!result.manifestExists)
+    {
+        // One automatic hardware quality pass for a freshly created build.
+        const QString pendingKey = QStringLiteral("General/Graphics/initialQualityPresetPending");
+        mLauncherSettings.remove(pendingKey);
+        mLauncherSettings.setValue(pendingKey, QStringLiteral("true"));
+    }
+    return true;
+}
+
+void Launcher::MainDialog::changeBuild()
+{
+    if (mServerDialog != nullptr && mServerDialog->isRunning())
+    {
+        QMessageBox::warning(this, tr("Local server is running"),
+            tr("Stop the local server before switching to another build."));
+        return;
+    }
+
+    // Persist the current build before replacing it, then reload everything
+    // from the newly selected folder.
+    if (!writeSettings())
+        return;
+    if (!runBuildSetup(mBuildDataPath))
+        return;
+    if (!reloadSettings())
+        return;
+    writeSettings();
+    applyBuildManifestRestrictions();
+    QTimer::singleShot(0, this, SLOT(checkForUpdates()));
 }
 
 void Launcher::MainDialog::setVersionLabel()
@@ -570,6 +703,7 @@ bool Launcher::MainDialog::setup()
     if (!setupGameSettings())
         return false;
 
+    applyPendingBuildPath();
     loadBuildManifest();
     setVersionLabel();
 
@@ -603,6 +737,7 @@ bool Launcher::MainDialog::reloadSettings()
     if (!setupGameSettings())
         return false;
 
+    applyPendingBuildPath();
     loadBuildManifest();
     applyBuildManifestRestrictions();
     if (!mBuildManifestLoaded)
@@ -801,8 +936,8 @@ bool Launcher::MainDialog::setupGameData()
         msgBox.setText(tr("<br><b>Could not find the Data Files location</b><br><br> \
                                    The directory containing the data files was not found."));
 
-        QAbstractButton *wizardButton =
-                msgBox.addButton(tr("Run &Installation Wizard..."), QMessageBox::ActionRole);
+        QAbstractButton *setupButton =
+                msgBox.addButton(tr("Choose the build folder..."), QMessageBox::ActionRole);
         QAbstractButton *skipButton =
                 msgBox.addButton(tr("Skip"), QMessageBox::RejectRole);
 
@@ -810,11 +945,10 @@ bool Launcher::MainDialog::setupGameData()
 
         msgBox.exec();
 
-        if (msgBox.clickedButton() == wizardButton)
+        if (msgBox.clickedButton() == setupButton && runBuildSetup(QString()))
         {
-            if (!mWizardInvoker->startProcess(QStringLiteral("arenamp-wizard"), QStringList() << QStringLiteral("--from-launcher"), false)
-                && !mWizardInvoker->startProcess(QStringLiteral("openmw-wizard"), QStringList() << QStringLiteral("--from-launcher"), false))
-                return false;
+            applyPendingBuildPath();
+            loadBuildManifest();
         }
     }
 
@@ -1421,6 +1555,7 @@ void Launcher::MainDialog::checkForUpdates()
     mUpdateCheckRunning = true;
     mPlayButton->setEnabled(false);
     mPlayButton->setText(tr("Checking for updates..."));
+    mPlayButton->setPulse(false);
     mPlayPage->setPlayButtonState(tr("Checking for updates..."), false);
     mPlayPage->setUpdateState(true, false);
 
@@ -1432,6 +1567,7 @@ void Launcher::MainDialog::checkForUpdates()
     mPlayButton->setText(mUpdateAvailable ? tr("Update") : tr("Play"));
     mPlayButton->setIcon(ArenaUi::glassIcon(mUpdateAvailable ? QStringLiteral("update-dark") : QStringLiteral("play-dark")));
     mPlayButton->setEnabled(true);
+    mPlayButton->setPulse(true, mUpdateAvailable);
     mPlayPage->setPlayButtonState(mUpdateAvailable ? tr("Update") : tr("Start game"), true);
     mPlayPage->setUpdateState(false, mUpdateAvailable);
 }

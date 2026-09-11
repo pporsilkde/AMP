@@ -33,6 +33,8 @@
 #include <QScrollArea>
 #include <QTabBar>
 #include <QTabWidget>
+#include <QListWidget>
+#include <QFormLayout>
 #include <QPushButton>
 #include <QPlainTextEdit>
 #include <QRegularExpression>
@@ -204,9 +206,6 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     , mClearCellsButton(nullptr)
     , mResetServerButton(nullptr)
     , mSyncingXpControls(false)
-    , mPlayIconLabel(nullptr)
-    , mPlayTitleLabel(nullptr)
-    , mPlaySubtitleLabel(nullptr)
     , mServerRunning(false)
     , mUpdateChecking(false)
     , mUpdateAvailable(false)
@@ -273,30 +272,16 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     serverModeLabel->setProperty("arenaFieldLabel", true);
     buildNameEdit->setProperty("arenaBuildName", true);
 
-    // Hero "Start game" button: title + subtitle drawn by child labels so the
-    // subtitle can show the real connection target in a smaller font.
-    playButton->setText(QString());
+    // Hero "Start game" action. ArenaUi::HeroButton paints itself, so the
+    // caption, the connection target and the soft pulse are set through its
+    // own API instead of child labels.
+    playButton->setText(tr("Start game"));
+    playButton->setIcon(ArenaUi::glassIcon(QStringLiteral("play-dark")));
     playButton->setToolTip(tr("Start ArenaMP with the current connection settings"));
-    QVBoxLayout* heroLayout = new QVBoxLayout(playButton);
-    heroLayout->setContentsMargins(12, 7, 12, 7);
-    heroLayout->setSpacing(1);
-    QHBoxLayout* heroTitleRow = new QHBoxLayout();
-    heroTitleRow->setSpacing(8);
-    mPlayIconLabel = new QLabel(playButton);
-    mPlayIconLabel->setPixmap(ArenaUi::glassIcon(QStringLiteral("play-dark")).pixmap(18, 18));
-    mPlayTitleLabel = new QLabel(tr("Start game"), playButton);
-    mPlayTitleLabel->setProperty("arenaHeroTitle", true);
-    mPlaySubtitleLabel = new QLabel(playButton);
-    mPlaySubtitleLabel->setProperty("arenaHeroSubtitle", true);
-    mPlaySubtitleLabel->setAlignment(Qt::AlignCenter);
-    for (QLabel* label : { mPlayIconLabel, mPlayTitleLabel, mPlaySubtitleLabel })
-        label->setAttribute(Qt::WA_TransparentForMouseEvents);
-    heroTitleRow->addStretch(1);
-    heroTitleRow->addWidget(mPlayIconLabel);
-    heroTitleRow->addWidget(mPlayTitleLabel);
-    heroTitleRow->addStretch(1);
-    heroLayout->addLayout(heroTitleRow);
-    heroLayout->addWidget(mPlaySubtitleLabel);
+    playButton->setPulse(true);
+
+    changeBuildButton->setIcon(ArenaUi::glassIcon(QStringLiteral("browse")));
+    connect(changeBuildButton, &QPushButton::clicked, this, &PlayPage::changeBuildRequested);
 
     // Connection card.
     mAlternativePort->setValidator(new QIntValidator(1, 65535, mAlternativePort));
@@ -400,8 +385,10 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     saveServerSettingsButton->setProperty("arenaPrimary", true);
     applyServerSettingsFormButton->setProperty("arenaQuiet", true);
     syncServerSettingsFormButton->setProperty("arenaQuiet", true);
-    serverSettingsFormInfoLabel->setText(tr("Main server settings grouped by category. Changes are saved to the persistent config and synchronized to runtime."));
-    serverSettingsFormInfoLabel->setWordWrap(true);
+    // U021: the explanation moved into the title tooltip; the page itself now
+    // uses the space for the settings.
+    serverSettingsFormInfoLabel->hide();
+    serverSettingsTitleLabel->setToolTip(tr("Main server settings grouped by category. Changes are saved to the persistent config and synchronized to runtime."));
     serverSettingsEditor->setProperty("arenaCodeEditor", true);
     serverSettingsEditor->setLineWrapMode(QPlainTextEdit::NoWrap);
     serverSettingsEditor->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
@@ -459,16 +446,79 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     serverSettingsScrollArea->hide();
     formServerSettingsTabLayout->insertWidget(1, categoryTabs, 1);
 
-    // Keep synchronization actions visible at the bottom instead of burying
-    // them below a long scrolling form.
-    serverSettingsFormButtonLayout->removeWidget(applyServerSettingsFormButton);
-    serverSettingsFormButtonLayout->removeWidget(syncServerSettingsFormButton);
-    QHBoxLayout* settingsActions = new QHBoxLayout();
-    settingsActions->setSpacing(8);
-    settingsActions->addStretch(1);
-    settingsActions->addWidget(syncServerSettingsFormButton);
-    settingsActions->addWidget(applyServerSettingsFormButton);
-    formServerSettingsTabLayout->addLayout(settingsActions);
+    // U021: one vertical category list on the left drives both the form
+    // categories and the raw editor. The two horizontal tab bars are kept as
+    // the state machine (existing load/save code depends on them) but are no
+    // longer drawn, and the manual form<->raw buttons disappear because the
+    // switch already synchronizes both directions.
+    applyServerSettingsFormButton->hide();
+    syncServerSettingsFormButton->hide();
+    if (serverSettingsModeTabs->tabBar() != nullptr)
+        serverSettingsModeTabs->tabBar()->hide();
+    if (categoryTabs->tabBar() != nullptr)
+        categoryTabs->tabBar()->hide();
+
+    QListWidget* settingsNav = new QListWidget(serverSettingsTab);
+    settingsNav->setObjectName(QStringLiteral("serverSettingsNav"));
+    settingsNav->setFocusPolicy(Qt::NoFocus);
+    settingsNav->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    settingsNav->setFixedWidth(184);
+    settingsNav->setIconSize(QSize(18, 18));
+    settingsNav->setUniformItemSizes(true);
+    const struct { const char* icon; QString title; } navEntries[] = {
+        { "settings", tr("Overview") },
+        { "users", tr("Players") },
+        { "advanced", tr("Combat / NPC") },
+        { "update", tr("Progress") },
+        { "wifi", tr("Network") },
+        { "changelog", tr("Raw config.lua") },
+    };
+    for (const auto& entry : navEntries)
+    {
+        QListWidgetItem* item = new QListWidgetItem(ArenaUi::glassIcon(QString::fromLatin1(entry.icon)),
+            entry.title, settingsNav);
+        item->setSizeHint(QSize(176, 34));
+    }
+    connect(settingsNav, &QListWidget::currentRowChanged, this, [this, categoryTabs](int row)
+    {
+        if (row < 0)
+            return;
+        if (row >= categoryTabs->count())
+        {
+            serverSettingsModeTabs->setCurrentWidget(rawServerSettingsTab);
+            return;
+        }
+        serverSettingsModeTabs->setCurrentWidget(formServerSettingsTab);
+        categoryTabs->setCurrentIndex(row);
+    });
+
+    serverSettingsTabLayout->removeWidget(serverSettingsModeTabs);
+    QHBoxLayout* settingsBody = new QHBoxLayout();
+    settingsBody->setSpacing(10);
+    settingsBody->addWidget(settingsNav);
+    settingsBody->addWidget(serverSettingsModeTabs, 1);
+    serverSettingsTabLayout->insertLayout(2, settingsBody, 1);
+    settingsNav->setCurrentRow(0);
+
+    // Value fields no longer stretch across the whole page: a checkbox or a
+    // number stays next to its label, which is what makes the long lists
+    // readable at a glance.
+    for (QFormLayout* form : serverSettingsTab->findChildren<QFormLayout*>())
+    {
+        form->setFieldGrowthPolicy(QFormLayout::FieldsStayAtSizeHint);
+        form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        form->setFormAlignment(Qt::AlignLeft | Qt::AlignTop);
+        form->setHorizontalSpacing(14);
+        form->setVerticalSpacing(7);
+    }
+    for (QSpinBox* box : serverSettingsTab->findChildren<QSpinBox*>())
+        box->setMaximumWidth(140);
+    for (QDoubleSpinBox* box : serverSettingsTab->findChildren<QDoubleSpinBox*>())
+        box->setMaximumWidth(140);
+    for (QComboBox* box : serverSettingsTab->findChildren<QComboBox*>())
+        box->setMaximumWidth(240);
+    for (QLineEdit* edit : serverSettingsTab->findChildren<QLineEdit*>())
+        edit->setMaximumWidth(320);
 
     serverSettingsModeTabs->setTabText(serverSettingsModeTabs->indexOf(formServerSettingsTab), tr("Visual editor"));
     serverSettingsModeTabs->setTabText(serverSettingsModeTabs->indexOf(rawServerSettingsTab), tr("Raw config.lua"));
@@ -485,11 +535,7 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
 
 void Launcher::PlayPage::setPlayButtonState(const QString& text, bool enabled)
 {
-    // The hero button draws its caption with child labels (title + target).
-    if (mPlayTitleLabel != nullptr)
-        mPlayTitleLabel->setText(text);
-    else
-        playButton->setText(text);
+    playButton->setText(text);
     playButton->setEnabled(enabled);
     updateStatusPanel();
 }
@@ -596,47 +642,45 @@ void Launcher::PlayPage::updateStatusPanel()
         presetValueLabel->setText(mode.isEmpty() ? QStringLiteral("\u2014") : mode);
 
     // Hero button subtitle: where "Start game" is going to connect.
-    if (mPlayIconLabel != nullptr)
-        mPlayIconLabel->setPixmap(ArenaUi::glassIcon(mUpdateAvailable
-            ? QStringLiteral("update-dark") : QStringLiteral("play-dark")).pixmap(18, 18));
-    if (mPlaySubtitleLabel != nullptr)
-    {
-        if (mUpdateChecking)
-            mPlaySubtitleLabel->setText(tr("Please wait a moment"));
-        else if (mUpdateAvailable)
-            mPlaySubtitleLabel->setText(tr("Install the new build version first"));
-        else if (host)
-            mPlaySubtitleLabel->setText(tr("Local server + game on port %1").arg(serverPort()));
-        else if (alternate)
-            mPlaySubtitleLabel->setText(alternativeAddress().isEmpty()
-                ? tr("Enter the server address")
-                : tr("Connect to %1:%2").arg(alternativeAddress(), alternativePort()));
-        else
-            mPlaySubtitleLabel->setText(tr("Connect to the selected server"));
-    }
+    playButton->setIcon(ArenaUi::glassIcon(mUpdateAvailable
+        ? QStringLiteral("update-dark") : QStringLiteral("play-dark")));
+    if (mUpdateChecking)
+        playButton->setSubtitle(tr("Please wait a moment"));
+    else if (mUpdateAvailable)
+        playButton->setSubtitle(tr("Install the new build version first"));
+    else if (host)
+        playButton->setSubtitle(tr("Local server + game on port %1").arg(serverPort()));
+    else if (alternate)
+        playButton->setSubtitle(alternativeAddress().isEmpty()
+            ? tr("Enter the server address")
+            : tr("Connect to %1:%2").arg(alternativeAddress(), alternativePort()));
+    else
+        playButton->setSubtitle(tr("Connect to the selected server"));
+    // Keep the glow calm while checking, brighter when an update is waiting.
+    playButton->setPulse(!mUpdateChecking, mUpdateAvailable);
 
     // Contextual tip instead of static marketing text.
     if (mUpdateAvailable)
     {
         tipTitleLabel->setText(tr("A new version is ready"));
-        tipTextLabel->setText(tr("The update keeps your saves, server data and settings. The launcher restarts by itself when it is done."));
+        tipTextLabel->setText(tr("Saves, server data and settings are kept. The launcher restarts by itself."));
     }
     else if (mServerRunning)
     {
         tipTitleLabel->setText(tr("Your server is online"));
-        tipTextLabel->setText(tr("Give friends your Radmin VPN or public IP and port %1. The live log is on the Server Console tab.")
+        tipTextLabel->setText(tr("Friends connect to your Radmin VPN or public IP, port %1. Live log: Server Console tab.")
             .arg(mRunningPort.isEmpty() ? serverPort() : mRunningPort));
     }
     else if (host)
     {
         tipTitleLabel->setText(tr("Playing with friends?"));
-        tipTextLabel->setText(tr("Start game launches the local server first. For Internet play forward UDP port %1 on the router or use Radmin VPN.")
+        tipTextLabel->setText(tr("The local server starts first. For Internet play forward UDP port %1 or use Radmin VPN.")
             .arg(serverPort()));
     }
     else if (alternate)
     {
         tipTitleLabel->setText(tr("Another server"));
-        tipTextLabel->setText(tr("This launch ignores the server from build.ini. The build's content files must match that server."));
+        tipTextLabel->setText(tr("The server from build.ini is ignored. Content files must match the chosen server."));
     }
     else
     {

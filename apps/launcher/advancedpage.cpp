@@ -8,12 +8,113 @@
 #include <QCompleter>
 #include <QString>
 #include <QTabBar>
+#include <QCheckBox>
+#include <QFrame>
+#include <QLabel>
+#include <QPushButton>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QGridLayout>
+#include <QScrollArea>
+#include <QSignalBlocker>
+#include <QVector>
+#include <components/misc/arenaglassicons.hpp>
 #include <components/contentselector/view/contentselector.hpp>
 #include <components/contentselector/model/esmfile.hpp>
 
 #include <cmath>
 
 #include "utils/openalutil.hpp"
+
+namespace
+{
+    QFrame* makeQuickCard(QWidget* parent, const QString& iconName, const QString& title,
+        const QString& subtitle, QVBoxLayout** bodyOut)
+    {
+        QFrame* card = new QFrame(parent);
+        card->setFrameShape(QFrame::NoFrame);
+        card->setProperty("arenaCard", true);
+        QVBoxLayout* outer = new QVBoxLayout(card);
+        outer->setContentsMargins(12, 10, 12, 12);
+        outer->setSpacing(8);
+
+        QHBoxLayout* header = new QHBoxLayout();
+        header->setSpacing(10);
+        QLabel* icon = new QLabel(card);
+        icon->setFixedSize(28, 28);
+        icon->setAlignment(Qt::AlignCenter);
+        icon->setPixmap(ArenaUi::glassIcon(iconName).pixmap(24, 24));
+        header->addWidget(icon);
+        QVBoxLayout* text = new QVBoxLayout();
+        text->setSpacing(1);
+        QLabel* titleLabel = new QLabel(title, card);
+        titleLabel->setProperty("arenaSectionTitle", true);
+        text->addWidget(titleLabel);
+        if (!subtitle.isEmpty())
+        {
+            QLabel* subtitleLabel = new QLabel(subtitle, card);
+            subtitleLabel->setProperty("arenaMuted", true);
+            subtitleLabel->setWordWrap(true);
+            text->addWidget(subtitleLabel);
+        }
+        header->addLayout(text, 1);
+        outer->addLayout(header);
+
+        QVBoxLayout* body = new QVBoxLayout();
+        body->setSpacing(7);
+        outer->addLayout(body);
+        if (bodyOut != nullptr)
+            *bodyOut = body;
+        return card;
+    }
+
+    // One switch in front of several engine settings. The mirror follows the
+    // originals, so Launcher load/save keeps working on the real widgets.
+    QCheckBox* makeGroupSwitch(QWidget* card, QVBoxLayout* body, const QString& text,
+        const QString& tooltip, const QVector<QCheckBox*>& targets)
+    {
+        QCheckBox* mirror = new QCheckBox(text, card);
+        mirror->setToolTip(tooltip);
+        body->addWidget(mirror);
+
+        auto refresh = [mirror, targets]() {
+            bool all = !targets.isEmpty();
+            for (QCheckBox* target : targets)
+                all = all && target != nullptr && target->isChecked();
+            const QSignalBlocker blocker(mirror);
+            mirror->setChecked(all);
+        };
+        for (QCheckBox* target : targets)
+        {
+            if (target == nullptr)
+                continue;
+            QObject::connect(target, &QCheckBox::toggled, mirror, [refresh](bool) { refresh(); });
+        }
+        QObject::connect(mirror, &QCheckBox::toggled, card, [targets](bool enabled) {
+            for (QCheckBox* target : targets)
+                if (target != nullptr && target->isChecked() != enabled)
+                    target->setChecked(enabled);
+        });
+        refresh();
+        return mirror;
+    }
+
+    QHBoxLayout* makeFieldRow(QWidget* card, QVBoxLayout* body, const QString& label, QWidget* field, int fieldWidth)
+    {
+        QHBoxLayout* row = new QHBoxLayout();
+        row->setSpacing(8);
+        QLabel* caption = new QLabel(label, card);
+        caption->setProperty("arenaFieldLabel", true);
+        row->addWidget(caption);
+        row->addStretch(1);
+        field->setParent(card);
+        field->setMaximumWidth(fieldWidth);
+        field->setVisible(true);
+        row->addWidget(field);
+        body->addLayout(row);
+        return row;
+    }
+}
 
 Launcher::AdvancedPage::AdvancedPage(Config::GameSettings &gameSettings, QWidget *parent)
         : QWidget(parent)
@@ -89,6 +190,139 @@ Launcher::AdvancedPage::AdvancedPage(Config::GameSettings &gameSettings, QWidget
     for(const char * name : Launcher::enumerateOpenALDevicesHrtf())
     {
         hrtfProfileSelectorComboBox->addItem(QString::fromUtf8(name), QString::fromUtf8(name));
+    }
+
+    // U021: "Advanced" is a short list of decisions, not a dump of engine
+    // internals. Every quick control drives the original widgets, which remain
+    // available behind "All engine parameters" for power users.
+    {
+        QWidget* panel = new QWidget(this);
+        panel->setObjectName(QStringLiteral("advancedQuickPanel"));
+        QVBoxLayout* panelLayout = new QVBoxLayout(panel);
+        panelLayout->setContentsMargins(0, 0, 0, 0);
+        panelLayout->setSpacing(10);
+
+        QHBoxLayout* columns = new QHBoxLayout();
+        columns->setSpacing(10);
+        QVBoxLayout* leftColumn = new QVBoxLayout();
+        leftColumn->setSpacing(10);
+        QVBoxLayout* rightColumn = new QVBoxLayout();
+        rightColumn->setSpacing(10);
+        columns->addLayout(leftColumn, 1);
+        columns->addLayout(rightColumn, 1);
+        panelLayout->addLayout(columns, 1);
+
+        QVBoxLayout* body = nullptr;
+        QFrame* visuals = makeQuickCard(panel, QStringLiteral("graphics"), tr("Visuals"),
+            tr("Detail switches that the quality presets do not cover."), &body);
+        makeGroupSwitch(visuals, body, tr("Normal and specular maps"),
+            tr("Turns on object and terrain normal/specular maps together with environment-map lighting."),
+            { autoUseObjectNormalMapsCheckBox, autoUseObjectSpecularMapsCheckBox,
+              autoUseTerrainNormalMapsCheckBox, autoUseTerrainSpecularMapsCheckBox,
+              bumpMapLocalLightingCheckBox });
+        makeGroupSwitch(visuals, body, tr("Sheathed weapons and shields"),
+            tr("Requires the additional animation sources shipped with the build."),
+            { animSourcesCheckBox, weaponSheathingCheckBox, shieldSheathingCheckBox });
+        body->addWidget(radialFogCheckBox);
+        body->addWidget(graphicHerbalismCheckBox);
+        body->addWidget(magicItemAnimationsCheckBox);
+        leftColumn->addWidget(visuals);
+
+        QFrame* gameplay = makeQuickCard(panel, QStringLiteral("gamepad"), tr("Gameplay"),
+            tr("Client-side comfort options. Server rules stay on the server."), &body);
+        makeGroupSwitch(gameplay, body, tr("Modern movement"),
+            tr("Smooth movement plus turning the character towards the movement direction."),
+            { smoothMovementCheckBox, turnToMovementDirectionCheckBox });
+        body->addWidget(toggleSneakCheckBox);
+        body->addWidget(viewOverShoulderCheckBox);
+        body->addWidget(headBobbingCheckBox);
+        leftColumn->addWidget(gameplay);
+
+        QFrame* audio = makeQuickCard(panel, QStringLiteral("info"), tr("Sound"), QString(), &body);
+        makeFieldRow(audio, body, tr("Audio device:"), audioDeviceSelectorComboBox, 240);
+        makeFieldRow(audio, body, tr("HRTF:"), enableHRTFComboBox, 160);
+        leftColumn->addWidget(audio);
+        leftColumn->addStretch(1);
+
+        QFrame* interfaceCard = makeQuickCard(panel, QStringLiteral("settings"), tr("Interface"),
+            tr("What the HUD shows and how large it is."), &body);
+        makeGroupSwitch(interfaceCard, body, tr("Detailed tooltips"),
+            tr("Shows effect duration, enchant chance, melee info and projectile damage."),
+            { showEffectDurationCheckBox, showEnchantChanceCheckBox,
+              showMeleeInfoCheckBox, showProjectileDamageCheckBox });
+        body->addWidget(changeDialogTopicsCheckBox);
+        body->addWidget(stretchBackgroundCheckBox);
+        makeFieldRow(interfaceCard, body, tr("Interface scale:"), scalingSpinBox, 110);
+        rightColumn->addWidget(interfaceCard);
+
+        QFrame* performance = makeQuickCard(panel, QStringLiteral("cpu"), tr("Performance"),
+            tr("One preset for the engine tuning parameters."), &body);
+        makeFieldRow(performance, body, tr("Preset:"), osgPresetComboBox, 240);
+        body->addWidget(osgPresetDescriptionLabel);
+        osgPresetDescriptionLabel->setProperty("arenaMuted", true);
+        osgPresetDescriptionLabel->setWordWrap(true);
+        makeFieldRow(performance, body, tr("Physics threads:"), physicsThreadsSpinBox, 110);
+        QHBoxLayout* presetActions = new QHBoxLayout();
+        presetActions->setSpacing(8);
+        presetActions->addStretch(1);
+        osgPresetApplyButton->setParent(performance);
+        osgPresetApplyButton->setProperty("arenaPrimary", true);
+        presetActions->addWidget(osgPresetApplyButton);
+        body->addLayout(presetActions);
+        rightColumn->addWidget(performance);
+
+        rightColumn->addStretch(1);
+
+        // Expert escape hatch: everything the launcher can still change.
+        QHBoxLayout* expertRow = new QHBoxLayout();
+        expertRow->setSpacing(8);
+        QPushButton* expertButton = new QPushButton(tr("All engine parameters"), panel);
+        expertButton->setProperty("arenaQuiet", true);
+        expertButton->setCheckable(true);
+        expertButton->setIcon(ArenaUi::glassIcon(QStringLiteral("advanced")));
+        expertRow->addStretch(1);
+        expertRow->addWidget(expertButton);
+        panelLayout->addLayout(expertRow);
+
+        if (AdvancedTabWidget != nullptr)
+        {
+            AdvancedTabWidget->hide();
+            connect(expertButton, &QPushButton::toggled, this, [this, panel](bool expert) {
+                AdvancedTabWidget->setVisible(expert);
+                for (QObject* child : panel->children())
+                {
+                    QWidget* widget = qobject_cast<QWidget*>(child);
+                    if (widget != nullptr && widget->property("arenaCard").toBool())
+                        widget->setVisible(!expert);
+                }
+            });
+        }
+
+        // Longer translations must scroll instead of being cut off by the
+        // fixed launcher window.
+        QScrollArea* quickScroll = new QScrollArea(this);
+        quickScroll->setObjectName(QStringLiteral("advancedQuickScroll"));
+        quickScroll->setWidgetResizable(true);
+        quickScroll->setFrameShape(QFrame::NoFrame);
+        quickScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        quickScroll->setProperty("arenaSettingsScroll", true);
+        quickScroll->setWidget(panel);
+        // In expert mode the quick panel shrinks to its action row so the
+        // original tab widget gets the whole page.
+        connect(expertButton, &QPushButton::toggled, quickScroll, [quickScroll](bool expert) {
+            quickScroll->setMaximumHeight(expert ? 56 : QWIDGETSIZE_MAX);
+        });
+
+        if (QBoxLayout* pageLayout = qobject_cast<QBoxLayout*>(layout()))
+            pageLayout->insertWidget(0, quickScroll, 1);
+        else if (QGridLayout* grid = qobject_cast<QGridLayout*>(layout()))
+            grid->addWidget(quickScroll, grid->rowCount(), 0, 1, qMax(1, grid->columnCount()));
+        else
+        {
+            QVBoxLayout* fallback = new QVBoxLayout(this);
+            fallback->setContentsMargins(0, 0, 0, 0);
+            fallback->addWidget(quickScroll, 1);
+        }
     }
 
     loadSettings();

@@ -1,4 +1,5 @@
 set(LAUNCHER
+    buildsetupdialog.cpp
     datafilespage.cpp
     graphicspage.cpp
     sdlinit.cpp
@@ -21,6 +22,7 @@ set(LAUNCHER
 )
 
 set(LAUNCHER_HEADER
+    buildsetupdialog.hpp
     datafilespage.hpp
     graphicspage.hpp
     sdlinit.hpp
@@ -40,6 +42,7 @@ set(LAUNCHER_HEADER
 
 # Headers that must be pre-processed
 set(LAUNCHER_HEADER_MOC
+    buildsetupdialog.hpp
     datafilespage.hpp
     graphicspage.hpp
     maindialog.hpp
