@@ -24,6 +24,10 @@ namespace Launcher
         bool saveSettings();
         bool loadSettings();
 
+        // U023: re-apply the currently selected Auto/manual graphics preset to
+        // the active build settings.cfg (used after switching build folders).
+        void applyCurrentQualityPreset();
+
         // U020: shared with the Play page status column.
         QString hardwareGpuName() const;
         QString hardwareGpuDetail() const;
@@ -84,6 +88,7 @@ namespace Launcher
         HardwareInfo detectHardware() const;
         int recommendQuality(const HardwareInfo& info) const;
         void applyQualityLevel(int level);
+        void applyRequiredShaderBaseline();
         void applyTerrainDetail(int index);
         void applyPbrQuality(int index);
         int terrainDetailIndexFromSettings() const;

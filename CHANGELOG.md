@@ -1,3 +1,17 @@
+## U023 — Graphics preset persistence, revive fallback and Data Files cleanup
+
+### Fixed
+- Auto graphics detection now applies its effective preset to the active `settings.cfg` instead of only updating the recommendation label. Segmented manual preset buttons apply immediately, and the existing Apply button uses the same authoritative path.
+- Switching builds re-applies the persisted Auto/manual profile after `Settings::Manager` is rebound to the selected build, preventing stale graphics values from the previous build.
+- Every preset writes the required ArenaMP `[Shaders]` baseline for normal/specular maps, Enhanced PBR, shader-compatible lighting, balanced materials, HDR and Bloom.
+- Completed Russian coverage for the redesigned Graphics page while retaining the original English strings.
+- Data Files now hides only the obsolete Content List profile strip (combo + New/Clone/Delete); the plug-in manager remains fully available.
+- Death recovery preserves `nirnRestoreHealth` validation and adds a narrow fallback for a client-confirmed healing potion whose record is unavailable to the server: consume the required potion(s) and revive at 5% base health. Server-known non-healing records are still rejected and normal recognized Restore Health potions keep the 25% path.
+
+### Validation
+- Lua syntax: PASS. Recovery harness: unknown record 5%, known non-healing reject, known generated heal 25%, preclassified `nirnRestoreHealth` heal 25%.
+- Data Files UI XML and U023 static graphics checks: PASS.
+
 ## U022 — Four sections, Settings replaces Advanced, spin-box steppers and Help link
 
 ### Changed

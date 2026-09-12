@@ -132,13 +132,24 @@ Launcher::GraphicsPage::GraphicsPage(Config::LauncherSettings& launcherSettings,
         {
             qualityPresetComboBox->setCurrentIndex(static_cast<int>(i));
             syncQualityPresetButtons();
+            // U023: segmented preset buttons are actions, not just selectors.
+            // Apply immediately so Auto and manually chosen profiles can never
+            // look selected while settings.cfg still contains the old profile.
+            if (!mInitializingQuality)
+                slotApplyQualityPreset();
         });
     }
 
     connect(autoSelectQualityCheckBox, &QCheckBox::toggled, this, [this](bool)
     {
         if (!mInitializingQuality)
+        {
             updateQualityDescription();
+            // In Auto mode changing the hardware-selection switch changes the
+            // effective preset, so persist that effective preset immediately.
+            if (qualityPresetComboBox->currentIndex() == 0)
+                slotApplyQualityPreset();
+        }
     });
     connect(terrainDetailComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(slotTerrainDetailChanged(int)));
     connect(pbrQualityComboBox, SIGNAL(currentIndexChanged(int)), this, SLOT(slotPbrQualityChanged(int)));
@@ -204,6 +215,13 @@ bool Launcher::GraphicsPage::loadSettings()
     syncGraphicsControls();
     loadOcclusionSettings();
     return true;
+}
+
+void Launcher::GraphicsPage::applyCurrentQualityPreset()
+{
+    // U023: keep one authoritative application path for both UI actions and
+    // build switches. This reloads the active settings.cfg before touching it.
+    slotApplyQualityPreset();
 }
 
 void Launcher::GraphicsPage::loadOcclusionSettings()
@@ -1149,6 +1167,11 @@ void Launcher::GraphicsPage::slotDetectHardware()
     mRecommendedQuality = recommendQuality(mHardwareInfo);
     updateHardwareLabels();
     updateQualityDescription();
+
+    // U023: when Auto is selected the newly detected recommendation is the
+    // selected preset, so write it instead of only changing the label.
+    if (!mInitializingQuality && qualityPresetComboBox->currentIndex() == 0)
+        slotApplyQualityPreset();
 }
 
 void Launcher::GraphicsPage::slotApplyQualityPreset()
@@ -1361,10 +1384,39 @@ void Launcher::GraphicsPage::applyQualityLevel(int requestedLevel)
             ? "CullDrawThreadPerContext" : "DrawThreadPerContext");
     Settings::Manager::setString("threading model", "OSG", threadingModel);
 
+    // U023: every ArenaMP preset finishes with the renderer baseline requested
+    // by the build. Presets still scale distance, shadows, water, grass, worker
+    // threads, AA and light counts, while this block keeps material/HDR output
+    // consistent across builds and guarantees these keys exist in settings.cfg.
+    applyRequiredShaderBaseline();
+
     // No display-setting restore is required: the preset never modifies those
     // keys. In particular, do not call setInt/setBool/setFloat for them here,
     // because doing so materializes values inherited from settings-default.cfg
     // or defaults.bin inside the user's settings.cfg.
+}
+
+void Launcher::GraphicsPage::applyRequiredShaderBaseline()
+{
+    Settings::Manager::setBool("auto use object normal maps", "Shaders", true);
+    Settings::Manager::setBool("auto use object specular maps", "Shaders", true);
+    Settings::Manager::setBool("auto use terrain normal maps", "Shaders", true);
+    Settings::Manager::setBool("auto use terrain specular maps", "Shaders", true);
+    Settings::Manager::setBool("enhanced pbr lighting", "Shaders", true);
+    Settings::Manager::setBool("force per pixel lighting", "Shaders", true);
+    Settings::Manager::setBool("force shaders", "Shaders", true);
+    Settings::Manager::setString("lighting method", "Shaders", "shaders compatibility");
+    Settings::Manager::setString("material quality", "Shaders", "balanced");
+    Settings::Manager::setBool("bloom enabled", "Shaders", true);
+    Settings::Manager::setFloat("bloom intensity", "Shaders", 0.39f);
+    Settings::Manager::setFloat("bloom radius", "Shaders", 3.54839f);
+    Settings::Manager::setFloat("bloom soft knee", "Shaders", 0.4f);
+    Settings::Manager::setFloat("bloom threshold", "Shaders", 0.52f);
+    Settings::Manager::setFloat("hdr exposure", "Shaders", 0.97f);
+    Settings::Manager::setFloat("hdr interior exposure", "Shaders", 0.52f);
+    Settings::Manager::setBool("hdr lighting", "Shaders", true);
+    Settings::Manager::setFloat("hdr night exposure", "Shaders", -0.07f);
+    Settings::Manager::setFloat("hdr saturation", "Shaders", 1.13f);
 }
 
 void Launcher::GraphicsPage::applyVendorOptimizations(int level)

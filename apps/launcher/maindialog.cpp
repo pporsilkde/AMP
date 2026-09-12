@@ -505,12 +505,19 @@ void Launcher::MainDialog::createPages()
         }
     }
 
-    // U021: Data Files shows the content list only. Grass/groundcover plug-ins
-    // are recognized by name and connected automatically, and the legacy
-    // launcher profile selector is redundant now that one build.ini describes
-    // exactly one build.
+    // U023: Data Files keeps the actual plug-in manager only. Grass/groundcover
+    // plug-ins are recognized by name and connected automatically, while the
+    // legacy Content List profile strip is redundant because build.ini already
+    // describes exactly one build.
     if (mDataFilesPage != nullptr)
     {
+        // U023: keep the actual plug-in manager (contentSelectorWidget) but hide
+        // the obsolete Content List profile strip with New/Clone/Delete icons.
+        // build.ini already represents one selected build, so this second profile
+        // layer only duplicates UI without adding useful control.
+        if (QGroupBox* profileGroup = mDataFilesPage->findChild<QGroupBox*>(QStringLiteral("profileGroupBox")))
+            profileGroup->hide();
+
         for (QCheckBox* box : mDataFilesPage->findChildren<QCheckBox*>())
         {
             const bool groundcover = box->objectName().contains(QLatin1String("groundcover"), Qt::CaseInsensitive)
@@ -640,13 +647,12 @@ bool Launcher::MainDialog::runBuildSetup(const QString& initialPath)
         result.buildName.trimmed().isEmpty() ? QStringLiteral("ArenaMP") : result.buildName.trimmed());
     mLauncherSettings.remove(QStringLiteral("General/firstrun"));
     mLauncherSettings.setValue(QStringLiteral("General/firstrun"), QStringLiteral("false"));
-    if (!result.manifestExists)
-    {
-        // One automatic hardware quality pass for a freshly created build.
-        const QString pendingKey = QStringLiteral("General/Graphics/initialQualityPresetPending");
-        mLauncherSettings.remove(pendingKey);
-        mLauncherSettings.setValue(pendingKey, QStringLiteral("true"));
-    }
+    // U023: selecting any build changes the active settings.cfg target. Re-apply
+    // the currently selected Auto/manual graphics profile after the switch so an
+    // existing build cannot inherit stale values from a different setup.
+    const QString pendingKey = QStringLiteral("General/Graphics/initialQualityPresetPending");
+    mLauncherSettings.remove(pendingKey);
+    mLauncherSettings.setValue(pendingKey, QStringLiteral("true"));
     return true;
 }
 
@@ -667,6 +673,13 @@ void Launcher::MainDialog::changeBuild()
         return;
     if (!reloadSettings())
         return;
+
+    // U023: reloadSettings() rebinds Settings::Manager to the selected build's
+    // settings.cfg. Re-apply the persisted Auto/manual quality profile now so
+    // switching an existing build works even though launcher.cfg was reloaded.
+    if (mGraphicsPage != nullptr)
+        mGraphicsPage->applyCurrentQualityPreset();
+
     writeSettings();
     applyBuildManifestRestrictions();
     QTimer::singleShot(0, this, SLOT(checkForUpdates()));

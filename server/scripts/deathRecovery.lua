@@ -172,16 +172,19 @@ local function cfgBoolean(key, fallback)
     return fallback
 end
 
-local function recordRestoresHealth(refId)
-    -- Server-generated and permanently stored potion records carry their effect
-    -- list, so custom alchemy is validated exactly instead of by name.
-    if RecordStores == nil or RecordStores["potion"] == nil then return false end
+local function recordRestoreHealthStatus(refId)
+    -- U023: return a tri-state value so a base/mod potion that the client can
+    -- inspect does not become indistinguishable from a server-known non-healing
+    -- generated record. true = known Restore Health, false = known non-healing,
+    -- nil = the server has no record/effect data for this refId.
+    if RecordStores == nil or RecordStores["potion"] == nil then return nil end
     local data = RecordStores["potion"].data
-    if type(data) ~= "table" then return false end
+    if type(data) ~= "table" then return nil end
 
     local record = nil
     if type(data.permanentRecords) == "table" then record = data.permanentRecords[refId] end
     if record == nil and type(data.generatedRecords) == "table" then record = data.generatedRecords[refId] end
+    if record == nil then return nil end
     if type(record) ~= "table" or type(record.effects) ~= "table" then return false end
 
     for _, effect in pairs(record.effects) do
@@ -193,10 +196,10 @@ local function recordRestoresHealth(refId)
     return false
 end
 
-local function isRestoreHealthPotion(refId)
-    -- Y040: the client checks the ESM record before offering the prompt, but the
-    -- request itself arrives as plain text. Without this a modified client could
-    -- spend a worthless item - or an empty string - and still stand back up.
+local function restoreHealthPotionStatus(refId)
+    -- Y040/U023: the request itself is text, so keep all existing authoritative
+    -- checks. nirnRestoreHealth and configured patterns remain trusted known
+    -- healing IDs; RecordStores can also prove a generated potion either way.
     if type(refId) ~= "string" or refId == "" then return false end
     if not cfgBoolean("validate potion refIds", true) then return true end
 
@@ -208,7 +211,11 @@ local function isRestoreHealthPotion(refId)
         end
     end
 
-    return recordRestoresHealth(refId)
+    return recordRestoreHealthStatus(refId)
+end
+
+local function isRestoreHealthPotion(refId)
+    return restoreHealthPotionStatus(refId) == true
 end
 
 local function requiredPotionCount(target)
@@ -222,50 +229,62 @@ end
 
 local function takePotions(player, preferredRefId, required)
     required = math.max(1, math.floor(tonumber(required) or 1))
-    if player == nil or type(player.data.inventory) ~= "table" then return false end
+    if player == nil or type(player.data.inventory) ~= "table" then return false, false end
 
-    -- Build an ordered list so the refId selected by the client is consumed first,
-    -- then use any other valid Restore Health potions. This means mixed potion
-    -- stacks count correctly toward high-level revives.
+    -- Build an ordered list so the client-selected potion is consumed first.
+    -- Only that selected refId may use the U023 unknown-record fallback: the
+    -- client has already resolved it as a real ESM::Potion with Restore Health,
+    -- while the server still verifies that the exact refId is in inventory.
     local candidates = {}
     local seen = {}
-    local function addCandidate(refId)
+    local function addCandidate(refId, allowUnknown)
         if type(refId) ~= "string" or refId == "" or seen[refId] then return end
-        if not isRestoreHealthPotion(refId) then return end
+        local status = restoreHealthPotionStatus(refId)
+        if status ~= true and not (allowUnknown == true and status == nil) then return end
         local count = inventoryCount(player, refId)
         if count <= 0 then return end
         seen[refId] = true
-        table.insert(candidates, { refId = refId, count = count })
+        table.insert(candidates, { refId = refId, count = count, unknown = status == nil })
     end
 
     if type(preferredRefId) == "string" and preferredRefId ~= "" then
-        if not isRestoreHealthPotion(preferredRefId) then
-            return false
+        local preferredStatus = restoreHealthPotionStatus(preferredRefId)
+        if preferredStatus == false then
+            tes3mp.LogMessage(enumerations.log.WARN, "deathRecovery: refused known non-healing revive item " ..
+                tostring(preferredRefId) .. " from " .. tostring(player.accountName))
+            return false, false
         end
-        addCandidate(preferredRefId)
+
+        addCandidate(preferredRefId, preferredStatus == nil)
+        if preferredStatus == nil and inventoryCount(player, preferredRefId) > 0 then
+            tes3mp.LogMessage(enumerations.log.WARN, "deathRecovery: using 5% fallback for uninspectable healing potion " ..
+                tostring(preferredRefId) .. " from " .. tostring(player.accountName))
+        end
     end
     for _, item in pairs(player.data.inventory) do
-        if type(item) == "table" then addCandidate(item.refId) end
+        if type(item) == "table" then addCandidate(item.refId, false) end
     end
 
     local available = 0
     for _, entry in ipairs(candidates) do available = available + entry.count end
-    if available < required then return false end
+    if available < required then return false, false end
 
     local remaining = required
     local removals = {}
+    local usedUnknownFallback = false
     for _, entry in ipairs(candidates) do
         if remaining <= 0 then break end
         local amount = math.min(remaining, entry.count)
         inventoryHelper.removeClosestItem(player.data.inventory, entry.refId, amount)
         table.insert(removals, { refId = entry.refId, count = amount })
+        if amount > 0 and entry.unknown == true then usedUnknownFallback = true end
         remaining = remaining - amount
     end
 
     tableHelper.cleanNils(player.data.inventory)
     player:LoadItemChanges(removals, enumerations.inventory.REMOVE)
     player:Save()
-    return true
+    return true, usedUnknownFallback
 end
 
 local function findPidByCharacterName(name)
@@ -304,8 +323,15 @@ local function recoverTarget(target, sourcePid, kind)
     applyXpAtTime(target, now(), true)
     stopTimer(target, "deathRecoveryXpTimerId")
 
-    local fractionKey = kind == "touch" and "touch revive health fraction" or "potion revive health fraction"
-    local defaultFraction = kind == "touch" and 0.10 or 0.25
+    local fractionKey = "potion revive health fraction"
+    local defaultFraction = 0.25
+    if kind == "touch" then
+        fractionKey = "touch revive health fraction"
+        defaultFraction = 0.10
+    elseif kind == "potion_fallback" then
+        fractionKey = "unknown potion revive health fraction"
+        defaultFraction = 0.05
+    end
     local fraction = clamp(cfgNumber(fractionKey, defaultFraction), 0.01, 1)
     local healthBase = math.max(1, tonumber(target.data.stats.healthBase) or 1)
     local restoredHealth = math.max(1, healthBase * fraction)
@@ -367,9 +393,11 @@ local function controlValidator(eventStatus, pid, message)
 
     if action == "SELF_POTION" then
         local refId = fields[2] or ""
-        if player.deathRecoveryActive == true and refId ~= ""
-            and takePotions(player, refId, requiredPotionCount(player)) then
-            recoverTarget(player, pid, "potion")
+        if player.deathRecoveryActive == true and refId ~= "" then
+            local consumed, fallback = takePotions(player, refId, requiredPotionCount(player))
+            if consumed then
+                recoverTarget(player, pid, fallback and "potion_fallback" or "potion")
+            end
         end
 
     elseif action == "ALLY_POTION" or action == "TOUCH" then
@@ -381,8 +409,11 @@ local function controlValidator(eventStatus, pid, message)
             and nearby(pid, targetPid) then
             if action == "ALLY_POTION" then
                 local refId = fields[3] or ""
-                if refId ~= "" and takePotions(player, refId, requiredPotionCount(target)) then
-                    recoverTarget(target, pid, "potion")
+                if refId ~= "" then
+                    local consumed, fallback = takePotions(player, refId, requiredPotionCount(target))
+                    if consumed then
+                        recoverTarget(target, pid, fallback and "potion_fallback" or "potion")
+                    end
                 end
             else
                 -- The client only emits TOUCH after a successful Restore Health

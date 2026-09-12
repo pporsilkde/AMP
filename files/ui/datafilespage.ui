@@ -21,6 +21,9 @@
    </item>
    <item>
     <widget class="QGroupBox" name="profileGroupBox">
+     <property name="visible">
+      <bool>false</bool>
+     </property>
      <property name="focusPolicy">
       <enum>Qt::NoFocus</enum>
      </property>
