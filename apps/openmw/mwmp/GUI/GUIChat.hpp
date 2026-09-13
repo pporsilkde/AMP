@@ -225,6 +225,7 @@ namespace mwmp
 
         void onDragStart(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
         void onDrag(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
+        void onGeometryReleased(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
         void applyHudGeometry(int width, int height);
         void applyPanelGeometry(int width, int height);
         void applyStateGeometry();
@@ -235,6 +236,9 @@ namespace mwmp
 
         MyGUI::Widget* mPanelBackground;
         MyGUI::Widget* mDragHandle;
+        MyGUI::Widget* mLayoutFrame;
+        MyGUI::Widget* mLayoutDrag;
+        MyGUI::Widget* mLayoutResize;
         MyGUI::Widget* mChatToolbar;
         MyGUI::Widget* mEmojiBar;
         MyGUI::Widget* mColorBar;
@@ -342,6 +346,8 @@ namespace mwmp
         float targetAlpha;
         MyGUI::IntPoint dragStartMouse;
         MyGUI::IntPoint dragStartWindow;
+        MyGUI::IntSize dragStartSize;
+        MyGUI::IntCoord hudCoord;
         MyGUI::IntCoord panelCoord;
     };
 }

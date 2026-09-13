@@ -510,10 +510,38 @@ void mwmp::GUIController::onAccountLoginDone(MWGui::WindowBase *parWindow)
     submitInputReply(password);
 }
 
+bool mwmp::GUIController::pressedChatLayoutKey(int key, bool repeat)
+{
+    if (mChat == nullptr)
+        return false;
+    MWBase::WindowManager* wm = MWBase::Environment::get().getWindowManager();
+    const auto mode = wm->getMode();
+    if (wm->isConsoleMode() || (mode != MWGui::GM_None
+        && !(mode == static_cast<MWGui::GuiMode>(GM_ARENAMP_PlayerMenu) && mChat->historyReviewState)))
+        return false;
+    if (key == keyChatMode)
+    {
+        if (!repeat)
+            mChat->pressedChatMode();
+        return true;
+    }
+    if (key == SDL_SCANCODE_ESCAPE && mChat->historyReviewState)
+    {
+        if (!repeat)
+            mChat->setHistoryReviewState(false);
+        return true;
+    }
+    return false;
+}
+
 bool mwmp::GUIController::pressedKey(int key)
 {
     MWBase::WindowManager *windowManager = MWBase::Environment::get().getWindowManager();
-    if (mChat == nullptr || windowManager->isConsoleMode() || windowManager->getMode() != MWGui::GM_None)
+    if (mChat == nullptr || windowManager->isConsoleMode())
+        return false;
+    const auto mode = windowManager->getMode();
+    if (mode != MWGui::GM_None
+        && !(mode == static_cast<MWGui::GuiMode>(GM_ARENAMP_PlayerMenu) && mChat->historyReviewState))
         return false;
     if (key == keyChatMode)
     {

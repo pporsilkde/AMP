@@ -121,7 +121,7 @@ target_link_libraries(arenamp-launcher
 target_link_libraries(arenamp-launcher Qt5::Widgets Qt5::Core Qt5::Gui Qt5::Network)
 
 if (WIN32)
-    target_link_libraries(arenamp-launcher dxgi advapi32)
+    target_link_libraries(arenamp-launcher dxgi advapi32 ole32 uuid)
 endif (WIN32)
 
 if (BUILD_WITH_CODE_COVERAGE)

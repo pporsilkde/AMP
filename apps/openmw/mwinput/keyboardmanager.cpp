@@ -13,6 +13,8 @@
 #include "../mwbase/world.hpp"
 
 #include "../mwworld/player.hpp"
+#include "../mwmp/Main.hpp"
+#include "../mwmp/GUIController.hpp"
 
 #include "actions.hpp"
 #include "bindingsmanager.hpp"
@@ -61,6 +63,15 @@ namespace MWInput
                 && MWBase::Environment::get().getWindowManager()->isConsoleMode())
             SDL_StopTextInput();
 
+        // Layout keys must be handled before MyGUI consumes keys for the focused
+        // history widget, and before Escape can open the pause menu.
+        if (!mBindingsManager->isDetectingBindingState()
+            && mwmp::Main::isInitialized()
+            && mwmp::Main::get().getGUIController()->pressedChatLayoutKey(arg.keysym.scancode, arg.repeat != 0))
+        {
+            MWBase::Environment::get().getInputManager()->setJoystickLastUsed(false);
+            return;
+        }
         bool consumed = false;
         if (!arg.repeat && !mBindingsManager->isDetectingBindingState())
         {

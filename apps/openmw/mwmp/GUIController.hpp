@@ -63,6 +63,7 @@ namespace mwmp
 
         /// Returns 0 if there was no events
         bool pressedKey(int key);
+        bool pressedChatLayoutKey(int key, bool repeat);
 
         void changeChatMode();
 

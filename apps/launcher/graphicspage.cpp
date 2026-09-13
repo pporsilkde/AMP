@@ -17,6 +17,10 @@
 #include <QStringList>
 #include <QThread>
 #include <QTabBar>
+#include <QListWidget>
+#include <QScrollArea>
+#include <QHBoxLayout>
+#include <components/misc/arenaglassicons.hpp>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -71,16 +75,43 @@ Launcher::GraphicsPage::GraphicsPage(Config::LauncherSettings& launcherSettings,
     setObjectName ("GraphicsPage");
     setupUi(this);
 
-    // U016: graphics sub-pages use the same equal-width macOS segmented
-    // navigation as the main launcher. Five tabs always remain on one line.
-    if (DisplayTabWidget->tabBar() != nullptr)
+    // Match the server settings: categories on the left, scrollable cards on the right.
+    DisplayTabWidget->tabBar()->hide();
+    qualityTopLayout->setDirection(QBoxLayout::TopToBottom);
+    qualityTopLayout->setStretch(0, 0);
+    qualityTopLayout->setStretch(1, 0);
+    auto* navigation = new QListWidget(this);
+    navigation->setObjectName(QStringLiteral("graphicsSettingsNav"));
+    navigation->setFixedWidth(164);
+    navigation->setFocusPolicy(Qt::NoFocus);
+    navigation->setIconSize(QSize(18, 18));
+    navigation->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    navigation->setUniformItemSizes(true);
+    const char* icons[] = { "graphics", "play", "settings", "advanced", "graphics" };
+    const int initialCategory = DisplayTabWidget->currentIndex();
+    for (int i = 0; i < DisplayTabWidget->count(); ++i)
     {
-        DisplayTabWidget->setDocumentMode(true);
-        DisplayTabWidget->tabBar()->setExpanding(true);
-        DisplayTabWidget->tabBar()->setUsesScrollButtons(false);
-        DisplayTabWidget->tabBar()->setElideMode(Qt::ElideRight);
-        DisplayTabWidget->tabBar()->setDrawBase(false);
+        QWidget* page = DisplayTabWidget->widget(i);
+        const QString title = DisplayTabWidget->tabText(i);
+        auto* item = new QListWidgetItem(ArenaUi::glassIcon(QString::fromLatin1(icons[i])), title, navigation);
+        item->setSizeHint(QSize(156, 36));
+        item->setToolTip(title);
+        DisplayTabWidget->removeTab(i);
+        auto* scroll = new QScrollArea(DisplayTabWidget);
+        scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setWidgetResizable(true);
+        scroll->setWidget(page);
+        DisplayTabWidget->insertTab(i, scroll, title);
     }
+    verticalLayout->removeWidget(DisplayTabWidget);
+    auto* body = new QHBoxLayout;
+    body->setContentsMargins(0, 0, 0, 0);
+    body->setSpacing(10);
+    body->addWidget(navigation);
+    body->addWidget(DisplayTabWidget, 1);
+    verticalLayout->addLayout(body, 1);
+    connect(navigation, &QListWidget::currentRowChanged, DisplayTabWidget, &QTabWidget::setCurrentIndex);
+    navigation->setCurrentRow(std::max(0, initialCategory));
 
     // X041: the streaming/occlusion budget used to sit in Advanced -> Arena
     // Settings, whose save path was never wired up, so nothing the user typed
@@ -334,10 +365,6 @@ void Launcher::GraphicsPage::syncGraphicsControls()
     int lightingMethod = 1;
     if (Settings::Manager::getString("lighting method", "Shaders") == "legacy")
         lightingMethod = 0;
-    else if (Settings::Manager::getString("lighting method", "Shaders") == "shaders")
-        lightingMethod = 2;
-    else if (Settings::Manager::getString("lighting method", "Shaders") == "clustered")
-        lightingMethod = 3;
     if (pbrIndex > 0 && lightingMethod == 0)
         lightingMethod = 1;
     lightingMethodComboBox->setCurrentIndex(lightingMethod);
@@ -494,8 +521,8 @@ bool Launcher::GraphicsPage::saveSettings()
     Settings::Manager::setInt("max shader ripples", "Water", waterMaxRipplesSpinBox->value());
 
     // Lighting. PBR material maps require the shader-compatible backend.
-    static std::array<std::string, 4> lightingMethodMap = {"legacy", "shaders compatibility", "shaders", "clustered"};
-    int lightingMethodIndex = lightingMethodComboBox->currentIndex();
+    static const std::array<std::string, 2> lightingMethodMap = {"legacy", "shaders compatibility"};
+    int lightingMethodIndex = std::max(0, std::min(1, lightingMethodComboBox->currentIndex()));
     if (pbrIndex > 0 && lightingMethodIndex == 0)
     {
         lightingMethodIndex = 1;

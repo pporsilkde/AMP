@@ -41,6 +41,7 @@
 
 
 #include "buildsetupdialog.hpp"
+#include "desktopshortcut.hpp"
 #include "playpage.hpp"
 #include "graphicspage.hpp"
 #include <QTextStream>
@@ -572,8 +573,8 @@ Launcher::FirstRunDialogResult Launcher::MainDialog::showFirstRunDialog()
     if (!setup() || !setupGameData())
         return FirstRunDialogResultFailure;
 
-    if (firstRun)
-        writeSettings();
+    if ((firstRun || !mPendingDesktopShortcut.isEmpty()) && !writeSettings())
+        return FirstRunDialogResultFailure;
     return FirstRunDialogResultContinue;
 }
 
@@ -653,6 +654,7 @@ bool Launcher::MainDialog::runBuildSetup(const QString& initialPath)
     const QString pendingKey = QStringLiteral("General/Graphics/initialQualityPresetPending");
     mLauncherSettings.remove(pendingKey);
     mLauncherSettings.setValue(pendingKey, QStringLiteral("true"));
+    mPendingDesktopShortcut = result.buildName.trimmed().isEmpty() ? QStringLiteral("ArenaMP") : result.buildName.trimmed();
     return true;
 }
 
@@ -1541,6 +1543,14 @@ bool Launcher::MainDialog::writeSettings()
     if (!writeBuildManifest())
         return false;
 
+    if (!mPendingDesktopShortcut.isEmpty())
+    {
+        const QString name = mPendingDesktopShortcut;
+        mPendingDesktopShortcut.clear();
+        if (!createDesktopShortcut(name))
+            QMessageBox::warning(this, tr("Desktop shortcut"),
+                tr("The build is ready, but the desktop shortcut could not be created."));
+    }
     return true;
 }
 

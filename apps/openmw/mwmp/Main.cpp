@@ -57,6 +57,7 @@
 #include "MechanicsHelper.hpp"
 #include "RecordHelper.hpp"
 #include "VoiceChat.hpp"
+#include <components/settings/parser.hpp>
 /*
     Start of AMP addition
 */
@@ -90,18 +91,35 @@ std::string loadSettings(Settings::Manager& settings)
     const std::string localdefault = (mCfgMgr.getLocalPath() / "tes3mp-client-default.cfg").string();
     const std::string globaldefault = (mCfgMgr.getGlobalPath() / "tes3mp-client-default.cfg").string();
 
-    // prefer local
-    if (boost::filesystem::exists(localdefault))
-        settings.loadDefault(localdefault, false);
-    else if (boost::filesystem::exists(globaldefault))
-        settings.loadDefault(globaldefault, false);
-    else
-        throw std::runtime_error ("No default settings file found! Make sure the file \"tes3mp-client-default.cfg\" was properly installed.");
+    // Ignore obsolete Chat defaults even when upgrading an old installation.
+    const std::string defaults = boost::filesystem::exists(localdefault) ? localdefault : globaldefault;
+    if (!boost::filesystem::exists(defaults))
+        throw std::runtime_error("No default settings file found! Make sure tes3mp-client-default.cfg was installed.");
+    Settings::CategorySettingValueMap clientDefaults;
+    Settings::SettingsFileParser defaultParser;
+    defaultParser.loadSettingsFile(defaults, clientDefaults);
+    for (const auto& entry : clientDefaults)
+        if (entry.first.first != "Chat")
+            settings.mDefaultSettings.emplace(entry);
+
 
     // load user settings if they exist
     const std::string settingspath = (mCfgMgr.getUserConfigPath() / "tes3mp-client.cfg").string();
     if (boost::filesystem::exists(settingspath))
-        settings.loadUser(settingspath);
+    {
+        // Do not retarget saveUser() away from the active build's settings.cfg.
+        Settings::CategorySettingValueMap legacy;
+        Settings::SettingsFileParser parser;
+        parser.loadSettingsFile(settingspath, legacy);
+        for (const auto& entry : legacy)
+        {
+            // Existing settings.cfg chat values win; old client values migrate once.
+            if (entry.first.first == "Chat")
+                Settings::Manager::mUserSettings.emplace(entry);
+            else
+                Settings::Manager::mUserSettings[entry.first] = entry.second;
+        }
+    }
 
     return settingspath;
 }

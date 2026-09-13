@@ -84,6 +84,7 @@ namespace Launcher
         bool setup();
         // U021: built-in replacement for the standalone setup wizard.
         bool runBuildSetup(const QString& initialPath);
+        QString mPendingDesktopShortcut;
         void applyPendingBuildPath();
 
         void createIcons();

@@ -61,10 +61,6 @@ namespace
     constexpr int sDrawerHeight = 68;
     constexpr int sColorDrawerHeight = 96;
     constexpr int sSideMargin = 10;
-    constexpr int sHudX = 1;
-    constexpr int sHudY = 25;
-    constexpr int sHudWidth = 260;
-    constexpr int sHudHeight = 400;
     constexpr const char* sHudFont = "Russo";
     constexpr const char* sMenuFont = "DejaVuLGCSansMono";
     constexpr const char* sChatFontResource = "ArenaMPChatColor.xml";
@@ -244,6 +240,9 @@ namespace mwmp
         , mCommandScroll(nullptr)
         , mPanelBackground(nullptr)
         , mDragHandle(nullptr)
+        , mLayoutFrame(nullptr)
+        , mLayoutDrag(nullptr)
+        , mLayoutResize(nullptr)
         , mChatToolbar(nullptr)
         , mEmojiBar(nullptr)
         , mColorBar(nullptr)
@@ -343,11 +342,14 @@ namespace mwmp
         , targetAlpha(sThirtyPercentTransparentAlpha)
         , dragStartMouse(0, 0)
         , dragStartWindow(0, 0)
-        , panelCoord(x, y, std::max(sMinimumPanelWidth, w), std::max(sMinimumPanelHeight, h))
+        , dragStartSize(0, 0)
+        , hudCoord(x, y, std::max(240, w), std::max(120, h))
+        , panelCoord(Settings::Manager::getInt("menu x", "Chat"), Settings::Manager::getInt("menu y", "Chat"),
+            std::max(sMinimumPanelWidth, Settings::Manager::getInt("menu w", "Chat")),
+            std::max(sMinimumPanelHeight, Settings::Manager::getInt("menu h", "Chat")))
     {
-        // X050d: x/y/w/h are the saved interactive player-menu geometry.
-        // Passive HUD chat deliberately keeps the compact X048 rectangle.
-        setCoord(sHudX, sHudY, sHudWidth, sHudHeight);
+        // HUD and expanded player menu have independent saved rectangles.
+        setCoord(hudCoord);
 
         getWidget(mCommandLine, "edit_Command");
         getWidget(mHistory, "list_History");
@@ -418,6 +420,19 @@ namespace mwmp
     {
         getWidget(mPanelBackground, "PanelBackground");
         getWidget(mDragHandle, "DragHandle");
+        getWidget(mLayoutFrame, "LayoutFrame");
+        getWidget(mLayoutDrag, "LayoutDrag");
+        getWidget(mLayoutResize, "LayoutResize");
+        MyGUI::TextBox* layoutTitle;
+        getWidget(layoutTitle, "LayoutTitle");
+        layoutTitle->setCaption(localizeArena("chat.layout.edit"));
+        for (MyGUI::Widget* handle : {mLayoutDrag, mLayoutResize})
+        {
+            handle->eventMouseButtonPressed += MyGUI::newDelegate(this, &GUIChat::onDragStart);
+            handle->eventMouseDrag += MyGUI::newDelegate(this, &GUIChat::onDrag);
+            handle->eventMouseButtonReleased += MyGUI::newDelegate(this, &GUIChat::onGeometryReleased);
+        }
+        mHistory->eventKeyButtonPressed += MyGUI::newDelegate(this, &GUIChat::keyPress);
         getWidget(mChatToolbar, "ChatToolbar");
         getWidget(mEmojiBar, "EmojiBar");
         getWidget(mColorBar, "ColorBar");
@@ -651,6 +666,11 @@ namespace mwmp
 
     bool GUIChat::exit()
     {
+        if (historyReviewState)
+        {
+            setHistoryReviewState(false);
+            return false;
+        }
         if (editState)
         {
             setEditState(false);
@@ -1086,22 +1106,27 @@ namespace mwmp
             return;
         }
 
-        windowState = static_cast<ChatWindowState>((static_cast<int>(windowState) + 1) % CHAT_STATE_COUNT);
+        // Keep the historic visibility cycle, inserting a transient layout mode
+        // between fully visible and 30% transparent. Only that mode has a frame.
+        if (windowState == CHAT_VISIBLE && !historyReviewState)
+        {
+            setHistoryReviewState(true);
+            MWBase::Environment::get().getWindowManager()->messageBox(localizeArena("chat.mode.layout"));
+            return;
+        }
+
+        windowState = historyReviewState ? CHAT_TRANSPARENT_30
+            : static_cast<ChatWindowState>((static_cast<int>(windowState) + 1) % CHAT_STATE_COUNT);
         Settings::Manager::setString("mode", "Chat", getModeSetting());
         Settings::Manager::saveUser();
+        setHistoryReviewState(false);
         revealTime = windowState == CHAT_AUTOHIDE ? delay : 0.f;
+        if (windowState == CHAT_HIDDEN && editState)
+            setEditState(false);
 
         const std::string chatMode = getModeMessage();
         LOG_MESSAGE_SIMPLE(TimedLog::LOG_VERBOSE, "Switch chat mode to %s", chatMode.c_str());
         MWBase::Environment::get().getWindowManager()->messageBox(chatMode);
-
-        if (windowState == CHAT_HIDDEN)
-        {
-            setHistoryReviewState(false);
-            if (editState)
-                setEditState(false);
-        }
-
         refreshPresentation();
     }
 
@@ -1233,7 +1258,9 @@ namespace mwmp
 
         if (!editState)
         {
-            mHistory->setCoord(8, 8, std::max(32, mainWidth - 16), std::max(20, mainHeight - 16));
+            const int top = historyReviewState ? 34 : 8;
+            const int bottom = historyReviewState ? 28 : 8;
+            mHistory->setCoord(8, top, std::max(32, mainWidth - 16), std::max(20, mainHeight - top - bottom));
             mCommandLine->setVisible(false);
             return;
         }
@@ -1325,7 +1352,10 @@ namespace mwmp
         if (state && editState)
             setEditState(false);
 
+        if (!state && geometryDirty)
+            persistGeometry();
         historyReviewState = state;
+        applyStateGeometry();
         if (state)
         {
             mMainWidget->setNeedMouseFocus(true);
@@ -1370,10 +1400,12 @@ namespace mwmp
         if (mainMenuOpen == state)
             return;
 
+        if (state && historyReviewState)
+            setHistoryReviewState(false);
         mainMenuOpen = state;
         if (state)
         {
-            if (editState)
+            if (editState && menuState)
             {
                 panelCoord = mMainWidget->getCoord();
                 if (geometryDirty)
@@ -1441,6 +1473,7 @@ namespace mwmp
     {
         if (key == MyGUI::KeyCode::Escape)
         {
+            setHistoryReviewState(false);
             setEditState(false);
             return;
         }
@@ -1582,6 +1615,7 @@ namespace mwmp
         const bool chatVisible = menuVisible && activeTab == TAB_CHAT;
         const bool editorVisible = editState && !mainMenuOpen && (!menuState || activeTab == TAB_CHAT);
 
+        mLayoutFrame->setVisible(historyReviewState && !mainMenuOpen);
         mPanelBackground->setVisible(menuVisible);
         mDragHandle->setVisible(menuVisible);
         mChatToolbar->setVisible(chatVisible);
@@ -1599,14 +1633,14 @@ namespace mwmp
         // Y024: the history scrollbar is an explicit Player Menu feature.
         // Showing the ordinary game cursor must leave the HUD chat transparent
         // to the mouse and must not expose a scrollbar.
-        mHistory->setNeedMouseFocus(chatVisible);
+        mHistory->setNeedMouseFocus(chatVisible || historyReviewState);
         if (mHistoryScroll)
         {
-            mHistoryScroll->setVisible(chatVisible);
-            mHistoryScroll->setNeedMouseFocus(chatVisible);
+            mHistoryScroll->setVisible(chatVisible || historyReviewState);
+            mHistoryScroll->setNeedMouseFocus(chatVisible || historyReviewState);
         }
 
-        if (!menuVisible)
+        if (!menuVisible && !historyReviewState)
             scrollHistoryToBottom();
 
         updateToggleButtons();
@@ -2031,37 +2065,67 @@ namespace mwmp
 
     void GUIChat::onDragStart(MyGUI::Widget*, int, int, MyGUI::MouseButton id)
     {
-        if (id != MyGUI::MouseButton::Left || !editState || !menuState)
+        if (id != MyGUI::MouseButton::Left || (!historyReviewState && !(editState && menuState)))
             return;
         dragStartMouse = MyGUI::InputManager::getInstance().getMousePosition();
         dragStartWindow = mMainWidget->getPosition();
+        dragStartSize = mMainWidget->getSize();
     }
 
-    void GUIChat::onDrag(MyGUI::Widget*, int, int, MyGUI::MouseButton id)
+    void GUIChat::onDrag(MyGUI::Widget* sender, int, int, MyGUI::MouseButton id)
     {
-        if (id != MyGUI::MouseButton::Left || !editState || !menuState)
+        if (id != MyGUI::MouseButton::Left || (!historyReviewState && !(editState && menuState)))
             return;
-
-        const MyGUI::IntPoint mouse = MyGUI::InputManager::getInstance().getMousePosition();
-        const MyGUI::IntPoint delta = mouse - dragStartMouse;
-        mMainWidget->setPosition(dragStartWindow + delta);
+        const MyGUI::IntPoint delta = MyGUI::InputManager::getInstance().getMousePosition() - dragStartMouse;
         const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
-        clampToViewport(view.width, view.height);
-        panelCoord = mMainWidget->getCoord();
-        applyMenuLayout();
+        if (historyReviewState)
+        {
+            if (sender == mLayoutResize)
+                hudCoord = MyGUI::IntCoord(dragStartWindow.left, dragStartWindow.top,
+                    std::max(240, dragStartSize.width + delta.left),
+                    std::max(120, dragStartSize.height + delta.top));
+            else
+                hudCoord = MyGUI::IntCoord(dragStartWindow.left + delta.left, dragStartWindow.top + delta.top,
+                    dragStartSize.width, dragStartSize.height);
+            // While resizing, keep the opposite corner anchored at its position.
+            if (sender == mLayoutResize && view.width > 0 && view.height > 0)
+            {
+                hudCoord.width = std::min(hudCoord.width, view.width - hudCoord.left);
+                hudCoord.height = std::min(hudCoord.height, view.height - hudCoord.top);
+            }
+            applyHudGeometry(view.width, view.height);
+            hudCoord = mMainWidget->getCoord();
+            updateCommandLineLayout();
+        }
+        else
+        {
+            mMainWidget->setPosition(dragStartWindow + delta);
+            clampToViewport(view.width, view.height);
+            panelCoord = mMainWidget->getCoord();
+            applyMenuLayout();
+        }
         markGeometryDirty();
+    }
+
+    void GUIChat::onGeometryReleased(MyGUI::Widget*, int, int, MyGUI::MouseButton id)
+    {
+        if (id == MyGUI::MouseButton::Left && geometryDirty)
+            persistGeometry();
     }
 
     void GUIChat::applyHudGeometry(int width, int height)
     {
         if (!mMainWidget)
             return;
-
-        const int hudWidth = width > 0 ? std::min(sHudWidth, width) : sHudWidth;
-        const int hudHeight = height > 0 ? std::min(sHudHeight, height) : sHudHeight;
-        const int hudX = width > 0 ? std::max(0, std::min(sHudX, width - hudWidth)) : sHudX;
-        const int hudY = height > 0 ? std::max(0, std::min(sHudY, height - hudHeight)) : sHudY;
-        mMainWidget->setCoord(hudX, hudY, hudWidth, hudHeight);
+        MyGUI::IntCoord visible = hudCoord;
+        if (width > 0 && height > 0)
+        {
+            visible.width = std::min(std::max(240, visible.width), width);
+            visible.height = std::min(std::max(120, visible.height), height);
+            visible.left = std::max(0, std::min(visible.left, width - visible.width));
+            visible.top = std::max(0, std::min(visible.top, height - visible.height));
+        }
+        mMainWidget->setCoord(visible);
     }
 
     void GUIChat::applyPanelGeometry(int width, int height)
@@ -2134,10 +2198,14 @@ namespace mwmp
 
         if (editState && menuState)
             panelCoord = mMainWidget->getCoord();
-        Settings::Manager::setInt("x", "Chat", panelCoord.left);
-        Settings::Manager::setInt("y", "Chat", panelCoord.top);
-        Settings::Manager::setInt("w", "Chat", panelCoord.width);
-        Settings::Manager::setInt("h", "Chat", panelCoord.height);
+        Settings::Manager::setInt("x", "Chat", hudCoord.left);
+        Settings::Manager::setInt("y", "Chat", hudCoord.top);
+        Settings::Manager::setInt("w", "Chat", hudCoord.width);
+        Settings::Manager::setInt("h", "Chat", hudCoord.height);
+        Settings::Manager::setInt("menu x", "Chat", panelCoord.left);
+        Settings::Manager::setInt("menu y", "Chat", panelCoord.top);
+        Settings::Manager::setInt("menu w", "Chat", panelCoord.width);
+        Settings::Manager::setInt("menu h", "Chat", panelCoord.height);
         Settings::Manager::saveUser();
         geometryDirty = false;
         geometrySaveDelay = 0.f;

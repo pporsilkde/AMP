@@ -811,7 +811,7 @@ namespace ArenaUi
                 background: transparent;
             }
 
-            QListWidget#serverSettingsNav {
+            QListWidget#serverSettingsNav, QListWidget#graphicsSettingsNav {
                 background-color: rgba(9,10,12,110);
                 border: 1px solid rgba(255,255,255,17);
                 border-radius: 11px;
@@ -819,18 +819,18 @@ namespace ArenaUi
                 outline: 0;
                 font-size: 13px;
             }
-            QListWidget#serverSettingsNav::item {
+            QListWidget#serverSettingsNav::item, QListWidget#graphicsSettingsNav::item {
                 color: #cfc9be;
                 border: 1px solid transparent;
                 border-radius: 9px;
                 padding: 5px 8px;
                 margin: 1px 0;
             }
-            QListWidget#serverSettingsNav::item:hover {
+            QListWidget#serverSettingsNav::item:hover, QListWidget#graphicsSettingsNav::item:hover {
                 color: #f1eadc;
                 background-color: rgba(255,255,255,12);
             }
-            QListWidget#serverSettingsNav::item:selected {
+            QListWidget#serverSettingsNav::item:selected, QListWidget#graphicsSettingsNav::item:selected {
                 color: #fff1d2;
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
                     stop:0 rgba(224,182,106,140), stop:1 rgba(146,105,52,96));

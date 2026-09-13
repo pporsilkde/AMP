@@ -180,7 +180,7 @@
             </item>
             <item>
              <widget class="QWidget" name="qualityPresetButtonsHost">
-              <layout class="QHBoxLayout" name="qualityPresetButtonsLayout">
+              <layout class="QGridLayout" name="qualityPresetButtonsLayout">
                <property name="spacing">
                 <number>5</number>
                </property>
@@ -196,7 +196,7 @@
                <property name="bottomMargin">
                 <number>3</number>
                </property>
-               <item>
+               <item row="0" column="0">
                 <widget class="QPushButton" name="presetAutoButton">
                  <property name="text">
                   <string>Auto</string>
@@ -218,7 +218,7 @@
                  </property>
                 </widget>
                </item>
-               <item>
+               <item row="0" column="1">
                 <widget class="QPushButton" name="presetMinimumButton">
                  <property name="text">
                   <string>Minimum</string>
@@ -240,7 +240,7 @@
                  </property>
                 </widget>
                </item>
-               <item>
+               <item row="0" column="2">
                 <widget class="QPushButton" name="presetLowButton">
                  <property name="text">
                   <string>Low</string>
@@ -262,7 +262,7 @@
                  </property>
                 </widget>
                </item>
-               <item>
+               <item row="0" column="3">
                 <widget class="QPushButton" name="presetBalancedButton">
                  <property name="text">
                   <string>Balance</string>
@@ -284,7 +284,7 @@
                  </property>
                 </widget>
                </item>
-               <item>
+               <item row="1" column="0">
                 <widget class="QPushButton" name="presetMediumButton">
                  <property name="text">
                   <string>Medium</string>
@@ -306,7 +306,7 @@
                  </property>
                 </widget>
                </item>
-               <item>
+               <item row="1" column="1">
                 <widget class="QPushButton" name="presetHighButton">
                  <property name="text">
                   <string>High</string>
@@ -328,7 +328,7 @@
                  </property>
                 </widget>
                </item>
-               <item>
+               <item row="1" column="2">
                 <widget class="QPushButton" name="presetUltraButton">
                  <property name="text">
                   <string>Ultra</string>
@@ -1407,16 +1407,6 @@
            <item>
             <property name="text">
              <string>shaders compatibility</string>
-            </property>
-           </item>
-           <item>
-            <property name="text">
-             <string>shaders</string>
-            </property>
-           </item>
-           <item>
-            <property name="text">
-             <string>clustered (Project Magnus)</string>
             </property>
            </item>
           </widget>

@@ -326,6 +326,9 @@ namespace ArenaUi
                 m.insert(QString::fromUtf8(u8"Insufficient permissions"), QString::fromUtf8(u8"\u041D\u0435\u0434\u043E\u0441\u0442\u0430\u0442\u043E\u0447\u043D\u043E \u043F\u0440\u0430\u0432"));
                 m.insert(QString::fromUtf8(u8"An error occurred"), QString::fromUtf8(u8"\u041F\u0440\u043E\u0438\u0437\u043E\u0448\u043B\u0430 \u043E\u0448\u0438\u0431\u043A\u0430"));
                 m.insert(QString::fromUtf8(u8"Error creating destination"), QString::fromUtf8(u8"\u041E\u0448\u0438\u0431\u043A\u0430 \u0441\u043E\u0437\u0434\u0430\u043D\u0438\u044F \u043F\u0430\u043F\u043A\u0438 \u043D\u0430\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F"));
+                m.insert(QString::fromUtf8(u8"Desktop shortcut"), QString::fromUtf8(u8"Ярлык на рабочем столе"));
+                m.insert(QString::fromUtf8(u8"The build is ready, but the desktop shortcut could not be created."),
+                    QString::fromUtf8(u8"Сборка готова, но создать ярлык на рабочем столе не удалось."));
                 m.insert(QString::fromUtf8(u8"Could not create build.ini"), QString::fromUtf8(u8"\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u043E\u0437\u0434\u0430\u0442\u044C build.ini"));
                 m.insert(QString::fromUtf8(u8"Preserved existing build manifest without changes: %1"), QString::fromUtf8(u8"\u0421\u0443\u0449\u0435\u0441\u0442\u0432\u0443\u044E\u0449\u0438\u0439 \u043C\u0430\u043D\u0438\u0444\u0435\u0441\u0442 \u0441\u0431\u043E\u0440\u043A\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D \u0431\u0435\u0437 \u0438\u0437\u043C\u0435\u043D\u0435\u043D\u0438\u0439: %1"));
                 m.insert(QString::fromUtf8(u8"Saved build manifest: %1"), QString::fromUtf8(u8"\u041C\u0430\u043D\u0438\u0444\u0435\u0441\u0442 \u0441\u0431\u043E\u0440\u043A\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D: %1"));

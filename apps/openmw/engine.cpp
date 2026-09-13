@@ -1,4 +1,5 @@
 #include "engine.hpp"
+#include <components/settings/parser.hpp>
 
 #include <iomanip>
 #include <fstream>
@@ -860,7 +861,16 @@ std::string OMW::Engine::loadSettings (Settings::Manager & settings)
     const std::string settingspath = settingsPath.string();
     settings.setUserSettingsPath(settingspath);
     if (boost::filesystem::exists(settingspath))
-        settings.loadUser(settingspath);
+    {
+        // tes3mp-client.cfg was read first. Parse each file independently so
+        // overlapping legacy keys cannot cause a duplicate-setting exception.
+        // The active build's settings.cfg is authoritative, including [Chat].
+        Settings::CategorySettingValueMap buildSettings;
+        Settings::SettingsFileParser parser;
+        parser.loadSettingsFile(settingspath, buildSettings);
+        for (const auto& entry : buildSettings)
+            Settings::Manager::mUserSettings[entry.first] = entry.second;
+    }
 
     // ArenaMP migration: previous builds could leave the compact target panel
     // disabled in an existing user settings file. Enable it once after upgrading,
