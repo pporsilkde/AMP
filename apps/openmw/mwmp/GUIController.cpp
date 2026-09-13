@@ -107,15 +107,22 @@ void mwmp::GUIController::setupChat()
     int chatW = Settings::Manager::getInt("w", "Chat");
     int chatH = Settings::Manager::getInt("h", "Chat");
 
-    // U024d: U024b/U024c shipped 20,40,800,500 as the HUD defaults. Migrate
-    // exactly that untouched rectangle once so existing settings.cfg files also
-    // receive the new compact 250x300 chat. Any user-custom geometry is kept.
-    if (chatX == 20 && chatY == 40 && chatW == 800 && chatH == 500)
+    // U024e: U024d only migrated one exact legacy rectangle, so any older
+    // settings.cfg that had already been touched could keep the large chat.
+    // Revision 2 deliberately applies the requested HUD rectangle once to all
+    // existing installations. Afterwards the player's saved geometry wins.
+    const int geometryRevision = Settings::Manager::getInt("hud geometry revision", "Chat");
+    if (geometryRevision < 2)
     {
+        chatX = 20;
+        chatY = 40;
         chatW = 250;
         chatH = 300;
+        Settings::Manager::setInt("x", "Chat", chatX);
+        Settings::Manager::setInt("y", "Chat", chatY);
         Settings::Manager::setInt("w", "Chat", chatW);
         Settings::Manager::setInt("h", "Chat", chatH);
+        Settings::Manager::setInt("hud geometry revision", "Chat", 2);
         Settings::Manager::saveUser();
     }
 

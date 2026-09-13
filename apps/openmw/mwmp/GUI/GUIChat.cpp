@@ -340,6 +340,7 @@ namespace mwmp
         , revealTime(0.f)
         , currentAlpha(sThirtyPercentTransparentAlpha)
         , targetAlpha(sThirtyPercentTransparentAlpha)
+        , geometryDragMode(GEOMETRY_DRAG_NONE)
         , dragStartMouse(0, 0)
         , dragStartWindow(0, 0)
         , dragStartSize(0, 0)
@@ -426,11 +427,10 @@ namespace mwmp
         MyGUI::TextBox* layoutTitle;
         getWidget(layoutTitle, "LayoutTitle");
         layoutTitle->setCaption(localizeArena("chat.layout.edit"));
-        // U024d: the entire editor chrome is a valid move surface. The old
-        // implementation only listened on the narrow title strip, which made
-        // the visible frame look draggable while most of it ignored the mouse.
-        // The bottom-right grip stays a dedicated resize surface.
-        for (MyGUI::Widget* handle : {mLayoutFrame, mLayoutDrag, mLayoutResize})
+        // U024e: use dedicated, unmistakable mouse surfaces instead of the
+        // decorative frame itself. A MyGUI Button reliably receives press and
+        // capture events across the desktop forks; the frame is visual only.
+        for (MyGUI::Widget* handle : {mLayoutDrag, mLayoutResize})
         {
             handle->eventMouseButtonPressed += MyGUI::newDelegate(this, &GUIChat::onDragStart);
             handle->eventMouseDrag += MyGUI::newDelegate(this, &GUIChat::onDrag);
@@ -649,6 +649,7 @@ namespace mwmp
 
         mDragHandle->eventMouseButtonPressed += MyGUI::newDelegate(this, &GUIChat::onDragStart);
         mDragHandle->eventMouseDrag += MyGUI::newDelegate(this, &GUIChat::onDrag);
+        mDragHandle->eventMouseButtonReleased += MyGUI::newDelegate(this, &GUIChat::onGeometryReleased);
 
         // Keep the title bar draggable even though its label occupies part of it.
         title->setNeedMouseFocus(false);
@@ -1358,6 +1359,8 @@ namespace mwmp
 
         if (!state && geometryDirty)
             persistGeometry();
+        if (!state)
+            geometryDragMode = GEOMETRY_DRAG_NONE;
         historyReviewState = state;
         applyStateGeometry();
         if (state)
@@ -1529,6 +1532,23 @@ namespace mwmp
     void GUIChat::update(float dt)
     {
         syncSettings();
+
+        // U024e: eventMouseDrag is not dependable on every MyGUI/OpenMW
+        // combination used by ArenaMP. Once the title bar or resize grip has
+        // captured the mouse, update directly from InputManager every frame.
+        // This makes movement deterministic even when no drag event is emitted.
+        if (geometryDragMode != GEOMETRY_DRAG_NONE)
+        {
+            if (MyGUI::InputManager::getInstance().isCaptureMouse())
+                updateGeometryDrag();
+            else
+            {
+                geometryDragMode = GEOMETRY_DRAG_NONE;
+                if (geometryDirty)
+                    persistGeometry();
+            }
+        }
+
         if (editState && activeTab == TAB_CHAT)
             updateCommandLineLayout();
 
@@ -1628,6 +1648,9 @@ namespace mwmp
         // Do not rely only on the .layout NeedMouse flag: older MyGUI/OpenMW
         // combinations can retain a stale focus mask when a hidden overlay is
         // shown again. Force all three editor surfaces into the active state.
+        // MyGUI stops child hit-testing when a parent has NeedMouse=false.
+        // Keep the frame pickable so the Button children can receive capture;
+        // only the title bar and resize grip have drag delegates attached.
         mLayoutFrame->setNeedMouseFocus(layoutVisible);
         mLayoutDrag->setNeedMouseFocus(layoutVisible);
         mLayoutResize->setNeedMouseFocus(layoutVisible);
@@ -2078,53 +2101,90 @@ namespace mwmp
             sendGroupAction("decline");
     }
 
-    void GUIChat::onDragStart(MyGUI::Widget*, int, int, MyGUI::MouseButton id)
+    void GUIChat::onDragStart(MyGUI::Widget* sender, int, int, MyGUI::MouseButton id)
     {
-        if (id != MyGUI::MouseButton::Left || (!historyReviewState && !(editState && menuState)))
+        if (id != MyGUI::MouseButton::Left)
             return;
-        dragStartMouse = MyGUI::InputManager::getInstance().getMousePosition();
-        dragStartWindow = mMainWidget->getPosition();
-        dragStartSize = mMainWidget->getSize();
-    }
 
-    void GUIChat::onDrag(MyGUI::Widget* sender, int, int, MyGUI::MouseButton id)
-    {
-        if (id != MyGUI::MouseButton::Left || (!historyReviewState && !(editState && menuState)))
-            return;
-        const MyGUI::IntPoint delta = MyGUI::InputManager::getInstance().getMousePosition() - dragStartMouse;
-        const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
         if (historyReviewState)
         {
             if (sender == mLayoutResize)
-                hudCoord = MyGUI::IntCoord(dragStartWindow.left, dragStartWindow.top,
-                    std::max(240, dragStartSize.width + delta.left),
-                    std::max(120, dragStartSize.height + delta.top));
+                geometryDragMode = GEOMETRY_DRAG_HUD_RESIZE;
+            else if (sender == mLayoutDrag)
+                geometryDragMode = GEOMETRY_DRAG_HUD_MOVE;
             else
-                hudCoord = MyGUI::IntCoord(dragStartWindow.left + delta.left, dragStartWindow.top + delta.top,
-                    dragStartSize.width, dragStartSize.height);
-            // While resizing, keep the opposite corner anchored at its position.
-            if (sender == mLayoutResize && view.width > 0 && view.height > 0)
+                return;
+        }
+        else if (editState && menuState && sender == mDragHandle)
+            geometryDragMode = GEOMETRY_DRAG_MENU_MOVE;
+        else
+            return;
+
+        dragStartMouse = MyGUI::InputManager::getInstance().getMousePosition();
+        dragStartWindow = mMainWidget->getPosition();
+        dragStartSize = mMainWidget->getSize();
+
+        // Apply immediately as well as from update(). This also proves the
+        // actual _Main widget, not merely the decorative frame, owns geometry.
+        updateGeometryDrag();
+    }
+
+    void GUIChat::onDrag(MyGUI::Widget*, int, int, MyGUI::MouseButton id)
+    {
+        if (id == MyGUI::MouseButton::Left && geometryDragMode != GEOMETRY_DRAG_NONE)
+            updateGeometryDrag();
+    }
+
+    void GUIChat::updateGeometryDrag()
+    {
+        if (geometryDragMode == GEOMETRY_DRAG_NONE || !mMainWidget)
+            return;
+
+        const MyGUI::IntPoint delta = MyGUI::InputManager::getInstance().getMousePosition() - dragStartMouse;
+        const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
+
+        if (geometryDragMode == GEOMETRY_DRAG_HUD_RESIZE)
+        {
+            hudCoord = MyGUI::IntCoord(dragStartWindow.left, dragStartWindow.top,
+                std::max(240, dragStartSize.width + delta.left),
+                std::max(120, dragStartSize.height + delta.top));
+            if (view.width > 0 && view.height > 0)
             {
-                hudCoord.width = std::min(hudCoord.width, view.width - hudCoord.left);
-                hudCoord.height = std::min(hudCoord.height, view.height - hudCoord.top);
+                hudCoord.width = std::min(hudCoord.width, std::max(1, view.width - hudCoord.left));
+                hudCoord.height = std::min(hudCoord.height, std::max(1, view.height - hudCoord.top));
             }
             applyHudGeometry(view.width, view.height);
             hudCoord = mMainWidget->getCoord();
             updateCommandLineLayout();
         }
-        else
+        else if (geometryDragMode == GEOMETRY_DRAG_HUD_MOVE)
+        {
+            hudCoord = MyGUI::IntCoord(dragStartWindow.left + delta.left, dragStartWindow.top + delta.top,
+                dragStartSize.width, dragStartSize.height);
+            applyHudGeometry(view.width, view.height);
+            hudCoord = mMainWidget->getCoord();
+            updateCommandLineLayout();
+        }
+        else if (geometryDragMode == GEOMETRY_DRAG_MENU_MOVE)
         {
             mMainWidget->setPosition(dragStartWindow + delta);
             clampToViewport(view.width, view.height);
             panelCoord = mMainWidget->getCoord();
             applyMenuLayout();
         }
+
         markGeometryDirty();
     }
 
     void GUIChat::onGeometryReleased(MyGUI::Widget*, int, int, MyGUI::MouseButton id)
     {
-        if (id == MyGUI::MouseButton::Left && geometryDirty)
+        if (id != MyGUI::MouseButton::Left)
+            return;
+
+        if (geometryDragMode != GEOMETRY_DRAG_NONE)
+            updateGeometryDrag();
+        geometryDragMode = GEOMETRY_DRAG_NONE;
+        if (geometryDirty)
             persistGeometry();
     }
 

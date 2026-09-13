@@ -214,9 +214,9 @@
       </Widget>
     </Widget>
 
-    <!-- U024d: classic grab frame for F2 layout editing. The full outer frame
-         accepts the mouse, the wide title bar is an obvious drag handle, and
-         the bottom-right corner is reserved for resize. -->
+    <!-- U024e: classic F2 editor. The outer frame stays mouse-enabled so MyGUI
+         can traverse to its child controls; the wide MW_Button title bar is the
+         dedicated move surface and the bottom-right MW_Button is the resize grip. -->
     <Widget type="Widget" skin="MW_Box" position="0 0 720 470" align="Stretch" name="LayoutFrame">
       <Property key="Visible" value="false"/>
       <Property key="NeedMouse" value="true"/>
@@ -229,7 +229,7 @@
         <Property key="NeedMouse" value="false"/>
         <Property key="Alpha" value="0.9"/>
       </Widget>
-      <Widget type="Widget" skin="MW_Box" position="5 5 710 34" align="HStretch Top" name="LayoutDrag">
+      <Widget type="Button" skin="MW_Button" position="5 5 710 34" align="HStretch Top" name="LayoutDrag">
         <Property key="NeedMouse" value="true"/>
         <Property key="Alpha" value="1.0"/>
         <Widget type="TextBox" skin="SandBrightText" position="8 5 694 24" align="Stretch" name="LayoutTitle">
@@ -237,7 +237,7 @@
           <Property key="TextAlign" value="Left VCenter"/>
         </Widget>
       </Widget>
-      <Widget type="Widget" skin="MW_Box" position="684 434 31 31" align="Right Bottom" name="LayoutResize">
+      <Widget type="Button" skin="MW_Button" position="684 434 31 31" align="Right Bottom" name="LayoutResize">
         <Property key="NeedMouse" value="true"/>
         <Property key="Alpha" value="1.0"/>
         <Widget type="TextBox" skin="SandBrightText" position="2 2 27 27">

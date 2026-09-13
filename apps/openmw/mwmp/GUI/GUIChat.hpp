@@ -75,6 +75,17 @@ namespace mwmp
             DRAWER_COLOR
         };
 
+        // U024e: explicit drag state. The HUD editor polls the captured mouse
+        // every frame as a fallback for MyGUI builds where eventMouseDrag is
+        // unreliable on overlay widgets.
+        enum GeometryDragMode
+        {
+            GEOMETRY_DRAG_NONE = 0,
+            GEOMETRY_DRAG_HUD_MOVE,
+            GEOMETRY_DRAG_HUD_RESIZE,
+            GEOMETRY_DRAG_MENU_MOVE
+        };
+
         static const int sEmojiSlotCount = 20;
         // X054: coreChat ships 40 nickname colours and /color offers all of
         // them, so the menu strip has to carry the same 40. Only the first
@@ -226,6 +237,7 @@ namespace mwmp
         void onDragStart(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
         void onDrag(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
         void onGeometryReleased(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
+        void updateGeometryDrag();
         void applyHudGeometry(int width, int height);
         void applyPanelGeometry(int width, int height);
         void applyStateGeometry();
@@ -344,6 +356,7 @@ namespace mwmp
         float revealTime;
         float currentAlpha;
         float targetAlpha;
+        GeometryDragMode geometryDragMode;
         MyGUI::IntPoint dragStartMouse;
         MyGUI::IntPoint dragStartWindow;
         MyGUI::IntSize dragStartSize;
