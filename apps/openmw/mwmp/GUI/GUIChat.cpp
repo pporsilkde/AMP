@@ -426,7 +426,11 @@ namespace mwmp
         MyGUI::TextBox* layoutTitle;
         getWidget(layoutTitle, "LayoutTitle");
         layoutTitle->setCaption(localizeArena("chat.layout.edit"));
-        for (MyGUI::Widget* handle : {mLayoutDrag, mLayoutResize})
+        // U024d: the entire editor chrome is a valid move surface. The old
+        // implementation only listened on the narrow title strip, which made
+        // the visible frame look draggable while most of it ignored the mouse.
+        // The bottom-right grip stays a dedicated resize surface.
+        for (MyGUI::Widget* handle : {mLayoutFrame, mLayoutDrag, mLayoutResize})
         {
             handle->eventMouseButtonPressed += MyGUI::newDelegate(this, &GUIChat::onDragStart);
             handle->eventMouseDrag += MyGUI::newDelegate(this, &GUIChat::onDrag);
@@ -1258,8 +1262,8 @@ namespace mwmp
 
         if (!editState)
         {
-            const int top = historyReviewState ? 34 : 8;
-            const int bottom = historyReviewState ? 28 : 8;
+            const int top = historyReviewState ? 42 : 8;
+            const int bottom = historyReviewState ? 38 : 8;
             mHistory->setCoord(8, top, std::max(32, mainWidth - 16), std::max(20, mainHeight - top - bottom));
             mCommandLine->setVisible(false);
             return;
@@ -1359,12 +1363,16 @@ namespace mwmp
         if (state)
         {
             mMainWidget->setNeedMouseFocus(true);
-            mHistory->setNeedMouseFocus(true);
+            // U024d: layout-edit mode owns the mouse completely. Keeping the
+            // history mouse-active allowed the history/scrollbar to win hit
+            // testing over the visible frame on some MyGUI builds. Keyboard
+            // focus remains on history so Esc/F2 handling is unchanged.
+            mHistory->setNeedMouseFocus(false);
             mHistory->setNeedKeyFocus(true);
             if (mHistoryScroll)
             {
-                mHistoryScroll->setVisible(true);
-                mHistoryScroll->setNeedMouseFocus(true);
+                mHistoryScroll->setVisible(false);
+                mHistoryScroll->setNeedMouseFocus(false);
             }
             syncInteractiveInputMode();
             MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mHistory);
@@ -1615,7 +1623,14 @@ namespace mwmp
         const bool chatVisible = menuVisible && activeTab == TAB_CHAT;
         const bool editorVisible = editState && !mainMenuOpen && (!menuState || activeTab == TAB_CHAT);
 
-        mLayoutFrame->setVisible(historyReviewState && !mainMenuOpen);
+        const bool layoutVisible = historyReviewState && !mainMenuOpen;
+        mLayoutFrame->setVisible(layoutVisible);
+        // Do not rely only on the .layout NeedMouse flag: older MyGUI/OpenMW
+        // combinations can retain a stale focus mask when a hidden overlay is
+        // shown again. Force all three editor surfaces into the active state.
+        mLayoutFrame->setNeedMouseFocus(layoutVisible);
+        mLayoutDrag->setNeedMouseFocus(layoutVisible);
+        mLayoutResize->setNeedMouseFocus(layoutVisible);
         mPanelBackground->setVisible(menuVisible);
         mDragHandle->setVisible(menuVisible);
         mChatToolbar->setVisible(chatVisible);
@@ -1633,11 +1648,11 @@ namespace mwmp
         // Y024: the history scrollbar is an explicit Player Menu feature.
         // Showing the ordinary game cursor must leave the HUD chat transparent
         // to the mouse and must not expose a scrollbar.
-        mHistory->setNeedMouseFocus(chatVisible || historyReviewState);
+        mHistory->setNeedMouseFocus(chatVisible);
         if (mHistoryScroll)
         {
-            mHistoryScroll->setVisible(chatVisible || historyReviewState);
-            mHistoryScroll->setNeedMouseFocus(chatVisible || historyReviewState);
+            mHistoryScroll->setVisible(chatVisible);
+            mHistoryScroll->setNeedMouseFocus(chatVisible);
         }
 
         if (!menuVisible && !historyReviewState)

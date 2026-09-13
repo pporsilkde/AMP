@@ -107,6 +107,18 @@ void mwmp::GUIController::setupChat()
     int chatW = Settings::Manager::getInt("w", "Chat");
     int chatH = Settings::Manager::getInt("h", "Chat");
 
+    // U024d: U024b/U024c shipped 20,40,800,500 as the HUD defaults. Migrate
+    // exactly that untouched rectangle once so existing settings.cfg files also
+    // receive the new compact 250x300 chat. Any user-custom geometry is kept.
+    if (chatX == 20 && chatY == 40 && chatW == 800 && chatH == 500)
+    {
+        chatW = 250;
+        chatH = 300;
+        Settings::Manager::setInt("w", "Chat", chatW);
+        Settings::Manager::setInt("h", "Chat", chatH);
+        Settings::Manager::saveUser();
+    }
+
     keySay = SDL_GetScancodeFromName(Settings::Manager::getString("keySay", "Chat").c_str());
     keyChatMode = SDL_GetScancodeFromName(Settings::Manager::getString("keyChatMode", "Chat").c_str());
 

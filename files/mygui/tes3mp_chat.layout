@@ -214,24 +214,33 @@
       </Widget>
     </Widget>
 
-    <!-- F2 HUD layout overlay. Children provide separate move and resize grips. -->
+    <!-- U024d: classic grab frame for F2 layout editing. The full outer frame
+         accepts the mouse, the wide title bar is an obvious drag handle, and
+         the bottom-right corner is reserved for resize. -->
     <Widget type="Widget" skin="MW_Box" position="0 0 720 470" align="Stretch" name="LayoutFrame">
       <Property key="Visible" value="false"/>
-      <Property key="NeedMouse" value="false"/>
-      <Property key="Alpha" value="0.65"/>
-      <Widget type="Widget" skin="FullBlackBG" position="4 4 712 462" align="Stretch">
+      <Property key="NeedMouse" value="true"/>
+      <Property key="Alpha" value="1.0"/>
+      <Widget type="Widget" skin="FullBlackBG" position="5 5 710 460" align="Stretch">
         <Property key="NeedMouse" value="false"/>
-        <Property key="Alpha" value="0.3"/>
+        <Property key="Alpha" value="0.45"/>
       </Widget>
-      <Widget type="Widget" skin="MW_Box" position="4 4 712 26" align="HStretch Top" name="LayoutDrag">
+      <Widget type="Widget" skin="MW_Box" position="2 2 716 466" align="Stretch">
+        <Property key="NeedMouse" value="false"/>
+        <Property key="Alpha" value="0.9"/>
+      </Widget>
+      <Widget type="Widget" skin="MW_Box" position="5 5 710 34" align="HStretch Top" name="LayoutDrag">
         <Property key="NeedMouse" value="true"/>
-        <Widget type="TextBox" skin="SandBrightText" position="6 2 700 22" align="Stretch" name="LayoutTitle">
+        <Property key="Alpha" value="1.0"/>
+        <Widget type="TextBox" skin="SandBrightText" position="8 5 694 24" align="Stretch" name="LayoutTitle">
           <Property key="NeedMouse" value="false"/>
+          <Property key="TextAlign" value="Left VCenter"/>
         </Widget>
       </Widget>
-      <Widget type="Widget" skin="MW_Box" position="690 440 26 26" align="Right Bottom" name="LayoutResize">
+      <Widget type="Widget" skin="MW_Box" position="684 434 31 31" align="Right Bottom" name="LayoutResize">
         <Property key="NeedMouse" value="true"/>
-        <Widget type="TextBox" skin="SandBrightText" position="2 2 22 22">
+        <Property key="Alpha" value="1.0"/>
+        <Widget type="TextBox" skin="SandBrightText" position="2 2 27 27">
           <Property key="NeedMouse" value="false"/>
           <Property key="Caption" value="+"/>
           <Property key="TextAlign" value="Center"/>
