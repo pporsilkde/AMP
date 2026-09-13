@@ -50,6 +50,8 @@ namespace Launcher
         void setGameRunning(bool running);
 
         VoicePanel* voicePanel() const { return mVoicePanel; }
+        bool voiceEnabled() const;
+        QString pushToTalkKey() const;
 
     signals:
         /// Тикет получен и его можно отдать коммутатору.

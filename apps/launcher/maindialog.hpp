@@ -35,6 +35,7 @@ namespace Launcher
     class UnshieldThread;
     class SettingsPage;
     class AdvancedPage;
+    class ChatPage;
     class ServerDialog;
 
     enum FirstRunDialogResult
@@ -100,6 +101,7 @@ namespace Launcher
         QString primaryDataDirectory() const;
         bool isLocalServerAddress(const QString& address) const;
         void writeClientEndpoint(const QString& address, const QString& port) const;
+        void writeClientVoiceSettings() const;
         QString resolveSelectedDataFilePath(const QString& fileName, const QStringList& selectedPaths) const;
 
         void setVersionLabel();
@@ -117,6 +119,7 @@ namespace Launcher
         DataFilesPage *mDataFilesPage;
         SettingsPage *mSettingsPage;
         AdvancedPage *mAdvancedPage;
+        ChatPage *mChatPage;
 
         Process::ProcessInvoker *mGameInvoker;
         ServerDialog *mServerDialog;

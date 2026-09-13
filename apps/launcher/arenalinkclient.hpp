@@ -12,6 +12,7 @@
 #include <QObject>
 #include <QString>
 #include <QVector>
+#include <string>
 
 #include <components/openmw-mp/arenalink.hpp>
 

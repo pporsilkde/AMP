@@ -7,6 +7,9 @@ set(LAUNCHER
     updatecontroller.cpp
     maindialog.cpp
     playpage.cpp
+    arenalinkclient.cpp
+    chatpage.cpp
+    voice/voicepanel.cpp
     textslotmsgbox.cpp
     settingspage.cpp
     advancedpage.cpp
@@ -28,6 +31,9 @@ set(LAUNCHER_HEADER
     sdlinit.hpp
     maindialog.hpp
     playpage.hpp
+    arenalinkclient.hpp
+    chatpage.hpp
+    voice/voicepanel.hpp
     textslotmsgbox.hpp
     settingspage.hpp
     advancedpage.hpp
@@ -47,6 +53,9 @@ set(LAUNCHER_HEADER_MOC
     graphicspage.hpp
     maindialog.hpp
     playpage.hpp
+    arenalinkclient.hpp
+    chatpage.hpp
+    voice/voicepanel.hpp
     textslotmsgbox.hpp
     settingspage.hpp
     advancedpage.hpp

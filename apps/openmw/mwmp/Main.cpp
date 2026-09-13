@@ -200,8 +200,19 @@ bool Main::init(std::vector<std::string> &content, std::vector<std::string> &gro
     loadSettings(manager);
 
     int logLevel = manager.getInt("logLevel", "General");
-    pMain->mVoiceChat->configure(manager.getBool("enabled", "Voice"),
-        manager.getString("pushToTalkKey", "Voice"), manager.getFloat("rangeMeters", "Voice"));
+    bool voiceEnabled = manager.getBool("enabled", "Voice");
+    std::string voiceKey = manager.getString("pushToTalkKey", "Voice");
+    if (const char* envEnabled = std::getenv("ARENAMP_VOICE_ENABLED"))
+    {
+        const std::string value(envEnabled);
+        voiceEnabled = value != "0" && value != "false" && value != "FALSE" && value != "off" && value != "OFF";
+    }
+    if (const char* envKey = std::getenv("ARENAMP_VOICE_PTT_KEY"))
+    {
+        if (*envKey != '\0')
+            voiceKey = envKey;
+    }
+    pMain->mVoiceChat->configure(voiceEnabled, voiceKey, manager.getFloat("rangeMeters", "Voice"));
     TimedLog::SetLevel(logLevel);
     if (address.empty())
     {

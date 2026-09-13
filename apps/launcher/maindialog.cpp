@@ -43,6 +43,7 @@
 #include "buildsetupdialog.hpp"
 #include "desktopshortcut.hpp"
 #include "playpage.hpp"
+#include "chatpage.hpp"
 #include "graphicspage.hpp"
 #include <QTextStream>
 #include <QFile>
@@ -71,7 +72,7 @@ namespace
     // laptop screens together with the Windows taskbar.
     constexpr int sLauncherWidth = 1080;
     constexpr int sLauncherHeight = 720;
-    constexpr int sNavigationItems = 4;
+    constexpr int sNavigationItems = 5;
 
     void repolishWidget(QWidget* widget)
     {
@@ -209,6 +210,7 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     : QMainWindow(parent)
     , mPlayPage(nullptr)
     , mGraphicsPage(nullptr)
+    , mChatPage(nullptr)
     , mDataFilesPage(nullptr)
     , mSettingsPage(nullptr)
     , mAdvancedPage(nullptr)
@@ -367,6 +369,13 @@ void Launcher::MainDialog::createIcons()
     graphicsButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom | Qt::AlignAbsolute);
     graphicsButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
 
+    QListWidgetItem *chatButton = new QListWidgetItem(iconWidget);
+    chatButton->setSizeHint(QSize((sLauncherWidth - 20 - 18 - 12 - 30) / sNavigationItems - 4, 58));
+    chatButton->setIcon(ArenaUi::glassIcon(QStringLiteral("chat")));
+    chatButton->setText(tr("Chat"));
+    chatButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
+    chatButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
+
     // U022: four sections. The old OpenMW "Settings" page (Morrowind.ini
     // importer and wizard shortcuts) is gone; the compact engine options that
     // used to live under "Advanced" are the Settings page now.
@@ -395,6 +404,7 @@ void Launcher::MainDialog::createPages()
     mGraphicsPage = new GraphicsPage(mLauncherSettings, this);
     mSettingsPage = new SettingsPage(mCfgMgr, mGameSettings, mLauncherSettings, this);
     mAdvancedPage = new AdvancedPage(mGameSettings, this);
+    mChatPage = new ChatPage(mLauncherSettings, this);
     mPlayPage->setServerConsoleWidget(mServerDialog);
     connect(mGraphicsPage, &GraphicsPage::hardwareInfoChanged, this, [this]()
     {
@@ -456,6 +466,8 @@ void Launcher::MainDialog::createPages()
 
         mPlayPage->setServerAddress(addr);
         mPlayPage->setServerPort(port);
+        if (mChatPage != nullptr)
+            mChatPage->setServerEndpoint(addr, port.toUShort());
 
         const bool managedServer = mServerDialog->isRunning();
         const bool reachableServer = managedServer
@@ -472,6 +484,7 @@ void Launcher::MainDialog::createPages()
     pagesWidget->addWidget(mPlayPage);
     pagesWidget->addWidget(mDataFilesPage);
     pagesWidget->addWidget(mGraphicsPage);
+    pagesWidget->addWidget(mChatPage);
     pagesWidget->addWidget(mAdvancedPage);
     mSettingsPage->hide();
 
@@ -1341,6 +1354,95 @@ void Launcher::MainDialog::writeClientEndpoint(const QString& address, const QSt
     }
 }
 
+void Launcher::MainDialog::writeClientVoiceSettings() const
+{
+    if (mChatPage == nullptr)
+        return;
+
+    QDir userDir(QString::fromUtf8(mCfgMgr.getUserConfigPath().string().c_str()));
+    if (!userDir.exists())
+        userDir.mkpath(QStringLiteral("."));
+
+    QFile cfgFile(userDir.filePath(QStringLiteral("tes3mp-client.cfg")));
+    QStringList lines;
+    if (cfgFile.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        QTextStream input(&cfgFile);
+        input.setCodec("UTF-8");
+        while (!input.atEnd())
+            lines.append(input.readLine());
+        cfgFile.close();
+    }
+
+    const QString enabledValue = mChatPage->voiceEnabled() ? QStringLiteral("true") : QStringLiteral("false");
+    const QString keyValue = mChatPage->pushToTalkKey().trimmed().isEmpty()
+        ? QStringLiteral("V") : mChatPage->pushToTalkKey().trimmed();
+
+    int voiceHeader = -1;
+    int nextHeader = lines.size();
+    for (int i = 0; i < lines.size(); ++i)
+    {
+        const QString trimmed = lines.at(i).trimmed();
+        if (trimmed.compare(QStringLiteral("[Voice]"), Qt::CaseInsensitive) == 0)
+        {
+            voiceHeader = i;
+            for (int j = i + 1; j < lines.size(); ++j)
+            {
+                const QString candidate = lines.at(j).trimmed();
+                if (candidate.startsWith(QLatin1Char('[')) && candidate.endsWith(QLatin1Char(']')))
+                {
+                    nextHeader = j;
+                    break;
+                }
+            }
+            break;
+        }
+    }
+
+    if (voiceHeader < 0)
+    {
+        if (!lines.isEmpty() && !lines.last().isEmpty())
+            lines.append(QString());
+        voiceHeader = lines.size();
+        lines.append(QStringLiteral("[Voice]"));
+        lines.append(QStringLiteral("enabled = ") + enabledValue);
+        lines.append(QStringLiteral("pushToTalkKey = ") + keyValue);
+    }
+    else
+    {
+        bool foundEnabled = false;
+        bool foundKey = false;
+        for (int i = voiceHeader + 1; i < nextHeader; ++i)
+        {
+            const QString trimmed = lines.at(i).trimmed();
+            if (trimmed.startsWith(QLatin1String("enabled")))
+            {
+                lines[i] = QStringLiteral("enabled = ") + enabledValue;
+                foundEnabled = true;
+            }
+            else if (trimmed.startsWith(QLatin1String("pushToTalkKey")))
+            {
+                lines[i] = QStringLiteral("pushToTalkKey = ") + keyValue;
+                foundKey = true;
+            }
+        }
+        int insertAt = nextHeader;
+        if (!foundEnabled)
+            lines.insert(insertAt++, QStringLiteral("enabled = ") + enabledValue);
+        if (!foundKey)
+            lines.insert(insertAt, QStringLiteral("pushToTalkKey = ") + keyValue);
+    }
+
+    if (cfgFile.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate))
+    {
+        QTextStream output(&cfgFile);
+        output.setCodec("UTF-8");
+        for (const QString& line : lines)
+            output << line << '\n';
+    }
+}
+
+
 bool Launcher::MainDialog::setupGraphicsSettings()
 {
     // This method is almost a copy of OMW::Engine::loadSettings().  They should definitely
@@ -1437,6 +1539,9 @@ void Launcher::MainDialog::loadSettings()
 
         mServerDialog->setAutoRestartEnabled(autoRestart);
     }
+
+    if (mChatPage != nullptr)
+        mChatPage->loadSettings();
 }
 
 void Launcher::MainDialog::saveSettings()
@@ -1473,6 +1578,11 @@ void Launcher::MainDialog::saveSettings()
         mLauncherSettings.setValue(QStringLiteral("General/Build/name"), mPlayPage->buildName());
     }
 
+    if (mChatPage != nullptr)
+    {
+        mChatPage->saveSettings();
+        writeClientVoiceSettings();
+    }
 }
 
 bool Launcher::MainDialog::writeSettings()
@@ -1637,6 +1747,8 @@ void Launcher::MainDialog::play()
 
     mPendingClientAddress = alternate ? mPlayPage->alternativeAddress() : mPlayPage->serverAddress();
     mPendingClientPort = alternate ? mPlayPage->alternativePort() : mPlayPage->serverPort();
+    if (mChatPage != nullptr)
+        mChatPage->setServerEndpoint(mPendingClientAddress, mPendingClientPort.toUShort());
 
     bool startedNow = false;
     const bool localServerMode = mPlayPage->autoStartServer();
@@ -1708,6 +1820,11 @@ void Launcher::MainDialog::launchClient()
         ? mPlayPage->serverPort() : mPendingClientPort.trimmed();
 
     writeClientEndpoint(address, port);
+    if (mChatPage != nullptr)
+    {
+        mChatPage->setServerEndpoint(address, port.toUShort());
+        mChatPage->setGameRunning(true);
+    }
 
     QStringList arguments;
     arguments.append(QLatin1String("--connect=") + address + QLatin1String(":") + port);
@@ -1980,6 +2097,9 @@ void Launcher::MainDialog::serverRunningChanged(bool running, const QString& add
     {
         mPlayPage->setServerRunning(running, address, port);
     }
+
+    if (mChatPage != nullptr && !address.trimmed().isEmpty())
+        mChatPage->setServerEndpoint(address, port.toUShort());
 
     updateFooterServerStatus(running, address, port);
 }

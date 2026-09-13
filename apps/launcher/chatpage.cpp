@@ -179,6 +179,17 @@ void ChatPage::saveSettings()
         mVoicePanel->saveSettings(mLauncherSettings);
 }
 
+
+bool ChatPage::voiceEnabled() const
+{
+    return mVoicePanel != nullptr && mVoicePanel->voiceEnabled();
+}
+
+QString ChatPage::pushToTalkKey() const
+{
+    return mVoicePanel != nullptr ? mVoicePanel->pushToTalkKey() : QStringLiteral("V");
+}
+
 void ChatPage::setServerEndpoint(const QString& host, quint16 gamePort)
 {
     // Порты: игровой (RakNet) не трогаем, голос = +1, чат = +2.
@@ -190,8 +201,6 @@ void ChatPage::setGameRunning(bool running)
     mGameRunning = running;
     if (mVoicePanel != nullptr)
         mVoicePanel->setGameRunning(running);
-    if (running && mClient->authorized())
-        mClient->requestVoiceTicket(1);      // игровая сессия
 }
 
 void ChatPage::slotLoginClicked()
@@ -231,10 +240,6 @@ void ChatPage::slotLoggedIn(const LinkProfile& profile)
     mStack->setCurrentIndex(1);
     mHistory->clear();
 
-    if (mVoicePanel != nullptr)
-        mVoicePanel->setVoiceAvailable(profile.voicePort != 0);
-    if (profile.voicePort != 0 && !mGameRunning)
-        mClient->requestVoiceTicket(0);      // лобби
 }
 
 void ChatPage::slotLoginFailed(quint8 reason, const QString& text)
@@ -387,7 +392,7 @@ QString ChatPage::renderMessageHtml(const LinkMessage& message)
     // Пришедшее из игры помечаем, иначе непонятно, почему человек «молчит»
     // в лаунчере, но пишет.
     const QString source = message.fromGame
-        ? QStringLiteral("<span style='color:#6E6A62'> из игры</span>") : QString();
+        ? QStringLiteral("<span style='color:#6E6A62'> %1</span>").arg(tr("from game").toHtmlEscaped()) : QString();
 
     return QStringLiteral(
         "<div style='margin-bottom:4px'>%1"
