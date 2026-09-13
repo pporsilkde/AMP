@@ -143,9 +143,13 @@ float arenaParallaxShadow(sampler2D heightMap, vec2 uv, float currentHeight,
         float blocker = texture2D(heightMap, uv).a - rayHeight;
         if (blocker > 0.0)
         {
-            float distanceFactor = max(float(i) / float(ARENAMP_SHADOW_STEPS), 0.1);
+            // ARTIFACT FIX: the old gain (2.2 / 0.1 = 22x) combined with an 0.82
+            // occlusion ceiling wiped out virtually all direct light on dense
+            // height maps such as rug weave, wood grain or cloth. Keep a firm
+            // floor under distanceFactor and a sane ceiling on the occlusion.
+            float distanceFactor = max(float(i) / float(ARENAMP_SHADOW_STEPS), 0.35);
             visibility = min(visibility,
-                1.0 - clamp(blocker * (2.2 / distanceFactor), 0.0, 0.82));
+                1.0 - clamp(blocker * (1.6 / distanceFactor), 0.0, 0.45));
         }
     }
     return visibility;
@@ -207,7 +211,15 @@ vec2 getMaterialParallaxOffset(vec3 eyeDir, vec3 lightDir, mat3 tbnTranspose,
 #endif
 
     // Avoid extreme UV stretching at grazing angles and fade displacement at range.
+    // abs(eyeTS.z) is the tangent-space N.V, so any narrow smoothstep on it draws
+    // a circle around the camera on a flat surface. The UV offset needs a tight
+    // band (it only has to die out right at the silhouette), but reusing that same
+    // band for self-shadowing switched the whole POM shadow on and off across a
+    // few degrees, producing a hard arc on floors and rugs that tracked the camera.
     float angleFade = smoothstep(0.03, 0.18, abs(eyeTS.z));
+    // Wide, deliberately blurry ramp: the transition is spread over so many
+    // degrees that no edge is perceptible while walking.
+    float shadowAngleFade = smoothstep(0.20, 0.65, abs(eyeTS.z));
 #if @materialQuality == 2
     float distanceFade = 1.0 - smoothstep(5000.0, 6500.0, viewDistance);
 #elif @materialQuality == 3
@@ -215,10 +227,22 @@ vec2 getMaterialParallaxOffset(vec3 eyeDir, vec3 lightDir, mat3 tbnTranspose,
 #else
     float distanceFade = 1.0 - smoothstep(7500.0, 9500.0, viewDistance);
 #endif
-    float fade = angleFade * distanceFade;
-    directVisibility = mix(1.0, directVisibility, fade);
-    ambientVisibility = mix(1.0, ambientVisibility, fade);
-    return offset * fade;
+    float offsetFade = angleFade * distanceFade;
+    float shadowFade = shadowAngleFade * distanceFade;
+
+    // Interiors are lit by point lights (candles, lanterns, torches), but the
+    // POM self-shadow ray is traced against lcalcPosition(0) - the directional
+    // sun, which indoors is a fake light pointing nowhere useful. Shadowing that
+    // matches no visible source reads as a rendering artifact, so scale it down.
+    // isInterior is already declared as a uniform by both including shaders
+    // (objects_fragment.glsl, terrain_fragment.glsl) before they pull in this
+    // file, so no change is needed there.
+    if (isInterior)
+        shadowFade *= 0.35;
+
+    directVisibility = mix(1.0, directVisibility, shadowFade);
+    ambientVisibility = mix(1.0, ambientVisibility, shadowFade);
+    return offset * offsetFade;
 }
 
 #endif

@@ -111,7 +111,11 @@ float pbrFilterRoughness(vec3 normalValue, float roughness)
     vec3 dNdx = dFdx(safeNormal);
     vec3 dNdy = dFdy(safeNormal);
     float normalVariance = max(dot(dNdx, dNdx), dot(dNdy, dNdy));
-    float varianceRoughness = min(normalVariance * 0.40, 0.50);
+    // Screen-space derivatives of a normal map jump at every mip transition, and
+    // mip transitions on a floor are rings centred on the camera. A 0.50 ceiling
+    // let those rings move enough roughness to be visible in the ambient/env
+    // term; 0.15 keeps the specular anti-aliasing without the banding.
+    float varianceRoughness = min(normalVariance * 0.40, 0.15);
     filtered = sqrt(filtered * filtered + varianceRoughness);
 #endif
 

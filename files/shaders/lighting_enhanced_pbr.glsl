@@ -34,7 +34,14 @@ vec3 arenaPbrEnvironmentBrdf(vec3 f0, float roughness, float nDotV)
     const vec4 c0 = vec4(-1.0, -0.0275, -0.572, 0.022);
     const vec4 c1 = vec4(1.0, 0.0425, 1.04, -0.04);
     vec4 r = roughness * c0 + c1;
-    float a004 = min(r.x * r.x, exp2(-9.28 * nDotV)) * r.x + r.y;
+    // Karis' fit uses a hard min() here, which is C1-discontinuous and shows up
+    // on large flat surfaces as a faint circular seam that tracks the camera.
+    // A short smooth blend around the crossover removes the seam and is
+    // numerically indistinguishable from min() everywhere else.
+    float lobe = r.x * r.x;
+    float tail = exp2(-9.28 * nDotV);
+    float blend = smoothstep(-0.25, 0.25, (tail - lobe) / max(tail + lobe, 1e-5));
+    float a004 = mix(tail, lobe, blend) * r.x + r.y;
     vec2 ab = vec2(-1.04, 1.04) * a004 + r.zw;
     return f0 * ab.x + ab.y;
 }
@@ -84,6 +91,30 @@ vec3 arenaPbrAccumulatePointSpecular(vec3 viewPos, vec3 N, vec3 V,
     float roughness, float metallicity, vec3 albedo)
 {
     vec3 result = vec3(0.0);
+#if @lightingMethodClustered && defined(MAGNUS_FRAGMENT_SHADER)
+    // Clustered lighting keeps point lights in the Magnus SSBOs; LightBuffer
+    // holds the directional sun only, so the startLight..endLight loop below
+    // would read past the end of a one-element array.
+    int clusterIndex = magnusGetClusterIndex(gl_FragCoord.xy, viewPos);
+    MagnusLightGrid grid = magnusLightGridBuffer[clusterIndex];
+    for (uint c = 0u; c < grid.count; ++c)
+    {
+        MagnusPointLight light = magnusPointLights[magnusLightIndexList[grid.offset + c]];
+        vec3 toLight = light.position.xyz - viewPos;
+        float lightDistance = length(toLight);
+        if (lightDistance <= 0.0001 || lightDistance > light.radius * 2.0)
+            continue;
+        float illumination = magnusIllumination(light, lightDistance);
+        if (illumination <= 0.0001)
+            continue;
+        vec3 lightColor = max(light.diffuse.xyz, vec3(0.0)) * illumination;
+        result += arenaPbrDirectSpecular(lightColor, N, V, toLight / lightDistance,
+            roughness, metallicity, albedo);
+    }
+    return result;
+#elif @lightingMethodClustered
+    return result;
+#else
     for (int i = @startLight; i < @endLight; ++i)
     {
 #if @lightingMethodUBO
@@ -110,24 +141,41 @@ vec3 arenaPbrAccumulatePointSpecular(vec3 viewPos, vec3 N, vec3 V,
             roughness, metallicity, albedo);
     }
     return result;
+#endif
 }
 
 vec3 arenaPbrDiffuseForLight(vec3 lightColor, vec3 N, vec3 V, vec3 L,
     float roughness, float metallicity, vec3 albedo)
 {
     float nDotL = max(dot(N, L), 0.0);
-    float nDotV = max(dot(N, V), 0.0);
-    if (nDotL <= 0.0001 || nDotV <= 0.0001)
+    if (nDotL <= 0.0001)
         return vec3(0.0);
+
+    // ARTIFACT FIX: do not bail out on nDotV. Normal-mapped detail on a flat
+    // surface viewed at a grazing angle pushes individual texels below the
+    // horizon, and returning black for those killed all direct light on a
+    // camera-following ring (perfect circles, because dot(N, V) == const on a
+    // plane is a cone around the normal with its apex at the eye). Clamp the
+    // view term instead so the BRDF stays continuous across the horizon.
+    float nDotV = max(dot(N, V), 0.02);
 
     vec3 H = normalize(V + L);
     float lDotH = max(dot(L, H), 0.0);
-    vec3 f0 = arenaPbrF0(albedo, metallicity);
-    vec3 F = pbrFresnelSchlick(max(dot(H, V), 0.0), f0);
-    vec3 kd = (vec3(1.0) - F) * (1.0 - metallicity);
+
+    // ARTIFACT FIX: the previous kd = (1 - F(V.H)) drove diffuse to ZERO
+    // whenever the light and the viewer sat on opposite sides of the surface
+    // point (V.H -> 0 => F -> 1). For a dielectric with f0 = 0.04 this term
+    // carries no physics worth having - it only ever multiplies diffuse by
+    // 0.96..1.0 in the useful range - so it is dropped entirely. Metals still
+    // lose their diffuse lobe through (1 - metallicity).
+    vec3 kd = vec3(1.0 - metallicity);
+
     float burley = arenaPbrBurleyDiffuse(roughness, nDotL, lDotH, nDotV);
     float diffuseMix = clamp(pbrDiffuseResponse, 0.0, 1.0);
-    float diffuseBrdf = mix(1.0, clamp(burley, 0.55, 1.45), diffuseMix);
+    // ARTIFACT FIX: the old [0.55, 1.45] window allowed a 45% grazing-angle
+    // darkening, which landed on the same camera-centred ring and amplified the
+    // visible arc. A tighter window keeps the Burley shaping without the band.
+    float diffuseBrdf = mix(1.0, clamp(burley, 0.80, 1.25), diffuseMix);
     return max(lightColor, vec3(0.0)) * nDotL * kd * diffuseBrdf;
 }
 
@@ -164,6 +212,36 @@ void arenaApplyEnhancedPbr(vec3 viewPos, vec3 viewNormal, vec3 albedo,
     enhancedSpecular += arenaPbrDirectSpecular(sunColor, N, V, L,
         roughness, metallicity, albedo) * shadowing;
 
+#if @lightingMethodClustered
+#ifdef MAGNUS_FRAGMENT_SHADER
+    // Clustered lighting: point lights live in the Magnus SSBOs. Walking
+    // startLight..endLight here read past the end of LightBuffer[1] (which
+    // only carries the sun), so the PBR path silently lost every candle,
+    // lantern and torch and interiors came out ~45% too dark after the
+    // legacyPreserve mix below.
+    int pbrClusterIndex = magnusGetClusterIndex(gl_FragCoord.xy, viewPos);
+    MagnusLightGrid pbrGrid = magnusLightGridBuffer[pbrClusterIndex];
+    for (uint c = 0u; c < pbrGrid.count; ++c)
+    {
+        MagnusPointLight light = magnusPointLights[magnusLightIndexList[pbrGrid.offset + c]];
+        vec3 toLight = light.position.xyz - viewPos;
+        float lightDistance = length(toLight);
+        if (lightDistance <= 0.0001)
+            continue;
+
+        float illumination = magnusIllumination(light, lightDistance);
+        if (illumination <= 0.0001)
+            continue;
+
+        vec3 pointL = toLight / lightDistance;
+        vec3 pointDiffuse = max(light.diffuse.xyz, vec3(0.0)) * illumination;
+        directPbr += arenaPbrDiffuseForLight(pointDiffuse, N, V, pointL,
+            roughness, metallicity, albedo);
+        enhancedSpecular += arenaPbrDirectSpecular(pointDiffuse, N, V, pointL,
+            roughness, metallicity, albedo);
+    }
+#endif
+#else
     for (int i = @startLight; i < @endLight; ++i)
     {
 #if @lightingMethodUBO
@@ -176,6 +254,13 @@ void arenaApplyEnhancedPbr(vec3 viewPos, vec3 viewNormal, vec3 albedo,
         if (lightDistance <= 0.0001)
             continue;
 
+#if !@lightingMethodFFP
+        // Match the culling the legacy path already does, so the PBR and legacy
+        // halves of the mix below never disagree about which lights exist.
+        if (lightDistance > lcalcRadius(lightIndex) * 2.0)
+            continue;
+#endif
+
         float illumination = lcalcIllumination(lightIndex, lightDistance);
         if (illumination <= 0.0001)
             continue;
@@ -187,6 +272,7 @@ void arenaApplyEnhancedPbr(vec3 viewPos, vec3 viewNormal, vec3 albedo,
         enhancedSpecular += arenaPbrDirectSpecular(pointDiffuse, N, V, pointL,
             roughness, metallicity, albedo);
     }
+#endif
 
     // Use the rebuilt PBR result as the primary direct lighting.  A small
     // legacy contribution prevents authored Morrowind materials from becoming
@@ -194,7 +280,10 @@ void arenaApplyEnhancedPbr(vec3 viewPos, vec3 viewNormal, vec3 albedo,
     float legacyPreserve = mix(0.12, mix(0.38, 0.55, interiorSafety), legacySafety);
     diffuseLight = mix(directPbr, diffuseLight, legacyPreserve);
 
-    float nDotV = max(dot(N, V), 0.0);
+    // Clamped away from zero for the same reason as in the diffuse BRDF: the
+    // split-sum fit has a min() kink that would otherwise draw a faint ring on
+    // large flat surfaces exactly where dot(N, V) crosses (1 - roughness)^2.
+    float nDotV = clamp(dot(N, V), 0.02, 1.0);
     vec3 f0 = arenaPbrF0(albedo, metallicity);
     vec3 envBrdf = arenaPbrEnvironmentBrdf(f0, roughness, nDotV);
     vec3 envRadiance = max(gl_LightModel.ambient.xyz, vec3(0.0))
