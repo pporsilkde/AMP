@@ -833,6 +833,26 @@ namespace ArenaUi
                 m.insert(QString::fromUtf8(u8"The language sets the text encoding of the build: win1251 for Russian, win1250 for Polish, win1252 otherwise."), QString::fromUtf8(u8"Язык задаёт кодировку текста сборки: win1251 для русского, win1250 для польского, иначе win1252."));
                 m.insert(QString::fromUtf8(u8"build.ini has no language field: choose the encoding the build expects."), QString::fromUtf8(u8"В build.ini нет поля языка: выберите кодировку, которую ожидает сборка."));
                 m.insert(QString::fromUtf8(u8"The language comes from build.ini: %1."), QString::fromUtf8(u8"Язык взят из build.ini: %1."));
+
+                // U024j: сообщения об ошибках лаунчера оставались без перевода.
+                m.insert(QString::fromUtf8(u8"<br><b>Could not find defaults.bin or settings-default.cfg</b><br><br>                      The problem may be due to an incomplete installation of OpenMW.<br>                      Reinstalling OpenMW may resolve the problem."), QString::fromUtf8(u8"<br><b>Не найдены defaults.bin или settings-default.cfg</b><br><br>                      Вероятно, установка OpenMW неполная.<br>                      Переустановка OpenMW может решить проблему."));
+                m.insert(QString::fromUtf8(u8"<br><b>Could not write %1</b><br><br>%2"), QString::fromUtf8(u8"<br><b>Не удалось записать %1</b><br><br>%2"));
+                m.insert(QString::fromUtf8(u8"<br><b>You do not have a game file selected.</b><br><br> ArenaMP will not start without a game file selected.<br>"), QString::fromUtf8(u8"<br><b>Не выбран игровой файл.</b><br><br> ArenaMP не запустится, пока игровой файл не выбран.<br>"));
+                m.insert(QString::fromUtf8(u8"CHANGELOG.txt was not found in the ArenaMP installation."), QString::fromUtf8(u8"CHANGELOG.txt не найден в установленной ArenaMP."));
+                m.insert(QString::fromUtf8(u8"Could not create directory: %1"), QString::fromUtf8(u8"Не удалось создать папку: %1"));
+                m.insert(QString::fromUtf8(u8"Could not finish writing %1"), QString::fromUtf8(u8"Не удалось дописать %1"));
+                m.insert(QString::fromUtf8(u8"Could not open the changelog file: %1"), QString::fromUtf8(u8"Не удалось открыть файл списка изменений: %1"));
+                m.insert(QString::fromUtf8(u8"Could not write %1"), QString::fromUtf8(u8"Не удалось записать %1"));
+                m.insert(QString::fromUtf8(u8"Could not write: %1"), QString::fromUtf8(u8"Не удалось записать: %1"));
+                m.insert(QString::fromUtf8(u8"Error creating OpenMW configuration directory"), QString::fromUtf8(u8"Не удалось создать папку конфигурации OpenMW"));
+                m.insert(QString::fromUtf8(u8"Error detecting Morrowind installation"), QString::fromUtf8(u8"Не удалось найти установленный Morrowind"));
+                m.insert(QString::fromUtf8(u8"Error opening OpenMW configuration file"), QString::fromUtf8(u8"Не удалось открыть файл конфигурации OpenMW"));
+                m.insert(QString::fromUtf8(u8"Error reading OpenMW configuration file"), QString::fromUtf8(u8"Не удалось прочитать файл конфигурации OpenMW"));
+                m.insert(QString::fromUtf8(u8"Error writing ArenaMP build manifest"), QString::fromUtf8(u8"Не удалось записать манифест сборки ArenaMP"));
+                m.insert(QString::fromUtf8(u8"Error writing Launcher configuration file"), QString::fromUtf8(u8"Не удалось записать файл конфигурации лаунчера"));
+                m.insert(QString::fromUtf8(u8"Error writing OpenMW configuration file"), QString::fromUtf8(u8"Не удалось записать файл конфигурации OpenMW"));
+                m.insert(QString::fromUtf8(u8"\n\nRestart the server to apply the new manifest."), QString::fromUtf8(u8"\n\nПерезапустите сервер, чтобы применить новый манифест."));
+
                 return m;
             }();
             return map;
