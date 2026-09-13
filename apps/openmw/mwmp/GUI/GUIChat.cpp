@@ -349,7 +349,7 @@ namespace mwmp
             std::max(sMinimumPanelHeight, Settings::Manager::getInt("menu h", "Chat")))
     {
         // HUD and expanded player menu have independent saved rectangles.
-        setCoord(hudCoord);
+        setCoord(hudCoord.left, hudCoord.top, hudCoord.width, hudCoord.height);
 
         getWidget(mCommandLine, "edit_Command");
         getWidget(mHistory, "list_History");
