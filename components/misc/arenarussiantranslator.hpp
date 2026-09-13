@@ -326,6 +326,15 @@ namespace ArenaUi
                 m.insert(QString::fromUtf8(u8"Insufficient permissions"), QString::fromUtf8(u8"\u041D\u0435\u0434\u043E\u0441\u0442\u0430\u0442\u043E\u0447\u043D\u043E \u043F\u0440\u0430\u0432"));
                 m.insert(QString::fromUtf8(u8"An error occurred"), QString::fromUtf8(u8"\u041F\u0440\u043E\u0438\u0437\u043E\u0448\u043B\u0430 \u043E\u0448\u0438\u0431\u043A\u0430"));
                 m.insert(QString::fromUtf8(u8"Error creating destination"), QString::fromUtf8(u8"\u041E\u0448\u0438\u0431\u043A\u0430 \u0441\u043E\u0437\u0434\u0430\u043D\u0438\u044F \u043F\u0430\u043F\u043A\u0438 \u043D\u0430\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u044F"));
+                m.insert(QString::fromUtf8(u8"Selected server"), QString::fromUtf8(u8"Выбранный сервер"));
+                m.insert(QString::fromUtf8(u8"Refresh server status"), QString::fromUtf8(u8"Обновить статус сервера"));
+                m.insert(QString::fromUtf8(u8"Players online:"), QString::fromUtf8(u8"Игроки онлайн:"));
+                m.insert(QString::fromUtf8(u8"Server uptime:"), QString::fromUtf8(u8"Время работы:"));
+                m.insert(QString::fromUtf8(u8"Online"), QString::fromUtf8(u8"Доступен"));
+                m.insert(QString::fromUtf8(u8"Checking..."), QString::fromUtf8(u8"Проверка…"));
+                m.insert(QString::fromUtf8(u8"No response"), QString::fromUtf8(u8"Нет ответа"));
+                m.insert(QString::fromUtf8(u8"%1d %2h %3m"), QString::fromUtf8(u8"%1 д %2 ч %3 мин"));
+                m.insert(QString::fromUtf8(u8"This server does not publish player count or uptime yet."), QString::fromUtf8(u8"Этот сервер пока не передаёт число игроков и время работы."));
                 m.insert(QString::fromUtf8(u8"Desktop shortcut"), QString::fromUtf8(u8"Ярлык на рабочем столе"));
                 m.insert(QString::fromUtf8(u8"The build is ready, but the desktop shortcut could not be created."),
                     QString::fromUtf8(u8"Сборка готова, но создать ярлык на рабочем столе не удалось."));

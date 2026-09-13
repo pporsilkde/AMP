@@ -14,6 +14,7 @@ class QCheckBox;
 
 namespace Launcher
 {
+    class ServerStatusQuery;
     class PlayPage : public QWidget, private Ui::PlayPage
     {
         Q_OBJECT
@@ -120,6 +121,11 @@ namespace Launcher
         QPushButton* mResetServerButton;
         bool mSyncingXpControls;
 
+        ServerStatusQuery* mStatusQuery = nullptr;
+        QLabel* mRemoteStatus = nullptr;
+        QLabel* mRemotePlayers = nullptr;
+        QLabel* mRemoteUptime = nullptr;
+        QLabel* mRemoteEndpoint = nullptr;
         bool mServerRunning;
         bool mUpdateChecking;
         bool mUpdateAvailable;

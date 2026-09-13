@@ -15,6 +15,7 @@
 #include <Script/API/TimerAPI.hpp>
 #include <chrono>
 #include <thread>
+#include <components/openmw-mp/serverstatus.hpp>
 #include <csignal>
 
 #include "Networking.hpp"
@@ -647,6 +648,8 @@ void signalHandler(int signum)
 int Networking::mainLoop()
 {
     RakNet::Packet *packet;
+    const auto statusStarted = std::chrono::steady_clock::now();
+    std::int64_t lastStatusSecond = -1;
 
 #ifndef _WIN32
     struct sigaction sigIntHandler;
@@ -658,6 +661,20 @@ int Networking::mainLoop()
     
     while (running && !killLoop)
     {
+        // The same response is served by RakNet to offline pings on the game port.
+        // Publish on the server thread; RakNet copies it under its own mutex.
+        const auto uptime = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::steady_clock::now() - statusStarted).count();
+        if (uptime != lastStatusSecond)
+        {
+            lastStatusSecond = uptime;
+            unsigned online = 0;
+            for (const auto& entry : *players)
+                if (entry.second && entry.second->isHandshaked() && entry.second->getLoadState() != Player::KICKED)
+                    ++online;
+            const std::string status = ArenaStatus::payload(online, maxConnections(), static_cast<std::uint64_t>(uptime));
+            peer->SetOfflinePingResponse(status.data(), static_cast<unsigned>(status.size()));
+        }
 #ifndef _WIN32
         sigaction(SIGTERM, &sigIntHandler, NULL);
         sigaction(SIGINT, &sigIntHandler, NULL);
@@ -705,6 +722,8 @@ int Networking::mainLoop()
                 case ID_SND_RECEIPT_ACKED:
                 case ID_CONNECTED_PING:
                 case ID_UNCONNECTED_PING:
+                case ID_UNCONNECTED_PING_OPEN_CONNECTIONS:
+                    // Offline status queries are already answered by RakNet.
                     break;
                 default:
                 {

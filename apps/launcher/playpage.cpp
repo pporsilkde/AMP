@@ -2,6 +2,8 @@
 #include <QUrl>
 #include <QLineEdit>
 #include "playpage.hpp"
+#include "serverstatusquery.hpp"
+#include <QGridLayout>
 
 #include <array>
 #include <cmath>
@@ -214,6 +216,63 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     setObjectName("PlayPage");
     setupUi(this);
     serverPortEdit->setValidator(new QIntValidator(1, 65535, serverPortEdit));
+
+    // U024h: live game-server information immediately below the alternate address.
+    auto* remoteCard = new QFrame(launchCard);
+    remoteCard->setObjectName(QStringLiteral("remoteServerStatusCard"));
+    remoteCard->setStyleSheet(QStringLiteral("QFrame#remoteServerStatusCard { background: rgba(12,14,17,100); border: 1px solid rgba(220,191,137,40); border-radius: 10px; }"));
+    auto* remoteLayout = new QGridLayout(remoteCard);
+    remoteLayout->setContentsMargins(12, 9, 12, 9);
+    remoteLayout->setHorizontalSpacing(16);
+    remoteLayout->setVerticalSpacing(5);
+    auto* title = new QLabel(tr("Selected server"), remoteCard);
+    mRemoteStatus = new QLabel(tr("Checking..."), remoteCard);
+    mRemotePlayers = new QLabel(QStringLiteral("—"), remoteCard);
+    mRemoteUptime = new QLabel(QStringLiteral("—"), remoteCard);
+    mRemoteEndpoint = new QLabel(remoteCard);
+    mRemoteEndpoint->setTextFormat(Qt::PlainText);
+    mRemoteEndpoint->setWordWrap(true);
+    remoteLayout->addWidget(title, 0, 0);
+    remoteLayout->addWidget(mRemoteStatus, 0, 1);
+    auto* refresh = new QPushButton(remoteCard);
+    refresh->setIcon(ArenaUi::glassIcon(QStringLiteral("refresh")));
+    refresh->setToolTip(tr("Refresh server status"));
+    refresh->setFixedSize(28, 26);
+    remoteLayout->addWidget(refresh, 0, 2);
+    remoteLayout->addWidget(mRemoteEndpoint, 1, 0, 1, 3);
+    remoteLayout->addWidget(new QLabel(tr("Players online:"), remoteCard), 2, 0);
+    remoteLayout->addWidget(mRemotePlayers, 2, 1, 1, 2);
+    remoteLayout->addWidget(new QLabel(tr("Server uptime:"), remoteCard), 3, 0);
+    remoteLayout->addWidget(mRemoteUptime, 3, 1, 1, 2);
+    launchCardLayout->insertWidget(launchCardLayout->indexOf(launchFormFrame) + 1, remoteCard);
+    // Keep all controls accessible in the existing fixed-size launcher window.
+    const int launchIndex = playTabLayout->indexOf(launchCard);
+    playTabLayout->removeWidget(launchCard);
+    auto* launchScroll = new QScrollArea(playTab);
+    launchScroll->setFrameShape(QFrame::NoFrame);
+    launchScroll->setWidgetResizable(true);
+    launchScroll->setWidget(launchCard);
+    playTabLayout->insertWidget(launchIndex, launchScroll, 1);
+
+    mStatusQuery = new ServerStatusQuery(this);
+    mStatusQuery->result = [this](ServerStatusQuery::State state, const ArenaStatus::Status& status)
+    {
+        mRemoteStatus->setText(state == ServerStatusQuery::Online ? tr("Online")
+            : state == ServerStatusQuery::Checking ? tr("Checking...")
+            : state == ServerStatusQuery::NoAddress ? tr("Enter the server address") : tr("No response"));
+        mRemoteStatus->setStyleSheet(state == ServerStatusQuery::Online
+            ? QStringLiteral("color: #97c88b;") : QStringLiteral("color: #c5af8a;"));
+        mRemotePlayers->setText(status.details ? QStringLiteral("%1 / %2").arg(status.players).arg(status.capacity) : QStringLiteral("—"));
+        mRemoteUptime->setText(status.details ? tr("%1d %2h %3m")
+            .arg(static_cast<qulonglong>(status.uptime / 86400))
+            .arg(static_cast<qulonglong>((status.uptime / 3600) % 24))
+            .arg(static_cast<qulonglong>((status.uptime / 60) % 60)) : QStringLiteral("—"));
+        const QString hint = state == ServerStatusQuery::Online && !status.details
+            ? tr("This server does not publish player count or uptime yet.") : QString();
+        mRemotePlayers->setToolTip(hint);
+        mRemoteUptime->setToolTip(hint);
+    };
+    connect(refresh, &QPushButton::clicked, this, [this]() { mStatusQuery->refresh(); });
 
     // U020 showcase layout. All controls now live in playpage.ui: a launch
     // card, a local-server card and a permanent system-status column. The
@@ -571,6 +630,17 @@ void Launcher::PlayPage::updateStatusPanel()
 
     const bool host = autoStartServerCheckBox->isChecked();
     const bool alternate = mAlternativeServer != nullptr && mAlternativeServer->isChecked();
+    if (mStatusQuery)
+    {
+        const QString address = host ? QStringLiteral("127.0.0.1")
+            : alternate ? alternativeAddress() : serverAddress();
+        const QString portText = host && !mRunningPort.isEmpty() ? mRunningPort
+            : alternate ? alternativePort() : serverPort();
+        bool valid = false;
+        const int port = portText.toInt(&valid);
+        mRemoteEndpoint->setText(address.isEmpty() ? QStringLiteral("—") : QStringLiteral("%1:%2").arg(address, portText));
+        mStatusQuery->setEndpoint(address, valid && port > 0 && port <= 65535 ? static_cast<quint16>(port) : 0);
+    }
 
     // Headline: the single most important launcher state.
     QString state;
