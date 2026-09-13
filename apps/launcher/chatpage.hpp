@@ -14,6 +14,7 @@
 // Связь — постоянный TCP к игровому серверу (ArenaLink), без веба.
 
 #include <QVector>
+#include <QString>
 #include <QWidget>
 
 #include "arenalinkclient.hpp"
@@ -38,8 +39,9 @@ namespace Launcher
     public:
         explicit ChatPage(Config::LauncherSettings& launcherSettings, QWidget* parent = nullptr);
 
-        void loadSettings();
+        void loadSettings(const QString& gameSettingsPath = QString());
         void saveSettings();
+        void refreshLoginFromGameSettings();
 
         /// MainDialog сообщает адрес выбранного сервера: чат и голос ходят
         /// на тот же хост, порты игровой+2 и игровой+1.
@@ -83,6 +85,8 @@ namespace Launcher
         void setStatus(const QString& text, bool error = false);
 
         Config::LauncherSettings& mLauncherSettings;
+        QString mGameSettingsPath;
+        QString mGamePassword;
         ArenaLinkClient* mClient;
         VoicePanel* mVoicePanel = nullptr;
         QStackedLayout* mStack;

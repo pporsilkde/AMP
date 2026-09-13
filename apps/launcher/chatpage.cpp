@@ -16,6 +16,8 @@
 #include "voice/voicepanel.hpp"
 
 #include <QDateTime>
+#include <QFile>
+#include <QTextStream>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
@@ -163,13 +165,70 @@ void ChatPage::buildChatView()
     mStack->addWidget(view);
 }
 
-void ChatPage::loadSettings()
+void ChatPage::loadSettings(const QString& gameSettingsPath)
 {
+    if (!gameSettingsPath.trimmed().isEmpty())
+        mGameSettingsPath = gameSettingsPath;
+
+    // Launcher/Chat/lastName remains only as a fallback for old configurations.
+    // The authoritative ArenaMP account is [Login] name/password in settings.cfg.
     mNameEdit->setText(mLauncherSettings.value(QStringLiteral("Chat/lastName")));
+    refreshLoginFromGameSettings();
+
     if (mVoicePanel != nullptr)
         mVoicePanel->loadSettings(mLauncherSettings);
-    // Пароль не сохраняется никогда. Автовход возможен только по коду
-    // или повторным вводом: держать пароль в launcher.cfg нельзя.
+}
+
+void ChatPage::refreshLoginFromGameSettings()
+{
+    if (mGameSettingsPath.trimmed().isEmpty())
+        return;
+
+    QFile file(mGameSettingsPath);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        return;
+
+    QString accountName;
+    QString accountPassword;
+    QString section;
+    QTextStream input(&file);
+    input.setCodec("UTF-8");
+
+    while (!input.atEnd())
+    {
+        QString line = input.readLine().trimmed();
+        if (line.isEmpty() || line.startsWith(QLatin1Char('#')) || line.startsWith(QLatin1Char(';')))
+            continue;
+
+        if (line.startsWith(QLatin1Char('[')) && line.endsWith(QLatin1Char(']')))
+        {
+            section = line.mid(1, line.size() - 2).trimmed();
+            continue;
+        }
+        if (section.compare(QStringLiteral("Login"), Qt::CaseInsensitive) != 0)
+            continue;
+
+        const int equals = line.indexOf(QLatin1Char('='));
+        if (equals <= 0)
+            continue;
+
+        const QString key = line.left(equals).trimmed();
+        const QString value = line.mid(equals + 1).trimmed();
+        if (key.compare(QStringLiteral("name"), Qt::CaseInsensitive) == 0)
+            accountName = value;
+        else if (key.compare(QStringLiteral("password"), Qt::CaseInsensitive) == 0)
+            accountPassword = value;
+    }
+
+    if (!accountName.isEmpty())
+        mNameEdit->setText(accountName);
+
+    // Never copy the password into launcher.cfg. Keep it only in memory and
+    // show it masked in the normal password mode. /chatlink code mode keeps
+    // its own temporary value untouched until the user switches back.
+    mGamePassword = accountPassword;
+    if (!mCodeMode)
+        mSecretEdit->setText(mGamePassword);
 }
 
 void ChatPage::saveSettings()
@@ -225,7 +284,13 @@ void ChatPage::slotToggleCodeMode()
     mCodeMode = !mCodeMode;
     mSecretEdit->setEchoMode(mCodeMode ? QLineEdit::Normal : QLineEdit::Password);
     mSecretEdit->setPlaceholderText(mCodeMode ? tr("In-game code") : tr("Password"));
-    mSecretEdit->clear();
+    if (mCodeMode)
+        mSecretEdit->clear();
+    else
+    {
+        refreshLoginFromGameSettings();
+        mSecretEdit->setText(mGamePassword);
+    }
     mUseCodeButton->setText(mCodeMode ? tr("Sign in with a password")
                                       : tr("Sign in with an in-game code (/chatlink)"));
 }
@@ -286,6 +351,7 @@ void ChatPage::slotLogoutClicked()
 {
     mClient->disconnectFromServer();
     mStack->setCurrentIndex(0);
+    refreshLoginFromGameSettings();
     setStatus(QString());
 }
 

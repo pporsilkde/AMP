@@ -38,6 +38,11 @@
 #include <QVBoxLayout>
 #include <QRegularExpression>
 #include <QStyle>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPixmap>
+#include <QLinearGradient>
+
 
 
 #include "buildsetupdialog.hpp"
@@ -147,6 +152,61 @@ namespace
         text.replace(QRegularExpression(QStringLiteral("`([^`]+)`")),
             QStringLiteral("<code>\\1</code>"));
         return text;
+    }
+
+    QIcon buildChatLauncherIcon()
+    {
+        const int size = 64;
+        QPixmap pixmap(size, size);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+
+        auto makeBubblePath = [](const QRectF& rect, const QPointF& tailTip,
+                                 const QPointF& tailBase1, const QPointF& tailBase2)
+        {
+            QPainterPath path;
+            path.addRoundedRect(rect, 12.0, 12.0);
+            QPainterPath tail;
+            tail.moveTo(tailBase1);
+            tail.lineTo(tailTip);
+            tail.lineTo(tailBase2);
+            tail.closeSubpath();
+            path.addPath(tail);
+            return path;
+        };
+
+        const QRectF backRect(12.0, 12.0, 34.0, 24.0);
+        const QPainterPath backPath = makeBubblePath(backRect, QPointF(20.0, 42.0),
+            QPointF(22.0, 35.0), QPointF(28.0, 35.0));
+        QLinearGradient backGradient(backRect.topLeft(), backRect.bottomRight());
+        backGradient.setColorAt(0.0, QColor(255, 232, 176, 96));
+        backGradient.setColorAt(1.0, QColor(120, 82, 20, 150));
+        painter.setPen(QPen(QColor(255, 223, 154, 200), 1.6));
+        painter.setBrush(backGradient);
+        painter.drawPath(backPath);
+
+        const QRectF frontRect(18.0, 20.0, 34.0, 24.0);
+        const QPainterPath frontPath = makeBubblePath(frontRect, QPointF(42.0, 50.0),
+            QPointF(36.0, 43.0), QPointF(44.0, 43.0));
+        QLinearGradient frontGradient(frontRect.topLeft(), frontRect.bottomLeft());
+        frontGradient.setColorAt(0.0, QColor(255, 249, 229, 230));
+        frontGradient.setColorAt(0.45, QColor(244, 212, 127, 224));
+        frontGradient.setColorAt(1.0, QColor(173, 116, 38, 236));
+        painter.setPen(QPen(QColor(255, 245, 214, 235), 1.8));
+        painter.setBrush(frontGradient);
+        painter.drawPath(frontPath);
+
+        painter.setPen(QPen(QColor(90, 46, 8, 230), 2.0, Qt::SolidLine, Qt::RoundCap));
+        painter.drawLine(QPointF(26.0, 29.0), QPointF(44.0, 29.0));
+        painter.drawLine(QPointF(26.0, 35.0), QPointF(40.0, 35.0));
+
+        painter.setPen(QPen(QColor(255, 255, 255, 92), 1.2));
+        painter.drawArc(QRectF(20.0, 22.0, 22.0, 12.0), 25 * 16, 130 * 16);
+
+        return QIcon(pixmap);
     }
 
     QString changelogMarkdownToHtml(const QString& markdown)
@@ -371,7 +431,7 @@ void Launcher::MainDialog::createIcons()
 
     QListWidgetItem *chatButton = new QListWidgetItem(iconWidget);
     chatButton->setSizeHint(QSize((sLauncherWidth - 20 - 18 - 12 - 30) / sNavigationItems - 4, 58));
-    chatButton->setIcon(ArenaUi::glassIcon(QStringLiteral("chat")));
+    chatButton->setIcon(buildChatLauncherIcon());
     chatButton->setText(tr("Chat"));
     chatButton->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
     chatButton->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled);
@@ -823,6 +883,8 @@ void Launcher::MainDialog::changePage(QListWidgetItem *current, QListWidgetItem 
 
     int currentIndex = iconWidget->row(current);
     pagesWidget->setCurrentIndex(currentIndex);
+    if (pagesWidget->currentWidget() == mChatPage && mChatPage != nullptr)
+        mChatPage->refreshLoginFromGameSettings();
     // The Play page draws its own cards and status column, so the shared
     // glass panel behind the stacked pages is disabled only there.
     const bool bare = pagesWidget->currentWidget() == mPlayPage;
@@ -1541,7 +1603,10 @@ void Launcher::MainDialog::loadSettings()
     }
 
     if (mChatPage != nullptr)
-        mChatPage->loadSettings();
+    {
+        const QString settingsPath = QString::fromUtf8(mCfgMgr.getPrimarySettingsPath().string().c_str());
+        mChatPage->loadSettings(settingsPath);
+    }
 }
 
 void Launcher::MainDialog::saveSettings()
