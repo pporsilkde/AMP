@@ -1676,6 +1676,12 @@ QString payloadRoot(QString root, const QString& kind)
     fail(QStringLiteral("Архив движка должен содержать arenamp-launcher в корне"));
 }
 
+bool isRequiredDataFilesManifest(const QString& relative)
+{
+    return QFileInfo(QDir::fromNativeSeparators(relative)).fileName().compare(
+        QStringLiteral("requiredDataFiles.json"), Qt::CaseInsensitive) == 0;
+}
+
 bool isProtected(const QString& relative, const QString& kind)
 {
     const QString normalized = QDir::fromNativeSeparators(relative);
@@ -2091,6 +2097,20 @@ int prepareUpdate(const QJsonObject& request, const QString& job)
         {
             const QString source = it.next();
             const QString relative = QDir(payload).relativeFilePath(source).replace(QLatin1Char('\\'), QLatin1Char('/'));
+            // U024g: requiredDataFiles.json is generated from the host's selected
+            // content/CRC list. Never let a stock client package replace an
+            // existing host manifest. Keep the explicit check here even though
+            // engine protection currently also covers the server tree, so a
+            // future package layout cannot silently regress this rule.
+            if (target.kind == QLatin1String("engine") && isRequiredDataFilesManifest(relative))
+            {
+                logEvent(QStringLiteral("preserve"), QJsonObject{
+                    {QStringLiteral("kind"), target.kind},
+                    {QStringLiteral("relative"), relative},
+                    {QStringLiteral("reason"), QStringLiteral("requiredDataFiles.json is host-generated")}
+                });
+                continue;
+            }
             if (isProtected(relative, target.kind)) continue;
             const QString dest = destinationPath(target.root, relative).toCaseFolded();
             if (destinations.contains(dest)) fail(QStringLiteral("Пакеты обновления пытаются заменить один и тот же файл"));
@@ -2265,7 +2285,10 @@ int selfTest()
         // U020: engine packages never replace the host's data-file manifest.
         if (!isProtected(QStringLiteral("server/data/requiredDataFiles.json"), QStringLiteral("engine"))) return 6;
         if (!isProtected(QStringLiteral("Resources/server/data/RequiredDataFiles.json"), QStringLiteral("engine"))) return 7;
-        if (isProtected(QStringLiteral("tes3mp.exe"), QStringLiteral("engine"))) return 8;
+        if (!isRequiredDataFilesManifest(QStringLiteral("server/data/requiredDataFiles.json"))) return 8;
+        if (!isRequiredDataFilesManifest(QStringLiteral("Resources/server/data/REQUIREDDATAFILES.JSON"))) return 9;
+        if (isRequiredDataFilesManifest(QStringLiteral("server/data/other.json"))) return 10;
+        if (isProtected(QStringLiteral("tes3mp.exe"), QStringLiteral("engine"))) return 11;
 #ifdef Q_OS_WIN
         std::fprintf(stderr, "arena-updater native self-test: OK; transport=winhttp\n");
 #else
@@ -2273,7 +2296,7 @@ int selfTest()
 #endif
         return 0;
     }
-    catch (...) { return 9; }
+    catch (...) { return 99; }
 }
 }
 
