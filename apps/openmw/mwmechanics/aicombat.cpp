@@ -1304,8 +1304,8 @@ namespace MWMechanics
         if (tuning.mAgilityScaling && bipedal && !target.isEmpty() && target.getClass().isActor()
             && storage.mTacticalState == AiCombatStorage::Tactical_None)
         {
-            const MWMechanics::CreatureStats& targetStats = target.getClass().getCreatureStats(target);
-            const bool targetWindingUp = targetStats.getAttackingOrSpell();
+            // CreatureStats only has stale declarations for this state; query the live CharacterController via MechanicsManager.
+            const bool targetWindingUp = MWBase::Environment::get().getMechanicsManager()->isAttackingOrSpell(target);
             const float evadeRange = std::max(140.f, storage.mAttackRange * 1.30f);
             const bool inEvadeRange = storage.mLOS && distToTarget < evadeRange;
 
