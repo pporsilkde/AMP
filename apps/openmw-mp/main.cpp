@@ -33,6 +33,8 @@
 
 #include "Player.hpp"
 #include "Networking.hpp"
+#include "LinkServer.hpp"
+#include "LinkAccountStore.hpp"
 #include "MasterClient.hpp"
 #include "Utils.hpp"
 
@@ -367,7 +369,22 @@ int main(int argc, char *argv[])
 
         networking.postInit();
 
+        // ArenaLink owns a separate nonblocking TCP listener and never calls Lua
+        // from its worker. Scope destruction stops it before Networking is destroyed.
+        LinkServer launcherChat;
+        LinkConfig linkConfig;
+        linkConfig.bindAddress = address;
+        linkConfig.authMode = ArenaLink::AUTH_TES3MP_PROOF;
+        const char* disableChat = std::getenv("ARENAMP_CHAT_DISABLED");
+        linkConfig.enabled = !(disableChat && std::string(disableChat) == "1");
+        launcherChat.configure(linkConfig, jsonLinkCallbacks(dataDirectory));
+        if (linkConfig.enabled && !launcherChat.start(static_cast<unsigned short>(port)))
+            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "ArenaLink: TCP chat could not start (game port + 2)");
+        else if (launcherChat.running())
+            LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "ArenaLink: chat listening on TCP %u", launcherChat.port());
+
         code = networking.mainLoop();
+        launcherChat.stop();
 
         // ArenaMP Y052: without this guard a server running with [MasterServer]
         // disabled crashed here, which is *before* the reserved-exit-code

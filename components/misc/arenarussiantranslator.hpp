@@ -32,6 +32,11 @@ namespace ArenaUi
             static const QHash<QString, QString> map = []()
             {
                 QHash<QString, QString> m;
+                m.insert(QString::fromUtf8(u8"Voice settings apply when the game starts"), QString::fromUtf8(u8"Настройки голоса применятся при запуске игры"));
+                m.insert(QString::fromUtf8(u8"In-game voice uses the server settings"), QString::fromUtf8(u8"Игровой голос работает по настройкам сервера"));
+                m.insert(QString::fromUtf8(u8"Invalid endpoint or credentials exceed protocol limits"), QString::fromUtf8(u8"Неверный адрес или слишком длинное имя/пароль"));
+                m.insert(QString::fromUtf8(u8"Chat sign-in timed out at %1:%2. Check the ArenaLink service."), QString::fromUtf8(u8"Сервер чата %1:%2 не завершил вход. Проверьте запуск ArenaLink."));
+                m.insert(QString::fromUtf8(u8"Chat server needs a supported secure sign-in method"), QString::fromUtf8(u8"Обновите сервер чата: способ авторизации несовместим."));
                 m.insert(QString::fromUtf8(u8"Connect to another server"), QString::fromUtf8(u8"Подключиться к другому серверу"));
                 m.insert(QString::fromUtf8(u8"Server address"), QString::fromUtf8(u8"Адрес сервера"));
                 m.insert(QString::fromUtf8(u8"Server website"), QString::fromUtf8(u8"Сайт сервера"));

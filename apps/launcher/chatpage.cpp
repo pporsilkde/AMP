@@ -39,11 +39,15 @@ ChatPage::ChatPage(Config::LauncherSettings& launcherSettings, QWidget* parent)
     : QWidget(parent)
     , mLauncherSettings(launcherSettings)
     , mClient(new ArenaLinkClient(this))
-    , mStack(new QStackedLayout(this))
+    , mStack(new QStackedLayout())
 {
     setObjectName(QStringLiteral("chatPage"));
     buildLoginCard();
     buildChatView();
+    QVBoxLayout* pageLayout = new QVBoxLayout(this);
+    pageLayout->addLayout(mStack, 1);
+    mVoicePanel = new VoicePanel(this);
+    pageLayout->addWidget(mVoicePanel);
 
     connect(mClient, &ArenaLinkClient::loggedIn, this, &ChatPage::slotLoggedIn);
     connect(mClient, &ArenaLinkClient::loginFailed, this, &ChatPage::slotLoginFailed);
@@ -91,6 +95,7 @@ void ChatPage::buildLoginCard()
     mLoginButton->setDefault(true);
     mUseCodeButton = new QPushButton(tr("Sign in with an in-game code (/chatlink)"), card);
     mUseCodeButton->setProperty("arenaQuiet", true);
+    mUseCodeButton->hide();
     mLoginStatus = new QLabel(card);
     mLoginStatus->setAlignment(Qt::AlignHCenter);
     mLoginStatus->setWordWrap(true);
@@ -133,9 +138,7 @@ void ChatPage::buildChatView()
     QVBoxLayout* leftLayout = new QVBoxLayout(left);
     leftLayout->setContentsMargins(0, 0, 0, 0);
     mChannels = new QListWidget(left);
-    mVoicePanel = new VoicePanel(left);
     leftLayout->addWidget(mChannels, 1);
-    leftLayout->addWidget(mVoicePanel);
 
     mHistory = new QTextBrowser(view);
     mHistory->setOpenExternalLinks(true);
@@ -343,8 +346,7 @@ void ChatPage::slotDisconnected(const QString& reason)
     mLoginButton->setEnabled(true);
     mStack->setCurrentIndex(0);
     setStatus(reason, true);
-    if (mVoicePanel != nullptr)
-        mVoicePanel->setVoiceAvailable(false);
+    // Native in-game voice does not depend on the ArenaLink connection.
 }
 
 void ChatPage::slotLogoutClicked()

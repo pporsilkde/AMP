@@ -13,6 +13,7 @@
 // читается хвост файла.
 
 #include <atomic>
+#include <functional>
 #include <cstdint>
 #include <deque>
 #include <map>
@@ -56,6 +57,7 @@ namespace mwmp
         /// Для AUTH_PROOF: sha256(пароль) из хранилища сервера.
         /// Пустая строка — режим proof для этой учётки недоступен.
         std::string passwordSha256;
+        std::string passwordSalt;
     };
 
     /// Колбэки в остальной сервер. Реализуются там, где живёт существующая
@@ -64,11 +66,16 @@ namespace mwmp
     {
         /// Найти учётку по имени. false — персонажа нет (его создают только
         /// в игре), лаунчер покажет «зайдите на сервер и создайте персонажа».
-        bool (*findAccount)(const std::string& name, LinkAccount& out) = nullptr;
+        std::function<bool(const std::string&)> isAddressBanned;
+        std::function<bool(const std::string&, LinkAccount&)> findAccount;
         /// Запасной путь, когда пароли в bcrypt и proof не посчитать.
         bool (*verifyPassword)(const std::string& name, const std::string& password) = nullptr;
         /// Код из внутриигровой команды /chatlink.
         bool (*verifyLinkCode)(const std::string& name, const std::string& code) = nullptr;
+        /// Verify HMAC-SHA256 with the actual account verifier, in constant time.
+        /// Must be thread-safe; never call Lua directly from the network thread.
+        bool (*verifyProof)(const LinkAccount& account, const std::string& nonce,
+            const std::string& proof) = nullptr;
         /// Отдать сообщение во внутриигровой чат (каналы с CHANNEL_MIRRORS_GAME).
         void (*pushToGameChat)(const std::string& author, const std::string& text) = nullptr;
         /// Выдать голосовой тикет: реализуется через VoiceServer::issueTicket.
@@ -123,6 +130,7 @@ namespace mwmp
         void handleHistory(Client& client, ArenaLink::Reader& reader);
         void handleVoiceTicket(Client& client, ArenaLink::Reader& reader);
 
+        void flushOutput(Client& client);
         void sendTo(Client& client, const std::string& frame);
         void broadcast(std::uint16_t channel, const std::string& frame);
         void closeClient(Client& client, const std::string& reason);
@@ -137,7 +145,7 @@ namespace mwmp
         LinkCallbacks mCallbacks{};
         std::atomic<bool> mRunning{false};
         std::thread mThread;
-        int mListenSocket = -1;
+        std::intptr_t mListenSocket = -1;
         unsigned short mPort = 0;
 
         mutable std::mutex mMutex;

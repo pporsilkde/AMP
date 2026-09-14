@@ -321,7 +321,7 @@ namespace mwmp
 
     void VoiceChat::configure(bool enabled, const std::string& pushToTalkKey, float rangeMeters)
     {
-        mEnabled = false; // Alpha 0.14: temporary compile-time voice shutdown.
+        mEnabled = enabled;
         mPushToTalkKey = pushToTalkKey.empty() ? "V" : pushToTalkKey;
         mRangeMeters = std::clamp(rangeMeters, 3.f, 100.f);
         const SDL_Scancode code = SDL_GetScancodeFromName(mPushToTalkKey.c_str());
@@ -330,7 +330,6 @@ namespace mwmp
 
     void VoiceChat::init()
     {
-        return; // Alpha 0.14: never open the microphone.
         if (!mEnabled || mAvailable)
             return;
 
@@ -397,7 +396,6 @@ namespace mwmp
 
     void VoiceChat::update(float dt)
     {
-        return; // Alpha 0.14: no capture, PTT notifications or playback updates.
         // Y041: the key is sampled before the availability checks so that a player
         // pressing push-to-talk on a client with voice disabled or without a usable
         // microphone gets told why nothing happens, instead of silence.
@@ -439,10 +437,10 @@ namespace mwmp
         {
             if (wantsToTalk)
                 notifyUnavailable("Voice chat has no usable microphone. Check the system default recording device and microphone permissions.");
-            return;
+            // Reception and speaker cleanup still work without a capture device.
         }
 
-        const bool pressed = wantsToTalk;
+        const bool pressed = wantsToTalk && mAvailable;
         if (pressed != mTransmitting)
         {
             LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Voice: push-to-talk %s (%s)",
@@ -509,7 +507,8 @@ namespace mwmp
         }
 
         MWBase::SoundManager* soundManager = MWBase::Environment::get().getSoundManager();
-        if (mTransmitting && local != nullptr && !capturedVoiceFrame && mImpl->localLipAge > 0.10f)
+        if (mTransmitting && local != nullptr && soundManager != nullptr
+            && !capturedVoiceFrame && mImpl->localLipAge > 0.10f)
         {
             mImpl->localLipLevel = 0.f;
             soundManager->clearVoiceLipSync(local->getPlayerPtr());
@@ -548,7 +547,6 @@ namespace mwmp
 
     void VoiceChat::receive(RakNet::RakNetGUID speakerGuid, const VoiceFrame& frame)
     {
-        return; // Alpha 0.14: never enqueue remote voice.
         if (!mEnabled || frame.codec != VoiceFrame::CodecImaAdpcm16k || frame.payload.empty())
             return;
 
@@ -648,3 +646,4 @@ namespace mwmp
         mTransmitting = false;
     }
 }
+

@@ -46,6 +46,8 @@ set(SERVER
     main.cpp
     Player.cpp
     Networking.cpp
+    LinkServer.cpp
+    LinkAccountStore.cpp
     MasterClient.cpp
     Cell.cpp
     CellController.cpp

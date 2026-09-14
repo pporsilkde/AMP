@@ -1,18 +1,17 @@
-// ArenaMP U025 — скелет ArenaLink.
-//
-// Что здесь настоящее: кадрирование TCP-потока, состояние клиента,
-// challenge-response, правила рассылки, лимиты. Что помечено TODO:
-// привязка к конкретным структурам сервера (учётки, внутриигровой чат)
-// и SHA-256/HMAC — их берём из уже имеющейся в дереве реализации,
-// новую зависимость ради этого не тянем.
-
+// ArenaLink transport. The host must supply thread-safe account callbacks;
+// the cumulative archive does not contain the game's account storage adapter.
+#ifdef _WIN32
+#  define _CRT_RAND_S
+#endif
 #include "LinkServer.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <fstream>
-#include <random>
+#include <cstdlib>
+#include <cerrno>
+#include <limits>
 
 #ifdef _WIN32
 #  include <winsock2.h>
@@ -41,22 +40,57 @@ namespace
             std::chrono::system_clock::now().time_since_epoch()).count());
     }
 
-    void randomBytes(std::uint8_t* out, std::size_t size)
+    bool randomBytes(std::uint8_t* out, std::size_t size)
     {
-        static thread_local std::mt19937_64 engine{std::random_device{}()};
+#ifdef _WIN32
         for (std::size_t i = 0; i < size; ++i)
-            out[i] = static_cast<std::uint8_t>(engine() & 0xFF);
+        {
+            unsigned int value = 0;
+            if (rand_s(&value) != 0) return false;
+            out[i] = static_cast<std::uint8_t>(value);
+        }
+        return true;
+#else
+        std::ifstream entropy("/dev/urandom", std::ios::binary);
+        return static_cast<bool>(entropy.read(reinterpret_cast<char*>(out), size));
+#endif
     }
+
+    bool nonblocking(std::intptr_t socket)
+    {
+#ifdef _WIN32
+        u_long enabled = 1;
+        return ioctlsocket(socket, FIONBIO, &enabled) == 0;
+#else
+        const int flags = fcntl(socket, F_GETFL, 0);
+        return flags >= 0 && fcntl(socket, F_SETFL, flags | O_NONBLOCK) == 0;
+#endif
+    }
+
+    bool wouldBlock()
+    {
+#ifdef _WIN32
+        const int error = WSAGetLastError();
+        return error == WSAEWOULDBLOCK || error == WSAEINTR;
+#else
+        return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR;
+#endif
+    }
+
 }
 
 struct LinkServer::Client
 {
-    int socket = -1;
+    std::intptr_t socket = -1;
     std::string address;
     std::string inBuffer;
     std::string outBuffer;
     std::uint8_t nonce[sNonceSize] = {};
     bool helloDone = false;
+    bool authAttempted = false;
+    LinkAccount account;
+    bool accountFound = false;
+    std::string requestedName;
     bool authorized = false;
     std::uint32_t userId = 0;
     std::string name;
@@ -86,12 +120,33 @@ bool LinkServer::start(unsigned short gamePort)
     if (!mConfig.enabled || mRunning.load())
         return false;
 
+    if (mCallbacks.findAccount == nullptr
+        || ((mConfig.authMode == AUTH_PROOF || mConfig.authMode == AUTH_TES3MP_PROOF) && mCallbacks.verifyProof == nullptr)
+        || (mConfig.authMode == AUTH_CODE && mCallbacks.verifyLinkCode == nullptr)
+        || (mConfig.authMode != AUTH_PROOF && mConfig.authMode != AUTH_TES3MP_PROOF && mConfig.authMode != AUTH_CODE)
+        || (mConfig.port == 0 && gamePort > 65533))
+        return false;
+
     mPort = mConfig.port != 0 ? mConfig.port : static_cast<unsigned short>(gamePort + 2);
 
-    mListenSocket = static_cast<int>(::socket(AF_INET, SOCK_STREAM, 0));
+    mListenSocket = static_cast<std::intptr_t>(::socket(AF_INET, SOCK_STREAM, 0));
     if (mListenSocket < 0)
         return false;
 
+    if (!nonblocking(mListenSocket))
+    {
+        ARENA_CLOSESOCKET(mListenSocket);
+        mListenSocket = -1;
+        return false;
+    }
+#ifndef _WIN32
+    if (mListenSocket >= FD_SETSIZE)
+    {
+        ARENA_CLOSESOCKET(mListenSocket);
+        mListenSocket = -1;
+        return false;
+    }
+#endif
     int reuse = 1;
     ::setsockopt(mListenSocket, SOL_SOCKET, SO_REUSEADDR,
         reinterpret_cast<const char*>(&reuse), sizeof(reuse));
@@ -114,7 +169,7 @@ bool LinkServer::start(unsigned short gamePort)
     // написанное в лаунчере видно в игре и наоборот; остальные живут
     // только в лаунчере.
     mChannels = {
-        { 1, "Общий",        static_cast<std::uint8_t>(CHANNEL_WRITABLE | CHANNEL_MIRRORS_GAME) },
+        { 1, "Общий",        static_cast<std::uint8_t>(CHANNEL_WRITABLE | (mCallbacks.pushToGameChat ? CHANNEL_MIRRORS_GAME : 0)) },
         { 2, "Поиск группы", CHANNEL_WRITABLE },
         { 3, "Торговля",     CHANNEL_WRITABLE },
         { 4, "Объявления",   static_cast<std::uint8_t>(CHANNEL_ADMIN_ONLY) },
@@ -130,13 +185,13 @@ void LinkServer::stop()
 {
     if (!mRunning.exchange(false))
         return;
+    if (mThread.joinable())
+        mThread.join();
     if (mListenSocket >= 0)
     {
         ARENA_CLOSESOCKET(mListenSocket);
         mListenSocket = -1;
     }
-    if (mThread.joinable())
-        mThread.join();
 
     std::lock_guard<std::mutex> lock(mMutex);
     for (Client* client : mClients)
@@ -164,17 +219,40 @@ void LinkServer::threadMain()
     // и отдельный поток на клиента здесь не нужен.
     while (mRunning.load())
     {
-        // TODO: собрать fd_set из mListenSocket и сокетов клиентов,
-        // select с таймаутом 200 мс, затем acceptPending() и
-        // serviceClient() для готовых.
-        acceptPending();
+        fd_set reads, writes;
+        FD_ZERO(&reads);
+        FD_ZERO(&writes);
+        FD_SET(mListenSocket, &reads);
+        std::intptr_t largest = mListenSocket;
+        {
+            std::lock_guard<std::mutex> lock(mMutex);
+            for (Client* client : mClients)
+            {
+                if (client->socket < 0) continue;
+                FD_SET(client->socket, &reads);
+                if (!client->outBuffer.empty()) FD_SET(client->socket, &writes);
+                largest = std::max(largest, client->socket);
+            }
+        }
+        timeval timeout{0, 200000};
+        const int ready = ::select(
+#ifdef _WIN32
+            0,
+#else
+            static_cast<int>(largest + 1),
+#endif
+            &reads, &writes, nullptr, &timeout);
+        if (!mRunning.load()) break;
+        if (ready > 0 && FD_ISSET(mListenSocket, &reads)) acceptPending();
 
         std::lock_guard<std::mutex> lock(mMutex);
         const std::uint64_t now = nowSec();
         for (auto it = mClients.begin(); it != mClients.end();)
         {
             Client* client = *it;
-            serviceClient(*client);
+            if (ready > 0 && client->socket >= 0 && FD_ISSET(client->socket, &reads))
+                serviceClient(*client);
+            if (client->socket >= 0) flushOutput(*client);
             // 90 с без единого кадра — клиент мёртв. Лаунчер шлёт PING
             // раз в 30 с, так что живое соединение сюда не попадает.
             if (client->socket < 0 || now - client->lastSeen > 90)
@@ -194,19 +272,28 @@ void LinkServer::acceptPending()
 {
     sockaddr_in from{};
     socklen_t fromSize = sizeof(from);
-    const int socket = static_cast<int>(::accept(mListenSocket,
+    const std::intptr_t socket = static_cast<std::intptr_t>(::accept(mListenSocket,
         reinterpret_cast<sockaddr*>(&from), &fromSize));
     if (socket < 0)
         return;
 
     std::lock_guard<std::mutex> lock(mMutex);
-    if (mClients.size() >= mConfig.maxConnections)
+    if (mClients.size() >= std::min<unsigned>(mConfig.maxConnections, FD_SETSIZE - 1)
+#ifndef _WIN32
+        || socket >= FD_SETSIZE
+#endif
+        )
     {
         ARENA_CLOSESOCKET(socket);
         return;
     }
 
     const std::string address = inet_ntoa(from.sin_addr);
+    if (mCallbacks.isAddressBanned && mCallbacks.isAddressBanned(address))
+    {
+        ARENA_CLOSESOCKET(socket);
+        return;
+    }
     const unsigned fromAddress = static_cast<unsigned>(std::count_if(mClients.begin(), mClients.end(),
         [&address](const Client* client) { return client->address == address; }));
     if (fromAddress >= mConfig.maxConnectionsPerAddress)
@@ -215,23 +302,30 @@ void LinkServer::acceptPending()
         return;
     }
 
-#ifndef _WIN32
-    ::fcntl(socket, F_SETFL, O_NONBLOCK);
+    if (!nonblocking(socket))
+    {
+        ARENA_CLOSESOCKET(socket);
+        return;
+    }
     int noDelay = 1;
-    ::setsockopt(socket, IPPROTO_TCP, TCP_NODELAY, &noDelay, sizeof(noDelay));
-#endif
+    ::setsockopt(socket, IPPROTO_TCP, TCP_NODELAY,
+        reinterpret_cast<const char*>(&noDelay), sizeof(noDelay));
 
     Client* client = new Client();
     client->socket = socket;
     client->address = address;
     client->lastSeen = nowSec();
     client->minuteStart = client->lastSeen;
-    randomBytes(client->nonce, sNonceSize);
+    if (!randomBytes(client->nonce, sNonceSize))
+    {
+        ARENA_CLOSESOCKET(socket);
+        delete client;
+        return;
+    }
     mClients.push_back(client);
 
-    // CHALLENGE отправляем сразу: клиенту не нужно ждать HELLO-ответа,
-    // а nonce уже связан с этим соединением.
-    sendTo(*client, makeChallenge(client->nonce, mConfig.authMode));
+    // Protocol 2 waits for HELLO(name) so the challenge can carry that account's salt.
+
 }
 
 void LinkServer::serviceClient(Client& client)
@@ -256,9 +350,11 @@ void LinkServer::serviceClient(Client& client)
             closeClient(client, "клиент закрыл соединение");
             return;
         }
-        break;    // EAGAIN
+        if (!wouldBlock()) closeClient(client, "socket read failed");
+        break;
     }
 
+    if (client.socket < 0) return;
     for (;;)
     {
         FrameHeader header;
@@ -277,7 +373,6 @@ void LinkServer::serviceClient(Client& client)
             return;
     }
 
-    // TODO: дослать client.outBuffer, если предыдущий send() ушёл не целиком.
 }
 
 void LinkServer::handleFrame(Client& client, const FrameHeader& header, const std::string& payload)
@@ -299,14 +394,25 @@ void LinkServer::handleFrame(Client& client, const FrameHeader& header, const st
         {
             const std::uint16_t protocol = reader.u16();
             reader.u8();                          // вид клиента: ПК/Android
-            reader.text(32);                      // версия клиента, для логов
-            if (protocol != sProtocol)
+            reader.text(32);                      // version
+            const std::string name = reader.text(sMaxNick);
+            if (!reader.ok() || protocol != sProtocol || client.helloDone || name.empty())
             {
                 sendTo(client, makeAuthFail(FAIL_VERSION, "Версия лаунчера не совпадает с сервером"));
                 closeClient(client, "версия протокола");
                 return;
             }
+            if (!throttleAuth(client.address))
+            {
+                sendTo(client, makeAuthFail(FAIL_RATE, "Слишком много попыток, подождите"));
+                return;
+            }
             client.helloDone = true;
+            client.requestedName = name;
+            client.accountFound = mCallbacks.findAccount(name, client.account);
+            // Missing users receive a syntactically valid challenge too.
+            const std::string salt = client.accountFound ? client.account.passwordSalt : std::string(64, '0');
+            sendTo(client, makeChallenge(client.nonce, mConfig.authMode, salt));
             break;
         }
         case TYPE_AUTH:      handleAuth(client, reader); break;
@@ -339,28 +445,27 @@ void LinkServer::handleFrame(Client& client, const FrameHeader& header, const st
 
 void LinkServer::handleAuth(Client& client, Reader& reader)
 {
+    if (!client.helloDone || client.authorized || client.authAttempted)
+    {
+        closeClient(client, "unexpected AUTH");
+        return;
+    }
+    client.authAttempted = true;
     const std::string name = reader.text(sMaxNick);
     const std::uint8_t mode = reader.u8();
     const std::string secret = reader.text(128);
-    if (!reader.ok() || name.empty())
+    if (!reader.ok() || name != client.requestedName || mode != mConfig.authMode)
     {
         closeClient(client, "некорректный AUTH");
         return;
     }
 
-    if (!throttleAuth(client.address))
-    {
-        ++mStats.rejectedAuth;
-        sendTo(client, makeAuthFail(FAIL_RATE, "Слишком много попыток, подождите"));
-        closeClient(client, "перебор пароля");
-        return;
-    }
-
     LinkAccount account;
-    if (mCallbacks.findAccount == nullptr || !mCallbacks.findAccount(name, account))
+    if (!client.accountFound || !mCallbacks.findAccount(name, account)
+        || account.passwordSha256 != client.account.passwordSha256
+        || account.passwordSalt != client.account.passwordSalt)
     {
-        sendTo(client, makeAuthFail(FAIL_NO_ACCOUNT,
-            "Персонаж не найден. Зайдите на сервер и создайте его в игре."));
+        sendTo(client, makeAuthFail(FAIL_BAD_CREDENTIALS, "Неверное имя или пароль"));
         return;
     }
     if (account.banned)
@@ -373,11 +478,10 @@ void LinkServer::handleAuth(Client& client, Reader& reader)
     switch (mode)
     {
         case AUTH_PROOF:
-            // proof = HMAC-SHA256(sha256(пароль), nonce). Пароль по сети
-            // не идёт вообще. Если у учётки нет passwordSha256 (bcrypt в
-            // хранилище) — клиенту заранее выдан AUTH_PLAIN в CHALLENGE.
-            // TODO: сравнение постоянного времени с посчитанным HMAC.
-            verified = !account.passwordSha256.empty() && secret.size() == sProofSize;
+        case AUTH_TES3MP_PROOF:
+            verified = secret.size() == sProofSize && mCallbacks.verifyProof != nullptr
+                && mCallbacks.verifyProof(account,
+                    std::string(reinterpret_cast<const char*>(client.nonce), sNonceSize), secret);
             break;
         case AUTH_PLAIN:
             verified = mCallbacks.verifyPassword != nullptr
@@ -398,6 +502,7 @@ void LinkServer::handleAuth(Client& client, Reader& reader)
         return;
     }
 
+    mAuthAttempts.erase(client.address);
     client.authorized = true;
     client.userId = account.userId;
     client.name = account.name;
@@ -419,6 +524,14 @@ void LinkServer::handleAuth(Client& client, Reader& reader)
 
 void LinkServer::handleSend(Client& client, Reader& reader)
 {
+    LinkAccount currentAccount;
+    if (!mCallbacks.findAccount(client.name, currentAccount) || currentAccount.banned
+        || (mCallbacks.isAddressBanned && mCallbacks.isAddressBanned(client.address))
+        || currentAccount.passwordSha256 != client.account.passwordSha256)
+    {
+        closeClient(client, "account revoked");
+        return;
+    }
     const std::uint16_t channelId = reader.u16();
     const std::string text = reader.text16(sMaxText);
     if (!reader.ok() || text.empty())
@@ -589,19 +702,37 @@ void LinkServer::disconnectUser(std::uint32_t userId, const std::string& reason)
     }
 }
 
+void LinkServer::flushOutput(Client& client)
+{
+    while (client.socket >= 0 && !client.outBuffer.empty())
+    {
+        const int count = static_cast<int>(client.outBuffer.size());
+        const auto sent = ::send(client.socket, client.outBuffer.data(), count,
+#ifdef MSG_NOSIGNAL
+            MSG_NOSIGNAL
+#else
+            0
+#endif
+        );
+        if (sent > 0) client.outBuffer.erase(0, static_cast<std::size_t>(sent));
+        else
+        {
+            if (sent == 0 || !wouldBlock()) closeClient(client, "socket write failed");
+            return;
+        }
+    }
+}
+
 void LinkServer::sendTo(Client& client, const std::string& data)
 {
-    if (client.socket < 0)
-        return;
-    const auto sent = ::send(client.socket, data.data(), static_cast<int>(data.size()), 0);
-    if (sent < 0)
+    if (client.socket < 0) return;
+    if (client.outBuffer.size() + data.size() > sMaxPayload * 64)
     {
-        // TODO: EAGAIN — сложить остаток в client.outBuffer и дослать,
-        // когда select скажет, что сокет готов на запись.
+        closeClient(client, "slow consumer");
         return;
     }
-    if (static_cast<std::size_t>(sent) < data.size())
-        client.outBuffer.append(data, static_cast<std::size_t>(sent), data.size() - static_cast<std::size_t>(sent));
+    client.outBuffer += data;
+    flushOutput(client);
 }
 
 void LinkServer::broadcast(std::uint16_t channel, const std::string& data)
@@ -654,15 +785,13 @@ void LinkServer::appendHistory(const Message& message)
 bool LinkServer::throttleAuth(const std::string& address)
 {
     const std::uint64_t now = nowSec();
+    for (auto it = mAuthAttempts.begin(); it != mAuthAttempts.end();)
+        if (it->second.second <= now) it = mAuthAttempts.erase(it);
+        else ++it;
     auto& entry = mAuthAttempts[address];
-    if (entry.second > now)
-        return false;
-    if (++entry.first >= mConfig.authTriesBeforeBlock)
-    {
-        entry.first = 0;
-        entry.second = now + mConfig.authBlockSeconds;
-        return false;
-    }
+    if (entry.second == 0) entry.second = now + mConfig.authBlockSeconds;
+    if (entry.first >= mConfig.authTriesBeforeBlock) return false;
+    ++entry.first;
     return true;
 }
 

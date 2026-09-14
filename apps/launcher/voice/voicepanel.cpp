@@ -19,7 +19,7 @@ VoicePanel::VoicePanel(QWidget* parent)
     layout->setContentsMargins(0, 8, 0, 0);
 
     mEnabled = new QCheckBox(tr("Voice chat"), this);
-    mStateLabel = new QLabel(tr("Lobby"), this);
+    mStateLabel = new QLabel(tr("Voice settings apply when the game starts"), this);
     mStateLabel->setWordWrap(true);
     mStateLabel->setProperty("arenaMuted", true);
     mPushToTalkKey = new QKeySequenceEdit(this);
@@ -67,7 +67,7 @@ void VoicePanel::setVoiceAvailable(bool available)
 void VoicePanel::setGameRunning(bool running)
 {
     mGameRunning = running;
-    setStateText(running ? tr("In game: nearby players are audible") : tr("Lobby"));
+    setStateText(running ? tr("In-game voice uses the server settings") : tr("Voice settings apply when the game starts"));
     updateEnabledState();
 }
 

@@ -1268,10 +1268,8 @@ void Launcher::GraphicsPage::applyQualityLevel(int requestedLevel)
     static const int anisotropy[] = { 0, 2, 4, 8, 12, 16 };
     static const int antialiasing[] = { 0, 0, 2, 2, 4, 4 };
     static const int waterRtt[] = { 256, 256, 512, 512, 1024, 2048 };
-    // Minimum already reflects world objects. Higher presets progressively add
-    // actors and groundcover; the limited 0..5 setting range means adjacent
-    // presets intentionally share a detail tier.
-    static const int waterReflectionDetail[] = { 2, 3, 3, 4, 5, 5 };
+    // Minimum/Low avoid reflecting the entire city into the water RTT.
+    static const int waterReflectionDetail[] = { 0, 1, 3, 4, 5, 5 };
     // Shadow-map sizes below 512 are intentionally not used by any quality preset.
     static const int shadowResolution[] = { 512, 512, 1024, 2048, 4096, 8192 };
     static const float grassDensity[] = { 0.30f, 0.45f, 0.65f, 0.80f, 0.90f, 1.00f };
@@ -1411,11 +1409,19 @@ void Launcher::GraphicsPage::applyQualityLevel(int requestedLevel)
             ? "CullDrawThreadPerContext" : "DrawThreadPerContext");
     Settings::Manager::setString("threading model", "OSG", threadingModel);
 
-    // U023: every ArenaMP preset finishes with the renderer baseline requested
-    // by the build. Presets still scale distance, shadows, water, grass, worker
-    // threads, AA and light counts, while this block keeps material/HDR output
-    // consistent across builds and guarantees these keys exist in settings.cfg.
+    // U030: the common baseline supplies tone parameters only. It must not
+    // undo the material/lighting quality selected above, especially Minimum.
     applyRequiredShaderBaseline();
+    const bool postEnabled = level >= 2;
+    Settings::Manager::setBool("hdr lighting", "Shaders", postEnabled);
+    Settings::Manager::setBool("bloom enabled", "Shaders", postEnabled);
+    if (!postEnabled)
+    {
+        Settings::Manager::setBool("native ssr enabled", "Shaders", false);
+        Settings::Manager::setBool("smaa enabled", "Shaders", false);
+        Settings::Manager::setBool("god rays enabled", "Shaders", false);
+        Settings::Manager::setBool("atmospheric fog enabled", "Shaders", false);
+    }
 
     // No display-setting restore is required: the preset never modifies those
     // keys. In particular, do not call setInt/setBool/setFloat for them here,
@@ -1425,23 +1431,12 @@ void Launcher::GraphicsPage::applyQualityLevel(int requestedLevel)
 
 void Launcher::GraphicsPage::applyRequiredShaderBaseline()
 {
-    Settings::Manager::setBool("auto use object normal maps", "Shaders", true);
-    Settings::Manager::setBool("auto use object specular maps", "Shaders", true);
-    Settings::Manager::setBool("auto use terrain normal maps", "Shaders", true);
-    Settings::Manager::setBool("auto use terrain specular maps", "Shaders", true);
-    Settings::Manager::setBool("enhanced pbr lighting", "Shaders", true);
-    Settings::Manager::setBool("force per pixel lighting", "Shaders", true);
-    Settings::Manager::setBool("force shaders", "Shaders", true);
-    Settings::Manager::setString("lighting method", "Shaders", "shaders compatibility");
-    Settings::Manager::setString("material quality", "Shaders", "balanced");
-    Settings::Manager::setBool("bloom enabled", "Shaders", true);
     Settings::Manager::setFloat("bloom intensity", "Shaders", 0.39f);
     Settings::Manager::setFloat("bloom radius", "Shaders", 3.54839f);
     Settings::Manager::setFloat("bloom soft knee", "Shaders", 0.4f);
     Settings::Manager::setFloat("bloom threshold", "Shaders", 0.52f);
     Settings::Manager::setFloat("hdr exposure", "Shaders", 0.97f);
     Settings::Manager::setFloat("hdr interior exposure", "Shaders", 0.52f);
-    Settings::Manager::setBool("hdr lighting", "Shaders", true);
     Settings::Manager::setFloat("hdr night exposure", "Shaders", -0.07f);
     Settings::Manager::setFloat("hdr saturation", "Shaders", 1.13f);
 }

@@ -31,13 +31,13 @@ namespace ArenaLink
     using Reader = ArenaNet::Reader;
 
     inline constexpr std::uint32_t sMagic = 0x414C4B31u;      // 'ALK1'
-    inline constexpr std::uint16_t sProtocol = 1;
+    inline constexpr std::uint16_t sProtocol = 2;
     inline constexpr std::size_t sHeaderSize = 8;
     inline constexpr std::size_t sMaxPayload = 16384;
     inline constexpr std::size_t sNonceSize = 16;
     inline constexpr std::size_t sProofSize = 32;             // HMAC-SHA256
     inline constexpr std::size_t sTicketSize = 16;
-    inline constexpr std::size_t sMaxNick = 32;
+    inline constexpr std::size_t sMaxNick = 120; // bytes: up to 30 UTF-8 code points
     inline constexpr std::size_t sMaxText = 4000;
     inline constexpr std::size_t sMaxChannelName = 32;
 
@@ -82,6 +82,7 @@ namespace ArenaLink
         // Первая привязка без пароля: игрок пишет /chatlink в игре и
         // вводит шестизначный код. Живёт 5 минут, одноразовый.
         AUTH_CODE     = 2,
+        AUTH_TES3MP_PROOF = 3, // HMAC keyed by the stored salted TES3MP verifier
     };
 
     enum AuthFail : std::uint8_t
@@ -206,20 +207,22 @@ namespace ArenaLink
 
     // ── сборка полезных нагрузок ─────────────────────────────────────────
 
-    inline std::string makeHello(std::uint8_t clientKind, const std::string& clientVersion)
+    inline std::string makeHello(std::uint8_t clientKind, const std::string& clientVersion, const std::string& name = {})
     {
         Writer writer;
         writer.u16(sProtocol);
         writer.u8(clientKind);          // 0 — лаунчер ПК, 1 — Android
         writer.text(clientVersion, 32);
+        writer.text(name, sMaxNick);
         return frame(TYPE_HELLO, writer.data());
     }
 
-    inline std::string makeChallenge(const std::uint8_t nonce[sNonceSize], std::uint8_t authMode)
+    inline std::string makeChallenge(const std::uint8_t nonce[sNonceSize], std::uint8_t authMode, const std::string& salt = {})
     {
         Writer writer;
         writer.raw(nonce, sNonceSize);
         writer.u8(authMode);
+        writer.text(salt, 128);
         return frame(TYPE_CHALLENGE, writer.data());
     }
 

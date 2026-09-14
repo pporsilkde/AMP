@@ -9,6 +9,7 @@
 #include <QDateTime>
 #include <QMessageAuthenticationCode>
 #include <QTcpSocket>
+#include <QSignalBlocker>
 #include <QTimer>
 
 using namespace Launcher;
@@ -49,18 +50,29 @@ void ArenaLinkClient::setServer(const QString& host, quint16 gamePort, quint16 l
 
 void ArenaLinkClient::connectAndLogin(const QString& name, const QString& password)
 {
+    disconnectFromServer();
+    mSocket->abort();
+    mBuffer.clear();
+    if (mHost.isEmpty() || mLinkPort < 3 || name.toUtf8().size() > static_cast<int>(sMaxNick)
+        || password.toUtf8().size() > 128)
+    {
+        emit loginFailed(FAIL_BAD_CREDENTIALS, tr("Invalid endpoint or credentials exceed protocol limits"));
+        return;
+    }
+    const quint64 generation = ++mGeneration;
+    mAwaitingChallenge = true;
     mPendingName = name;
     mPendingSecret = password;
     mPendingMode = AUTH_PROOF;
     emit connecting();
-    mSocket->abort();
     mSocket->connectToHost(mHost, mLinkPort);
-    QTimer::singleShot(sConnectTimeoutMs, this, [this]()
+    QTimer::singleShot(sConnectTimeoutMs, this, [this, generation]()
     {
-        if (mSocket->state() == QAbstractSocket::ConnectingState)
+        if (generation == mGeneration && !mProfile.authorized)
         {
+            disconnectFromServer();
             mSocket->abort();
-            emit disconnected(tr("The server is not responding"));
+            emit disconnected(tr("Chat sign-in timed out at %1:%2. Check the ArenaLink service.").arg(mHost).arg(mLinkPort));
         }
     });
 }
@@ -73,6 +85,8 @@ void ArenaLinkClient::connectAndLoginWithCode(const QString& name, const QString
 
 void ArenaLinkClient::disconnectFromServer()
 {
+    ++mGeneration;
+    mAwaitingChallenge = false;
     mPingTimer->stop();
     mProfile = LinkProfile();
     mBuffer.clear();
@@ -83,7 +97,7 @@ void ArenaLinkClient::disconnectFromServer()
 
 void ArenaLinkClient::slotConnected()
 {
-    send(makeHello(0, QStringLiteral("ArenaMP U025").toStdString()));
+    send(makeHello(0, "ArenaMP U030", mPendingName.toStdString()));
     // Дальше ждём CHALLENGE: без nonce отвечать нечем.
 }
 
@@ -133,15 +147,34 @@ void ArenaLinkClient::handleFrame(const FrameHeader& header, const QByteArray& p
         case TYPE_CHALLENGE:
         {
             QByteArray nonce(static_cast<int>(sNonceSize), '\0');
-            if (!reader.raw(nonce.data(), sNonceSize))
+            if (!mAwaitingChallenge || !reader.raw(nonce.data(), sNonceSize))
                 return;
             const quint8 serverMode = reader.u8();
+            const QByteArray salt = QByteArray::fromStdString(reader.text(128));
 
             // Сервер решает, каким способом принимать пароль: если учётки
             // лежат в bcrypt, proof посчитать нельзя и он попросит AUTH_PLAIN.
             quint8 mode = mPendingMode == AUTH_CODE ? AUTH_CODE : serverMode;
+            if (!reader.ok() || (mode != AUTH_PROOF && mode != AUTH_TES3MP_PROOF && mode != AUTH_CODE))
+            {
+                disconnectFromServer();
+                emit loginFailed(FAIL_BAD_CREDENTIALS, tr("Chat server needs a supported secure sign-in method"));
+                return;
+            }
+            mAwaitingChallenge = false;
             std::string secret;
-            if (mode == AUTH_PROOF)
+            if (mode == AUTH_TES3MP_PROOF)
+            {
+                const auto hexHash = [](const QByteArray& bytes) {
+                    return QCryptographicHash::hash(bytes, QCryptographicHash::Sha256).toHex();
+                };
+                const QByteArray first = hexHash(mPendingSecret.toUtf8());
+                const QByteArray gameHash = hexHash(first + hexHash(hexHash(first)));
+                const QByteArray key = QCryptographicHash::hash(gameHash + salt, QCryptographicHash::Sha256);
+                const QByteArray proof = QMessageAuthenticationCode::hash(nonce, key, QCryptographicHash::Sha256);
+                secret.assign(proof.constData(), static_cast<std::size_t>(proof.size()));
+            }
+            else if (mode == AUTH_PROOF)
             {
                 const QByteArray proof = makeProof(mPendingSecret, nonce);
                 secret.assign(proof.constData(), static_cast<std::size_t>(proof.size()));
@@ -175,6 +208,11 @@ void ArenaLinkClient::handleFrame(const FrameHeader& header, const QByteArray& p
         {
             const quint8 reason = reader.u8();
             const QString text = QString::fromStdString(reader.text16(256));
+            // Preserve the server's authentication error instead of replacing
+            // it with a generic socket disconnect notification.
+            const QSignalBlocker blocker(mSocket);
+            disconnectFromServer();
+            mSocket->abort();
             emit loginFailed(reason, text);
             break;
         }
@@ -325,6 +363,9 @@ void ArenaLinkClient::slotPing()
 void ArenaLinkClient::slotDisconnected()
 {
     mPingTimer->stop();
+    ++mGeneration;
+    mPendingSecret.clear();
+    mBuffer.clear();
     mProfile.authorized = false;
     emit disconnected(tr("Connection to the server was lost"));
 }
@@ -332,6 +373,9 @@ void ArenaLinkClient::slotDisconnected()
 void ArenaLinkClient::slotError()
 {
     mPingTimer->stop();
+    ++mGeneration;
+    mPendingSecret.clear();
+    mBuffer.clear();
     mProfile.authorized = false;
     emit disconnected(mSocket->errorString());
 }

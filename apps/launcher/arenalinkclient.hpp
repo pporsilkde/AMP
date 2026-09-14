@@ -125,6 +125,8 @@ namespace Launcher
         QString mPendingSecret;
         quint8 mPendingMode = ArenaLink::AUTH_PROOF;
         LinkProfile mProfile;
+        quint64 mGeneration = 0;
+        bool mAwaitingChallenge = false;
     };
 }
 #endif
