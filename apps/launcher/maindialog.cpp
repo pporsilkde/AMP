@@ -884,7 +884,23 @@ void Launcher::MainDialog::changePage(QListWidgetItem *current, QListWidgetItem 
     int currentIndex = iconWidget->row(current);
     pagesWidget->setCurrentIndex(currentIndex);
     if (pagesWidget->currentWidget() == mChatPage && mChatPage != nullptr)
+    {
+        // Opening chat must use the current Play selection even before a game
+        // has been launched. A managed local host uses its local endpoint.
+        if (mPlayPage != nullptr)
+        {
+            const bool alternate = mPlayPage->alternativeServer();
+            QString host = alternate ? mPlayPage->alternativeAddress() : mPlayPage->serverAddress();
+            QString port = alternate ? mPlayPage->alternativePort() : mPlayPage->serverPort();
+            if (mPlayPage->autoStartServer() && mServerDialog != nullptr && mServerDialog->isRunning())
+            {
+                host = mServerDialog->localConnectAddress();
+                port = mServerDialog->configuredPort();
+            }
+            mChatPage->setServerEndpoint(host, port.toUShort());
+        }
         mChatPage->refreshLoginFromGameSettings();
+    }
     // The Play page draws its own cards and status column, so the shared
     // glass panel behind the stacked pages is disabled only there.
     const bool bare = pagesWidget->currentWidget() == mPlayPage;

@@ -32,6 +32,9 @@ namespace ArenaUi
             static const QHash<QString, QString> map = []()
             {
                 QHash<QString, QString> m;
+                m.insert(QString::fromUtf8(u8"Open Chat.log"), QString::fromUtf8(u8"Открыть Chat.log"));
+                m.insert(QString::fromUtf8(u8"Chat log"), QString::fromUtf8(u8"Журнал чата"));
+                m.insert(QString::fromUtf8(u8"Could not open Chat.log: %1"), QString::fromUtf8(u8"Не удалось открыть Chat.log: %1"));
                 m.insert(QString::fromUtf8(u8"Voice settings apply when the game starts"), QString::fromUtf8(u8"Настройки голоса применятся при запуске игры"));
                 m.insert(QString::fromUtf8(u8"In-game voice uses the server settings"), QString::fromUtf8(u8"Игровой голос работает по настройкам сервера"));
                 m.insert(QString::fromUtf8(u8"Invalid endpoint or credentials exceed protocol limits"), QString::fromUtf8(u8"Неверный адрес или слишком длинное имя/пароль"));

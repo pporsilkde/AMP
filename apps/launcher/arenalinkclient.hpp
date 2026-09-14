@@ -9,6 +9,7 @@
 // HMAC-SHA256(sha256(пароль), nonce).
 
 #include <QByteArray>
+#include <QElapsedTimer>
 #include <QObject>
 #include <QString>
 #include <QVector>
@@ -80,6 +81,11 @@ namespace Launcher
         void connectAndLoginWithCode(const QString& name, const QString& code);
         void disconnectFromServer();
 
+        QString chatLogPath() const { return mLogPath; }
+        void configureChatLog(const QString& settingsPath);
+        void logCredentialSource(bool readable, bool hasName, bool hasPassword);
+        void logLoginValidation(bool hasName, bool hasPassword);
+
         bool authorized() const { return mProfile.authorized; }
         const LinkProfile& profile() const { return mProfile; }
 
@@ -109,6 +115,7 @@ namespace Launcher
         void slotPing();
 
     private:
+        void logEvent(const QString& event);
         void handleFrame(const ArenaLink::FrameHeader& header, const QByteArray& payload);
         void send(const std::string& frame);
         /// HMAC-SHA256(sha256(пароль), nonce) — пароль остаётся на машине игрока.
@@ -125,6 +132,10 @@ namespace Launcher
         QString mPendingSecret;
         quint8 mPendingMode = ArenaLink::AUTH_PROOF;
         LinkProfile mProfile;
+        QString mLogPath;
+        QString mStage = QStringLiteral("idle");
+        quint64 mAttempt = 0;
+        QElapsedTimer mAttemptClock;
         quint64 mGeneration = 0;
         bool mAwaitingChallenge = false;
     };

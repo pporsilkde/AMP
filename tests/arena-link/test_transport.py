@@ -29,7 +29,8 @@ class Transport(unittest.TestCase):
             '-o',exe],check=True)
         with socket.socket() as reserve:
             reserve.bind(('127.0.0.1',0)); cls.port=reserve.getsockname()[1]
-        cls.process=subprocess.Popen([exe,str(cls.port)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
+        cls.diagnostic=Path(cls.tmp.name)/'ChatServer.log'
+        cls.process=subprocess.Popen([exe,str(cls.port),str(cls.diagnostic)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,text=True)
         assert cls.process.stdout.readline().strip() == 'ready'
     @classmethod
     def tearDownClass(cls):
@@ -79,4 +80,11 @@ class Transport(unittest.TestCase):
         self.assertEqual(s.recv(1),b'')
     def test_07_send_before_auth_is_closed(self):
         s=self.connect(); s.sendall(frame(0x14,b'')); self.assertEqual(s.recv(1),b'')
+    def test_08_diagnostics_capture_failure_without_secrets(self):
+        s=self.connect(); self.assertEqual(self.login(s,b'X'*32)[0],5)
+        content=self.diagnostic.read_text()
+        for required in ('LISTENING', 'HELLO', 'CHALLENGE', 'AUTH_RECEIVED', 'AUTH_FAIL', 'PROOF_MISMATCH'):
+            self.assertIn(required,content)
+        for private in ('Alice', 'Длинное Русское', 'X'*32, 'K'*32, 'Привет'):
+            self.assertNotIn(private,content)
 if __name__=='__main__': unittest.main(verbosity=2)

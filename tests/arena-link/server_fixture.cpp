@@ -3,9 +3,12 @@
 #include <iostream>
 #include <cassert>
 #include <cstdlib>
+#include <fstream>
+#include <memory>
+#include <mutex>
 int main(int argc, char** argv)
 {
-    assert(argc == 2);
+    assert(argc == 3);
     mwmp::LinkServer server;
     mwmp::LinkConfig config;
     config.bindAddress = "127.0.0.1";
@@ -13,6 +16,13 @@ int main(int argc, char** argv)
     config.maxConnectionsPerAddress = 20;
     config.sendRatePerMinute = 100;
     mwmp::LinkCallbacks callbacks;
+    auto log = std::make_shared<std::ofstream>(argv[2]);
+    auto lock = std::make_shared<std::mutex>();
+    callbacks.diagnostic = [log, lock](const std::string& event) {
+        std::lock_guard<std::mutex> guard(*lock);
+        *log << event << '\n';
+        log->flush();
+    };
     server.configure(config, callbacks);
     assert(!server.start(25565)); // An unconfigured backend cannot accept logins.
     callbacks.findAccount = [](const std::string& name, mwmp::LinkAccount& out) {

@@ -1,5 +1,5 @@
 // ArenaLink transport. The host must supply thread-safe account callbacks;
-// the cumulative archive does not contain the game's account storage adapter.
+// LinkAccountStore supplies the native server's JSON account adapter.
 #ifdef _WIN32
 #  define _CRT_RAND_S
 #endif
@@ -67,6 +67,15 @@ namespace
 #endif
     }
 
+    int socketError()
+    {
+#ifdef _WIN32
+        return WSAGetLastError();
+#else
+        return errno;
+#endif
+    }
+
     bool wouldBlock()
     {
 #ifdef _WIN32
@@ -81,6 +90,7 @@ namespace
 
 struct LinkServer::Client
 {
+    std::uint64_t id = 0;
     std::intptr_t socket = -1;
     std::string address;
     std::string inBuffer;
@@ -115,26 +125,44 @@ void LinkServer::configure(const LinkConfig& config, const LinkCallbacks& callba
     mCallbacks = callbacks;
 }
 
+void LinkServer::diagnose(const std::string& event) const
+{
+    try { if (mCallbacks.diagnostic) mCallbacks.diagnostic(event); }
+    catch (...) { /* A diagnostic sink must not interrupt networking. */ }
+}
+
 bool LinkServer::start(unsigned short gamePort)
 {
+    diagnose("START build=U031 protocol=" + std::to_string(sProtocol)
+        + " game_port=" + std::to_string(gamePort) + " bind=" + mConfig.bindAddress);
     if (!mConfig.enabled || mRunning.load())
+    {
+        diagnose("START_SKIPPED disabled_or_already_running");
         return false;
+    }
 
     if (mCallbacks.findAccount == nullptr
         || ((mConfig.authMode == AUTH_PROOF || mConfig.authMode == AUTH_TES3MP_PROOF) && mCallbacks.verifyProof == nullptr)
         || (mConfig.authMode == AUTH_CODE && mCallbacks.verifyLinkCode == nullptr)
         || (mConfig.authMode != AUTH_PROOF && mConfig.authMode != AUTH_TES3MP_PROOF && mConfig.authMode != AUTH_CODE)
         || (mConfig.port == 0 && gamePort > 65533))
+    {
+        diagnose("START_FAILED invalid_callbacks_auth_mode_or_port");
         return false;
+    }
 
     mPort = mConfig.port != 0 ? mConfig.port : static_cast<unsigned short>(gamePort + 2);
 
     mListenSocket = static_cast<std::intptr_t>(::socket(AF_INET, SOCK_STREAM, 0));
     if (mListenSocket < 0)
+    {
+        diagnose("SOCKET_CREATE_FAILED error=" + std::to_string(socketError()));
         return false;
+    }
 
     if (!nonblocking(mListenSocket))
     {
+        diagnose("NONBLOCKING_FAILED error=" + std::to_string(socketError()));
         ARENA_CLOSESOCKET(mListenSocket);
         mListenSocket = -1;
         return false;
@@ -160,6 +188,8 @@ bool LinkServer::start(unsigned short gamePort)
     if (::bind(mListenSocket, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0
         || ::listen(mListenSocket, 16) != 0)
     {
+        diagnose("BIND_OR_LISTEN_FAILED tcp_port=" + std::to_string(mPort)
+            + " error=" + std::to_string(socketError()));
         ARENA_CLOSESOCKET(mListenSocket);
         mListenSocket = -1;
         return false;
@@ -176,6 +206,7 @@ bool LinkServer::start(unsigned short gamePort)
     };
     loadHistory();
 
+    diagnose("LISTENING tcp_port=" + std::to_string(mPort));
     mRunning.store(true);
     mThread = std::thread(&LinkServer::threadMain, this);
     return true;
@@ -185,6 +216,7 @@ void LinkServer::stop()
 {
     if (!mRunning.exchange(false))
         return;
+    diagnose("STOP_REQUEST");
     if (mThread.joinable())
         mThread.join();
     if (mListenSocket >= 0)
@@ -284,6 +316,7 @@ void LinkServer::acceptPending()
 #endif
         )
     {
+        diagnose("ACCEPT_REJECTED connection_or_descriptor_limit");
         ARENA_CLOSESOCKET(socket);
         return;
     }
@@ -291,6 +324,7 @@ void LinkServer::acceptPending()
     const std::string address = inet_ntoa(from.sin_addr);
     if (mCallbacks.isAddressBanned && mCallbacks.isAddressBanned(address))
     {
+        diagnose("ACCEPT_REJECTED address_banned_or_banlist_unreadable peer=" + address);
         ARENA_CLOSESOCKET(socket);
         return;
     }
@@ -298,6 +332,7 @@ void LinkServer::acceptPending()
         [&address](const Client* client) { return client->address == address; }));
     if (fromAddress >= mConfig.maxConnectionsPerAddress)
     {
+        diagnose("ACCEPT_REJECTED per_address_limit peer=" + address);
         ARENA_CLOSESOCKET(socket);
         return;
     }
@@ -312,7 +347,9 @@ void LinkServer::acceptPending()
         reinterpret_cast<const char*>(&noDelay), sizeof(noDelay));
 
     Client* client = new Client();
+    client->id = mNextConnectionId++;
     client->socket = socket;
+    diagnose("ACCEPT conn=" + std::to_string(client->id) + " peer=" + address);
     client->address = address;
     client->lastSeen = nowSec();
     client->minuteStart = client->lastSeen;
@@ -396,6 +433,8 @@ void LinkServer::handleFrame(Client& client, const FrameHeader& header, const st
             reader.u8();                          // вид клиента: ПК/Android
             reader.text(32);                      // version
             const std::string name = reader.text(sMaxNick);
+            diagnose("HELLO conn=" + std::to_string(client.id) + " protocol=" + std::to_string(protocol)
+                + " parsed=" + std::to_string(reader.ok()));
             if (!reader.ok() || protocol != sProtocol || client.helloDone || name.empty())
             {
                 sendTo(client, makeAuthFail(FAIL_VERSION, "Версия лаунчера не совпадает с сервером"));
@@ -404,6 +443,7 @@ void LinkServer::handleFrame(Client& client, const FrameHeader& header, const st
             }
             if (!throttleAuth(client.address))
             {
+                diagnose("AUTH_RATE_LIMIT conn=" + std::to_string(client.id));
                 sendTo(client, makeAuthFail(FAIL_RATE, "Слишком много попыток, подождите"));
                 return;
             }
@@ -412,6 +452,8 @@ void LinkServer::handleFrame(Client& client, const FrameHeader& header, const st
             client.accountFound = mCallbacks.findAccount(name, client.account);
             // Missing users receive a syntactically valid challenge too.
             const std::string salt = client.accountFound ? client.account.passwordSalt : std::string(64, '0');
+            diagnose("CHALLENGE conn=" + std::to_string(client.id) + " mode=" + std::to_string(mConfig.authMode)
+                + " account_found=" + std::to_string(client.accountFound));
             sendTo(client, makeChallenge(client.nonce, mConfig.authMode, salt));
             break;
         }
@@ -454,8 +496,11 @@ void LinkServer::handleAuth(Client& client, Reader& reader)
     const std::string name = reader.text(sMaxNick);
     const std::uint8_t mode = reader.u8();
     const std::string secret = reader.text(128);
+    diagnose("AUTH_RECEIVED conn=" + std::to_string(client.id) + " mode=" + std::to_string(mode)
+        + " parsed=" + std::to_string(reader.ok()));
     if (!reader.ok() || name != client.requestedName || mode != mConfig.authMode)
     {
+        diagnose("AUTH_INVALID_FIELDS conn=" + std::to_string(client.id));
         closeClient(client, "некорректный AUTH");
         return;
     }
@@ -465,11 +510,13 @@ void LinkServer::handleAuth(Client& client, Reader& reader)
         || account.passwordSha256 != client.account.passwordSha256
         || account.passwordSalt != client.account.passwordSalt)
     {
+        diagnose("AUTH_FAIL conn=" + std::to_string(client.id) + " cause=ACCOUNT_MISSING_CHANGED_OR_UNREADABLE");
         sendTo(client, makeAuthFail(FAIL_BAD_CREDENTIALS, "Неверное имя или пароль"));
         return;
     }
     if (account.banned)
     {
+        diagnose("AUTH_FAIL conn=" + std::to_string(client.id) + " cause=ACCOUNT_BANNED");
         sendTo(client, makeAuthFail(FAIL_BANNED, "Учётная запись заблокирована"));
         return;
     }
@@ -497,11 +544,13 @@ void LinkServer::handleAuth(Client& client, Reader& reader)
 
     if (!verified)
     {
+        diagnose("AUTH_FAIL conn=" + std::to_string(client.id) + " cause=PROOF_MISMATCH");
         ++mStats.rejectedAuth;
         sendTo(client, makeAuthFail(FAIL_BAD_CREDENTIALS, "Неверный пароль"));
         return;
     }
 
+    diagnose("AUTH_OK conn=" + std::to_string(client.id));
     mAuthAttempts.erase(client.address);
     client.authorized = true;
     client.userId = account.userId;
@@ -749,6 +798,7 @@ void LinkServer::broadcast(std::uint16_t channel, const std::string& data)
 
 void LinkServer::closeClient(Client& client, const std::string&)
 {
+    diagnose("CLOSE conn=" + std::to_string(client.id) + " authorized=" + std::to_string(client.authorized));
     if (client.socket >= 0)
         ARENA_CLOSESOCKET(client.socket);
     client.socket = -1;

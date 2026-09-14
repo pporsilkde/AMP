@@ -64,6 +64,7 @@ namespace mwmp
     /// логика входа: подменять или дублировать её ArenaLink не должен.
     struct LinkCallbacks
     {
+        std::function<void(const std::string&)> diagnostic;
         /// Найти учётку по имени. false — персонажа нет (его создают только
         /// в игре), лаунчер покажет «зайдите на сервер и создайте персонажа».
         std::function<bool(const std::string&)> isAddressBanned;
@@ -121,6 +122,7 @@ namespace mwmp
     private:
         struct Client;
 
+        void diagnose(const std::string& event) const;
         void threadMain();
         void acceptPending();
         void serviceClient(Client& client);
@@ -155,6 +157,7 @@ namespace mwmp
         std::map<std::string, std::pair<unsigned, std::uint64_t>> mAuthAttempts;
         std::uint64_t mNextMessageId = 1;
         Stats mStats;
+        std::uint64_t mNextConnectionId = 1;
     };
 }
 #endif

@@ -17,6 +17,9 @@
 
 #include <QDateTime>
 #include <QFile>
+#include <QDesktopServices>
+#include <QUrl>
+#include <QMessageBox>
 #include <QTextStream>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -48,6 +51,13 @@ ChatPage::ChatPage(Config::LauncherSettings& launcherSettings, QWidget* parent)
     pageLayout->addLayout(mStack, 1);
     mVoicePanel = new VoicePanel(this);
     pageLayout->addWidget(mVoicePanel);
+    QPushButton* logButton = new QPushButton(tr("Open Chat.log"), this);
+    pageLayout->addWidget(logButton);
+    connect(logButton, &QPushButton::clicked, this, [this]() {
+        const QString path = mClient->chatLogPath();
+        if (path.isEmpty() || !QDesktopServices::openUrl(QUrl::fromLocalFile(path)))
+            QMessageBox::warning(this, tr("Chat log"), tr("Could not open Chat.log: %1").arg(path));
+    });
 
     connect(mClient, &ArenaLinkClient::loggedIn, this, &ChatPage::slotLoggedIn);
     connect(mClient, &ArenaLinkClient::loginFailed, this, &ChatPage::slotLoginFailed);
@@ -187,9 +197,13 @@ void ChatPage::refreshLoginFromGameSettings()
     if (mGameSettingsPath.trimmed().isEmpty())
         return;
 
+    mClient->configureChatLog(mGameSettingsPath);
     QFile file(mGameSettingsPath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        mClient->logCredentialSource(false, false, false);
         return;
+    }
 
     QString accountName;
     QString accountPassword;
@@ -229,6 +243,7 @@ void ChatPage::refreshLoginFromGameSettings()
     // Never copy the password into launcher.cfg. Keep it only in memory and
     // show it masked in the normal password mode. /chatlink code mode keeps
     // its own temporary value untouched until the user switches back.
+    mClient->logCredentialSource(true, !accountName.isEmpty(), !accountPassword.isEmpty());
     mGamePassword = accountPassword;
     if (!mCodeMode)
         mSecretEdit->setText(mGamePassword);
@@ -271,6 +286,7 @@ void ChatPage::slotLoginClicked()
     const QString secret = mSecretEdit->text();
     if (name.isEmpty() || secret.isEmpty())
     {
+        mClient->logLoginValidation(!name.isEmpty(), !secret.isEmpty());
         setStatus(tr("Enter the character name and password"), true);
         return;
     }

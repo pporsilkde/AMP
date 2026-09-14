@@ -11,12 +11,32 @@
 #include <QTcpSocket>
 #include <QSignalBlocker>
 #include <QTimer>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QStandardPaths>
+#include <QCoreApplication>
+#include <QDebug>
+#include <QHostAddress>
 
 using namespace Launcher;
 using namespace ArenaLink;
 
 namespace
 {
+    const char* socketErrorName(QAbstractSocket::SocketError error)
+    {
+        switch (error)
+        {
+            case QAbstractSocket::ConnectionRefusedError: return "CONNECTION_REFUSED";
+            case QAbstractSocket::RemoteHostClosedError: return "REMOTE_CLOSED";
+            case QAbstractSocket::HostNotFoundError: return "HOST_NOT_FOUND";
+            case QAbstractSocket::SocketTimeoutError: return "TIMEOUT";
+            case QAbstractSocket::NetworkError: return "NETWORK_ERROR";
+            case QAbstractSocket::SocketAccessError: return "ACCESS_DENIED";
+            default: return "OTHER";
+        }
+    }
     constexpr int sPingIntervalMs = 30000;
     constexpr int sConnectTimeoutMs = 8000;
 }
@@ -32,6 +52,10 @@ ArenaLinkClient::ArenaLinkClient(QObject* parent)
     connect(mSocket, QOverload<QAbstractSocket::SocketError>::of(&QAbstractSocket::error),
         this, &ArenaLinkClient::slotError);
 
+    configureChatLog(QString());
+    connect(mSocket, &QTcpSocket::hostFound, this, [this]() {
+        logEvent(QStringLiteral("DNS_RESOLVED"));
+    });
     mPingTimer->setInterval(sPingIntervalMs);
     connect(mPingTimer, &QTimer::timeout, this, &ArenaLinkClient::slotPing);
 }
@@ -41,11 +65,66 @@ ArenaLinkClient::~ArenaLinkClient()
     disconnectFromServer();
 }
 
+void ArenaLinkClient::configureChatLog(const QString& settingsPath)
+{
+    QString fallback = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (fallback.isEmpty()) fallback = QDir::homePath() + QStringLiteral("/ArenaMP");
+    const QString preferred = settingsPath.isEmpty() ? fallback : QFileInfo(settingsPath).absolutePath();
+    for (const QString& directory : { preferred, fallback })
+    {
+        if (!QDir().mkpath(directory)) continue;
+        QFile file(QDir(directory).filePath(QStringLiteral("Chat.log")));
+        if (file.open(QIODevice::WriteOnly | QIODevice::Append))
+        {
+            mLogPath = file.fileName();
+            return;
+        }
+    }
+    mLogPath.clear();
+    qWarning("ArenaLink: cannot create Chat.log in the config or app data directory");
+}
+
+void ArenaLinkClient::logEvent(const QString& event)
+{
+    if (mLogPath.isEmpty()) return;
+    // This function only receives allowlisted metadata, never network payloads,
+    // account names, passwords, proofs, nonces, salts, messages or exception dumps.
+    QString line = event.left(1024);
+    line.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    line.replace(QLatin1Char('\r'), QLatin1Char(' '));
+    if (QFileInfo(mLogPath).size() >= 1024 * 1024)
+    {
+        QFile::remove(mLogPath + QStringLiteral(".1"));
+        if (!QFile::rename(mLogPath, mLogPath + QStringLiteral(".1"))) return;
+    }
+    QFile file(mLogPath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Append)) return;
+    const QString record = QStringLiteral("%1 pid=%2 attempt=%3 elapsed_ms=%4 stage=%5 %6\n")
+        .arg(QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs))
+        .arg(QCoreApplication::applicationPid()).arg(mAttempt)
+        .arg(mAttemptClock.isValid() ? mAttemptClock.elapsed() : 0).arg(mStage, line);
+    const QByteArray bytes = record.toUtf8();
+    file.write(bytes);
+    file.flush();
+}
+
+void ArenaLinkClient::logCredentialSource(bool readable, bool hasName, bool hasPassword)
+{
+    logEvent(QStringLiteral("CONFIG_SOURCE settings_readable=%1 name_present=%2 password_present=%3")
+        .arg(readable).arg(hasName).arg(hasPassword));
+}
+
 void ArenaLinkClient::setServer(const QString& host, quint16 gamePort, quint16 linkPort)
 {
     mHost = host.trimmed();
-    // Порт чата по умолчанию — игровой + 2 (игровой + 1 занят голосом).
+    // ArenaLink TCP defaults to game port + 2.
     mLinkPort = linkPort != 0 ? linkPort : static_cast<quint16>(gamePort + 2);
+}
+
+void ArenaLinkClient::logLoginValidation(bool hasName, bool hasPassword)
+{
+    logEvent(QStringLiteral("LOCAL_VALIDATION_FAILED name_present=%1 password_present=%2")
+        .arg(hasName).arg(hasPassword));
 }
 
 void ArenaLinkClient::connectAndLogin(const QString& name, const QString& password)
@@ -56,11 +135,17 @@ void ArenaLinkClient::connectAndLogin(const QString& name, const QString& passwo
     if (mHost.isEmpty() || mLinkPort < 3 || name.toUtf8().size() > static_cast<int>(sMaxNick)
         || password.toUtf8().size() > 128)
     {
+        logEvent(QStringLiteral("LOCAL_VALIDATION_FAILED"));
         emit loginFailed(FAIL_BAD_CREDENTIALS, tr("Invalid endpoint or credentials exceed protocol limits"));
         return;
     }
     const quint64 generation = ++mGeneration;
     mAwaitingChallenge = true;
+    ++mAttempt;
+    mAttemptClock.start();
+    mStage = QStringLiteral("connecting");
+    logEvent(QStringLiteral("CONNECT build=U031 protocol=%1 host=%2 tcp_port=%3 name_present=%4 password_present=%5")
+        .arg(sProtocol).arg(mHost).arg(mLinkPort).arg(!name.isEmpty()).arg(!password.isEmpty()));
     mPendingName = name;
     mPendingSecret = password;
     mPendingMode = AUTH_PROOF;
@@ -70,6 +155,8 @@ void ArenaLinkClient::connectAndLogin(const QString& name, const QString& passwo
     {
         if (generation == mGeneration && !mProfile.authorized)
         {
+            logEvent(QStringLiteral("TIMEOUT socket_state=%1 bytes_pending=%2")
+                .arg(static_cast<int>(mSocket->state())).arg(mSocket->bytesToWrite()));
             disconnectFromServer();
             mSocket->abort();
             emit disconnected(tr("Chat sign-in timed out at %1:%2. Check the ArenaLink service.").arg(mHost).arg(mLinkPort));
@@ -85,6 +172,7 @@ void ArenaLinkClient::connectAndLoginWithCode(const QString& name, const QString
 
 void ArenaLinkClient::disconnectFromServer()
 {
+    logEvent(QStringLiteral("LOCAL_DISCONNECT"));
     ++mGeneration;
     mAwaitingChallenge = false;
     mPingTimer->stop();
@@ -97,7 +185,10 @@ void ArenaLinkClient::disconnectFromServer()
 
 void ArenaLinkClient::slotConnected()
 {
-    send(makeHello(0, "ArenaMP U030", mPendingName.toStdString()));
+    logEvent(QStringLiteral("TCP_CONNECTED peer=%1 peer_port=%2")
+        .arg(mSocket->peerAddress().toString()).arg(mSocket->peerPort()));
+    mStage = QStringLiteral("waiting_challenge");
+    send(makeHello(0, "ArenaMP U031", mPendingName.toStdString()));
     // Дальше ждём CHALLENGE: без nonce отвечать нечем.
 }
 
@@ -127,6 +218,7 @@ void ArenaLinkClient::slotReadyRead()
         {
             if (fatal)
             {
+                logEvent(QStringLiteral("MALFORMED_FRAME buffered_bytes=%1").arg(mBuffer.size()));
                 mSocket->abort();
                 emit disconnected(tr("The server sent malformed data"));
             }
@@ -140,6 +232,7 @@ void ArenaLinkClient::slotReadyRead()
 
 void ArenaLinkClient::handleFrame(const FrameHeader& header, const QByteArray& payload)
 {
+    logEvent(QStringLiteral("RX type=%1 bytes=%2").arg(static_cast<int>(header.type)).arg(payload.size()));
     Reader reader(payload.constData(), static_cast<std::size_t>(payload.size()));
 
     switch (header.type)
@@ -148,15 +241,19 @@ void ArenaLinkClient::handleFrame(const FrameHeader& header, const QByteArray& p
         {
             QByteArray nonce(static_cast<int>(sNonceSize), '\0');
             if (!mAwaitingChallenge || !reader.raw(nonce.data(), sNonceSize))
+            {
+                logEvent(QStringLiteral("CHALLENGE_INVALID_OR_DUPLICATE"));
                 return;
+            }
             const quint8 serverMode = reader.u8();
             const QByteArray salt = QByteArray::fromStdString(reader.text(128));
 
-            // Сервер решает, каким способом принимать пароль: если учётки
-            // лежат в bcrypt, proof посчитать нельзя и он попросит AUTH_PLAIN.
+            logEvent(QStringLiteral("CHALLENGE mode=%1 salt_bytes=%2 valid=%3")
+                .arg(serverMode).arg(salt.size()).arg(reader.ok()));
             quint8 mode = mPendingMode == AUTH_CODE ? AUTH_CODE : serverMode;
             if (!reader.ok() || (mode != AUTH_PROOF && mode != AUTH_TES3MP_PROOF && mode != AUTH_CODE))
             {
+                logEvent(QStringLiteral("AUTH_METHOD_UNSUPPORTED_OR_PROTOCOL_MISMATCH"));
                 disconnectFromServer();
                 emit loginFailed(FAIL_BAD_CREDENTIALS, tr("Chat server needs a supported secure sign-in method"));
                 return;
@@ -184,6 +281,8 @@ void ArenaLinkClient::handleFrame(const FrameHeader& header, const QByteArray& p
                 secret = mPendingSecret.toStdString();
             }
 
+            mStage = QStringLiteral("waiting_auth_result");
+            logEvent(QStringLiteral("AUTH_SEND mode=%1").arg(mode));
             send(makeAuth(mPendingName.toStdString(), mode, secret));
             mPendingSecret.clear();      // пароль в памяти не держим
             break;
@@ -192,7 +291,12 @@ void ArenaLinkClient::handleFrame(const FrameHeader& header, const QByteArray& p
         {
             AuthResult result;
             if (!parseAuthOk(reader, result))
+            {
+                logEvent(QStringLiteral("AUTH_OK_MALFORMED"));
                 return;
+            }
+            mStage = QStringLiteral("authorized");
+            logEvent(QStringLiteral("AUTH_OK"));
             mProfile.userId = result.userId;
             mProfile.name = QString::fromStdString(result.name);
             mProfile.level = result.level;
@@ -208,6 +312,7 @@ void ArenaLinkClient::handleFrame(const FrameHeader& header, const QByteArray& p
         {
             const quint8 reason = reader.u8();
             const QString text = QString::fromStdString(reader.text16(256));
+            logEvent(QStringLiteral("AUTH_FAIL reason=%1 valid=%2").arg(reason).arg(reader.ok()));
             // Preserve the server's authentication error instead of replacing
             // it with a generic socket disconnect notification.
             const QSignalBlocker blocker(mSocket);
@@ -349,8 +454,13 @@ void ArenaLinkClient::requestVoiceTicket(quint8 scope)
 void ArenaLinkClient::send(const std::string& data)
 {
     if (mSocket->state() != QAbstractSocket::ConnectedState)
+    {
+        logEvent(QStringLiteral("TX_SKIPPED socket_state=%1").arg(static_cast<int>(mSocket->state())));
         return;
-    mSocket->write(data.data(), static_cast<qint64>(data.size()));
+    }
+    const qint64 queued = mSocket->write(data.data(), static_cast<qint64>(data.size()));
+    const unsigned type = data.size() >= sHeaderSize ? static_cast<unsigned char>(data[4]) : 0;
+    logEvent(QStringLiteral("TX type=%1 bytes=%2 queued=%3").arg(type).arg(data.size()).arg(queued));
 }
 
 void ArenaLinkClient::slotPing()
@@ -362,6 +472,7 @@ void ArenaLinkClient::slotPing()
 
 void ArenaLinkClient::slotDisconnected()
 {
+    logEvent(QStringLiteral("TCP_DISCONNECTED socket_error=%1").arg(static_cast<int>(mSocket->error())));
     mPingTimer->stop();
     ++mGeneration;
     mPendingSecret.clear();
@@ -372,6 +483,9 @@ void ArenaLinkClient::slotDisconnected()
 
 void ArenaLinkClient::slotError()
 {
+    logEvent(QStringLiteral("SOCKET_ERROR code=%1 state=%2 name=%3")
+        .arg(static_cast<int>(mSocket->error())).arg(static_cast<int>(mSocket->state()))
+        .arg(QString::fromLatin1(socketErrorName(mSocket->error()))));
     mPingTimer->stop();
     ++mGeneration;
     mPendingSecret.clear();
