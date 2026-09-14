@@ -12,6 +12,31 @@ end
 
 local CONTROL_PREFIX = "@@AMP_PROFILE@@"
 
+-- U036 --------------------------------------------------------------------
+-- Menu ids. config.customMenuIds never carried the profile entries, so every
+-- CustomMessageBox/PasswordDialog here was opened with a nil id: the native
+-- call rejected it and, even when it did not, OnGUIAction could never match
+-- `idGui == nil` back to this script. That is the whole reason "Delete
+-- profile" appeared to do nothing.
+--
+-- The ids are resolved once, here, and written back into config so any other
+-- script comparing against config.customMenuIds sees the same numbers.
+----------------------------------------------------------------------------
+local MENU_ID_DEFAULTS = {
+    profileMain = 9040,
+    profileReturns = 9041,
+    profileDeletePassword = 9042,
+    profileDeleteConfirm = 9043
+}
+
+config.customMenuIds = type(config.customMenuIds) == "table" and config.customMenuIds or {}
+local menuId = {}
+for key, fallback in pairs(MENU_ID_DEFAULTS) do
+    local configured = tonumber(config.customMenuIds[key])
+    menuId[key] = configured or fallback
+    config.customMenuIds[key] = menuId[key]
+end
+
 local function escapeControl(value)
     value = tostring(value or "")
     value = value:gsub("\\", "\\\\")
@@ -125,7 +150,7 @@ local function showMain(pid)
     end
     local buttons = tr(pid, "Точки возврата;Обновить;Удалить профиль;Закрыть",
         "Return points;Refresh;Delete profile;Close")
-    tes3mp.CustomMessageBox(pid, config.customMenuIds.profileMain, text, buttons)
+    tes3mp.CustomMessageBox(pid, menuId.profileMain, text, buttons)
 end
 
 local function showReturns(pid)
@@ -139,7 +164,7 @@ local function showReturns(pid)
     for i=1,cfg.maxSlots do
         local n=slotName(i); text=text..n..": "..slotDescription(d.returnSlots[n],pid).."\n"
     end
-    tes3mp.CustomMessageBox(pid, config.customMenuIds.profileReturns, text,
+    tes3mp.CustomMessageBox(pid, menuId.profileReturns, text,
         tr(pid, "A: записать;A: вернуться;B: записать;B: вернуться;C: записать;C: вернуться;Назад",
             "A: save;A: return;B: save;B: return;C: save;C: return;Back"))
 end
@@ -175,35 +200,77 @@ local function goSlot(pid, name)
     save(pid)
 end
 
-local function requestDelete(pid)
-    tes3mp.PasswordDialog(pid, config.customMenuIds.profileDeletePassword,
-        tr(pid,"Удаление профиля необратимо. Введите текущий пароль. После повторного входа потребуется создать пароль и персонажа заново.",
-            "Profile deletion is irreversible. Enter your current password. On the next login you will create a new password and character."), "")
+-- U036: an irreversible action gets an explicit confirmation of its own. The
+-- password prompt alone reads like a routine re-authentication; it does not
+-- tell the player that the character, the password and the account file are
+-- all about to be destroyed.
+local function confirmDelete(pid)
+    if not valid(pid) then return end
+    local name = tostring(Players[pid].accountName or tes3mp.GetName(pid) or "")
+    local text = tr(pid,
+        "УДАЛЕНИЕ ПРОФИЛЯ\n\nПрофиль: ", "DELETE PROFILE\n\nProfile: ") .. name .. "\n\n" ..
+        tr(pid,
+            "Будут стёрты персонаж, статистика, точки возврата и пароль.\nВас отключит от сервера.\nПосле этого на то же имя можно будет создать новый профиль.\n\nЭто действие необратимо.",
+            "Your character, statistics, return points and password will be erased.\nYou will be disconnected.\nAfterwards the same name can be registered again from scratch.\n\nThis cannot be undone.")
+    tes3mp.CustomMessageBox(pid, menuId.profileDeleteConfirm, text,
+        tr(pid, "Удалить профиль;Отмена", "Delete profile;Cancel"))
 end
 
-local function deleteProfile(pid, inputHash)
-    if not valid(pid) or inputHash == nil then return end
+local function requestDelete(pid)
+    if not valid(pid) then return end
+    tes3mp.PasswordDialog(pid, menuId.profileDeletePassword,
+        tr(pid,"Подтвердите удаление: введите текущий пароль.",
+            "Confirm deletion: enter your current password."), "")
+end
+
+local function deleteProfile(pid, inputPassword)
+    if not valid(pid) then return end
+    -- An empty answer is the player closing the password prompt, not a failed
+    -- attempt: say nothing and leave the profile alone.
+    if inputPassword == nil or tostring(inputPassword) == "" then return end
+
     local p=Players[pid]
     local login=p.data.login or {}
-    if tostring(login.passwordHash or "") ~= tes3mp.GetSHA256Hash(tostring(inputHash) .. tostring(login.passwordSalt or "")) then
+    if tostring(login.passwordHash or "") ~= tes3mp.GetSHA256Hash(tostring(inputPassword) .. tostring(login.passwordSalt or "")) then
         tes3mp.MessageBox(pid,-1,tr(pid,"Неверный пароль. Профиль не удалён.","Incorrect password. Profile was not deleted.")); return
     end
     if config.databaseType ~= "json" then
         tes3mp.MessageBox(pid,-1,tr(pid,"Удаление профиля через интерфейс сейчас поддерживается только для JSON-профилей.",
             "In-game profile deletion currently supports JSON profiles only.")); return
     end
-    local path=config.dataPath.."/player/"..tostring(p.accountFile or "")
-    local ok, err=os.remove(path)
-    if not ok then
-        tes3mp.MessageBox(pid,-1,tr(pid,"Не удалось удалить файл профиля: ","Could not delete profile file: ")..tostring(err or "unknown")); return
+
+    local accountFile = tostring(p.accountFile or "")
+    if accountFile == "" then
+        tes3mp.MessageBox(pid,-1,tr(pid,"Файл профиля не определён. Профиль не удалён.",
+            "The profile file could not be resolved. Profile was not deleted.")); return
     end
+    local path=config.dataPath.."/player/"..accountFile
+
+    -- U036: stop every save path BEFORE touching the file. Destroy() sets
+    -- hasAccount to nil on kick, but a save triggered between os.remove() and
+    -- the kick would recreate exactly the file we are deleting.
     p.hasAccount=false
 
+    local ok, err=os.remove(path)
+    if not ok then
+        p.hasAccount=true
+        tes3mp.MessageBox(pid,-1,tr(pid,"Не удалось удалить файл профиля: ","Could not delete profile file: ")..tostring(err or "unknown")); return
+    end
+
+    -- U036: wipe the credentials in memory as well. The file is gone, but the
+    -- live table is what any remaining handler would see, and leaving a valid
+    -- hash there is how a half-deleted account ends up asking for the old
+    -- password again. Empty strings, never nil: the login path concatenates
+    -- these unguarded and nil would turn one bug into a crash.
+    p.data.login = p.data.login or {}
+    p.data.login.passwordHash = ""
+    p.data.login.passwordSalt = ""
+    p.data.login.password = nil
+
     -- Y053: remember the path so the OnPlayerDisconnect handler below can remove
-    -- the file again once the mandatory disconnect save has finished. The account
-    -- table itself is deliberately left intact: eventHandler concatenates
-    -- data.login.passwordSalt unguarded, so blanking it here would trade one bug
-    -- for a nil-concat crash in the password path.
+    -- the file again after the disconnect path has run. hasAccount is already
+    -- false and the credentials above are blanked, so nothing should recreate
+    -- the file - this is the belt to that pair of braces.
     pendingDeletion[pid] = path
     tes3mp.LogMessage(enumerations.log.WARN,
         "[ArenaMP] profile deletion requested by pid " .. tostring(pid) .. " (" .. path .. ")")
@@ -252,7 +319,7 @@ local function command(pid, cmd)
     if sub=="" or sub=="show" then showMain(pid); return end
     if sub=="state" then sendState(pid); return end
     if sub=="returns" then showReturns(pid); return end
-    if sub=="delete" then requestDelete(pid); return end
+    if sub=="delete" then confirmDelete(pid); return end
 end
 
 local function uiCommand(pid, cmd)
@@ -263,7 +330,7 @@ local function uiCommand(pid, cmd)
     elseif sub=="returns" then
         showReturns(pid)
     elseif sub=="delete" then
-        requestDelete(pid)
+        confirmDelete(pid)
     end
 end
 
@@ -292,17 +359,21 @@ customEventHooks.registerHandler("OnPlayerAuthentified", function(eventStatus,pi
 end)
 customEventHooks.registerHandler("OnGUIAction", function(eventStatus,pid,idGui,data)
     if not valid(pid) then return end
-    if idGui==config.customMenuIds.profileMain then
+    if idGui==menuId.profileMain then
         local v=tonumber(data) or -1
-        if v==0 then showReturns(pid) elseif v==1 then showMain(pid) elseif v==2 then requestDelete(pid) end
-    elseif idGui==config.customMenuIds.profileReturns then
+        if v==0 then showReturns(pid) elseif v==1 then showMain(pid) elseif v==2 then confirmDelete(pid) end
+    elseif idGui==menuId.profileDeleteConfirm then
+        -- Button 0 is "Delete profile"; anything else (including closing the
+        -- box) cancels and returns to the profile page.
+        if (tonumber(data) or -1)==0 then requestDelete(pid) else showMain(pid) end
+    elseif idGui==menuId.profileReturns then
         local v=tonumber(data) or -1
         if v>=0 and v<=5 then
             local slot=slotName(math.floor(v/2)+1)
             if v%2==0 then setSlot(pid,slot) else goSlot(pid,slot) end
             showReturns(pid)
         elseif v==6 then showMain(pid) end
-    elseif idGui==config.customMenuIds.profileDeletePassword then
+    elseif idGui==menuId.profileDeletePassword then
         deleteProfile(pid,data)
     end
 end)

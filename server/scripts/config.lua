@@ -1041,7 +1041,14 @@ config.customMenuIds = { menuHelper = 9001, confiscate = 9002, recordPrint = 900
     questEditorStages = 9023, questEditorStageList = 9024, questEditorStageDetail = 9025,
     questEditorRequirements = 9026, questEditorRequirementList = 9027, questEditorRewards = 9028,
     questEditorRewardList = 9029, questEditorTransitions = 9030, questEditorTransitionList = 9031,
-    questEditorConfirm = 9032, questEditorStageFlags = 9033, questEditorGiver = 9034 }
+    questEditorConfirm = 9032, questEditorStageFlags = 9033, questEditorGiver = 9034,
+    -- U036: the profile menu ids. These were referenced by profileHelper but
+    -- never defined here, so every profile dialog was opened with a nil id and
+    -- no GUI answer could ever be matched back to it - which is why "Delete
+    -- profile" did nothing at all. profileHelper now also fills these in at
+    -- load time, so a server with an older config.lua still works.
+    profileMain = 9040, profileReturns = 9041, profileDeletePassword = 9042,
+    profileDeleteConfirm = 9043 }
 
 -- The menu files that should be loaded for menuHelper, from the scripts/menu subfolder
 config.menuHelperFiles = { "help", "defaultCrafting", "advancedExample" }
