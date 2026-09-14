@@ -1,5 +1,11 @@
 #include "VoiceChat.hpp"
 
+#ifdef __ANDROID__
+#include "VoiceUiState.hpp"
+#include <jni.h>
+namespace { mwmp::VoiceUiState sAndroidVoiceUi; }
+#endif
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -287,6 +293,11 @@ namespace mwmp
 
         void captureCallback(void* userdata, Uint8* stream, int len)
         {
+#ifdef __ANDROID__
+            // Android can pause the engine loop before the next update() stops
+            // capture. Do not queue background audio for playback on resume.
+            if (!sAndroidVoiceUi.foreground()) return;
+#endif
             auto* impl = static_cast<VoiceChat::Impl*>(userdata);
             if (impl == nullptr || stream == nullptr || len <= 0)
                 return;
@@ -403,11 +414,22 @@ namespace mwmp
         const Uint8* keys = SDL_GetKeyboardState(nullptr);
         GUIController* gui = Main::get().getGUIController();
         const bool chatEditing = gui != nullptr && gui->getChatEditState();
-        const bool wantsToTalk = local != nullptr && local->isLoggedIn() && !chatEditing
-            && keys != nullptr && keys[mImpl->pushToTalk];
+        bool talkAllowed = local != nullptr && local->isLoggedIn() && !chatEditing;
+        bool touchPressed = false;
+#ifdef __ANDROID__
+        talkAllowed = talkAllowed && sAndroidVoiceUi.foreground()
+            && !MWBase::Environment::get().getWindowManager()->isGuiMode();
+        if (!talkAllowed) sAndroidVoiceUi.press(false);
+        touchPressed = sAndroidVoiceUi.pressed();
+#endif
+        const bool wantsToTalk = talkAllowed
+            && (touchPressed || (keys != nullptr && keys[mImpl->pushToTalk]));
 
         if (!mEnabled)
         {
+#ifdef __ANDROID__
+            sAndroidVoiceUi.reset();
+#endif
             if (!mImpl->loggedDisabled)
             {
                 mImpl->loggedDisabled = true;
@@ -543,6 +565,37 @@ namespace mwmp
                 speaker.stream->setPosition(pos);
             ++it;
         }
+#ifdef __ANDROID__
+        int flags = VoiceUiState::Enabled;
+        if (mAvailable) flags |= VoiceUiState::Microphone;
+        if (local != nullptr && local->isLoggedIn()) flags |= VoiceUiState::LoggedIn;
+        if (talkAllowed && mAvailable) flags |= VoiceUiState::Ready;
+        if (mTransmitting) flags |= VoiceUiState::Transmitting;
+        const float level = mTransmitting && mImpl->localLipAge < 0.15f ? mImpl->localLipLevel : 0.f;
+        if (level > 0.025f) flags |= VoiceUiState::Speaking;
+        std::vector<std::string> speaking;
+        if (local != nullptr && local->isLoggedIn())
+        {
+            for (const auto& entry : mImpl->speakers)
+            {
+                if (entry.second.age > 0.18f || entry.second.lipLevel <= 0.025f) continue;
+                DedicatedPlayer* player = PlayerList::getPlayer(RakNet::RakNetGUID(entry.first));
+                if (player == nullptr || player->getPtr().isEmpty()) continue;
+                std::string name = player->npc.mName;
+                std::replace(name.begin(), name.end(), '\n', ' ');
+                std::replace(name.begin(), name.end(), '\r', ' ');
+                speaking.push_back(name.substr(0, 120));
+            }
+        }
+        std::sort(speaking.begin(), speaking.end());
+        std::string names;
+        for (std::size_t i = 0; i < std::min<std::size_t>(speaking.size(), 3); ++i)
+        {
+            if (!names.empty()) names += "\n";
+            names += speaking[i];
+        }
+        sAndroidVoiceUi.publish(flags, level, names);
+#endif
     }
 
     void VoiceChat::receive(RakNet::RakNetGUID speakerGuid, const VoiceFrame& frame)
@@ -607,6 +660,9 @@ namespace mwmp
 
     void VoiceChat::shutdown()
     {
+#ifdef __ANDROID__
+        sAndroidVoiceUi.reset();
+#endif
         if (!mImpl)
             return;
         MWBase::SoundManager* soundManager = nullptr;
@@ -647,3 +703,28 @@ namespace mwmp
     }
 }
 
+
+#ifdef __ANDROID__
+extern "C" JNIEXPORT void JNICALL Java_voice_NativeVoice_nativeSetForeground(JNIEnv*, jobject, jboolean active)
+{
+    sAndroidVoiceUi.foreground(active == JNI_TRUE);
+}
+extern "C" JNIEXPORT void JNICALL Java_voice_NativeVoice_nativeSetPressed(JNIEnv*, jobject, jboolean held)
+{
+    sAndroidVoiceUi.press(held == JNI_TRUE);
+}
+extern "C" JNIEXPORT jint JNICALL Java_voice_NativeVoice_nativeState(JNIEnv*, jobject)
+{
+    return sAndroidVoiceUi.state();
+}
+extern "C" JNIEXPORT jbyteArray JNICALL Java_voice_NativeVoice_nativeSpeakers(JNIEnv* env, jobject)
+{
+    // Return UTF-8 bytes, not JNI modified UTF-8: non-BMP names stay valid.
+    const std::string text = sAndroidVoiceUi.speakers();
+    jbyteArray result = env->NewByteArray(static_cast<jsize>(text.size()));
+    if (result && !text.empty())
+        env->SetByteArrayRegion(result, 0, static_cast<jsize>(text.size()),
+            reinterpret_cast<const jbyte*>(text.data()));
+    return result;
+}
+#endif

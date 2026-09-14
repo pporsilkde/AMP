@@ -83,7 +83,7 @@ class Transport(unittest.TestCase):
     def test_08_diagnostics_capture_failure_without_secrets(self):
         s=self.connect(); self.assertEqual(self.login(s,b'X'*32)[0],5)
         content=self.diagnostic.read_text()
-        for required in ('LISTENING', 'HELLO', 'CHALLENGE', 'AUTH_RECEIVED', 'AUTH_FAIL', 'PROOF_MISMATCH'):
+        for required in ('LISTENING', 'RECV', 'FRAME', 'SENT', 'HELLO', 'CHALLENGE', 'AUTH_RECEIVED', 'AUTH_FAIL', 'PROOF_MISMATCH'):
             self.assertIn(required,content)
         for private in ('Alice', 'Длинное Русское', 'X'*32, 'K'*32, 'Привет'):
             self.assertNotIn(private,content)

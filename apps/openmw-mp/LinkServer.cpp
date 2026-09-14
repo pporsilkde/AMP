@@ -133,7 +133,7 @@ void LinkServer::diagnose(const std::string& event) const
 
 bool LinkServer::start(unsigned short gamePort)
 {
-    diagnose("START build=U031 protocol=" + std::to_string(sProtocol)
+    diagnose("START build=U032 protocol=" + std::to_string(sProtocol)
         + " game_port=" + std::to_string(gamePort) + " bind=" + mConfig.bindAddress);
     if (!mConfig.enabled || mRunning.load())
     {
@@ -373,6 +373,7 @@ void LinkServer::serviceClient(Client& client)
         const auto received = ::recv(client.socket, buffer, sizeof(buffer), 0);
         if (received > 0)
         {
+            diagnose("RECV conn=" + std::to_string(client.id) + " bytes=" + std::to_string(received));
             client.inBuffer.append(buffer, static_cast<std::size_t>(received));
             client.lastSeen = nowSec();
             if (client.inBuffer.size() > sMaxPayload * 4)
@@ -414,6 +415,8 @@ void LinkServer::serviceClient(Client& client)
 
 void LinkServer::handleFrame(Client& client, const FrameHeader& header, const std::string& payload)
 {
+    diagnose("FRAME conn=" + std::to_string(client.id) + " type=" + std::to_string(header.type)
+        + " bytes=" + std::to_string(payload.size()));
     Reader reader(payload);
 
     // До авторизации принимаем ровно два типа кадров: всё остальное —
@@ -763,7 +766,11 @@ void LinkServer::flushOutput(Client& client)
             0
 #endif
         );
-        if (sent > 0) client.outBuffer.erase(0, static_cast<std::size_t>(sent));
+        if (sent > 0)
+        {
+            diagnose("SENT conn=" + std::to_string(client.id) + " bytes=" + std::to_string(sent));
+            client.outBuffer.erase(0, static_cast<std::size_t>(sent));
+        }
         else
         {
             if (sent == 0 || !wouldBlock()) closeClient(client, "socket write failed");
@@ -798,7 +805,9 @@ void LinkServer::broadcast(std::uint16_t channel, const std::string& data)
 
 void LinkServer::closeClient(Client& client, const std::string&)
 {
-    diagnose("CLOSE conn=" + std::to_string(client.id) + " authorized=" + std::to_string(client.authorized));
+    diagnose("CLOSE conn=" + std::to_string(client.id) + " authorized=" + std::to_string(client.authorized)
+        + " hello=" + std::to_string(client.helloDone) + " buffered=" + std::to_string(client.inBuffer.size())
+        + " pending=" + std::to_string(client.outBuffer.size()));
     if (client.socket >= 0)
         ARENA_CLOSESOCKET(client.socket);
     client.socket = -1;

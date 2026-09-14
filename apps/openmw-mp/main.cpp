@@ -382,9 +382,9 @@ int main(int argc, char *argv[])
         if (linkConfig.enabled && !chatStarted)
             LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "ArenaLink: TCP chat could not start (game port + 2)");
         else if (launcherChat.running())
-            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "ArenaLink U031: chat listening on TCP %u; diagnostics: %s/ChatServer.log", launcherChat.port(), dataDirectory.c_str());
+            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "ArenaLink U032: chat listening on TCP %u; diagnostics: %s/ChatServer.log", launcherChat.port(), dataDirectory.c_str());
         else if (!linkConfig.enabled)
-            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "ArenaLink U031: chat disabled by ARENAMP_CHAT_DISABLED=1");
+            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "ArenaLink U032: chat disabled by ARENAMP_CHAT_DISABLED=1");
 
         code = networking.mainLoop();
         launcherChat.stop();
