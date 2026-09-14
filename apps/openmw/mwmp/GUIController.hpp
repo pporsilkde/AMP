@@ -100,6 +100,10 @@ namespace mwmp
         void ensureEmbeddedRestartHud();
         void destroyEmbeddedRestartHud();
 
+        // U035b build fix: VoiceChat owns the data source for the private voice
+        // HUD. Keep the HUD implementation private and grant only VoiceChat access.
+        friend class VoiceChat;
+
         // U035: who is talking right now. One line per remote speaker plus the
         // local microphone state, rendered as a borderless HUD overlay so no
         // .layout file has to change.

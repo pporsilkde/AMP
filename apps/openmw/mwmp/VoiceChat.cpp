@@ -757,7 +757,7 @@ namespace mwmp
         gui->updateVoiceHud(visible, mEnabled && loggedIn && isMicOpen(), transmitting, level, mToggleMode);
     }
 
-    void VoiceChat::receive(RakNet::RakNetGUID speakerGuid, const VoiceFrame& frame)
+    void VoiceChat::receive(const RakNet::RakNetGUID& speakerGuid, const VoiceFrame& frame)
     {
         if (!mEnabled || frame.codec != VoiceFrame::CodecImaAdpcm16k || frame.payload.empty())
             return;
@@ -811,7 +811,7 @@ namespace mwmp
         }
     }
 
-    void VoiceChat::removeSpeaker(RakNet::RakNetGUID speakerGuid)
+    void VoiceChat::removeSpeaker(const RakNet::RakNetGUID& speakerGuid)
     {
         const auto it = mImpl->speakers.find(speakerGuid.g);
         if (it == mImpl->speakers.end())

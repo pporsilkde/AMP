@@ -24,8 +24,8 @@ namespace mwmp
             bool toggleMode);
         void init();
         void update(float dt);
-        void receive(RakNet::RakNetGUID speakerGuid, const VoiceFrame& frame);
-        void removeSpeaker(RakNet::RakNetGUID speakerGuid);
+        void receive(const RakNet::RakNetGUID& speakerGuid, const VoiceFrame& frame);
+        void removeSpeaker(const RakNet::RakNetGUID& speakerGuid);
         void shutdown();
 
         bool isAvailable() const { return mAvailable; }
