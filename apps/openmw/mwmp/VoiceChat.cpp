@@ -41,6 +41,7 @@ namespace
     constexpr std::size_t sFrameSamples = mwmp::VoiceFrame::FrameSamples; // 20 ms
     constexpr std::size_t sMaxCaptureSamples = sSampleRate;
     constexpr std::size_t sMaxPlaybackSamples = sSampleRate / 2;
+    constexpr std::size_t sAdpcmPayloadBytes = 4 + (sFrameSamples / 2);
     constexpr float sSpeakerTimeout = 0.75f;
 
     constexpr std::array<int, 89> sStepTable = {
@@ -122,7 +123,9 @@ namespace
 
     bool decodeAdpcm(const std::vector<std::uint8_t>& payload, std::vector<std::int16_t>& out)
     {
-        if (payload.size() < 4)
+        // A voice frame is fixed at 20 ms / 320 mono samples. Reject both
+        // truncated and oversized datagrams before they can create playback state.
+        if (payload.size() != sAdpcmPayloadBytes)
             return false;
 
         int predictor = static_cast<std::int16_t>(
@@ -182,6 +185,7 @@ namespace mwmp
             const std::size_t requested = bytes / sizeof(std::int16_t);
             auto* output = reinterpret_cast<std::int16_t*>(buffer);
             std::size_t copied = 0;
+            bool drainedAndFinished = false;
             {
                 std::lock_guard<std::mutex> lock(mMutex);
                 while (copied < requested && !mSamples.empty())
@@ -189,7 +193,15 @@ namespace mwmp
                     output[copied++] = mSamples.front();
                     mSamples.pop_front();
                 }
+                drainedAndFinished = mFinished && mSamples.empty();
             }
+
+            // Let the SoundManager/OpenAL owner retire the Stream naturally.
+            // VoiceChat deliberately keeps no raw Stream* after start, because
+            // OpenAL can retire an underrun stream before the speaker timeout.
+            if (copied == 0 && drainedAndFinished)
+                return 0;
+
             std::fill(output + copied, output + requested, 0);
             mOffset += requested;
             return requested * sizeof(std::int16_t);
@@ -199,6 +211,8 @@ namespace mwmp
         void push(const std::vector<std::int16_t>& samples)
         {
             std::lock_guard<std::mutex> lock(mMutex);
+            if (mFinished)
+                return;
             if (mSamples.size() + samples.size() > sMaxPlaybackSamples)
             {
                 const std::size_t overflow = mSamples.size() + samples.size() - sMaxPlaybackSamples;
@@ -210,6 +224,8 @@ namespace mwmp
         void pushSilence(std::size_t samples)
         {
             std::lock_guard<std::mutex> lock(mMutex);
+            if (mFinished)
+                return;
             samples = std::min(samples, sMaxPlaybackSamples);
             while (mSamples.size() + samples > sMaxPlaybackSamples && !mSamples.empty())
                 mSamples.pop_front();
@@ -220,10 +236,16 @@ namespace mwmp
             std::lock_guard<std::mutex> lock(mMutex);
             return mSamples.size();
         }
+        void finish()
+        {
+            std::lock_guard<std::mutex> lock(mMutex);
+            mFinished = true;
+        }
     private:
         mutable std::mutex mMutex;
         std::deque<std::int16_t> mSamples;
         std::size_t mOffset = 0;
+        bool mFinished = false;
     };
 
     float voiceLipLevel(const std::int16_t* samples, std::size_t count)
@@ -251,7 +273,7 @@ namespace mwmp
         struct Speaker
         {
             std::shared_ptr<VoiceStreamDecoder> decoder;
-            MWSound::Stream* stream = nullptr;
+            bool streamStarted = false;
             float age = 0.f;
             std::uint16_t lastSequence = 0;
             bool haveSequence = false;
@@ -545,8 +567,8 @@ namespace mwmp
             {
                 if (player != nullptr && !player->getPtr().isEmpty() && soundManager != nullptr)
                     soundManager->clearVoiceLipSync(player->getPtr());
-                if (speaker.stream != nullptr && soundManager != nullptr)
-                    soundManager->stopTrack(speaker.stream);
+                if (speaker.decoder)
+                    speaker.decoder->finish();
                 it = mImpl->speakers.erase(it);
                 continue;
             }
@@ -560,9 +582,9 @@ namespace mwmp
             if (soundManager != nullptr)
                 soundManager->setVoiceLipSyncLevel(player->getPtr(), lipLevel);
 
-            const osg::Vec3f pos = MWBase::Environment::get().getWorld()->getActorHeadTransform(player->getPtr()).getTrans();
-            if (speaker.stream != nullptr)
-                speaker.stream->setPosition(pos);
+            // Do not retain or dereference the raw SoundManager Stream handle here.
+            // The stream is positioned when an utterance starts; after silence a new
+            // stream is created from the speaker's current head position.
             ++it;
         }
 #ifdef __ANDROID__
@@ -608,6 +630,10 @@ namespace mwmp
         if (player == nullptr || player->getPtr().isEmpty() || soundManager == nullptr)
             return;
 
+        std::vector<std::int16_t> decoded;
+        if (!decodeAdpcm(frame.payload, decoded))
+            return;
+
         const std::uint64_t key = speakerGuid.g;
         Impl::Speaker& speaker = mImpl->speakers[key];
         if (speaker.haveSequence && !sequenceNewer(frame.sequence, speaker.lastSequence))
@@ -623,9 +649,6 @@ namespace mwmp
                 speaker.decoder->pushSilence(static_cast<std::size_t>(gap - 1) * sFrameSamples);
         }
 
-        std::vector<std::int16_t> decoded;
-        if (!decodeAdpcm(frame.payload, decoded))
-            return;
         speaker.decoder->push(decoded);
         speaker.lipLevel = voiceLipLevel(decoded.data(), decoded.size());
         soundManager->setVoiceLipSyncLevel(player->getPtr(), speaker.lipLevel);
@@ -636,11 +659,14 @@ namespace mwmp
         // Prebuffer three 20 ms frames. The low-latency OpenAL stream also uses
         // exactly three 20 ms buffers, preventing the normal music-stream
         // prequeue (6 x 125 ms) from adding ~750 ms of voice delay.
-        if (speaker.stream == nullptr && speaker.decoder->queuedSamples() >= sFrameSamples * 3)
+        if (!speaker.streamStarted && speaker.decoder->queuedSamples() >= sFrameSamples * 3)
         {
             const osg::Vec3f pos = MWBase::Environment::get().getWorld()->getActorHeadTransform(player->getPtr()).getTrans();
-            speaker.stream = soundManager->playTrack3D(speaker.decoder, pos,
-                2.f * Constants::UnitsPerMeter, mRangeMeters * Constants::UnitsPerMeter, 1.f, MWSound::Type::Voice);
+            // The SoundManager owns the returned stream. Keep only the fact that
+            // playback started; retaining the raw pointer caused a use-after-free
+            // when OpenAL retired a short/underrun stream before our timeout.
+            speaker.streamStarted = soundManager->playTrack3D(speaker.decoder, pos,
+                2.f * Constants::UnitsPerMeter, mRangeMeters * Constants::UnitsPerMeter, 1.f, MWSound::Type::Voice) != nullptr;
         }
     }
 
@@ -653,8 +679,8 @@ namespace mwmp
         DedicatedPlayer* player = PlayerList::getPlayer(speakerGuid);
         if (player != nullptr && !player->getPtr().isEmpty() && soundManager != nullptr)
             soundManager->clearVoiceLipSync(player->getPtr());
-        if (it->second.stream != nullptr && soundManager != nullptr)
-            soundManager->stopTrack(it->second.stream);
+        if (it->second.decoder)
+            it->second.decoder->finish();
         mImpl->speakers.erase(it);
     }
 
@@ -668,16 +694,19 @@ namespace mwmp
         MWBase::SoundManager* soundManager = nullptr;
         if (MWBase::Environment::get().getSoundManager() != nullptr)
             soundManager = MWBase::Environment::get().getSoundManager();
-        if (soundManager != nullptr)
+        for (auto& entry : mImpl->speakers)
         {
-            for (auto& entry : mImpl->speakers)
+            if (entry.second.decoder)
+                entry.second.decoder->finish();
+            if (soundManager != nullptr)
             {
                 DedicatedPlayer* player = PlayerList::getPlayer(RakNet::RakNetGUID(entry.first));
                 if (player != nullptr && !player->getPtr().isEmpty())
                     soundManager->clearVoiceLipSync(player->getPtr());
-                if (entry.second.stream != nullptr)
-                    soundManager->stopTrack(entry.second.stream);
             }
+        }
+        if (soundManager != nullptr)
+        {
             LocalPlayer* local = Main::isInitialized() ? Main::get().getLocalPlayer() : nullptr;
             if (local != nullptr)
                 soundManager->clearVoiceLipSync(local->getPlayerPtr());
