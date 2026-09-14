@@ -1070,10 +1070,23 @@ namespace MWSound
             }
         }
 
+        // ArenaMP U035 fix: do NOT advance the iterator from the for-header.
+        // erase() already returns the next element and the else-branch does its
+        // own ++, so the extra increment skipped entries and ran past end()
+        // (mActiveTracks is a std::vector). trkiter->get() then read past the
+        // buffer and isStreamPlaying() dereferenced a garbage/null Stream*,
+        // faulting on Stream::mHandle (offset 0x28). mActiveTracks is empty in
+        // normal play, so this only fired once voice chat created a 3D track -
+        // i.e. the moment a remote player pressed PTT and started talking.
         TrackList::iterator trkiter = mActiveTracks.begin();
-        for(;trkiter != mActiveTracks.end();++trkiter)
+        while(trkiter != mActiveTracks.end())
         {
             Stream *sound = trkiter->get();
+            if(sound == nullptr)
+            {
+                trkiter = mActiveTracks.erase(trkiter);
+                continue;
+            }
             if(!mOutput->isStreamPlaying(sound))
             {
                 mOutput->finishStream(sound);
