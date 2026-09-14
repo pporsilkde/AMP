@@ -6,6 +6,7 @@
 #define CHATAPI \
     SCRIPT_API_ENTRY("SendMessage", ChatFunctions::SendMessage),\
     SCRIPT_API_ENTRY("SendMessageTo", ChatFunctions::SendMessageTo),\
+    SCRIPT_API_ENTRY("PublishLauncherGlobal", ChatFunctions::PublishLauncherGlobal),\
     SCRIPT_API_ENTRY("CleanChatForPid", ChatFunctions::CleanChatForPid),\
     SCRIPT_API_ENTRY("CleanChat", ChatFunctions::CleanChat)
 
@@ -37,6 +38,14 @@ public:
     * \param message The contents of the message.
     */
     static void SendMessageTo(unsigned short sourcePid, unsigned short targetPid, const char *message) noexcept;
+
+    /**
+    * \brief Mirror an already-authorized in-game global chat message to ArenaLink.
+    *
+    * coreChat calls this only after the existing /// command/RP checks succeed,
+    * keeping launcher mirroring subordinate to the canonical server chat rules.
+    */
+    static void PublishLauncherGlobal(unsigned short pid, const char *message) noexcept;
 
     /**
     * \brief Remove all messages from chat for a certain player.

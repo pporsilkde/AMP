@@ -886,6 +886,15 @@ function OnMpNumIncrement(currentMpNum)
     eventHandler.OnMpNumIncrement(currentMpNum)
 end
 
+-- ArenaMP U034: ArenaLink/global launcher chat arrives here only after the
+-- native LinkServer queue has been drained by Networking::mainLoop().  This is
+-- therefore on the normal server/Lua thread and can safely reuse coreChat.
+function OnLauncherGlobalChat(author, userId, level, colorRgb, text)
+    if coreChat ~= nil and coreChat.SendLauncherGlobal ~= nil then
+        coreChat.SendLauncherGlobal(author, userId, level, colorRgb, text)
+    end
+end
+
 -- Timer-based events
 function OnLoginTimeExpiration(pid, accountName)
     eventHandler.OnLoginTimeExpiration(pid, accountName)

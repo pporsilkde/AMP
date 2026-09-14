@@ -177,6 +177,12 @@ namespace mwmp
         void selectTab(PlayerMenuTab tab, bool persist = true);
         void updateToggleButtons();
         std::string buildOutgoingMessage(const std::string& text) const;
+        // U034: remember the explicit chat prefix the player selected/typed.
+        // Only the established coreChat prefixes are persisted; arbitrary slash
+        // commands such as /help remain one-shot commands.
+        static std::string detectRememberedPrefix(const std::string& text);
+        void setRememberedPrefix(const std::string& prefix, bool refillEditor = false);
+        void refillRememberedPrefix(bool prependExisting = false);
         void setChatChannel(ChatChannel channel);
         void setChatStyle(ChatStyle style);
         void setRpMode(bool enabled);
@@ -318,6 +324,7 @@ namespace mwmp
         ChatWindowState windowState;
         ChatChannel chatChannel;
         ChatStyle chatStyle;
+        std::string rememberedPrefix;
         // Y049: server-restored personal markers and synthetic group markers.
         // Personal markers are installed into WindowManager's editable marker
         // collection; group markers stay in GUIController's transient layer.
@@ -345,6 +352,7 @@ namespace mwmp
         bool editState;
         bool menuState;
         bool sayKeyHeld;
+        bool applyingRememberedPrefix;
         bool historyReviewState;
         bool mainMenuOpen;
         bool historyDisplayEnabled;

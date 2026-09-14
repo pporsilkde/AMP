@@ -12,6 +12,7 @@
 class MasterClient;
 namespace  mwmp
 {
+    class LinkServer;
     class Networking
     {
     public:
@@ -41,6 +42,9 @@ namespace  mwmp
         unsigned short getPort() const;
 
         int mainLoop();
+
+        void setLinkServer(LinkServer* server);
+        void publishPlayerGlobalToLauncher(Player& player, const std::string& text);
 
         void stopServer(int code);
 
@@ -95,6 +99,7 @@ namespace  mwmp
         RakNet::BitStream bsOut;
         TPlayers *players;
         MasterClient *mclient;
+        LinkServer* mLinkServer;
 
         BaseSystem baseSystem;
         BaseActorList baseActorList;

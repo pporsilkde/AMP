@@ -15,8 +15,11 @@
 #include "chatpage.hpp"
 #include "voice/voicepanel.hpp"
 
+#include <QApplication>
+#include <QBrush>
 #include <QDateTime>
 #include <QFile>
+#include <QFont>
 #include <QDesktopServices>
 #include <QUrl>
 #include <QMessageBox>
@@ -32,6 +35,7 @@
 #include <QStackedLayout>
 #include <QTextBrowser>
 #include <QTextCursor>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include <components/config/launchersettings.hpp>
@@ -134,9 +138,13 @@ void ChatPage::buildChatView()
 
     QHBoxLayout* header = new QHBoxLayout();
     mProfileLabel = new QLabel(view);
+    mMentionLabel = new QLabel(view);
+    mMentionLabel->setStyleSheet(QStringLiteral("color:#E8C87A;font-weight:bold"));
+    mMentionLabel->hide();
     mLogoutButton = new QPushButton(tr("Sign out"), view);
     mLogoutButton->setProperty("arenaQuiet", true);
     header->addWidget(mProfileLabel, 1);
+    header->addWidget(mMentionLabel);
     header->addWidget(mLogoutButton);
     outer->addLayout(header);
 
@@ -202,6 +210,7 @@ void ChatPage::refreshLoginFromGameSettings()
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
     {
         mClient->logCredentialSource(false, false, false);
+        tryAutoLogin();
         return;
     }
 
@@ -247,6 +256,12 @@ void ChatPage::refreshLoginFromGameSettings()
     mGamePassword = accountPassword;
     if (!mCodeMode)
         mSecretEdit->setText(mGamePassword);
+
+    // U034: launcher chat follows the same settings.cfg identity as the game.
+    // Once both credentials and endpoint are known, no extra Sign in click is
+    // required. Password still never gets persisted in launcher.cfg.
+    mAutoLoginBlocked = false;
+    tryAutoLogin();
 }
 
 void ChatPage::saveSettings()
@@ -270,7 +285,20 @@ QString ChatPage::pushToTalkKey() const
 void ChatPage::setServerEndpoint(const QString& host, quint16 gamePort)
 {
     // Порты: игровой (RakNet) не трогаем, голос = +1, чат = +2.
-    mClient->setServer(host, gamePort);
+    const QString normalizedHost = host.trimmed();
+    const bool changed = normalizedHost != mServerHost || gamePort != mGamePort;
+    if (changed && (mClient->authorized() || mLoginInProgress))
+        mClient->disconnectFromServer();
+
+    mServerHost = normalizedHost;
+    mGamePort = gamePort;
+    mClient->setServer(normalizedHost, gamePort);
+    if (changed)
+    {
+        mAutoLoginBlocked = false;
+        mReconnectScheduled = false;
+    }
+    tryAutoLogin();
 }
 
 void ChatPage::setGameRunning(bool running)
@@ -280,8 +308,39 @@ void ChatPage::setGameRunning(bool running)
         mVoicePanel->setGameRunning(running);
 }
 
+void ChatPage::tryAutoLogin()
+{
+    if (mManualLogout || mAutoLoginBlocked || mLoginInProgress || mClient->authorized()
+        || mCodeMode || mServerHost.isEmpty() || mGamePort == 0)
+        return;
+
+    const QString name = mNameEdit != nullptr ? mNameEdit->text().trimmed() : QString();
+    if (name.isEmpty() || mGamePassword.isEmpty())
+        return;
+
+    mSecretEdit->setText(mGamePassword);
+    mLoginInProgress = true;
+    mLoginButton->setEnabled(false);
+    setStatus(tr("Connecting to the game server…"));
+    mClient->connectAndLogin(name, mGamePassword);
+}
+
+void ChatPage::scheduleAutoLogin()
+{
+    if (mManualLogout || mAutoLoginBlocked || mReconnectScheduled)
+        return;
+    mReconnectScheduled = true;
+    QTimer::singleShot(4000, this, [this]()
+    {
+        mReconnectScheduled = false;
+        tryAutoLogin();
+    });
+}
+
 void ChatPage::slotLoginClicked()
 {
+    mManualLogout = false;
+    mAutoLoginBlocked = false;
     const QString name = mNameEdit->text().trimmed();
     const QString secret = mSecretEdit->text();
     if (name.isEmpty() || secret.isEmpty())
@@ -290,6 +349,7 @@ void ChatPage::slotLoginClicked()
         setStatus(tr("Enter the character name and password"), true);
         return;
     }
+    mLoginInProgress = true;
     mLoginButton->setEnabled(false);
     setStatus(tr("Connecting to the game server…"));
     if (mCodeMode)
@@ -316,6 +376,9 @@ void ChatPage::slotToggleCodeMode()
 
 void ChatPage::slotLoggedIn(const LinkProfile& profile)
 {
+    mLoginInProgress = false;
+    mManualLogout = false;
+    mAutoLoginBlocked = false;
     mLoginButton->setEnabled(true);
     mSecretEdit->clear();
     saveSettings();
@@ -323,11 +386,16 @@ void ChatPage::slotLoggedIn(const LinkProfile& profile)
     mProfileLabel->setText(tr("%1 · level %2").arg(profile.name).arg(profile.level));
     mStack->setCurrentIndex(1);
     mHistory->clear();
+    mUnreadByChannel.clear();
+    mMentionsByChannel.clear();
+    updateMentionSummary();
 
 }
 
 void ChatPage::slotLoginFailed(quint8 reason, const QString& text)
 {
+    mLoginInProgress = false;
+    mAutoLoginBlocked = true;
     mLoginButton->setEnabled(true);
     if (!text.isEmpty())
     {
@@ -359,14 +427,21 @@ void ChatPage::slotLoginFailed(quint8 reason, const QString& text)
 
 void ChatPage::slotDisconnected(const QString& reason)
 {
+    mLoginInProgress = false;
     mLoginButton->setEnabled(true);
     mStack->setCurrentIndex(0);
-    setStatus(reason, true);
+    setStatus(reason, !reason.isEmpty());
     // Native in-game voice does not depend on the ArenaLink connection.
+    // ArenaLink itself reconnects automatically after a transient server restart.
+    if (!mManualLogout)
+        scheduleAutoLogin();
 }
 
 void ChatPage::slotLogoutClicked()
 {
+    mManualLogout = true;
+    mLoginInProgress = false;
+    mReconnectScheduled = false;
     mClient->disconnectFromServer();
     mStack->setCurrentIndex(0);
     refreshLoginFromGameSettings();
@@ -384,6 +459,9 @@ void ChatPage::slotChannelsReceived(const QVector<LinkChannel>& channels)
         mChannels->addItem(channel.mirrorsGame
             ? QStringLiteral("%1  ↔").arg(channel.name) : channel.name);
     }
+    mUnreadByChannel.clear();
+    mMentionsByChannel.clear();
+    updateMentionSummary();
     if (!channels.isEmpty())
         mChannels->setCurrentRow(0);
 }
@@ -393,6 +471,10 @@ void ChatPage::slotChannelChanged(int row)
     if (row < 0 || row >= mChannelList.size())
         return;
     mCurrentChannel = mChannelList[row].id;
+    mUnreadByChannel[mCurrentChannel] = 0;
+    mMentionsByChannel[mCurrentChannel] = 0;
+    updateChannelIndicator(mCurrentChannel);
+    updateMentionSummary();
     mHistory->clear();
     mSendButton->setEnabled(mChannelList[row].writable);
     mInput->setEnabled(mChannelList[row].writable);
@@ -410,9 +492,20 @@ void ChatPage::slotMessagesReceived(quint16 channel, const QVector<LinkMessage>&
 
 void ChatPage::slotMessageReceived(const LinkMessage& message)
 {
+    const bool mention = isMentionForMe(message);
     if (message.channel == mCurrentChannel)
         appendMessage(message);
-    // TODO: непрочитанные — жирным в списке каналов.
+    else
+        ++mUnreadByChannel[message.channel];
+
+    if (mention)
+    {
+        ++mMentionsByChannel[message.channel];
+        // Flashes the Windows taskbar entry even when the launcher is minimized.
+        QApplication::alert(window(), 5000);
+    }
+    updateChannelIndicator(message.channel);
+    updateMentionSummary();
 }
 
 void ChatPage::slotPresenceReceived(const QVector<LinkPresence>& players)
@@ -457,7 +550,7 @@ QString ChatPage::safeColor(const QString& value)
     return pattern.match(value).hasMatch() ? value.toUpper() : QStringLiteral("#C8C8C8");
 }
 
-QString ChatPage::renderMessageHtml(const LinkMessage& message)
+QString ChatPage::renderMessageHtml(const LinkMessage& message) const
 {
     // Ничего из сети не попадает в HTML без экранирования.
     const QString author = message.author.toHtmlEscaped();
@@ -468,22 +561,87 @@ QString ChatPage::renderMessageHtml(const LinkMessage& message)
     if (message.system)
         return QStringLiteral("<div style='color:#9A8F7A'><i>%1</i></div>").arg(text);
 
+    const bool mention = isMentionForMe(message);
     const QString badge = message.level > 0
         ? QStringLiteral("<span style='background:#2B2318;color:#E8C87A;"
                          "padding:0 4px;border-radius:3px'>%1</span> ").arg(message.level)
         : QString();
+    const QString mentionBadge = mention
+        ? QStringLiteral("<span style='background:#6B4F1D;color:#FFE6A0;font-weight:bold;"
+                         "padding:0 4px'>@</span> ") : QString();
+    const QString containerStyle = mention
+        ? QStringLiteral("margin-bottom:4px;background:#352C20;border-left:3px solid #D7B45A;padding:3px")
+        : QStringLiteral("margin-bottom:4px");
 
-    // Пришедшее из игры помечаем, иначе непонятно, почему человек «молчит»
-    // в лаунчере, но пишет.
-    const QString source = message.fromGame
-        ? QStringLiteral("<span style='color:#6E6A62'> %1</span>").arg(tr("from game").toHtmlEscaped()) : QString();
-
+    // U034: mirrored game and launcher messages deliberately share one visual
+    // stream. MESSAGE_FROM_GAME stays in the protocol for diagnostics/dedupe,
+    // but is no longer shown as a second pseudo-channel to the player.
     return QStringLiteral(
-        "<div style='margin-bottom:4px'>%1"
-        "<span style='color:%2;font-weight:bold'>%3</span>"
-        "<span style='color:#6E6A62'> %4</span>%5<br>"
-        "<span style='color:#DCD6CC'>%6</span></div>")
-        .arg(badge, safeColor(message.color), author, time, source, text);
+        "<div style='%1'>%2%3"
+        "<span style='color:%4;font-weight:bold'>%5</span>"
+        "<span style='color:#6E6A62'> %6</span><br>"
+        "<span style='color:#DCD6CC'>%7</span></div>")
+        .arg(containerStyle, mentionBadge, badge, safeColor(message.color), author, time, text);
+}
+
+bool ChatPage::isMentionForMe(const LinkMessage& message) const
+{
+    if (message.system || !mClient->authorized())
+        return false;
+    const QString name = mClient->profile().name.trimmed();
+    if (name.isEmpty() || message.author.compare(name, Qt::CaseInsensitive) == 0)
+        return false;
+
+    // @Name is the explicit form. A full standalone character name is accepted
+    // too, which is useful for names containing spaces copied from the roster.
+    const QString escaped = QRegularExpression::escape(name);
+    const QRegularExpression explicitMention(QStringLiteral("(^|[^\\p{L}\\p{N}_])@%1(?=$|[^\\p{L}\\p{N}_])").arg(escaped),
+        QRegularExpression::CaseInsensitiveOption);
+    if (explicitMention.match(message.text).hasMatch())
+        return true;
+    const QRegularExpression plainMention(QStringLiteral("(^|[^\\p{L}\\p{N}_])%1(?=$|[^\\p{L}\\p{N}_])").arg(escaped),
+        QRegularExpression::CaseInsensitiveOption);
+    return plainMention.match(message.text).hasMatch();
+}
+
+void ChatPage::updateChannelIndicator(quint16 channel)
+{
+    for (int row = 0; row < mChannelList.size(); ++row)
+    {
+        if (mChannelList[row].id != channel)
+            continue;
+        QListWidgetItem* item = mChannels->item(row);
+        if (item == nullptr)
+            return;
+        QString caption = mChannelList[row].mirrorsGame
+            ? QStringLiteral("%1  ↔").arg(mChannelList[row].name) : mChannelList[row].name;
+        const int mentions = mMentionsByChannel.value(channel);
+        const int unread = mUnreadByChannel.value(channel);
+        if (mentions > 0)
+            caption += QStringLiteral("   @%1").arg(mentions);
+        else if (unread > 0)
+            caption += QStringLiteral("   • %1").arg(unread);
+        item->setText(caption);
+        QFont font = item->font();
+        font.setBold(mentions > 0 || unread > 0);
+        item->setFont(font);
+        if (mentions > 0)
+            item->setForeground(QBrush(QColor(QStringLiteral("#E8C87A"))));
+        else
+            item->setForeground(QBrush());
+        return;
+    }
+}
+
+void ChatPage::updateMentionSummary()
+{
+    if (mMentionLabel == nullptr)
+        return;
+    int total = 0;
+    for (auto it = mMentionsByChannel.constBegin(); it != mMentionsByChannel.constEnd(); ++it)
+        total += it.value();
+    mMentionLabel->setVisible(total > 0);
+    mMentionLabel->setText(total > 0 ? tr("Mentions: %1").arg(total) : QString());
 }
 
 void ChatPage::slotSendClicked()
@@ -492,6 +650,10 @@ void ChatPage::slotSendClicked()
     if (text.isEmpty() || mCurrentChannel == 0 || !mClient->authorized())
         return;
     mInput->clear();
+    mUnreadByChannel[mCurrentChannel] = 0;
+    mMentionsByChannel[mCurrentChannel] = 0;
+    updateChannelIndicator(mCurrentChannel);
+    updateMentionSummary();
     // Эхо не рисуем: сервер вернёт сообщение пушем всем, включая автора,
     // иначе порядок в ленте разъедется.
     mClient->sendMessage(mCurrentChannel, text);

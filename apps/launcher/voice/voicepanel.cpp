@@ -91,6 +91,9 @@ QString VoicePanel::pushToTalkKey() const
 
 void VoicePanel::updateEnabledState()
 {
-    mEnabled->setEnabled(mAvailable);
+    // While tes3mp is running it exclusively owns microphone/PTT. Disabling the
+    // launcher voice controls prevents a second capture session from being
+    // opened accidentally by the launcher at the same time.
+    mEnabled->setEnabled(mAvailable && !mGameRunning);
     mPushToTalkKey->setEnabled(mAvailable && mEnabled->isChecked() && !mGameRunning);
 }

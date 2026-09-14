@@ -51,6 +51,18 @@ void ChatFunctions::SendMessageTo(unsigned short sourcePid, unsigned short targe
     packet->Send(targetPlayer->guid);
 }
 
+void ChatFunctions::PublishLauncherGlobal(unsigned short pid, const char *message) noexcept
+{
+    Player *player;
+    GET_PLAYER(pid, player,);
+
+    if (message == nullptr || *message == '\0')
+        return;
+
+    if (mwmp::Networking::getPtr() != nullptr)
+        mwmp::Networking::getPtr()->publishPlayerGlobalToLauncher(*player, message);
+}
+
 void ChatFunctions::CleanChatForPid(unsigned short pid)
 {
     Player *player;

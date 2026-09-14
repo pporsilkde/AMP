@@ -11,6 +11,7 @@
 #include <QDate>
 #include <QCoreApplication>
 #include <QMessageBox>
+#include <QProcess>
 #include <QFontDatabase>
 #include <QInputDialog>
 #include <QFileDialog>
@@ -296,6 +297,19 @@ Launcher::MainDialog::MainDialog(QWidget *parent)
     setFixedSize(sLauncherWidth, sLauncherHeight);
 
     mGameInvoker = new ProcessInvoker();
+    // U034: keep the launcher (and ArenaLink chat) alive while tes3mp runs.
+    // A tracked QProcess lets us hand lobby voice back after the game exits,
+    // while forwarded channels avoid a hidden launcher filling a pipe buffer.
+    mGameInvoker->getProcess()->setProcessChannelMode(QProcess::ForwardedChannels);
+    connect(mGameInvoker->getProcess(), QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+        this, [this](int, QProcess::ExitStatus)
+        {
+            if (mChatPage != nullptr)
+                mChatPage->setGameRunning(false);
+            showNormal();
+            raise();
+            activateWindow();
+        });
     mServerDialog = new ServerDialog(this);
     // The server console is embedded directly inside the Play page.
     // Do not wrap it in a second glass window/title bar, otherwise the
@@ -1912,12 +1926,15 @@ void Launcher::MainDialog::launchClient()
     mPendingClientAddress.clear();
     mPendingClientPort.clear();
 
-    if (mGameInvoker->startProcess(QLatin1String("tes3mp"), arguments, true))
+    if (mGameInvoker->startProcess(QLatin1String("tes3mp"), arguments, false))
     {
-        if (mServerDialog != nullptr && mServerDialog->isRunning())
-            return;
-        qApp->quit();
+        // Do not terminate the launcher: chat, mentions and the server-status
+        // connection stay live. Hiding completely also makes mentions easy to
+        // miss, so keep a normal taskbar entry in minimized state.
+        showMinimized();
     }
+    else if (mChatPage != nullptr)
+        mChatPage->setGameRunning(false);
 }
 
 void Launcher::MainDialog::runServer()

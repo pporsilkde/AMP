@@ -258,6 +258,7 @@ public:
             {"OnActorCellChange",        Callback<unsigned short, const char*>()},
             {"OnActorTest",              Callback<unsigned short, const char*>()},
             {"OnPlayerSendMessage",      Callback<unsigned short, const char*>()},
+            {"OnLauncherGlobalChat",     Callback<const char*, unsigned int, unsigned short, unsigned int, const char*>()},
             {"OnPlayerEndCharGen",       Callback<unsigned short>()},
             {"OnGUIAction",              Callback<unsigned short, int, const char*>()},
             {"OnWorldKillCount",         Callback<unsigned short>()},

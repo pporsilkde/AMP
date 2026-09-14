@@ -6,6 +6,8 @@
 #include "GUIChat.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cstring>
 #include <cmath>
 #include <cstdlib>
 #include <sstream>
@@ -308,6 +310,7 @@ namespace mwmp
         , windowState(CHAT_TRANSPARENT_30)
         , chatChannel(CHANNEL_SAY)
         , chatStyle(STYLE_PLAIN)
+        , rememberedPrefix()
         , activeTab(TAB_CHAT)
         , rpMode(false)
         , stayOpenAfterSend(false)
@@ -329,6 +332,7 @@ namespace mwmp
         , editState(false)
         , menuState(false)
         , sayKeyHeld(false)
+        , applyingRememberedPrefix(false)
         , historyReviewState(false)
         , mainMenuOpen(false)
         , historyDisplayEnabled(true)
@@ -712,13 +716,26 @@ namespace mwmp
         mCurrent = mCommandHistory.end();
         mEditString.clear();
 
+        // Remember exactly the established prefix that was sent. This makes
+        // repeated RP/OOC messages fast without changing the meaning of any
+        // existing slash command. If the prefix was manually removed while
+        // editing, commandTextChanged() has already cleared the saved value.
+        const std::string explicitPrefix = detectRememberedPrefix(cm);
+        if (!explicitPrefix.empty())
+            setRememberedPrefix(explicitPrefix);
+
+        // Clearing after Send is an internal editor reset, not the player's
+        // request to forget the prefix. Suppress commandTextChanged() for it.
+        applyingRememberedPrefix = true;
         mCommandLine->setCaption("");
+        applyingRememberedPrefix = false;
         const std::string outgoing = buildOutgoingMessage(cm);
         send(outgoing);
 
         if (stayOpenAfterSend)
         {
             selectTab(TAB_CHAT, false);
+            refillRememberedPrefix();
             MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
             updateCommandLineLayout();
         }
@@ -1061,6 +1078,56 @@ namespace mwmp
         networking->getPlayerPacket(ID_CHAT_MESSAGE)->Send();
     }
 
+    std::string GUIChat::detectRememberedPrefix(const std::string& text)
+    {
+        // Longest prefixes first: /// must never be mistaken for //.
+        static const std::array<const char*, 6> prefixes = {"///", "/try", "/do", "/me", "/s", "//"};
+        for (const char* prefix : prefixes)
+        {
+            const std::size_t length = std::strlen(prefix);
+            if (text.compare(0, length, prefix) == 0
+                && (text.size() == length || text[length] == ' '))
+                return prefix;
+        }
+        return std::string();
+    }
+
+    void GUIChat::setRememberedPrefix(const std::string& prefix, bool refillEditor)
+    {
+        if (rememberedPrefix == prefix)
+        {
+            if (refillEditor)
+                refillRememberedPrefix();
+            return;
+        }
+
+        rememberedPrefix = prefix;
+        Settings::Manager::setString("input prefix", "Chat", rememberedPrefix);
+        Settings::Manager::saveUser();
+        if (refillEditor)
+            refillRememberedPrefix(true);
+    }
+
+    void GUIChat::refillRememberedPrefix(bool prependExisting)
+    {
+        if (mCommandLine == nullptr || rememberedPrefix.empty())
+            return;
+
+        const std::string current = mCommandLine->getOnlyText();
+        std::string text;
+        if (current.empty())
+            text = rememberedPrefix + " ";
+        else if (prependExisting && current[0] != '/')
+            text = rememberedPrefix + " " + current;
+        else
+            return;
+
+        applyingRememberedPrefix = true;
+        mCommandLine->setCaption(text);
+        mCommandLine->setTextCursor(text.size());
+        applyingRememberedPrefix = false;
+    }
+
     std::string GUIChat::buildOutgoingMessage(const std::string& text) const
     {
         // User-entered slash commands always bypass the visual mode selector.
@@ -1240,14 +1307,39 @@ namespace mwmp
 
     void GUIChat::commandTextChanged(MyGUI::EditBox*)
     {
+        if (!applyingRememberedPrefix && !rememberedPrefix.empty() && mCommandLine != nullptr)
+        {
+            const std::string text = mCommandLine->getOnlyText();
+            const std::size_t length = rememberedPrefix.size();
+            const bool stillHasPrefix = text.compare(0, length, rememberedPrefix) == 0
+                && (text.size() == length || (text.size() > length && text[length] == ' '));
+            if (!stillHasPrefix)
+                setRememberedPrefix(std::string());
+        }
+
         // X054: while the Say key is still physically down we are inside the
         // tap-or-hold window. SDL key auto-repeat would otherwise stream the
         // bound character into the freshly focused editor, so anything typed by
         // the key that opened the chat is discarded until it is released.
         if (sayKeyHeld && mCommandLine != nullptr && !mCommandLine->getOnlyText().empty())
         {
-            mCommandLine->setCaption(std::string());
-            mCommandLine->setTextCursor(0);
+            // U034: keep the remembered prefix that was inserted by pressedSay(),
+            // but discard SDL TEXTINPUT/autorepeat generated by the same physical
+            // key that opened chat. Previously the whole editor was cleared, which
+            // also erased the newly restored /s, //, ///, /me, /do or /try prefix.
+            applyingRememberedPrefix = true;
+            if (!rememberedPrefix.empty())
+            {
+                const std::string prefixText = rememberedPrefix + " ";
+                mCommandLine->setCaption(prefixText);
+                mCommandLine->setTextCursor(prefixText.size());
+            }
+            else
+            {
+                mCommandLine->setCaption(std::string());
+                mCommandLine->setTextCursor(0);
+            }
+            applyingRememberedPrefix = false;
         }
 
         updateCommandLineLayout();
@@ -1463,6 +1555,7 @@ namespace mwmp
         setEditState(true);
         selectTab(TAB_CHAT, false);
         mCommandLine->setVisible(true);
+        refillRememberedPrefix();
         MWBase::Environment::get().getWindowManager()->setKeyFocusWidget(mCommandLine);
     }
 
@@ -1789,6 +1882,12 @@ namespace mwmp
         }
         Settings::Manager::setString("send channel", "Chat", setting);
         Settings::Manager::saveUser();
+        if (chatStyle == STYLE_PLAIN)
+        {
+            if (chatChannel == CHANNEL_GLOBAL_OOC) setRememberedPrefix("///", true);
+            else if (chatChannel == CHANNEL_LOCAL_OOC) setRememberedPrefix("//", true);
+            else if (chatChannel == CHANNEL_SAY) setRememberedPrefix("/s", true);
+        }
         updateToggleButtons();
     }
 
@@ -1799,6 +1898,12 @@ namespace mwmp
             : (chatStyle == STYLE_DO ? "do" : (chatStyle == STYLE_TRY ? "try" : "plain"));
         Settings::Manager::setString("send style", "Chat", setting);
         Settings::Manager::saveUser();
+        if (chatStyle == STYLE_ME) setRememberedPrefix("/me", true);
+        else if (chatStyle == STYLE_DO) setRememberedPrefix("/do", true);
+        else if (chatStyle == STYLE_TRY) setRememberedPrefix("/try", true);
+        else if (chatChannel == CHANNEL_GLOBAL_OOC) setRememberedPrefix("///", true);
+        else if (chatChannel == CHANNEL_LOCAL_OOC) setRememberedPrefix("//", true);
+        else if (chatChannel == CHANNEL_SAY) setRememberedPrefix("/s", true);
         updateToggleButtons();
     }
 
@@ -2431,6 +2536,13 @@ namespace mwmp
         if (chatChannel != configuredChannel)
         {
             chatChannel = configuredChannel;
+            changed = true;
+        }
+
+        const std::string configuredPrefix = Settings::Manager::getString("input prefix", "Chat");
+        if (rememberedPrefix != configuredPrefix)
+        {
+            rememberedPrefix = detectRememberedPrefix(configuredPrefix);
             changed = true;
         }
 

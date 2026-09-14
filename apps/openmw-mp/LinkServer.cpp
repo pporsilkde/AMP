@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cerrno>
 #include <limits>
+#include <utility>
 
 #ifdef _WIN32
 #  include <winsock2.h>
@@ -199,7 +200,7 @@ bool LinkServer::start(unsigned short gamePort)
     // написанное в лаунчере видно в игре и наоборот; остальные живут
     // только в лаунчере.
     mChannels = {
-        { 1, "Общий",        static_cast<std::uint8_t>(CHANNEL_WRITABLE | (mCallbacks.pushToGameChat ? CHANNEL_MIRRORS_GAME : 0)) },
+        { 1, "Общий",        static_cast<std::uint8_t>(CHANNEL_WRITABLE | (mConfig.mirrorGameChat ? CHANNEL_MIRRORS_GAME : 0)) },
         { 2, "Поиск группы", CHANNEL_WRITABLE },
         { 3, "Торговля",     CHANNEL_WRITABLE },
         { 4, "Объявления",   static_cast<std::uint8_t>(CHANNEL_ADMIN_ONLY) },
@@ -625,8 +626,19 @@ void LinkServer::handleSend(Client& client, Reader& reader)
 
     broadcast(channelId, makeMessage(message));
 
-    if ((found->flags & CHANNEL_MIRRORS_GAME) != 0 && mCallbacks.pushToGameChat != nullptr)
-        mCallbacks.pushToGameChat(client.name, text);
+    if ((found->flags & CHANNEL_MIRRORS_GAME) != 0 && mConfig.mirrorGameChat)
+    {
+        PendingGameChat pending;
+        pending.author = client.name;
+        pending.userId = client.userId;
+        pending.level = client.level;
+        pending.color = client.color;
+        pending.text = text;
+        // threadMain already owns mMutex while handleSend() runs.
+        mPendingGameChat.push_back(std::move(pending));
+        while (mPendingGameChat.size() > 256)
+            mPendingGameChat.pop_front();
+    }
 }
 
 void LinkServer::handleHistory(Client& client, Reader& reader)
@@ -715,6 +727,25 @@ void LinkServer::publishFromGame(const std::string& author, std::uint32_t userId
         appendHistory(message);
         broadcast(channel.id, makeMessage(message));
     }
+}
+
+void LinkServer::publishFromGame(const std::string& author, const std::string& text)
+{
+    LinkAccount account;
+    if (mCallbacks.findAccount == nullptr || !mCallbacks.findAccount(author, account))
+        return;
+    publishFromGame(account.name.empty() ? author : account.name, account.userId,
+        account.level, account.color, text);
+}
+
+bool LinkServer::popPendingGameChat(PendingGameChat& message)
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+    if (mPendingGameChat.empty())
+        return false;
+    message = std::move(mPendingGameChat.front());
+    mPendingGameChat.pop_front();
+    return true;
 }
 
 void LinkServer::publishPresence(const LinkAccount& account, bool online)

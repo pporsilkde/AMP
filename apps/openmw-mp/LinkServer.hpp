@@ -39,6 +39,7 @@ namespace mwmp
         unsigned sendRatePerMinute = 30;
         unsigned authTriesBeforeBlock = 5;
         unsigned authBlockSeconds = 300;
+        bool mirrorGameChat = true;                 // channel 1 <-> in-game ///
         std::string storageDir;                  // server/data/chat
     };
 
@@ -100,6 +101,21 @@ namespace mwmp
         /// в зеркалящие каналы лаунчера.
         void publishFromGame(const std::string& author, std::uint32_t userId,
             std::uint16_t level, std::uint32_t color, const std::string& text);
+        void publishFromGame(const std::string& author, const std::string& text);
+
+        struct PendingGameChat
+        {
+            std::string author;
+            std::uint32_t userId = 0;
+            std::uint16_t level = 0;
+            std::uint32_t color = 0xC8C8C8u;
+            std::string text;
+        };
+
+        /// The TCP thread only queues mirrored launcher messages. The server
+        /// main thread drains them and calls Lua, so Lua is never touched from
+        /// LinkServer::threadMain().
+        bool popPendingGameChat(PendingGameChat& message);
 
         /// Из игрового потока: игрок вошёл в мир / вышел / взял уровень /
         /// сменил цвет через /chatcolor. Рассылается как PRESENCE_DELTA,
@@ -154,6 +170,7 @@ namespace mwmp
         std::vector<Client*> mClients;
         std::vector<ArenaLink::Channel> mChannels;
         std::map<std::uint16_t, std::deque<ArenaLink::Message>> mHistory;
+        std::deque<PendingGameChat> mPendingGameChat;
         std::map<std::string, std::pair<unsigned, std::uint64_t>> mAuthAttempts;
         std::uint64_t mNextMessageId = 1;
         Stats mStats;

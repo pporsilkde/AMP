@@ -379,6 +379,7 @@ int main(int argc, char *argv[])
         linkConfig.enabled = !(disableChat && std::string(disableChat) == "1");
         launcherChat.configure(linkConfig, jsonLinkCallbacks(dataDirectory));
         const bool chatStarted = launcherChat.start(static_cast<unsigned short>(port));
+        networking.setLinkServer(launcherChat.running() ? &launcherChat : nullptr);
         if (linkConfig.enabled && !chatStarted)
             LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "ArenaLink: TCP chat could not start (game port + 2)");
         else if (launcherChat.running())
@@ -387,6 +388,7 @@ int main(int argc, char *argv[])
             LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "ArenaLink U032: chat disabled by ARENAMP_CHAT_DISABLED=1");
 
         code = networking.mainLoop();
+        networking.setLinkServer(nullptr);
         launcherChat.stop();
 
         // ArenaMP Y052: without this guard a server running with [MasterServer]

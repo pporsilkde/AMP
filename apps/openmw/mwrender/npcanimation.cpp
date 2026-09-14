@@ -4,6 +4,8 @@
 #include <osg/MatrixTransform>
 #include <osg/Depth>
 
+#include <set>
+
 #include <osgUtil/RenderBin>
 #include <osgUtil/CullVisitor>
 
@@ -123,6 +125,8 @@ private:
     float mTalkStop;
     float mBlinkStart;
     float mBlinkStop;
+    bool mTalkStartFound;
+    bool mTalkStopFound;
 
     float mBlinkTimer;
 
@@ -140,6 +144,8 @@ public:
 
     void setEnabled(bool enabled);
 
+    void resetTalkRange();
+    bool hasTalkRange() const;
     void setTalkStart(float value);
     void setTalkStop(float value);
     void setBlinkStart(float value);
@@ -189,7 +195,8 @@ private:
 // --------------------------------------------------------------------------------------------------------------
 
 HeadAnimationTime::HeadAnimationTime(const MWWorld::Ptr& reference)
-    : mReference(reference), mTalkStart(0), mTalkStop(0), mBlinkStart(0), mBlinkStop(0), mEnabled(true), mValue(0)
+    : mReference(reference), mTalkStart(0), mTalkStop(0), mBlinkStart(0), mBlinkStop(0),
+      mTalkStartFound(false), mTalkStopFound(false), mEnabled(true), mValue(0)
 {
     resetBlinkTimer();
 }
@@ -244,14 +251,31 @@ float HeadAnimationTime::getValue(osg::NodeVisitor*)
     return mValue;
 }
 
+void HeadAnimationTime::resetTalkRange()
+{
+    // Head meshes can be replaced at runtime (equipment/race/vampire state).
+    // Never inherit talk text-key times from the previously loaded head.
+    mTalkStart = 0.f;
+    mTalkStop = 0.f;
+    mTalkStartFound = false;
+    mTalkStopFound = false;
+}
+
+bool HeadAnimationTime::hasTalkRange() const
+{
+    return mTalkStartFound && mTalkStopFound && mTalkStop > mTalkStart;
+}
+
 void HeadAnimationTime::setTalkStart(float value)
 {
     mTalkStart = value;
+    mTalkStartFound = true;
 }
 
 void HeadAnimationTime::setTalkStop(float value)
 {
     mTalkStop = value;
+    mTalkStopFound = true;
 }
 
 void HeadAnimationTime::setBlinkStart(float value)
@@ -930,6 +954,9 @@ bool NpcAnimation::addOrReplaceIndividualPart(ESM::PartReferenceType type, int g
     }
 
     osg::Node* node = mObjectParts[type]->getNode();
+    if (type == ESM::PRT_Head)
+        mHeadAnimationTime->resetTalkRange();
+
     if (node->getNumChildrenRequiringUpdateTraversal() > 0)
     {
         std::shared_ptr<SceneUtil::ControllerSource> src;
@@ -968,6 +995,18 @@ bool NpcAnimation::addOrReplaceIndividualPart(ESM::PartReferenceType type, int g
 
         SceneUtil::AssignControllerSourcesVisitor assignVisitor(src);
         node->accept(assignVisitor);
+    }
+
+    if (type == ESM::PRT_Head && !mHeadAnimationTime->hasTalkRange())
+    {
+        // Installed replacer heads are not known at build time. Diagnose them
+        // when they are actually loaded so users can identify the exact NIF that
+        // lacks Morrowind's native talk:start/talk:stop morph text keys.
+        static std::set<std::string> warnedHeadMeshes;
+        const std::string key = Misc::StringUtils::lowerCase(mesh);
+        if (warnedHeadMeshes.insert(key).second)
+            Log(Debug::Warning) << "ArenaMP voice lip sync: head mesh '" << mesh
+                                << "' has no valid talk: start/talk: stop text keys; mouth movement is disabled for this head";
     }
 
     return true;

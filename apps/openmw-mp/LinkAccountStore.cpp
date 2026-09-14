@@ -107,6 +107,7 @@ namespace
         std::function<void(const std::string&)> log;
         std::map<std::string, std::uint32_t> ids;
         std::uint32_t nextId = 1;
+        std::mutex idMutex;
         bool banned(const char* list, const std::string& value) const
         {
             Tree bans;
@@ -150,9 +151,16 @@ namespace
                     log("ACCOUNT_VERIFIER_INVALID");
                     return false;
                 }
-                auto& id = ids[wanted];
-                if (id == 0) id = nextId++;
-                account.userId = id;
+                {
+                    // U034: findAccount is normally used by the ArenaLink TCP
+                    // thread, but game -> launcher mirroring also resolves the
+                    // same account on the main server thread. Keep transient
+                    // user-id allocation race-free without serializing JSON IO.
+                    std::lock_guard<std::mutex> guard(idMutex);
+                    auto& id = ids[wanted];
+                    if (id == 0) id = nextId++;
+                    account.userId = id;
+                }
                 account.level = static_cast<std::uint16_t>(std::clamp(data.get<int>("stats.level", 1), 0, 65535));
                 account.className = data.get<std::string>("character.class", "");
                 account.banned = banned("playerNames", name) || banned("playerNames", account.name);

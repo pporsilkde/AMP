@@ -13,6 +13,7 @@
 // Ник красится тем же цветом, что в игре, перед ником — бейдж уровня.
 // Связь — постоянный TCP к игровому серверу (ArenaLink), без веба.
 
+#include <QHash>
 #include <QVector>
 #include <QString>
 #include <QWidget>
@@ -80,7 +81,12 @@ namespace Launcher
         void buildChatView();
         void appendMessage(const LinkMessage& message);
         /// Единственное место, где текст превращается в HTML.
-        static QString renderMessageHtml(const LinkMessage& message);
+        QString renderMessageHtml(const LinkMessage& message) const;
+        bool isMentionForMe(const LinkMessage& message) const;
+        void updateChannelIndicator(quint16 channel);
+        void updateMentionSummary();
+        void tryAutoLogin();
+        void scheduleAutoLogin();
         static QString safeColor(const QString& value);
         void setStatus(const QString& text, bool error = false);
 
@@ -104,11 +110,20 @@ namespace Launcher
         QLineEdit* mInput = nullptr;
         QPushButton* mSendButton = nullptr;
         QLabel* mProfileLabel = nullptr;
+        QLabel* mMentionLabel = nullptr;
         QPushButton* mLogoutButton = nullptr;
 
         QVector<LinkChannel> mChannelList;
+        QHash<quint16, int> mUnreadByChannel;
+        QHash<quint16, int> mMentionsByChannel;
+        QString mServerHost;
+        quint16 mGamePort = 0;
         quint16 mCurrentChannel = 0;
         bool mGameRunning = false;
+        bool mLoginInProgress = false;
+        bool mManualLogout = false;
+        bool mAutoLoginBlocked = false;
+        bool mReconnectScheduled = false;
     };
 }
 #endif

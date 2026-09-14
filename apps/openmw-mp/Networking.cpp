@@ -20,6 +20,7 @@
 
 #include "Networking.hpp"
 #include "MasterClient.hpp"
+#include "LinkServer.hpp"
 #include "Cell.hpp"
 #include "CellController.hpp"
 #include "processors/PlayerProcessor.hpp"
@@ -37,7 +38,7 @@ static bool scriptErrorIgnoringState = false;
 bool killLoop = false;
 
 Networking::Networking(RakNet::RakPeerInterface *peer)
-    : startLocation("default"), mclient(nullptr)
+    : startLocation("default"), mclient(nullptr), mLinkServer(nullptr)
 {
     sThis = this;
     this->peer = peer;
@@ -645,6 +646,21 @@ void signalHandler(int signum)
     }
 }
 
+void Networking::setLinkServer(LinkServer* server)
+{
+    mLinkServer = server;
+}
+
+void Networking::publishPlayerGlobalToLauncher(Player& player, const std::string& text)
+{
+    if (mLinkServer == nullptr || !mLinkServer->running() || text.empty() || player.npc.mName.empty())
+        return;
+
+    // Called by coreChat only after /// has passed its existing RP/command checks.
+    // LinkServer distributes it to launcher clients without routing it back to Lua.
+    mLinkServer->publishFromGame(player.npc.mName, text);
+}
+
 int Networking::mainLoop()
 {
     RakNet::Packet *packet;
@@ -661,6 +677,21 @@ int Networking::mainLoop()
     
     while (running && !killLoop)
     {
+        // U034: the ArenaLink TCP worker only queues launcher -> game messages.
+        // Drain them here, on the normal server/Lua thread. This is the crucial
+        // thread boundary that keeps Lua and CoreScripts out of the TCP worker.
+        if (mLinkServer != nullptr)
+        {
+            LinkServer::PendingGameChat pending;
+            unsigned drained = 0;
+            while (drained < 64 && mLinkServer->popPendingGameChat(pending))
+            {
+                Script::Call<Script::CallbackIdentity("OnLauncherGlobalChat")>(
+                    pending.author.c_str(), pending.userId, pending.level, pending.color, pending.text.c_str());
+                ++drained;
+            }
+        }
+
         // The same response is served by RakNet to offline pings on the game port.
         // Publish on the server thread; RakNet copies it under its own mutex.
         const auto uptime = std::chrono::duration_cast<std::chrono::seconds>(

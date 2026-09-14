@@ -250,6 +250,11 @@ local function sendGlobalOOC(pid, message)
         tes3mp.MessageBox(pid, -1, color.Red .. L(pid, "ooc_blocked_in_rp"))
         return
     end
+    -- U034: mirror only an accepted /// message. The native function publishes
+    -- to ArenaLink but never calls back into Lua, so there is no echo loop.
+    if tes3mp.PublishLauncherGlobal ~= nil then
+        tes3mp.PublishLauncherGlobal(pid, message)
+    end
     local formatted = formatMessage(message, pid)
     local playerColor = ensurePlayerColor(pid)
     for receiverPid, player in pairs(Players) do
@@ -268,6 +273,40 @@ local function sendGlobalOOC(pid, message)
         end
     end
     clearPopupFragments(pid)
+end
+
+-- ArenaMP U034: inject a launcher-authenticated message into the same global
+-- OOC stream used by ///.  LinkServer queues this callback for the TES3MP main
+-- thread, so no Lua API is ever called from the TCP worker.  Do not reflect the
+-- message back to ArenaLink here: LinkServer has already broadcast the original
+-- launcher message and doing so would create a duplicate.
+local function linkColor(value)
+    local numeric = math.floor(tonumber(value) or 0xC8C8C8) % 0x1000000
+    return string.format("#%06X", numeric)
+end
+
+function coreChat.SendLauncherGlobal(author, userId, level, colorRgb, message)
+    author = tostring(author or ""):gsub("[\r\n]", " "):sub(1, 64)
+    message = tostring(message or ""):gsub("[\r\n]", " "):sub(1, 4000)
+    if author == "" or message == "" then return end
+
+    local playerColor = linkColor(colorRgb)
+    for receiverPid, player in pairs(Players) do
+        if player and player:IsLoggedIn() then
+            initializePlayer(receiverPid)
+            local prefix = color.Turquoise .. "[G] " .. playerColor .. author .. ": "
+            if isRP(receiverPid) then
+                sendCrossModeMessageBox(receiverPid, prefix .. color.Khaki .. message, "nonrp_to_rp")
+            else
+                local custom = ensureCustomVariables(receiverPid)
+                if custom.popupMode then
+                    sendMessageBoxSafe(receiverPid, prefix .. color.Khaki .. message)
+                else
+                    playerChatSendMessage(receiverPid, prefix .. color.Khaki .. message .. "\n", false)
+                end
+            end
+        end
+    end
 end
 
 local function sendLocalOOC(pid, message)

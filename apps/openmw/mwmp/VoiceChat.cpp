@@ -484,6 +484,9 @@ namespace mwmp
             // Reception and speaker cleanup still work without a capture device.
         }
 
+        // wantsToTalk is derived from physical key state, not SDL key-down
+        // repeats. A held V therefore causes one transition only; when chat has
+        // focus wantsToTalk is false and V is left to normal text input.
         const bool pressed = wantsToTalk && mAvailable;
         if (pressed != mTransmitting)
         {
@@ -651,7 +654,9 @@ namespace mwmp
 
         speaker.decoder->push(decoded);
         speaker.lipLevel = voiceLipLevel(decoded.data(), decoded.size());
-        soundManager->setVoiceLipSyncLevel(player->getPtr(), speaker.lipLevel);
+        // The receive path only stores speech energy. The native head morph is
+        // updated from update(), after revalidating the remote player Ptr on the
+        // main game thread. This avoids touching animation state from networking.
         speaker.lastSequence = frame.sequence;
         speaker.haveSequence = true;
         speaker.age = 0.f;
