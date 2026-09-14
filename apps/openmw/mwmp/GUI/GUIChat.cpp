@@ -813,6 +813,7 @@ namespace mwmp
         static const std::string groupMapPrefix = "@@AMP_GMARK@@";
         static const std::string profilePrefix = "@@AMP_PROFILE@@";
         static const std::string trainingPrefix = "@@AMP_TRAIN@@";
+        static const std::string revivePrefix = "@@AMP_REVIVE@@";
 
         if (msg.compare(0, groupPrefix.size(), groupPrefix) == 0)
         {
@@ -845,6 +846,20 @@ namespace mwmp
         }
 
 
+
+        if (msg.compare(0, revivePrefix.size(), revivePrefix) == 0)
+        {
+            // U035: server -> client death-recovery state. STATE <OPEN|DENY|LOCK> <seconds>
+            std::vector<std::string> fields = splitControlFields(msg.substr(revivePrefix.size()), '\t');
+            if (fields.size() >= 3 && fields[0] == "STATE")
+            {
+                mwmp::LocalPlayer* localPlayer = mwmp::Main::isInitialized()
+                    ? mwmp::Main::get().getLocalPlayer() : nullptr;
+                if (localPlayer != nullptr)
+                    localPlayer->applyDeathRecoveryState(fields[1], std::strtof(fields[2].c_str(), nullptr));
+            }
+            return true;
+        }
 
         if (msg.compare(0, trainingPrefix.size(), trainingPrefix) == 0)
         {

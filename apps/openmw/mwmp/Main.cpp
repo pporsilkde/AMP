@@ -45,6 +45,8 @@
 #include "../mwworld/ptr.hpp"
 #include "../mwworld/worldimp.hpp"
 
+#include <exception>
+
 #include "Main.hpp"
 #include "Networking.hpp"
 #include "LocalSystem.hpp"
@@ -212,7 +214,27 @@ bool Main::init(std::vector<std::string> &content, std::vector<std::string> &gro
         if (*envKey != '\0')
             voiceKey = envKey;
     }
-    pMain->mVoiceChat->configure(voiceEnabled, voiceKey, manager.getFloat("rangeMeters", "Voice"));
+    // Older tes3mp-client-default.cfg files do not carry the loudness keys and
+    // Settings::Manager throws on a missing setting - fall back rather than
+    // refuse to start.
+    auto voiceFloat = [&manager](const char* key, float fallback) {
+        try { return manager.getFloat(key, "Voice"); }
+        catch (const std::exception&) { return fallback; }
+    };
+    auto voiceBool = [&manager](const char* key, bool fallback) {
+        try { return manager.getBool(key, "Voice"); }
+        catch (const std::exception&) { return fallback; }
+    };
+    bool voiceToggleMode = voiceBool("toggleMode", false);
+    if (const char* envToggle = std::getenv("ARENAMP_VOICE_TOGGLE"))
+    {
+        const std::string value(envToggle);
+        voiceToggleMode = value != "0" && value != "false" && value != "FALSE"
+            && value != "off" && value != "OFF";
+    }
+    pMain->mVoiceChat->configure(voiceEnabled, voiceKey, voiceFloat("rangeMeters", 30.f),
+        voiceFloat("fullVolumeMeters", 12.f), voiceFloat("sourceVolume", 2.f),
+        voiceFloat("micGain", 1.5f), voiceFloat("playbackGain", 1.f), voiceToggleMode);
     TimedLog::SetLevel(logLevel);
     if (address.empty())
     {

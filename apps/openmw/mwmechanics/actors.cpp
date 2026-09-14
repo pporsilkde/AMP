@@ -71,6 +71,7 @@
 #include "steering.hpp"
 #include "npcstats.hpp"
 #include "creaturestats.hpp"
+#include "onstrikestacks.hpp"
 #include "movement.hpp"
 #include "character.hpp"
 #include "aicombat.hpp"
@@ -2755,6 +2756,12 @@ namespace MWMechanics
     void Actors::removeActor (const MWWorld::Ptr& ptr)
     {
         stopRagdoll(ptr);
+
+        // U035: drop any on-strike stack this actor took part in. Not strictly
+        // required (stacks decay and the table is garbage collected), but it
+        // keeps the table small in busy cells.
+        if (!ptr.isEmpty() && ptr.getClass().isActor())
+            OnStrikeStacks::forgetActor(ptr.getClass().getCreatureStats(ptr).getActorId());
         PtrActorMap::iterator iter = mActors.find(ptr);
         if(iter != mActors.end())
         {

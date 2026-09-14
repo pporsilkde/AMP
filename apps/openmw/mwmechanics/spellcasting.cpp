@@ -36,8 +36,13 @@
 
 #include "../mwrender/animation.hpp"
 
+#include <exception>
+
+#include <components/settings/settings.hpp>
+
 #include "actorutil.hpp"
 #include "aifollow.hpp"
+#include "onstrikestacks.hpp"
 #include "creaturestats.hpp"
 #include "linkedeffects.hpp"
 #include "spellabsorption.hpp"
@@ -168,6 +173,38 @@ namespace MWMechanics
             // enchanted-weapon and damage-over-time spell applications.
             if (isHarmful && !MechanicsHelper::isFriendlyFireAllowed(caster, target))
                 continue;
+
+            // U035: heavy on-strike effects (paralysis, silence, reflect, stat
+            // drain) have to be earned. The first hits of a stack are absorbed
+            // and only the last one lands, so a single lucky swing can no
+            // longer take a fight away from the player it hits.
+            //
+            // This sits before onHit/reflect on purpose: a suppressed effect
+            // did not happen at all, so it must not be reflected back at the
+            // attacker and must not report a magic hit to the victim. The
+            // weapon's own physical hit and its damage effects are untouched.
+            if (mEnchantmentType == ESM::Enchantment::WhenStrikes
+                && !caster.isEmpty() && target != caster
+                && OnStrikeStacks::isHeavyEffect(effectIt->mEffectID))
+            {
+                const bool targetIsPlayer = target == getPlayer()
+                    || mwmp::PlayerList::isDedicatedPlayer(target);
+                bool gated = targetIsPlayer;
+                if (!gated)
+                {
+                    try
+                    {
+                        gated = Settings::Manager::getBool("combat on strike stack pve", "Game");
+                    }
+                    catch (const std::exception&)
+                    {
+                        gated = false;
+                    }
+                }
+
+                if (gated && !OnStrikeStacks::chargeAndTest(caster, target, effectIt->mEffectID, mStrikeToken))
+                    continue;
+            }
 
             // Re-casting a bound equipment effect has no effect if the spell is still active
             if (magicEffect->mData.mFlags & ESM::MagicEffect::NonRecastable && targetSpells.isSpellActive(mId))

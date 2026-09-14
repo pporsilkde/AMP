@@ -1,8 +1,10 @@
 #include "xpleveling.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iomanip>
+#include <unordered_map>
 #include <MyGUI_LanguageManager.h>
 #include <set>
 #include <sstream>
@@ -54,6 +56,107 @@ namespace
     float nonNegativeSetting(const char* name)
     {
         return std::max(0.f, Settings::Manager::getFloat(name, "XP Leveling"));
+    }
+
+    // U035: Settings::Manager throws on a missing key. A build whose
+    // settings-default.cfg predates the repeat-decay keys must keep working,
+    // so every new key is read through a fallback.
+    float optionalSetting(const char* name, float fallback)
+    {
+        try
+        {
+            return Settings::Manager::getFloat(name, "XP Leveling");
+        }
+        catch (const std::exception&)
+        {
+            return fallback;
+        }
+    }
+
+    bool optionalBoolSetting(const char* name, bool fallback)
+    {
+        try
+        {
+            return Settings::Manager::getBool(name, "XP Leveling");
+        }
+        catch (const std::exception&)
+        {
+            return fallback;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // U035: diminishing returns for repeating one and the same action.
+    //
+    // Model: every reward adds 1 to a per-action "heat" value that decays
+    // exponentially with a configurable half-life, and the reward itself is
+    // multiplied by pow(falloff, heat). A plain repeat counter would be
+    // defeated by interleaving a second action; heat is not, because it only
+    // goes down with time, never with variety.
+    //
+    // Decay is evaluated lazily at award time from a monotonic clock, so this
+    // needs no per-frame tick and cannot drift with frame rate. Heat lives for
+    // the session only and is deliberately not saved: it is a short anti-grind
+    // timer, and restoring it after a reload would read as "my XP is broken".
+    // ------------------------------------------------------------------
+    struct RepeatHeat
+    {
+        float mHeat = 0.f;
+        double mLastAward = 0.0;
+    };
+
+    double monotonicSeconds()
+    {
+        using namespace std::chrono;
+        return duration_cast<duration<double>>(steady_clock::now().time_since_epoch()).count();
+    }
+
+    float repeatMultiplier(RepeatHeat& entry, float falloff, float floorValue, float halfLife)
+    {
+        const double now = monotonicSeconds();
+        if (entry.mLastAward > 0.0 && halfLife > 0.f)
+        {
+            const double elapsed = std::max(0.0, now - entry.mLastAward);
+            entry.mHeat *= static_cast<float>(std::exp(-elapsed * 0.6931472 / halfLife));
+            if (entry.mHeat < 0.01f)
+                entry.mHeat = 0.f;
+        }
+        entry.mLastAward = now;
+
+        falloff = clampFloat(falloff, 0.05f, 1.f);
+        floorValue = clampFloat(floorValue, 0.f, 1.f);
+        const float multiplier = clampFloat(std::pow(falloff, entry.mHeat), floorValue, 1.f);
+
+        // Cap the stored heat: past the point where the floor is reached the
+        // extra heat only delays recovery, which would punish a player for
+        // hours after a single long grinding session.
+        entry.mHeat = std::min(entry.mHeat + 1.f, 60.f);
+        return multiplier;
+    }
+
+    float skillRepeatMultiplier(int skillId, int usageType)
+    {
+        if (!optionalBoolSetting("repeat decay enabled", true))
+            return 1.f;
+
+        static std::unordered_map<int, RepeatHeat> sSkillHeat;
+        const int key = skillId * 8 + std::max(0, usageType) + 1;
+        return repeatMultiplier(sSkillHeat[key],
+            optionalSetting("repeat decay falloff", 0.93f),
+            optionalSetting("repeat decay floor", 0.20f),
+            optionalSetting("repeat decay half life", 60.f));
+    }
+
+    float killRepeatMultiplier(const std::string& victimRefId)
+    {
+        if (victimRefId.empty() || !optionalBoolSetting("repeat decay enabled", true))
+            return 1.f;
+
+        static std::unordered_map<std::string, RepeatHeat> sKillHeat;
+        return repeatMultiplier(sKillHeat[Misc::StringUtils::lowerCase(victimRefId)],
+            optionalSetting("kill repeat decay falloff", 0.85f),
+            optionalSetting("kill repeat decay floor", 0.15f),
+            optionalSetting("kill repeat decay half life", 120.f));
     }
 
     bool showNotifications()
@@ -503,6 +606,10 @@ namespace MWMechanics
             // pipeline generic across all 27 skills without any skill-ID tables.
             float xp = equivalentXp * organicGain / requirement;
 
+            // U035: repeating the same action back to back is worth less and
+            // less until the player either varies what they do or waits.
+            xp *= skillRepeatMultiplier(skillId, usageType);
+
             const float globalSkillXp = Settings::Manager::getFloat("global XP gain multiplier", "Game");
             if (globalSkillXp > 0.f)
                 xp *= globalSkillXp;
@@ -526,7 +633,12 @@ namespace MWMechanics
             const float perLevel = nonNegativeSetting("kill xp per victim level");
             const float relativeDanger = clampFloat(
                 std::sqrt(static_cast<float>(victimLevel) / static_cast<float>(playerLevel)), 0.35f, 2.25f);
-            const float xp = (base + perLevel * victimLevel) * relativeDanger;
+            // U035: farming the same creature record over and over decays
+            // faster than repeating a skill, and the multiplier is applied
+            // before the server signal so party splitting stays the server's
+            // only job.
+            const float repeatScale = killRepeatMultiplier(victim.getCellRef().getRefId());
+            const float xp = (base + perLevel * victimLevel) * relativeDanger * repeatScale;
 
             if (serverPartyXpEnabled())
             {

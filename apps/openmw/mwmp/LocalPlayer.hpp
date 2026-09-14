@@ -48,6 +48,13 @@ namespace mwmp
         bool getRecoverableAllyName(std::string& name, int* level = nullptr) const;
         void requestTouchRecovery(const MWWorld::Ptr& target);
 
+        // U035: getting up costs a lockout. The server owns it; this is the
+        // local mirror used to suppress the panel and show the countdown, so a
+        // patched client can lie to its own HUD and gain nothing.
+        // state: "OPEN" | "DENY" | "LOCK".
+        void applyDeathRecoveryState(const std::string& state, float seconds);
+        float getReviveLockoutRemaining() const { return mReviveLockoutRemaining; }
+
         bool processCharGen();
         bool isLoggedIn();
         void updateLanguage();
@@ -233,6 +240,7 @@ namespace mwmp
         float mDeathRecoveryInitialXp;
         float mDeathRecoveryRequestCooldown;
         bool mDeathRecoveryEWasDown;
+        float mReviveLockoutRemaining;
 
         bool mPersistentAnimationActive;
         bool mPersistentAnimationPlaying;

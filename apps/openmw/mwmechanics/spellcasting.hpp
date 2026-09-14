@@ -55,6 +55,11 @@ namespace MWMechanics
         bool mManualSpell; // True if spell is casted from script and ignores some checks (mana level, success chance, etc.)
         SourceType mSourceType{ SourceType::None }; // EncoreMP addition
 
+        // U035: identifies one weapon strike. An on-strike enchantment carrying
+        // several effects of the same heavy group must charge the stack once,
+        // not once per effect. 0 means "not part of a tracked strike".
+        unsigned int mStrikeToken{0};
+
     public:
         CastSpell(const MWWorld::Ptr& caster, const MWWorld::Ptr& target, const bool fromProjectile=false, const bool manualSpell=false);
 

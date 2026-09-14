@@ -82,10 +82,89 @@ local function scheduleTick(player)
     tes3mp.StartTimer(player.deathRecoveryXpTimerId)
 end
 
+-- U035 --------------------------------------------------------------------
+-- Getting up costs a lockout. After any successful recovery the player cannot
+-- be brought back again for "revive lockout seconds"; dying inside that window
+-- is a plain death with no incapacitated state at all.
+--
+-- The stamp is wall-clock (os.time) and lives in customVariables, not on the
+-- session table: a monotonic server clock would restart with the server and a
+-- session field would be cleared by a relog, which is the first thing anyone
+-- tries.
+----------------------------------------------------------------------------
+
+local function reviveLockoutSeconds()
+    return math.max(0, cfgNumber("revive lockout seconds", 60))
+end
+
+local function reviveLockoutRemaining(player)
+    if player == nil or type(player.data) ~= "table" then return 0 end
+    local limit = reviveLockoutSeconds()
+    if limit <= 0 then return 0 end
+
+    player.data.customVariables = player.data.customVariables or {}
+    local last = tonumber(player.data.customVariables.ampLastRevive) or 0
+    if last <= 0 then return 0 end
+
+    local elapsed = os.time() - last
+    -- A clock that jumped backwards (NTP, host migration) must not lock a
+    -- player out forever.
+    if elapsed < 0 then
+        player.data.customVariables.ampLastRevive = os.time()
+        return limit
+    end
+    return math.max(0, limit - elapsed)
+end
+
+local function stampReviveLockout(player)
+    if player == nil or type(player.data) ~= "table" then return end
+    player.data.customVariables = player.data.customVariables or {}
+    player.data.customVariables.ampLastRevive = os.time()
+end
+
+-- Server -> client control message on the existing @@AMP_REVIVE@@ channel.
+-- state: "OPEN" | "DENY" | "LOCK"
+local function sendRecoveryState(player, state, seconds)
+    if player == nil or not player:IsLoggedIn() then return end
+    tes3mp.SendMessage(player.pid, CONTROL_PREFIX .. "STATE\t" .. tostring(state) ..
+        "\t" .. string.format("%.1f", math.max(0, tonumber(seconds) or 0)) .. "\n", false)
+end
+
+function deathRecovery.LockoutRemaining(player)
+    return reviveLockoutRemaining(player)
+end
+
 function deathRecovery.Begin(player)
     if player == nil then return 30 end
 
     deathRecovery.Cancel(player, false)
+
+    -- U035: still under the lockout - no incapacitated window at all. The decay
+    -- window IS the XP penalty, so with no window the penalty is settled in one
+    -- go instead of being silently skipped.
+    local lockoutLeft = reviveLockoutRemaining(player)
+    if lockoutLeft > 0 then
+        local xpAtDeath = math.max(0, tonumber(player.data.stats.experience) or 0)
+        if xpAtDeath > 0 then
+            player.data.stats.experience = 0
+            sendLevelSilently(player)
+            if type(player.PersistXpProgress) == "function" then
+                player:PersistXpProgress(true)
+            end
+        end
+
+        sendRecoveryState(player, "DENY", lockoutLeft)
+        tes3mp.SendMessage(player.pid, string.format(
+            "You got up too recently - no recovery this time (%d s).\n", math.ceil(lockoutLeft)), false)
+
+        local minimumRespawn = 0
+        if xpAtDeath <= 0 and type(config.xpLeveling) == "table" then
+            local perLevel = tonumber(config.xpLeveling["zero xp death cooldown per level"]) or 0
+            local currentLevel = math.max(1, tonumber(player.data.stats.level) or 1)
+            minimumRespawn = math.max(0, perLevel) * currentLevel
+        end
+        return minimumRespawn
+    end
 
     local duration = clamp(cfgNumber("xp decay seconds", 30), 3, 30)
     local currentXp = math.max(0, tonumber(player.data.stats.experience) or 0)
@@ -98,6 +177,8 @@ function deathRecovery.Begin(player)
     -- The first tick is delayed; the client renders a smooth interpolation while
     -- these authoritative one-second checkpoints prevent reconnect/lag exploits.
     scheduleTick(player)
+
+    sendRecoveryState(player, "OPEN", duration)
 
     -- Never auto-respawn before the XP decay window can finish.
     local minimumRespawn = duration
@@ -341,6 +422,12 @@ local function recoverTarget(target, sourcePid, kind)
     target.deathRecoveryDuration = nil
     target.deathRecoveryInitialXp = nil
 
+    -- U035: every way back on to your feet starts the lockout, including an
+    -- ally rescue. If only self-revives were stamped, a duo would trade
+    -- rescues and the cooldown would never apply to either of them.
+    stampReviveLockout(target)
+    sendRecoveryState(target, "LOCK", reviveLockoutSeconds())
+
     if target.resurrectTimerId ~= nil then
         tes3mp.StopTimer(target.resurrectTimerId)
         target.resurrectTimerId = nil
@@ -359,12 +446,17 @@ local function recoverTarget(target, sourcePid, kind)
 
     local helperName = sourcePid ~= nil and logicHandler.GetChatName(sourcePid) or ""
     local source = kind == "touch" and "healing touch" or "Restore Health potion"
+    -- U035: say the lockout out loud, otherwise the next death looks like a bug.
+    local lockoutNote = ""
+    if reviveLockoutSeconds() > 0 then
+        lockoutNote = string.format(" No second recovery for %d s.", math.ceil(reviveLockoutSeconds()))
+    end
     if helperName ~= "" and sourcePid ~= target.pid then
-        tes3mp.SendMessage(target.pid, helperName .. " revived you with " .. source .. ".\n", false)
+        tes3mp.SendMessage(target.pid, helperName .. " revived you with " .. source .. "." .. lockoutNote .. "\n", false)
         tes3mp.SendMessage(sourcePid, "You revived " .. logicHandler.GetChatName(target.pid) .. ".\n", false)
     else
         -- Y040: the wording used to claim a potion even on the touch path.
-        tes3mp.SendMessage(target.pid, "You recovered with a " .. source .. ".\n", false)
+        tes3mp.SendMessage(target.pid, "You recovered with a " .. source .. "." .. lockoutNote .. "\n", false)
     end
     return true
 end
@@ -391,9 +483,14 @@ local function controlValidator(eventStatus, pid, message)
         return customEventHooks.makeEventStatus(false, false)
     end
 
-    if action == "SELF_POTION" then
+    if action == "STATE" then
+        -- Server -> client direction only; a client must never inject it.
+        return customEventHooks.makeEventStatus(false, false)
+
+    elseif action == "SELF_POTION" then
         local refId = fields[2] or ""
-        if player.deathRecoveryActive == true and refId ~= "" then
+        if player.deathRecoveryActive == true and refId ~= ""
+            and reviveLockoutRemaining(player) <= 0 then
             local consumed, fallback = takePotions(player, refId, requiredPotionCount(player))
             if consumed then
                 recoverTarget(player, pid, fallback and "potion_fallback" or "potion")
@@ -405,6 +502,7 @@ local function controlValidator(eventStatus, pid, message)
         local targetPid = findPidByCharacterName(targetName)
         local target = targetPid ~= nil and Players[targetPid] or nil
         if target ~= nil and target.deathRecoveryActive == true
+            and reviveLockoutRemaining(target) <= 0
             and groupHelper ~= nil and groupHelper.ArePlayersInSameGroup(pid, targetPid)
             and nearby(pid, targetPid) then
             if action == "ALLY_POTION" then

@@ -40,6 +40,7 @@
 #include <components/debug/debuglog.hpp>
 #include <components/misc/stringops.hpp>
 
+#include <components/esm/attr.hpp>
 #include <components/esm/loadalch.hpp>
 #include <components/esm/loadcell.hpp>
 #include <components/esm/loaddoor.hpp>
@@ -155,10 +156,43 @@ namespace
         float mStealthSearchRadius = 0.f;
         float mThreatFleeRatio = 0.f;
 
+        // U035
+        bool mAgilityScaling = true;
+        float mDodgeBaseChance = 0.05f;
+        float mDodgeAgilityBonus = 0.45f;
+        float mCounterWindow = 0.60f;
+        float mReactionDelayMax = 0.45f;
+
         int mFormationMaxActors = 0;
         int mPursuitMaxDoorTransitions = 0;
         int mStealthSearchPoints = 0;
     };
+
+    // U035: keys added after this binary shipped must not throw on a build
+    // whose settings-default.cfg is older than the executable.
+    bool optionalCombatBool(const char* name, bool fallback)
+    {
+        try
+        {
+            return Settings::Manager::getBool(name, "Game");
+        }
+        catch (const std::exception&)
+        {
+            return fallback;
+        }
+    }
+
+    float optionalCombatFloat(const char* name, float fallback)
+    {
+        try
+        {
+            return Settings::Manager::getFloat(name, "Game");
+        }
+        catch (const std::exception&)
+        {
+            return fallback;
+        }
+    }
 
     const CombatSettings& combatSettings()
     {
@@ -191,6 +225,12 @@ namespace
             cache.mStealthSearchRadius = SM::Manager::getFloat("combat stealth search radius", "Game");
             cache.mThreatFleeRatio = SM::Manager::getFloat("combat threat flee ratio", "Game");
 
+            cache.mAgilityScaling = optionalCombatBool("combat agility scaling", true);
+            cache.mDodgeBaseChance = optionalCombatFloat("combat dodge base chance", 0.05f);
+            cache.mDodgeAgilityBonus = optionalCombatFloat("combat dodge agility bonus", 0.45f);
+            cache.mCounterWindow = optionalCombatFloat("combat counter window", 0.60f);
+            cache.mReactionDelayMax = optionalCombatFloat("combat reaction delay max", 0.45f);
+
             cache.mFormationMaxActors = SM::Manager::getInt("combat formation max actors", "Game");
             cache.mPursuitMaxDoorTransitions = SM::Manager::getInt("combat pursuit max door transitions", "Game");
             cache.mStealthSearchPoints = SM::Manager::getInt("combat stealth search points", "Game");
@@ -200,6 +240,23 @@ namespace
         }
 
         return cache;
+    }
+
+    // U035: 0 for a raw novice, 1 for a high level fighter with good reflexes.
+    // Level dominates - that is the whole point - but Agility and Speed spread
+    // the result inside one level, so a level 20 mage does not move like a
+    // level 20 Ordinator.
+    float agilityRating(const MWWorld::Ptr& actor)
+    {
+        const MWMechanics::CreatureStats& stats = actor.getClass().getCreatureStats(actor);
+
+        const float level = std::max(0.f, std::min(1.f, (stats.getLevel() - 3.f) / 27.f));
+        const float agility = std::max(0.f, std::min(1.f,
+            (stats.getAttribute(ESM::Attribute::Agility).getModified() - 30.f) / 70.f));
+        const float speed = std::max(0.f, std::min(1.f,
+            (stats.getAttribute(ESM::Attribute::Speed).getModified() - 30.f) / 70.f));
+
+        return std::max(0.f, std::min(1.f, 0.60f * level + 0.25f * agility + 0.15f * speed));
     }
 
     float healthRatio(const MWWorld::Ptr& actor)
@@ -1224,13 +1281,84 @@ namespace MWMechanics
             }
         }
 
+        // -----------------------------------------------------------------
+        // U035: level-scaled nimbleness.
+        //
+        // The existing tactical rolls are flat: a level 1 rat picks from the
+        // same table as a level 40 lord. Everything below is scaled by an
+        // agility rating so that low level actors are calmer than they are
+        // today and high level ones actually read an incoming swing, hop out
+        // of it and answer into the opening.
+        // -----------------------------------------------------------------
+        const CombatSettings& tuning = combatSettings();
+        storage.mReactionDelay = std::max(0.f, storage.mReactionDelay - duration);
+        storage.mCounterWindow = std::max(0.f, storage.mCounterWindow - duration);
+        storage.mAgilityRefresh -= duration;
+        if (storage.mAgilityRefresh <= 0.f)
+        {
+            storage.mAgilityRating = tuning.mAgilityScaling ? agilityRating(actor) : 0.f;
+            storage.mAgilityRefresh = 1.f;
+        }
+        const float agility = storage.mAgilityRating;
+
+        if (tuning.mAgilityScaling && bipedal && !target.isEmpty() && target.getClass().isActor()
+            && storage.mTacticalState == AiCombatStorage::Tactical_None)
+        {
+            const MWMechanics::CreatureStats& targetStats = target.getClass().getCreatureStats(target);
+            const bool targetWindingUp = targetStats.getAttackingOrSpell();
+            const float evadeRange = std::max(140.f, storage.mAttackRange * 1.30f);
+            const bool inEvadeRange = storage.mLOS && distToTarget < evadeRange;
+
+            if (inEvadeRange && targetWindingUp && storage.mReactionDelay <= 0.f
+                && storage.mTacticalCooldown <= 0.f
+                && Misc::Rng::rollClosedProbability()
+                    < tuning.mDodgeBaseChance + tuning.mDodgeAgilityBonus * agility)
+            {
+                // Break out of the swing. The side is remembered so the answer
+                // comes back in from the same direction the actor left towards,
+                // which reads as one movement instead of two random ones.
+                storage.mCounterSide = Misc::Rng::rollProbability() < 0.5 ? -1.f : 1.f;
+                storage.mTacticalState = AiCombatStorage::Tactical_HopBack;
+                storage.mTacticalTimer = 0.24f + 0.10f * agility;
+                storage.mTacticalCooldown = std::max(0.55f, 2.4f - 1.5f * agility);
+                storage.mCounterWindow = std::max(0.f, tuning.mCounterWindow) * agility;
+                storage.stopAttack();
+                characterController.setAttackingOrSpell(false);
+                if (agility > 0.55f)
+                {
+                    stats.setMovementFlag(CreatureStats::Flag_ForceMoveJump, true);
+                    storage.mJumpTimer = 0.22f;
+                }
+
+                // A fighter cannot chain-dodge every swing; the delay before the
+                // next read is what separates a sluggish novice from a veteran.
+                storage.mReactionDelay = std::max(0.05f, tuning.mReactionDelayMax * (1.f - 0.8f * agility));
+            }
+            else if (storage.mCounterWindow > 0.f && !targetWindingUp && inEvadeRange)
+            {
+                // The swing is spent: step back in and strike into the opening.
+                // This is the only place the attack cooldown is waived, and the
+                // window itself is only ever opened by a successful evade.
+                storage.mTacticalState = AiCombatStorage::Tactical_CounterStep;
+                storage.mTacticalTimer = 0.30f;
+                storage.mTacticalCooldown = std::max(0.8f, 2.0f - 1.0f * agility);
+                storage.mCounterWindow = 0.f;
+                storage.mAttackCooldown = 0.f;
+            }
+        }
+
         const float hpMax = stats.getHealth().getModified();
         const float hpRatio = hpMax > 0.f ? stats.getHealth().getCurrent() / hpMax : 1.f;
 
         // Do not let close-range tactical decoration interrupt an actual melee
         // commitment. Real stuck recovery is kept, and a critically wounded
         // fighter may still retreat after the current swing has finished.
-        if (meleePressureRange && storage.mTacticalState != AiCombatStorage::Tactical_Unstuck)
+        // U035: HopBack and CounterStep are exempt for the same reason Unstuck
+        // is - they exist precisely at melee range and last a fraction of a
+        // second. Clearing them here would delete the mechanic outright.
+        if (meleePressureRange && storage.mTacticalState != AiCombatStorage::Tactical_Unstuck
+            && storage.mTacticalState != AiCombatStorage::Tactical_HopBack
+            && storage.mTacticalState != AiCombatStorage::Tactical_CounterStep)
         {
             const bool criticallyRetreating = storage.mTacticalState == AiCombatStorage::Tactical_Retreat
                 && hpRatio < 0.20f && !storage.mAttack && storage.mMeleeCommitTimer <= 0.f;
@@ -1260,7 +1388,7 @@ namespace MWMechanics
                 // the target, press, swing, recover, swing again.
             }
             else if (bipedal && distToTarget < std::max(300.f, storage.mAttackRange * 1.35f)
-                && roll < (ranged ? 0.08f : 0.05f))
+                && roll < (ranged ? 0.05f : 0.03f) + 0.10f * agility)
             {
                 storage.mTacticalState = AiCombatStorage::Tactical_JumpDodge;
                 storage.mTacticalTimer = 0.38f;
@@ -1271,7 +1399,7 @@ namespace MWMechanics
                 characterController.setAttackingOrSpell(false);
             }
             else if (distToTarget < std::max(380.f, storage.mAttackRange * 1.6f)
-                && roll < (ranged ? 0.35f : 0.12f))
+                && roll < (ranged ? 0.25f : 0.08f) + (ranged ? 0.14f : 0.18f) * agility)
             {
                 const bool left = Misc::Rng::rollProbability() < 0.5;
                 storage.mTacticalState = left
@@ -1279,7 +1407,7 @@ namespace MWMechanics
                 storage.mTacticalTimer = 0.45f + 0.35f * Misc::Rng::rollClosedProbability();
                 storage.mTacticalCooldown = 1.2f + 1.5f * Misc::Rng::rollClosedProbability();
             }
-            else if (!ranged && distToTarget < 650.f && roll < 0.20f)
+            else if (!ranged && distToTarget < 650.f && roll < 0.12f + 0.22f * agility)
             {
                 const bool left = Misc::Rng::rollProbability() < 0.5;
                 storage.mTacticalState = left
@@ -1326,6 +1454,21 @@ namespace MWMechanics
                 if (storage.mMovement.mPosition[0] == 0.f)
                     storage.mMovement.mPosition[0] = Misc::Rng::rollProbability() < 0.5 ? -1.f : 1.f;
                 storage.mMovement.mPosition[1] = storage.mTacticalState == AiCombatStorage::Tactical_Unstuck ? 0.65f : -0.2f;
+                break;
+            case AiCombatStorage::Tactical_HopBack:
+                // Out of the swing: mostly straight back, angled to the side so
+                // the actor ends up off the attacker's line rather than in a
+                // straight retreat that is trivially followed.
+                storage.stopAttack();
+                storage.mMovement.mPosition[0] = storage.mCounterSide * 0.45f;
+                storage.mMovement.mPosition[1] = -1.f;
+                characterController.setAttackingOrSpell(false);
+                break;
+            case AiCombatStorage::Tactical_CounterStep:
+                // Back in at an angle. The attack itself is left to the normal
+                // startAttackIfReady path - only its cooldown was waived.
+                storage.mMovement.mPosition[0] = storage.mCounterSide * 0.75f;
+                storage.mMovement.mPosition[1] = 0.9f;
                 break;
             case AiCombatStorage::Tactical_SneakApproach:
             case AiCombatStorage::Tactical_None:
@@ -2161,8 +2304,10 @@ namespace MWMechanics
 
     bool AiCombatStorage::suppressesAttack() const
     {
+        // U035: CounterStep is deliberately absent - it is an attacking state,
+        // and suppressing the attack would remove the whole point of it.
         return mTacticalState == Tactical_Retreat || mTacticalState == Tactical_JumpDodge
-            || mTacticalState == Tactical_Unstuck;
+            || mTacticalState == Tactical_Unstuck || mTacticalState == Tactical_HopBack;
     }
 }
 

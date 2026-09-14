@@ -40,6 +40,7 @@
 
 #include "npcstats.hpp"
 #include "movement.hpp"
+#include "onstrikestacks.hpp"
 #include "spellcasting.hpp"
 #include "spellresistance.hpp"
 #include "difficultyscaling.hpp"
@@ -78,6 +79,9 @@ namespace MWMechanics
             {
                 MWMechanics::CastSpell cast(attacker, victim, fromProjectile);
                 cast.mHitPosition = hitPosition;
+                // U035: one token per strike, so a multi-effect enchantment
+                // cannot charge the same heavy stack more than once per blow.
+                cast.mStrikeToken = MWMechanics::OnStrikeStacks::nextStrikeToken();
                 cast.cast(object, false);
                 return true;
             }

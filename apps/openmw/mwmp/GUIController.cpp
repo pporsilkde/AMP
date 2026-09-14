@@ -50,6 +50,8 @@ mwmp::GUIController::GUIController()
     , mListBox(nullptr)
     , mServerQuestEditor(nullptr)
     , mPreLoginPasswordAutoSubmitted(false)
+    , mVoiceHud(nullptr)
+    , mVoiceHudText(nullptr)
     , mEmbeddedRestartHud(nullptr)
     , mEmbeddedRestartProgress(nullptr)
     , mEmbeddedRestartTitle(nullptr)
@@ -81,6 +83,7 @@ void mwmp::GUIController::cleanUp()
     mServerQuestEditor = nullptr;
 
     destroyEmbeddedRestartHud();
+    destroyVoiceHud();
 
     // A fresh connection gets one automatic submission from the credentials
     // collected by the account card, even if the previous connection ended
@@ -221,6 +224,119 @@ void mwmp::GUIController::destroyEmbeddedRestartHud()
     mEmbeddedRestartTitle = nullptr;
     mEmbeddedRestartMessage = nullptr;
     mEmbeddedRestartTotalSeconds = 30;
+}
+
+// U035 ---------------------------------------------------------------------
+// "Who is talking" overlay.
+//
+// Built at runtime from the same borderless-widget recipe as the restart HUD,
+// so no .layout file and no skin has to be touched. It is rebuilt only when the
+// caption actually changes: MyGUI re-lays out a TextBox on every setCaption,
+// and this is called every frame while someone speaks.
+// ---------------------------------------------------------------------------
+void mwmp::GUIController::updateVoiceHud(const std::vector<VoiceHudSpeaker>& speakers,
+    bool micOpen, bool transmitting, float localLevel, bool toggleMode)
+{
+    const auto localize = [](const char* key) {
+        return MyGUI::LanguageManager::getInstance().replaceTags(
+            std::string("#{arenamp=") + key + "}");
+    };
+
+    // A five-step block meter reads at a glance and costs nothing to build.
+    const auto meter = [](float level) {
+        const int filled = std::max(0, std::min(5, static_cast<int>(level * 5.f + 0.5f)));
+        std::string bar;
+        for (int i = 0; i < 5; ++i)
+            bar += (i < filled) ? "|" : ".";
+        return bar;
+    };
+
+    std::string caption;
+
+    // Own state first: the player needs to know the microphone is open before
+    // they need to know who else is on air. In toggle mode that is the whole
+    // point - nothing else tells you the mic stayed open.
+    if (transmitting)
+        caption += "#77FF77" + meter(localLevel) + " " + localize("voice.hud.you") + "#FFFFFF";
+    else if (micOpen && toggleMode)
+        caption += "#FFCC55" + meter(0.f) + " " + localize("voice.hud.mic_open") + "#FFFFFF";
+
+    for (const VoiceHudSpeaker& speaker : speakers)
+    {
+        if (!caption.empty())
+            caption += "\n";
+        std::string name = speaker.mName;
+        // Names arrive from the network: never let one break the overlay apart.
+        std::replace(name.begin(), name.end(), '\n', ' ');
+        std::replace(name.begin(), name.end(), '\r', ' ');
+        if (name.size() > 24)
+            name = name.substr(0, 24);
+        // '#' starts a colour code in MyGUI captions; '##' is a literal one.
+        // Without this a player called "#FF0000abc" could repaint the overlay.
+        for (std::size_t i = 0; i < name.size(); ++i)
+        {
+            if (name[i] == '#')
+            {
+                name.insert(i, 1, '#');
+                ++i;
+            }
+        }
+        caption += "#9FD7FF" + meter(speaker.mLevel) + " " + name + "#FFFFFF";
+    }
+
+    if (caption.empty())
+    {
+        if (mVoiceHud != nullptr)
+            mVoiceHud->setVisible(false);
+        mVoiceHudCaption.clear();
+        return;
+    }
+
+    const MyGUI::IntSize view = MyGUI::RenderManager::getInstance().getViewSize();
+    const int lines = static_cast<int>(std::count(caption.begin(), caption.end(), '\n')) + 1;
+    const int width = std::max(160, std::min(320, view.width / 4));
+    const int height = 6 + lines * 18;
+    const int left = 12;
+    // Above the bottom resource bars, below the middle of the screen.
+    const int top = std::max(20, std::min(view.height - height - 120, view.height / 2 + 40));
+
+    if (mVoiceHud == nullptr)
+    {
+        mVoiceHud = MyGUI::Gui::getInstance().createWidget<MyGUI::Widget>(
+            "", left, top, width, height, MyGUI::Align::Default, "Popup");
+        mVoiceHud->setNeedMouseFocus(false);
+        mVoiceHud->setNeedKeyFocus(false);
+
+        mVoiceHudText = mVoiceHud->createWidget<MyGUI::TextBox>(
+            "SandBrightText", MyGUI::IntCoord(0, 0, width, height),
+            MyGUI::Align::Default, "VoiceHudText");
+        mVoiceHudText->setNeedMouseFocus(false);
+        mVoiceHudText->setNeedKeyFocus(false);
+        mVoiceHudText->setTextShadow(true);
+        mVoiceHudText->setTextShadowColour(MyGUI::Colour::Black);
+    }
+
+    mVoiceHud->setCoord(left, top, width, height);
+    if (mVoiceHudText != nullptr)
+    {
+        mVoiceHudText->setCoord(0, 0, width, height);
+        if (caption != mVoiceHudCaption)
+        {
+            mVoiceHudText->setCaptionWithReplacing(caption);
+            mVoiceHudCaption = caption;
+        }
+    }
+    mVoiceHud->setVisible(true);
+}
+
+void mwmp::GUIController::destroyVoiceHud()
+{
+    if (mVoiceHud != nullptr)
+        MyGUI::Gui::getInstance().destroyWidget(mVoiceHud);
+
+    mVoiceHud = nullptr;
+    mVoiceHudText = nullptr;
+    mVoiceHudCaption.clear();
 }
 
 bool mwmp::GUIController::handleEmbeddedRestartControl(const std::string& message)

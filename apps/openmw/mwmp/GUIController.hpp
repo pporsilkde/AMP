@@ -1,6 +1,9 @@
 #ifndef OPENMW_GUICONTROLLER_HPP
 #define OPENMW_GUICONTROLLER_HPP
 
+#include <string>
+#include <vector>
+
 #include <components/settings/settings.hpp>
 
 #include "apps/openmw/mwgui/mode.hpp"
@@ -97,6 +100,18 @@ namespace mwmp
         void ensureEmbeddedRestartHud();
         void destroyEmbeddedRestartHud();
 
+        // U035: who is talking right now. One line per remote speaker plus the
+        // local microphone state, rendered as a borderless HUD overlay so no
+        // .layout file has to change.
+        struct VoiceHudSpeaker
+        {
+            std::string mName;
+            float mLevel = 0.f;   // 0..1 speech energy, drives the level bar
+        };
+        void updateVoiceHud(const std::vector<VoiceHudSpeaker>& speakers,
+            bool micOpen, bool transmitting, float localLevel, bool toggleMode);
+        void destroyVoiceHud();
+
         GUIChat *mChat;
         int keySay;
         int keyChatMode;
@@ -111,6 +126,10 @@ namespace mwmp
         GUIDialogList *mListBox;
         ServerQuestEditorWindow *mServerQuestEditor;
         bool mPreLoginPasswordAutoSubmitted;
+
+        MyGUI::Widget* mVoiceHud;
+        MyGUI::TextBox* mVoiceHudText;
+        std::string mVoiceHudCaption;
 
         MyGUI::Widget* mEmbeddedRestartHud;
         MyGUI::ProgressBar* mEmbeddedRestartProgress;

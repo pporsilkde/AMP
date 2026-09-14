@@ -988,6 +988,12 @@ config.deathRecovery = {
     ["touch revive health fraction"] = 0.10,
     ["ally revive distance"] = 256,
 
+    -- U035: after any successful recovery (own potion or an ally) the player
+    -- cannot be revived again for this many seconds. Dying inside the window is
+    -- a plain death: the incapacitated state is not entered at all, so nobody
+    -- lies there pressing E for nothing. Set to 0 to disable.
+    ["revive lockout seconds"] = 60,
+
     -- Y040: the revive request names an inventory item, so the server checks that
     -- the item really restores health before spending it. Custom potions are
     -- validated against their stored record; vanilla ones against these Lua

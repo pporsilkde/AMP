@@ -226,6 +226,7 @@ LocalPlayer::LocalPlayer()
     mDeathRecoveryInitialXp = 0.f;
     mDeathRecoveryRequestCooldown = 0.f;
     mDeathRecoveryEWasDown = false;
+    mReviveLockoutRemaining = 0.f;
 
     mPersistentAnimationActive = false;
     mPersistentAnimationPlaying = false;
@@ -532,6 +533,39 @@ bool LocalPlayer::getRecoverableAllyName(std::string& name, int* level) const
     return !name.empty();
 }
 
+void LocalPlayer::applyDeathRecoveryState(const std::string& state, float seconds)
+{
+    seconds = std::max(0.f, seconds);
+
+    if (state == "DENY")
+    {
+        // Died inside the lockout: the server did not open a window. Close any
+        // panel that a local optimistic beginDeathRecovery() already opened.
+        mReviveLockoutRemaining = seconds;
+        mDeathRecoveryActive = false;
+        mDeathRecoveryElapsed = 0.f;
+        mDeathRecoveryRequestCooldown = 0.f;
+    }
+    else if (state == "LOCK")
+    {
+        // A recovery just succeeded - start the local countdown.
+        mReviveLockoutRemaining = seconds;
+    }
+    else if (state == "OPEN")
+    {
+        // The server accepted this death as recoverable, so no lockout can be
+        // pending. Normally the window is already open from the optimistic
+        // local call in die(); this only matters when the local countdown was
+        // ahead of the server's and suppressed it.
+        mReviveLockoutRemaining = 0.f;
+        if (!mDeathRecoveryActive)
+            beginDeathRecovery();
+        // After beginDeathRecovery(), which resets the duration to its default.
+        if (seconds > 0.f)
+            mDeathRecoveryDuration = seconds;
+    }
+}
+
 void LocalPlayer::sendDeathRecoveryControl(const std::string& payload)
 {
     chatMessage = "@@AMP_REVIVE@@" + payload;
@@ -553,6 +587,13 @@ void LocalPlayer::requestTouchRecovery(const MWWorld::Ptr& targetPtr)
 
 void LocalPlayer::beginDeathRecovery()
 {
+    // U035: while the revive lockout is running there is no incapacitated
+    // state at all. Opening the panel and then refusing every request would
+    // leave the player pressing E at a body that cannot be saved, and send
+    // party members running to a rescue the server will decline.
+    if (mReviveLockoutRemaining > 0.f)
+        return;
+
     const MWWorld::Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
     mDeathRecoveryActive = true;
     // Close existing item/skill windows too; resurrection clears the recovery flag.
@@ -574,12 +615,18 @@ void LocalPlayer::updateDeathRecovery(float dt)
     if (mDeathRecoveryActive)
         mDeathRecoveryElapsed = std::min(mDeathRecoveryDuration, mDeathRecoveryElapsed + dt);
     mDeathRecoveryRequestCooldown = std::max(0.f, mDeathRecoveryRequestCooldown - dt);
+    mReviveLockoutRemaining = std::max(0.f, mReviveLockoutRemaining - dt);
 
     const Uint8* keys = SDL_GetKeyboardState(nullptr);
     const bool eDown = keys && keys[SDL_SCANCODE_E] != 0;
     const bool ePressed = eDown && !mDeathRecoveryEWasDown;
     mDeathRecoveryEWasDown = eDown;
     if (!ePressed || mDeathRecoveryRequestCooldown > 0.f)
+        return;
+
+    // Both the own and the ally request are refused server-side during the
+    // lockout; do not spend a packet on them.
+    if (mReviveLockoutRemaining > 0.f)
         return;
 
     GUIController* gui = Main::get().getGUIController();

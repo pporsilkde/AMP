@@ -248,6 +248,32 @@ namespace mwmp
         bool mFinished = false;
     };
 
+    // U035 soft limiter: linear up to sLimiterKnee, then a tanh knee up to full
+    // scale. Digital gain on 16-bit voice has to be limited, not clipped - hard
+    // clipping turns a boosted voice into buzz, and IMA ADPCM quantises a
+    // rounded peak far better than a square one.
+    constexpr float sLimiterKnee = 22000.f;
+    constexpr float sLimiterCeil = 32767.f;
+
+    std::int16_t softLimit(float value)
+    {
+        const float magnitude = std::fabs(value);
+        if (magnitude <= sLimiterKnee)
+            return static_cast<std::int16_t>(std::lround(value));
+        const float sign = value < 0.f ? -1.f : 1.f;
+        const float over = (magnitude - sLimiterKnee) / (sLimiterCeil - sLimiterKnee);
+        const float shaped = sLimiterKnee + (sLimiterCeil - sLimiterKnee) * std::tanh(over);
+        return static_cast<std::int16_t>(std::lround(sign * std::min(shaped, sLimiterCeil)));
+    }
+
+    void applyGain(std::int16_t* samples, std::size_t count, float gain)
+    {
+        if (gain >= 0.999f && gain <= 1.001f)
+            return;
+        for (std::size_t i = 0; i < count; ++i)
+            samples[i] = softLimit(static_cast<float>(samples[i]) * gain);
+    }
+
     float voiceLipLevel(const std::int16_t* samples, std::size_t count)
     {
         if (samples == nullptr || count == 0)
@@ -289,6 +315,13 @@ namespace mwmp
         std::unordered_map<std::uint64_t, Speaker> speakers;
         float localLipLevel = 0.f;
         float localLipAge = 1.f;
+
+        // U035 radio mode: latch state and key edge detection. SDL reports the
+        // physical key state every frame, so the latch may only flip on the
+        // frame the key goes down.
+        bool toggleLatched = false;
+        bool pttKeyWasDown = false;
+        bool touchWasPressed = false;
 
         // Y041: diagnostics for a push-to-talk key that appears to do nothing.
         float initRetryTimer = 0.f;
@@ -352,11 +385,23 @@ namespace mwmp
     VoiceChat::VoiceChat() : mImpl(new Impl) {}
     VoiceChat::~VoiceChat() { shutdown(); }
 
-    void VoiceChat::configure(bool enabled, const std::string& pushToTalkKey, float rangeMeters)
+    void VoiceChat::configure(bool enabled, const std::string& pushToTalkKey, float rangeMeters,
+        float fullVolumeMeters, float sourceVolume, float micGain, float playbackGain,
+        bool toggleMode)
     {
+        mToggleMode = toggleMode;
         mEnabled = enabled;
         mPushToTalkKey = pushToTalkKey.empty() ? "V" : pushToTalkKey;
         mRangeMeters = std::clamp(rangeMeters, 3.f, 100.f);
+        // Full volume out to fullVolumeMeters, then the usual falloff towards
+        // rangeMeters. The reference distance must never exceed the audible
+        // range, or OpenAL would hold full gain right up to the cutoff.
+        mFullVolumeMeters = std::clamp(fullVolumeMeters, 1.f, mRangeMeters);
+        mSourceVolume = std::clamp(sourceVolume, 0.1f, 8.f);
+        mMicGain = std::clamp(micGain, 0.1f, 8.f);
+        mPlaybackGain = std::clamp(playbackGain, 0.1f, 8.f);
+        if (!mToggleMode)
+            mImpl->toggleLatched = false;
         const SDL_Scancode code = SDL_GetScancodeFromName(mPushToTalkKey.c_str());
         mImpl->pushToTalk = code == SDL_SCANCODE_UNKNOWN ? SDL_SCANCODE_V : code;
     }
@@ -412,8 +457,11 @@ namespace mwmp
         SDL_PauseAudioDevice(mImpl->captureDevice, 1);
         mAvailable = true;
         mImpl->notifiedUnavailable = false;
-        LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Voice: proximity PTT ready (%s, %.1f m)",
-            SDL_GetScancodeName(mImpl->pushToTalk), mRangeMeters);
+        LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO,
+            "Voice: proximity voice ready (%s, %s, full volume %.1f m, range %.1f m,"
+            " source x%.2f, mic x%.2f, playback x%.2f)",
+            SDL_GetScancodeName(mImpl->pushToTalk), mToggleMode ? "radio/toggle" : "push-to-talk",
+            mFullVolumeMeters, mRangeMeters, mSourceVolume, mMicGain, mPlaybackGain);
     }
 
     void VoiceChat::notifyUnavailable(const std::string& reason)
@@ -444,8 +492,34 @@ namespace mwmp
         if (!talkAllowed) sAndroidVoiceUi.press(false);
         touchPressed = sAndroidVoiceUi.pressed();
 #endif
-        const bool wantsToTalk = talkAllowed
-            && (touchPressed || (keys != nullptr && keys[mImpl->pushToTalk]));
+        // U035: hold mode is the classic push-to-talk; radio mode latches the
+        // microphone on a key-down edge and leaves it open until the next one.
+        // Both are driven from the physical key state, so a held key still
+        // produces exactly one transition and typing in chat never toggles
+        // anything (talkAllowed is false while the chat input has focus).
+        const bool keyDown = keys != nullptr && keys[mImpl->pushToTalk];
+        const bool keyPressed = keyDown && !mImpl->pttKeyWasDown;
+        const bool touchJustPressed = touchPressed && !mImpl->touchWasPressed;
+        mImpl->pttKeyWasDown = keyDown;
+        mImpl->touchWasPressed = touchPressed;
+
+        bool wantsToTalk;
+        if (mToggleMode)
+        {
+            if (talkAllowed && (keyPressed || touchJustPressed))
+                mImpl->toggleLatched = !mImpl->toggleLatched;
+            // Losing the right to talk (logout, death screen, chat focus, the
+            // app going to the background) must close the microphone rather
+            // than leave it silently latched open for the next session.
+            if (!talkAllowed)
+                mImpl->toggleLatched = false;
+            wantsToTalk = talkAllowed && mImpl->toggleLatched;
+        }
+        else
+        {
+            mImpl->toggleLatched = false;
+            wantsToTalk = talkAllowed && (touchPressed || keyDown);
+        }
 
         if (!mEnabled)
         {
@@ -536,6 +610,9 @@ namespace mwmp
                     }
                 }
 
+                // Boost before encoding, so the listener hears the same level
+                // the local indicator shows and ADPCM gets a healthier signal.
+                applyGain(frame.data(), frame.size(), mMicGain);
                 mImpl->localLipLevel = voiceLipLevel(frame.data(), frame.size());
                 mImpl->localLipAge = 0.f;
                 capturedVoiceFrame = true;
@@ -590,6 +667,8 @@ namespace mwmp
             // stream is created from the speaker's current head position.
             ++it;
         }
+        publishSpeakerHud();
+
 #ifdef __ANDROID__
         int flags = VoiceUiState::Enabled;
         if (mAvailable) flags |= VoiceUiState::Microphone;
@@ -623,6 +702,61 @@ namespace mwmp
 #endif
     }
 
+    bool VoiceChat::isMicOpen() const
+    {
+        return mToggleMode ? mImpl->toggleLatched : mTransmitting;
+    }
+
+    void VoiceChat::toggleMicrophone()
+    {
+        if (!mToggleMode)
+            return;
+        mImpl->toggleLatched = !mImpl->toggleLatched;
+    }
+
+    // U035: feed the "who is talking" overlay. Called once per frame from
+    // update(), after the speaker map has been aged and pruned, so a speaker
+    // that timed out this frame is already gone from the list.
+    void VoiceChat::publishSpeakerHud()
+    {
+        GUIController* gui = Main::isInitialized() ? Main::get().getGUIController() : nullptr;
+        if (gui == nullptr)
+            return;
+
+        std::vector<GUIController::VoiceHudSpeaker> visible;
+        LocalPlayer* local = Main::get().getLocalPlayer();
+        const bool loggedIn = local != nullptr && local->isLoggedIn();
+
+        if (mEnabled && loggedIn)
+        {
+            for (const auto& entry : mImpl->speakers)
+            {
+                // Same hold-and-fade window the lip sync uses, so the overlay
+                // and the mouth movement start and stop together.
+                if (entry.second.age > 0.35f)
+                    continue;
+                DedicatedPlayer* player = PlayerList::getPlayer(RakNet::RakNetGUID(entry.first));
+                if (player == nullptr || player->getPtr().isEmpty())
+                    continue;
+
+                GUIController::VoiceHudSpeaker speaker;
+                speaker.mName = player->npc.mName;
+                speaker.mLevel = std::clamp(entry.second.lipLevel, 0.f, 1.f);
+                visible.push_back(speaker);
+                if (visible.size() >= 5)
+                    break;
+            }
+
+            std::sort(visible.begin(), visible.end(),
+                [](const GUIController::VoiceHudSpeaker& a, const GUIController::VoiceHudSpeaker& b)
+                { return a.mName < b.mName; });
+        }
+
+        const bool transmitting = mEnabled && loggedIn && mTransmitting;
+        const float level = transmitting && mImpl->localLipAge < 0.15f ? mImpl->localLipLevel : 0.f;
+        gui->updateVoiceHud(visible, mEnabled && loggedIn && isMicOpen(), transmitting, level, mToggleMode);
+    }
+
     void VoiceChat::receive(RakNet::RakNetGUID speakerGuid, const VoiceFrame& frame)
     {
         if (!mEnabled || frame.codec != VoiceFrame::CodecImaAdpcm16k || frame.payload.empty())
@@ -652,6 +786,7 @@ namespace mwmp
                 speaker.decoder->pushSilence(static_cast<std::size_t>(gap - 1) * sFrameSamples);
         }
 
+        applyGain(decoded.data(), decoded.size(), mPlaybackGain);
         speaker.decoder->push(decoded);
         speaker.lipLevel = voiceLipLevel(decoded.data(), decoded.size());
         // The receive path only stores speech energy. The native head morph is
@@ -671,7 +806,8 @@ namespace mwmp
             // playback started; retaining the raw pointer caused a use-after-free
             // when OpenAL retired a short/underrun stream before our timeout.
             speaker.streamStarted = soundManager->playTrack3D(speaker.decoder, pos,
-                2.f * Constants::UnitsPerMeter, mRangeMeters * Constants::UnitsPerMeter, 1.f, MWSound::Type::Voice) != nullptr;
+                mFullVolumeMeters * Constants::UnitsPerMeter, mRangeMeters * Constants::UnitsPerMeter,
+                mSourceVolume, MWSound::Type::Voice) != nullptr;
         }
     }
 

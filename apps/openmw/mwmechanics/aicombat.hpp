@@ -91,7 +91,12 @@ namespace MWMechanics
             Tactical_Retreat,
             Tactical_JumpDodge,
             Tactical_SneakApproach,
-            Tactical_Unstuck
+            Tactical_Unstuck,
+            // U035: level-scaled evasion. HopBack breaks out of an incoming
+            // swing; CounterStep is the answer to it - a step into the opening
+            // the swing leaves, with the attack cooldown waived once.
+            Tactical_HopBack,
+            Tactical_CounterStep
         };
 
         TacticalState mTacticalState;
@@ -100,6 +105,15 @@ namespace MWMechanics
         float mTacticalDecisionTimer;
         float mJumpTimer;
         float mSneakTimer;
+        // U035 evasion state. mAgilityRating is cached because it reads four
+        // stats and is only allowed to change on the same cadence as the rest
+        // of the tactical decisions.
+        float mReactionDelay;
+        float mCounterWindow;
+        float mCounterSide;
+        float mAgilityRating;
+        float mAgilityRefresh;
+
         float mStuckCheckTimer;
         float mStuckDuration;
         osg::Vec3f mLastActorPos;
@@ -163,6 +177,11 @@ namespace MWMechanics
         mTacticalDecisionTimer(0.0f),
         mJumpTimer(0.0f),
         mSneakTimer(0.0f),
+        mReactionDelay(0.0f),
+        mCounterWindow(0.0f),
+        mCounterSide(1.0f),
+        mAgilityRating(0.0f),
+        mAgilityRefresh(0.0f),
         mStuckCheckTimer(0.0f),
         mStuckDuration(0.0f),
         mLastActorPos(),
