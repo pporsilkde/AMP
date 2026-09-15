@@ -385,13 +385,14 @@ namespace mwmp
     VoiceChat::VoiceChat() : mImpl(new Impl) {}
     VoiceChat::~VoiceChat() { shutdown(); }
 
-    void VoiceChat::configure(bool enabled, const std::string& pushToTalkKey, float rangeMeters,
-        float fullVolumeMeters, float sourceVolume, float micGain, float playbackGain,
+    void VoiceChat::configure(bool enabled, const std::string& pushToTalkKey, const std::string& captureDevice,
+        float rangeMeters, float fullVolumeMeters, float sourceVolume, float micGain, float playbackGain,
         bool toggleMode)
     {
         mToggleMode = toggleMode;
         mEnabled = enabled;
         mPushToTalkKey = pushToTalkKey.empty() ? "V" : pushToTalkKey;
+        mCaptureDevice = captureDevice;
         mRangeMeters = std::clamp(rangeMeters, 3.f, 100.f);
         // Full volume out to fullVolumeMeters, then the usual falloff towards
         // rangeMeters. The reference distance must never exceed the audible
@@ -432,7 +433,15 @@ namespace mwmp
         SDL_AudioSpec obtained{};
         const int allowedChanges = SDL_AUDIO_ALLOW_FREQUENCY_CHANGE | SDL_AUDIO_ALLOW_FORMAT_CHANGE
             | SDL_AUDIO_ALLOW_CHANNELS_CHANGE;
-        mImpl->captureDevice = SDL_OpenAudioDevice(nullptr, SDL_TRUE, &desired, &obtained, allowedChanges);
+        const char* requestedDevice = mCaptureDevice.empty() ? nullptr : mCaptureDevice.c_str();
+        mImpl->captureDevice = SDL_OpenAudioDevice(requestedDevice, SDL_TRUE, &desired, &obtained, allowedChanges);
+        if (mImpl->captureDevice == 0 && requestedDevice != nullptr)
+        {
+            LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN,
+                "Voice: selected microphone '%s' is unavailable (%s); falling back to the system default",
+                requestedDevice, SDL_GetError());
+            mImpl->captureDevice = SDL_OpenAudioDevice(nullptr, SDL_TRUE, &desired, &obtained, allowedChanges);
+        }
         if (mImpl->captureDevice == 0)
         {
             LOG_MESSAGE_SIMPLE(TimedLog::LOG_WARN, "Voice: microphone open failed: %s", SDL_GetError());
@@ -459,9 +468,10 @@ namespace mwmp
         mImpl->notifiedUnavailable = false;
         LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO,
             "Voice: proximity voice ready (%s, %s, full volume %.1f m, range %.1f m,"
-            " source x%.2f, mic x%.2f, playback x%.2f)",
+            " source x%.2f, mic x%.2f, playback x%.2f, capture=%s)",
             SDL_GetScancodeName(mImpl->pushToTalk), mToggleMode ? "radio/toggle" : "push-to-talk",
-            mFullVolumeMeters, mRangeMeters, mSourceVolume, mMicGain, mPlaybackGain);
+            mFullVolumeMeters, mRangeMeters, mSourceVolume, mMicGain, mPlaybackGain,
+            mCaptureDevice.empty() ? "system-default" : mCaptureDevice.c_str());
     }
 
     void VoiceChat::notifyUnavailable(const std::string& reason)
@@ -530,14 +540,17 @@ namespace mwmp
             {
                 mImpl->loggedDisabled = true;
                 LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "%s",
-                    "Voice: disabled by [Voice] enabled=false in tes3mp-client.cfg");
+                    "Voice: microphone transmit disabled by [Voice] enabled=false; incoming voice remains active");
             }
             if (wantsToTalk)
-                notifyUnavailable("Voice chat is disabled in tes3mp-client.cfg ([Voice] enabled).");
-            return;
+                notifyUnavailable("Microphone transmit is disabled. Incoming player voice is still enabled.");
+            mImpl->toggleLatched = false;
+            wantsToTalk = false;
         }
+        else
+            mImpl->loggedDisabled = false;
 
-        if (!mAvailable)
+        if (mEnabled && !mAvailable)
         {
             // Retrying SDL_OpenAudioDevice every single frame hammered the audio
             // backend and filled the log. Once every five seconds is enough to pick
@@ -551,17 +564,19 @@ namespace mwmp
             }
         }
 
-        if (!mAvailable)
+        if (mEnabled && !mAvailable)
         {
             if (wantsToTalk)
                 notifyUnavailable("Voice chat has no usable microphone. Check the system default recording device and microphone permissions.");
-            // Reception and speaker cleanup still work without a capture device.
+            // Capture availability only controls transmission. A player who has
+            // no microphone (or denied Android microphone permission) must still
+            // be able to hear nearby players.
         }
 
         // wantsToTalk is derived from physical key state, not SDL key-down
         // repeats. A held V therefore causes one transition only; when chat has
         // focus wantsToTalk is false and V is left to normal text input.
-        const bool pressed = wantsToTalk && mAvailable;
+        const bool pressed = wantsToTalk && mEnabled && mAvailable;
         if (pressed != mTransmitting)
         {
             LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "Voice: push-to-talk %s (%s)",
@@ -667,13 +682,70 @@ namespace mwmp
             // stream is created from the speaker's current head position.
             ++it;
         }
+
+        // Smart conversational ducking. It follows real speech energy and
+        // proximity, not merely an open radio latch: a nearby speaker pushes the
+        // game into the background, while a distant/quiet speaker only nudges it.
+        // The player-voice bus itself is excluded from ducking by VolumeSettings.
+        if (soundManager != nullptr)
+        {
+            auto speechStrength = [](float level)
+            {
+                // Ignore room noise, then make ordinary speech reach a useful
+                // strength without requiring shouting into the microphone.
+                const float normalized = std::clamp((level - 0.02f) / 0.18f, 0.f, 1.f);
+                return std::sqrt(normalized);
+            };
+
+            float activity = 0.f;
+            if (mTransmitting && mImpl->localLipAge < 0.18f)
+                activity = std::max(activity, speechStrength(mImpl->localLipLevel));
+
+            osg::Vec3f listenerPos;
+            const bool haveListener = local != nullptr && !local->getPlayerPtr().isEmpty();
+            if (haveListener)
+                listenerPos = MWBase::Environment::get().getWorld()->getActorHeadTransform(local->getPlayerPtr()).getTrans();
+
+            for (const auto& entry : mImpl->speakers)
+            {
+                if (entry.second.age >= 0.18f)
+                    continue;
+                DedicatedPlayer* player = PlayerList::getPlayer(RakNet::RakNetGUID(entry.first));
+                if (player == nullptr || player->getPtr().isEmpty())
+                    continue;
+
+                float proximity = 1.f;
+                if (haveListener && mRangeMeters > mFullVolumeMeters + 0.01f)
+                {
+                    const osg::Vec3f speakerPos = MWBase::Environment::get().getWorld()
+                        ->getActorHeadTransform(player->getPtr()).getTrans();
+                    const float distanceMeters = (speakerPos - listenerPos).length() / Constants::UnitsPerMeter;
+                    if (distanceMeters >= mRangeMeters)
+                        proximity = 0.f;
+                    else if (distanceMeters > mFullVolumeMeters)
+                    {
+                        const float t = std::clamp((distanceMeters - mFullVolumeMeters)
+                            / (mRangeMeters - mFullVolumeMeters), 0.f, 1.f);
+                        // Smoothstep falloff, squared so far-away chatter does not
+                        // unnecessarily suppress the game mix.
+                        const float smooth = t * t * (3.f - 2.f * t);
+                        proximity = 1.f - smooth;
+                        proximity *= proximity;
+                    }
+                }
+
+                activity = std::max(activity, speechStrength(entry.second.lipLevel) * proximity);
+            }
+            soundManager->setVoiceChatActivity(std::clamp(activity, 0.f, 1.f));
+        }
+
         publishSpeakerHud();
 
 #ifdef __ANDROID__
         int flags = VoiceUiState::Enabled;
-        if (mAvailable) flags |= VoiceUiState::Microphone;
+        if (mEnabled && mAvailable) flags |= VoiceUiState::Microphone;
         if (local != nullptr && local->isLoggedIn()) flags |= VoiceUiState::LoggedIn;
-        if (talkAllowed && mAvailable) flags |= VoiceUiState::Ready;
+        if (mEnabled && talkAllowed && mAvailable) flags |= VoiceUiState::Ready;
         if (mTransmitting) flags |= VoiceUiState::Transmitting;
         const float level = mTransmitting && mImpl->localLipAge < 0.15f ? mImpl->localLipLevel : 0.f;
         if (level > 0.025f) flags |= VoiceUiState::Speaking;
@@ -727,7 +799,7 @@ namespace mwmp
         LocalPlayer* local = Main::get().getLocalPlayer();
         const bool loggedIn = local != nullptr && local->isLoggedIn();
 
-        if (mEnabled && loggedIn)
+        if (loggedIn)
         {
             for (const auto& entry : mImpl->speakers)
             {
@@ -759,7 +831,7 @@ namespace mwmp
 
     void VoiceChat::receive(const RakNet::RakNetGUID& speakerGuid, const VoiceFrame& frame)
     {
-        if (!mEnabled || frame.codec != VoiceFrame::CodecImaAdpcm16k || frame.payload.empty())
+        if (frame.codec != VoiceFrame::CodecImaAdpcm16k || frame.payload.empty())
             return;
 
         DedicatedPlayer* player = PlayerList::getPlayer(speakerGuid);
@@ -807,7 +879,7 @@ namespace mwmp
             // when OpenAL retired a short/underrun stream before our timeout.
             speaker.streamStarted = soundManager->playTrack3D(speaker.decoder, pos,
                 mFullVolumeMeters * Constants::UnitsPerMeter, mRangeMeters * Constants::UnitsPerMeter,
-                mSourceVolume, MWSound::Type::Voice) != nullptr;
+                mSourceVolume, MWSound::Type::VoiceChat) != nullptr;
         }
     }
 

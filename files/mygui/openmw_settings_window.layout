@@ -1311,9 +1311,20 @@
             <UserString key="SettingValueType" value="Float" />
           </Widget>
           <Widget type="TextBox" skin="NormalText" position="8 62 462 18">
-            <Property key="Caption" value="#{sVoice}" />
+            <Property key="Caption" value="#{arenamp=settings.voice_chat_volume}" />
           </Widget>
           <Widget type="ScrollBar" skin="MW_HScroll" position="8 84 462 16">
+            <Property key="Range" value="10000" />
+            <Property key="Page" value="300" />
+            <UserString key="SettingType" value="Slider" />
+            <UserString key="SettingCategory" value="Sound" />
+            <UserString key="SettingName" value="voice chat volume" />
+            <UserString key="SettingValueType" value="Float" />
+          </Widget>
+          <Widget type="TextBox" skin="NormalText" position="8 116 462 18">
+            <Property key="Caption" value="#{arenamp=settings.npc_voice_volume}" />
+          </Widget>
+          <Widget type="ScrollBar" skin="MW_HScroll" position="8 138 462 16">
             <Property key="Range" value="10000" />
             <Property key="Page" value="300" />
             <UserString key="SettingType" value="Slider" />
@@ -1321,10 +1332,10 @@
             <UserString key="SettingName" value="voice volume" />
             <UserString key="SettingValueType" value="Float" />
           </Widget>
-          <Widget type="TextBox" skin="NormalText" position="8 116 462 18">
+          <Widget type="TextBox" skin="NormalText" position="8 170 462 18">
             <Property key="Caption" value="#{sEffects}" />
           </Widget>
-          <Widget type="ScrollBar" skin="MW_HScroll" position="8 138 462 16">
+          <Widget type="ScrollBar" skin="MW_HScroll" position="8 192 462 16">
             <Property key="Range" value="10000" />
             <Property key="Page" value="300" />
             <UserString key="SettingType" value="Slider" />
@@ -1332,10 +1343,10 @@
             <UserString key="SettingName" value="sfx volume" />
             <UserString key="SettingValueType" value="Float" />
           </Widget>
-          <Widget type="TextBox" skin="NormalText" position="8 170 462 18">
+          <Widget type="TextBox" skin="NormalText" position="8 224 462 18">
             <Property key="Caption" value="#{sFootsteps}" />
           </Widget>
-          <Widget type="ScrollBar" skin="MW_HScroll" position="8 192 462 16">
+          <Widget type="ScrollBar" skin="MW_HScroll" position="8 246 462 16">
             <Property key="Range" value="10000" />
             <Property key="Page" value="300" />
             <UserString key="SettingType" value="Slider" />
@@ -1343,15 +1354,26 @@
             <UserString key="SettingName" value="footsteps volume" />
             <UserString key="SettingValueType" value="Float" />
           </Widget>
-          <Widget type="TextBox" skin="NormalText" position="8 224 462 18">
+          <Widget type="TextBox" skin="NormalText" position="8 278 462 18">
             <Property key="Caption" value="#{sMusic}" />
           </Widget>
-          <Widget type="ScrollBar" skin="MW_HScroll" position="8 246 462 16">
+          <Widget type="ScrollBar" skin="MW_HScroll" position="8 300 462 16">
             <Property key="Range" value="10000" />
             <Property key="Page" value="300" />
             <UserString key="SettingType" value="Slider" />
             <UserString key="SettingCategory" value="Sound" />
             <UserString key="SettingName" value="music volume" />
+            <UserString key="SettingValueType" value="Float" />
+          </Widget>
+          <Widget type="TextBox" skin="NormalText" position="8 332 462 18">
+            <Property key="Caption" value="#{arenamp=settings.voice_chat_ducking}" />
+          </Widget>
+          <Widget type="ScrollBar" skin="MW_HScroll" position="8 354 462 16">
+            <Property key="Range" value="10000" />
+            <Property key="Page" value="300" />
+            <UserString key="SettingType" value="Slider" />
+            <UserString key="SettingCategory" value="Sound" />
+            <UserString key="SettingName" value="voice chat ducking" />
             <UserString key="SettingValueType" value="Float" />
           </Widget>
         </Widget>

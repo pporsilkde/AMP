@@ -282,6 +282,11 @@ QString ChatPage::pushToTalkKey() const
     return mVoicePanel != nullptr ? mVoicePanel->pushToTalkKey() : QStringLiteral("V");
 }
 
+QString ChatPage::captureDevice() const
+{
+    return mVoicePanel != nullptr ? mVoicePanel->captureDevice() : QString();
+}
+
 void ChatPage::setServerEndpoint(const QString& host, quint16 gamePort)
 {
     // Порты: игровой (RakNet) не трогаем, голос = +1, чат = +2.

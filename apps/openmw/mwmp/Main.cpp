@@ -225,14 +225,19 @@ bool Main::init(std::vector<std::string> &content, std::vector<std::string> &gro
         try { return manager.getBool(key, "Voice"); }
         catch (const std::exception&) { return fallback; }
     };
-    bool voiceToggleMode = voiceBool("toggleMode", false);
+    auto voiceString = [&manager](const char* key, const std::string& fallback) {
+        try { return manager.getString(key, "Voice"); }
+        catch (const std::exception&) { return fallback; }
+    };
+    bool voiceToggleMode = voiceBool("toggleMode", true);
     if (const char* envToggle = std::getenv("ARENAMP_VOICE_TOGGLE"))
     {
         const std::string value(envToggle);
         voiceToggleMode = value != "0" && value != "false" && value != "FALSE"
             && value != "off" && value != "OFF";
     }
-    pMain->mVoiceChat->configure(voiceEnabled, voiceKey, voiceFloat("rangeMeters", 30.f),
+    pMain->mVoiceChat->configure(voiceEnabled, voiceKey, voiceString("captureDevice", std::string()),
+        voiceFloat("rangeMeters", 30.f),
         voiceFloat("fullVolumeMeters", 12.f), voiceFloat("sourceVolume", 2.f),
         voiceFloat("micGain", 1.5f), voiceFloat("playbackGain", 1.f), voiceToggleMode);
     TimedLog::SetLevel(logLevel);

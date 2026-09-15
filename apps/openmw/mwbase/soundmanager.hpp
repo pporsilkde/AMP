@@ -122,6 +122,10 @@ namespace MWBase
             virtual void clearVoiceLipSync(const MWWorld::ConstPtr& reference) = 0;
             ///< Remove realtime ArenaMP voice activity for the actor.
 
+            virtual void setVoiceChatActivity(float level) = 0;
+            ///< Supply aggregate realtime player-voice activity (0..1). The
+            /// sound backend uses this for smooth smart ducking of game audio.
+
             virtual SoundStream *playTrack(const MWSound::DecoderPtr& decoder, Type type) = 0;
             ///< Play a 2D audio track, using a custom decoder. The caller is expected to call
             /// stopTrack with the returned handle when done.

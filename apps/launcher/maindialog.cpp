@@ -1469,6 +1469,7 @@ void Launcher::MainDialog::writeClientVoiceSettings() const
     const QString enabledValue = mChatPage->voiceEnabled() ? QStringLiteral("true") : QStringLiteral("false");
     const QString keyValue = mChatPage->pushToTalkKey().trimmed().isEmpty()
         ? QStringLiteral("V") : mChatPage->pushToTalkKey().trimmed();
+    const QString captureDevice = mChatPage->captureDevice().trimmed();
 
     int voiceHeader = -1;
     int nextHeader = lines.size();
@@ -1499,11 +1500,13 @@ void Launcher::MainDialog::writeClientVoiceSettings() const
         lines.append(QStringLiteral("[Voice]"));
         lines.append(QStringLiteral("enabled = ") + enabledValue);
         lines.append(QStringLiteral("pushToTalkKey = ") + keyValue);
+        lines.append(QStringLiteral("captureDevice = ") + captureDevice);
     }
     else
     {
         bool foundEnabled = false;
         bool foundKey = false;
+        bool foundCaptureDevice = false;
         for (int i = voiceHeader + 1; i < nextHeader; ++i)
         {
             const QString trimmed = lines.at(i).trimmed();
@@ -1517,12 +1520,19 @@ void Launcher::MainDialog::writeClientVoiceSettings() const
                 lines[i] = QStringLiteral("pushToTalkKey = ") + keyValue;
                 foundKey = true;
             }
+            else if (trimmed.startsWith(QLatin1String("captureDevice")))
+            {
+                lines[i] = QStringLiteral("captureDevice = ") + captureDevice;
+                foundCaptureDevice = true;
+            }
         }
         int insertAt = nextHeader;
         if (!foundEnabled)
             lines.insert(insertAt++, QStringLiteral("enabled = ") + enabledValue);
         if (!foundKey)
-            lines.insert(insertAt, QStringLiteral("pushToTalkKey = ") + keyValue);
+            lines.insert(insertAt++, QStringLiteral("pushToTalkKey = ") + keyValue);
+        if (!foundCaptureDevice)
+            lines.insert(insertAt, QStringLiteral("captureDevice = ") + captureDevice);
     }
 
     if (cfgFile.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate))

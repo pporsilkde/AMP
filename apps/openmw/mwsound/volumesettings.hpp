@@ -11,6 +11,8 @@ namespace MWSound
             VolumeSettings();
 
             float getVolumeFromType(Type type) const;
+            float getVoiceChatDuckingAmount() const { return mVoiceChatVolume > 0.001f ? mVoiceChatDuckingAmount : 0.f; }
+            void setRuntimeDuckingFactor(float factor);
 
             void update();
 
@@ -19,7 +21,10 @@ namespace MWSound
             float mSFXVolume;
             float mMusicVolume;
             float mVoiceVolume;
+            float mVoiceChatVolume;
             float mFootstepsVolume;
+            float mVoiceChatDuckingAmount;
+            float mRuntimeDuckingFactor = 1.f;
     };
 }
 

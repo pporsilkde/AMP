@@ -1,6 +1,7 @@
 #include "soundmanagerimp.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <numeric>
 
@@ -203,6 +204,64 @@ namespace MWSound
     float SoundManager::volumeFromType(Type type) const
     {
         return mVolumeSettings.getVolumeFromType(type);
+    }
+
+    void SoundManager::setVoiceChatActivity(float level)
+    {
+        // VoiceChat calls this every game frame with a 0..1 value that already
+        // includes speech energy and distance. Keep the loudest request until the
+        // audio update consumes it, since game/audio update order can differ.
+        mVoiceChatRequestedActivity = std::max(mVoiceChatRequestedActivity, std::clamp(level, 0.f, 1.f));
+        if (level > 0.025f)
+            mVoiceChatActivityHold = 0.30f;
+    }
+
+    void SoundManager::updateVoiceChatDucking(float duration)
+    {
+        if (duration <= 0.f)
+            return;
+
+        const float requested = std::clamp(mVoiceChatRequestedActivity, 0.f, 1.f);
+        mVoiceChatRequestedActivity = 0.f;
+
+        if (requested > 0.025f)
+        {
+            // Follow a newly louder speaker almost immediately, but do not make
+            // quiet syllables pump the whole mix up and down.
+            const float alpha = 1.f - std::exp(-duration / 0.07f);
+            if (requested >= mVoiceChatHeldActivity)
+                mVoiceChatHeldActivity += (requested - mVoiceChatHeldActivity) * alpha;
+            else
+            {
+                const float releaseAlpha = 1.f - std::exp(-duration / 0.30f);
+                mVoiceChatHeldActivity += (requested - mVoiceChatHeldActivity) * releaseAlpha;
+            }
+        }
+        else if (mVoiceChatActivityHold > 0.f)
+        {
+            mVoiceChatActivityHold = std::max(0.f, mVoiceChatActivityHold - duration);
+        }
+        else
+        {
+            // Speech finished: fade the conversation focus away instead of
+            // snapping the environment back between words.
+            const float alpha = 1.f - std::exp(-duration / 0.55f);
+            mVoiceChatHeldActivity += (0.f - mVoiceChatHeldActivity) * alpha;
+            if (mVoiceChatHeldActivity < 0.002f)
+                mVoiceChatHeldActivity = 0.f;
+        }
+
+        const float duckAmount = mVolumeSettings.getVoiceChatDuckingAmount();
+        const float target = 1.f - duckAmount * std::clamp(mVoiceChatHeldActivity, 0.f, 1.f);
+
+        // The mix itself has another small smoothing stage: ~100 ms into
+        // conversation focus, ~500 ms back to the full game mix.
+        const float tau = target < mVoiceChatDuckFactor ? 0.10f : 0.50f;
+        const float alpha = 1.f - std::exp(-duration / tau);
+        mVoiceChatDuckFactor += (target - mVoiceChatDuckFactor) * alpha;
+        if (std::fabs(target - mVoiceChatDuckFactor) < 0.001f)
+            mVoiceChatDuckFactor = target;
+        mVolumeSettings.setRuntimeDuckingFactor(mVoiceChatDuckFactor);
     }
 
     void SoundManager::stopMusic()
@@ -1027,6 +1086,7 @@ namespace MWSound
                 else
                 {
                     sound->updateFade(duration);
+                    sound->setBaseVolume(volumeFromType(sound->getPlayType()));
 
                     mOutput->updateSound(sound);
                     ++sndidx;
@@ -1064,41 +1124,40 @@ namespace MWSound
             else
             {
                 sound->updateFade(duration);
+                sound->setBaseVolume(volumeFromType(sound->getPlayType()));
 
                 mOutput->updateStream(sound);
                 ++sayiter;
             }
         }
 
-        // ArenaMP U035 fix: do NOT advance the iterator from the for-header.
-        // erase() already returns the next element and the else-branch does its
-        // own ++, so the extra increment skipped entries and ran past end()
-        // (mActiveTracks is a std::vector). trkiter->get() then read past the
-        // buffer and isStreamPlaying() dereferenced a garbage/null Stream*,
-        // faulting on Stream::mHandle (offset 0x28). mActiveTracks is empty in
-        // normal play, so this only fired once voice chat created a 3D track -
-        // i.e. the moment a remote player pressed PTT and started talking.
+        // ArenaMP U035: mActiveTracks can contain very short realtime voice
+        // streams. The old for-loop incremented trkiter both inside the body and
+        // again in the loop header. Erasing the last finished track therefore
+        // incremented end(), which is undefined behaviour and could make the next
+        // isStreamPlaying() receive a null/invalid Stream*. Use a single-owner
+        // while-style iterator advance instead.
         TrackList::iterator trkiter = mActiveTracks.begin();
-        while(trkiter != mActiveTracks.end())
+        while (trkiter != mActiveTracks.end())
         {
             Stream *sound = trkiter->get();
-            if(sound == nullptr)
+            if (sound == nullptr)
             {
                 trkiter = mActiveTracks.erase(trkiter);
                 continue;
             }
-            if(!mOutput->isStreamPlaying(sound))
+
+            if (!mOutput->isStreamPlaying(sound))
             {
                 mOutput->finishStream(sound);
                 trkiter = mActiveTracks.erase(trkiter);
+                continue;
             }
-            else
-            {
-                sound->updateFade(duration);
 
-                mOutput->updateStream(sound);
-                ++trkiter;
-            }
+            sound->updateFade(duration);
+            sound->setBaseVolume(volumeFromType(sound->getPlayType()));
+            mOutput->updateStream(sound);
+            ++trkiter;
         }
 
         if(mListenerUnderwater)
@@ -1113,17 +1172,21 @@ namespace MWSound
 
     void SoundManager::updateMusic(float duration)
     {
+        if (!mMusic)
+            return;
+
+        mMusic->setBaseVolume(volumeFromType(mMusic->getPlayType()));
         if (!mNextMusic.empty())
-        {
             mMusic->updateFade(duration);
 
-            mOutput->updateStream(mMusic.get());
+        // Refresh every sound tick so smart voice ducking affects music that was
+        // already playing before somebody started speaking.
+        mOutput->updateStream(mMusic.get());
 
-            if (mMusic->getRealVolume() <= 0.f)
-            {
-                streamMusicFull(mNextMusic);
-                mNextMusic.clear();
-            }
+        if (!mNextMusic.empty() && mMusic->getRealVolume() <= 0.f)
+        {
+            streamMusicFull(mNextMusic);
+            mNextMusic.clear();
         }
     }
 
@@ -1133,6 +1196,7 @@ namespace MWSound
         if(!mOutput->isInitialized() || mPlaybackPaused)
             return;
 
+        updateVoiceChatDucking(duration);
         updateSounds(duration);
         if (MWBase::Environment::get().getStateManager()->getState()!=
             MWBase::StateManager::State_NoGame)

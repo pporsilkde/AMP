@@ -8,8 +8,10 @@
 #include <QString>
 
 class QCheckBox;
+class QComboBox;
 class QKeySequenceEdit;
 class QLabel;
+class QPushButton;
 
 namespace Config { class LauncherSettings; }
 
@@ -30,15 +32,19 @@ namespace Launcher
 
         bool voiceEnabled() const;
         QString pushToTalkKey() const;
+        QString captureDevice() const;
 
     signals:
         void enabledChanged(bool enabled);
 
     private:
         void updateEnabledState();
+        void refreshCaptureDevices(const QString& preferred = QString());
 
         QCheckBox* mEnabled = nullptr;
         QKeySequenceEdit* mPushToTalkKey = nullptr;
+        QComboBox* mCaptureDevice = nullptr;
+        QPushButton* mRefreshDevices = nullptr;
         QLabel* mStateLabel = nullptr;
         bool mAvailable = true;
         bool mGameRunning = false;

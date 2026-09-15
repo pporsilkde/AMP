@@ -19,8 +19,8 @@ namespace mwmp
         VoiceChat();
         ~VoiceChat();
 
-        void configure(bool enabled, const std::string& pushToTalkKey, float rangeMeters,
-            float fullVolumeMeters, float sourceVolume, float micGain, float playbackGain,
+        void configure(bool enabled, const std::string& pushToTalkKey, const std::string& captureDevice,
+            float rangeMeters, float fullVolumeMeters, float sourceVolume, float micGain, float playbackGain,
             bool toggleMode);
         void init();
         void update(float dt);
@@ -52,20 +52,20 @@ namespace mwmp
         bool mAvailable = false;
         bool mTransmitting = false;
         std::string mPushToTalkKey = "V";
+        std::string mCaptureDevice; // empty = SDL/system default recording device
         float mRangeMeters = 30.f;
         // U035: OpenAL uses the inverse distance model, so past the reference
         // distance gain is ref/dist. The old 2 m reference made a speaker 10 m
         // away five times quieter than one standing next to you; conversation
         // range belongs inside the full-volume radius.
         float mFullVolumeMeters = 12.f;
-        // Source gain handed to OpenAL. Compensates the [Sound] voice volume
-        // slider (which also scales NPC dialogue) without touching it; OpenAL
-        // clamps the final source gain to 1.0, so this cannot distort.
+        // Source gain handed to OpenAL. ArenaMP U035g has a dedicated [Sound]
+        // voice-chat volume slider, separate from NPC/dialogue voice volume.
         float mSourceVolume = 2.f;
         float mMicGain = 1.f;        // digital pre-encode boost, soft-limited
         float mPlaybackGain = 1.f;   // digital post-decode boost, soft-limited
         // U035 radio mode: the push-to-talk key latches instead of being held.
-        bool mToggleMode = false;
+        bool mToggleMode = true;
         std::uint16_t mSequence = 0;
         int mAdpcmIndex = 0;
     };

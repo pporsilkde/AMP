@@ -99,6 +99,14 @@ namespace MWSound
 
         float mTimePassed;
 
+        // ArenaMP realtime voice-chat ducking. VoiceChat refreshes the hold
+        // timer only while actual speech energy is present; SoundManager then
+        // applies a fast attack and a slower release to game audio.
+        float mVoiceChatActivityHold = 0.f;
+        float mVoiceChatRequestedActivity = 0.f;
+        float mVoiceChatHeldActivity = 0.f;
+        float mVoiceChatDuckFactor = 1.f;
+
         const ESM::Cell *mLastCell;
 
         Sound* mCurrentRegionSound;
@@ -123,6 +131,7 @@ namespace MWSound
         void updateMusic(float duration);
 
         float volumeFromType(Type type) const;
+        void updateVoiceChatDucking(float duration);
 
         enum class WaterSoundAction
         {
@@ -188,6 +197,7 @@ namespace MWSound
         float getSaySoundLoudness(const MWWorld::ConstPtr& reference) const override;
         void setVoiceLipSyncLevel(const MWWorld::ConstPtr& reference, float level) override;
         void clearVoiceLipSync(const MWWorld::ConstPtr& reference) override;
+        void setVoiceChatActivity(float level) override;
         ///< Check the currently playing say sound for this actor
         /// and get an average loudness value (scale [0,1]) at the current time position.
         /// If the actor is not saying anything, returns 0.

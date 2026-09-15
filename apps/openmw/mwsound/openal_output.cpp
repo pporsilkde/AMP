@@ -1316,7 +1316,10 @@ bool OpenAL_Output::streamSound3D(DecoderPtr decoder, Stream *sound, bool getLou
 
 void OpenAL_Output::finishStream(Stream *sound)
 {
-    if(!sound->mHandle) return;
+    // ArenaMP U035: tolerate stale/empty callers defensively. The owner loop
+    // should never pass nullptr, but realtime voice exposed an iterator UB that
+    // did so in practice.
+    if(!sound || !sound->mHandle) return;
     OpenAL_SoundStream *stream = reinterpret_cast<OpenAL_SoundStream*>(sound->mHandle);
     ALuint source = stream->mSource;
 
@@ -1337,14 +1340,14 @@ void OpenAL_Output::finishStream(Stream *sound)
 
 double OpenAL_Output::getStreamDelay(Stream *sound)
 {
-    if(!sound->mHandle) return 0.0;
+    if(!sound || !sound->mHandle) return 0.0;
     OpenAL_SoundStream *stream = reinterpret_cast<OpenAL_SoundStream*>(sound->mHandle);
     return stream->getStreamDelay();
 }
 
 double OpenAL_Output::getStreamOffset(Stream *sound)
 {
-    if(!sound->mHandle) return 0.0;
+    if(!sound || !sound->mHandle) return 0.0;
     OpenAL_SoundStream *stream = reinterpret_cast<OpenAL_SoundStream*>(sound->mHandle);
     std::lock_guard<std::mutex> lock(mStreamThread->mMutex);
     return stream->getStreamOffset();
@@ -1352,7 +1355,7 @@ double OpenAL_Output::getStreamOffset(Stream *sound)
 
 float OpenAL_Output::getStreamLoudness(Stream *sound)
 {
-    if(!sound->mHandle) return 0.0;
+    if(!sound || !sound->mHandle) return 0.0;
     OpenAL_SoundStream *stream = reinterpret_cast<OpenAL_SoundStream*>(sound->mHandle);
     std::lock_guard<std::mutex> lock(mStreamThread->mMutex);
     return stream->getCurrentLoudness();
@@ -1360,7 +1363,7 @@ float OpenAL_Output::getStreamLoudness(Stream *sound)
 
 bool OpenAL_Output::isStreamPlaying(Stream *sound)
 {
-    if(!sound->mHandle) return false;
+    if(!sound || !sound->mHandle) return false;
     OpenAL_SoundStream *stream = reinterpret_cast<OpenAL_SoundStream*>(sound->mHandle);
     std::lock_guard<std::mutex> lock(mStreamThread->mMutex);
     return stream->isPlaying();
@@ -1368,7 +1371,7 @@ bool OpenAL_Output::isStreamPlaying(Stream *sound)
 
 void OpenAL_Output::updateStream(Stream *sound)
 {
-    if(!sound->mHandle) return;
+    if(!sound || !sound->mHandle) return;
     OpenAL_SoundStream *stream = reinterpret_cast<OpenAL_SoundStream*>(sound->mHandle);
     ALuint source = stream->mSource;
 

@@ -19,7 +19,9 @@ namespace MWSound
           mSFXVolume(clamp(Settings::Manager::getFloat("sfx volume", "Sound"))),
           mMusicVolume(clamp(Settings::Manager::getFloat("music volume", "Sound"))),
           mVoiceVolume(clamp(Settings::Manager::getFloat("voice volume", "Sound"))),
-          mFootstepsVolume(clamp(Settings::Manager::getFloat("footsteps volume", "Sound")))
+          mVoiceChatVolume(clamp(Settings::Manager::getFloat("voice chat volume", "Sound"))),
+          mFootstepsVolume(clamp(Settings::Manager::getFloat("footsteps volume", "Sound"))),
+          mVoiceChatDuckingAmount(clamp(Settings::Manager::getFloat("voice chat ducking", "Sound")))
     {
     }
 
@@ -35,6 +37,9 @@ namespace MWSound
             case Type::Voice:
                 volume *= mVoiceVolume;
                 break;
+            case Type::VoiceChat:
+                volume *= mVoiceChatVolume;
+                break;
             case Type::Foot:
                 volume *= mFootstepsVolume;
                 break;
@@ -46,11 +51,23 @@ namespace MWSound
                 break;
         }
 
+        // Smart voice-chat ducking only affects game audio. Realtime player
+        // voice must stay clear and movie playback is left untouched.
+        if (type != Type::VoiceChat && type != Type::Movie)
+            volume *= mRuntimeDuckingFactor;
+
         return volume;
+    }
+
+    void VolumeSettings::setRuntimeDuckingFactor(float factor)
+    {
+        mRuntimeDuckingFactor = clamp(factor);
     }
 
     void VolumeSettings::update()
     {
+        const float runtimeDuckingFactor = mRuntimeDuckingFactor;
         *this = VolumeSettings();
+        mRuntimeDuckingFactor = runtimeDuckingFactor;
     }
 }

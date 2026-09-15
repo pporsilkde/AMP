@@ -55,6 +55,7 @@ namespace Launcher
         VoicePanel* voicePanel() const { return mVoicePanel; }
         bool voiceEnabled() const;
         QString pushToTalkKey() const;
+        QString captureDevice() const;
 
     signals:
         /// Тикет получен и его можно отдать коммутатору.
