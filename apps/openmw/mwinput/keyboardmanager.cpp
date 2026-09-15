@@ -15,6 +15,7 @@
 #include "../mwworld/player.hpp"
 #include "../mwmp/Main.hpp"
 #include "../mwmp/GUIController.hpp"
+#include "../mwmp/LocalPlayer.hpp"
 
 #include "actions.hpp"
 #include "bindingsmanager.hpp"
@@ -72,6 +73,18 @@ namespace MWInput
             MWBase::Environment::get().getInputManager()->setJoystickLastUsed(false);
             return;
         }
+        // U035f: Android OSC taps are delivered as synthetic SDL key events.
+        // A complete E down/up can happen between two LocalPlayer frame polls, so
+        // forward the press edge immediately. LocalPlayer still owns all revive
+        // validation and the server remains authoritative. Do this before MyGUI
+        // can consume the key; updateDeathRecovery() will reject it in GUI/chat.
+        if (!arg.repeat && arg.keysym.scancode == SDL_SCANCODE_E
+            && !mBindingsManager->isDetectingBindingState() && mwmp::Main::isInitialized())
+        {
+            if (mwmp::LocalPlayer* localPlayer = mwmp::Main::get().getLocalPlayer())
+                localPlayer->notifyDeathRecoveryUsePressed();
+        }
+
         bool consumed = false;
         if (!arg.repeat && !mBindingsManager->isDetectingBindingState())
         {

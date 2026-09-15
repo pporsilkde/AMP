@@ -226,6 +226,7 @@ LocalPlayer::LocalPlayer()
     mDeathRecoveryInitialXp = 0.f;
     mDeathRecoveryRequestCooldown = 0.f;
     mDeathRecoveryEWasDown = false;
+    mDeathRecoveryUseQueued = false;
     mReviveLockoutRemaining = 0.f;
 
     mPersistentAnimationActive = false;
@@ -545,6 +546,7 @@ void LocalPlayer::applyDeathRecoveryState(const std::string& state, float second
         mDeathRecoveryActive = false;
         mDeathRecoveryElapsed = 0.f;
         mDeathRecoveryRequestCooldown = 0.f;
+        mDeathRecoveryUseQueued = false;
     }
     else if (state == "LOCK")
     {
@@ -585,6 +587,15 @@ void LocalPlayer::requestTouchRecovery(const MWWorld::Ptr& targetPtr)
     sendDeathRecoveryControl("TOUCH\t" + target->npc.mName);
 }
 
+void LocalPlayer::notifyDeathRecoveryUsePressed()
+{
+    // Android OSC generates SDL key-down/key-up events back-to-back. Polling
+    // SDL_GetKeyboardState() once per frame can miss that entire tap. Queue the
+    // edge here from KeyboardManager so the normal server-authoritative recovery
+    // path consumes it on the next LocalPlayer update.
+    mDeathRecoveryUseQueued = true;
+}
+
 void LocalPlayer::beginDeathRecovery()
 {
     // U035: while the revive lockout is running there is no incapacitated
@@ -605,6 +616,7 @@ void LocalPlayer::beginDeathRecovery()
     mDeathRecoveryDuration = 30.f;
     mDeathRecoveryRequestCooldown = 0.f;
     mDeathRecoveryEWasDown = false;
+    mDeathRecoveryUseQueued = false;
     mDeathRecoveryInitialXp = player.isEmpty() ? 0.f
         : std::max(0.f, player.getClass().getNpcStats(player).getExperience());
 }
@@ -621,7 +633,14 @@ void LocalPlayer::updateDeathRecovery(float dt)
     const bool eDown = keys && keys[SDL_SCANCODE_E] != 0;
     const bool ePressed = eDown && !mDeathRecoveryEWasDown;
     mDeathRecoveryEWasDown = eDown;
-    if (!ePressed || mDeathRecoveryRequestCooldown > 0.f)
+
+    // U035f: event-driven input catches very short Android OSC taps that can
+    // begin and end between two SDL_GetKeyboardState() polls. Physical keyboard
+    // polling remains as a fallback, and OR-ing the two paths still produces
+    // only one recovery request for a press.
+    const bool usePressed = ePressed || mDeathRecoveryUseQueued;
+    mDeathRecoveryUseQueued = false;
+    if (!usePressed || mDeathRecoveryRequestCooldown > 0.f)
         return;
 
     // Both the own and the ally request are refused server-side during the
@@ -1500,6 +1519,7 @@ void LocalPlayer::resurrect()
     mDeathRecoveryActive = false;
     mDeathRecoveryElapsed = 0.f;
     mDeathRecoveryRequestCooldown = 0.f;
+    mDeathRecoveryUseQueued = false;
     creatureStats.mDead = false;
 
     MWWorld::Ptr ptrPlayer = getPlayerPtr();

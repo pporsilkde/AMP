@@ -47,6 +47,9 @@ namespace mwmp
         int getSelfDeathRecoveryPotionRequirement() const;
         bool getRecoverableAllyName(std::string& name, int* level = nullptr) const;
         void requestTouchRecovery(const MWWorld::Ptr& target);
+        // U035f: SDL/Android synthetic key events may be shorter than one frame, so
+        // revive input also has an event-driven edge in addition to keyboard polling.
+        void notifyDeathRecoveryUsePressed();
 
         // U035: getting up costs a lockout. The server owns it; this is the
         // local mirror used to suppress the panel and show the countdown, so a
@@ -240,6 +243,7 @@ namespace mwmp
         float mDeathRecoveryInitialXp;
         float mDeathRecoveryRequestCooldown;
         bool mDeathRecoveryEWasDown;
+        bool mDeathRecoveryUseQueued;
         float mReviveLockoutRemaining;
 
         bool mPersistentAnimationActive;
