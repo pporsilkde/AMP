@@ -57,7 +57,7 @@
             <string>Build name:</string>
            </property>
            <property name="styleSheet">
-            <string notr="true">font-size: 12pt; font-weight: 500;</string>
+            <string notr="true">font-size: 16px; font-weight: 500;</string>
            </property>
           </widget>
          </item>
@@ -73,7 +73,7 @@
             </size>
            </property>
            <property name="styleSheet">
-            <string notr="true">font-size: 11pt; padding: 3px 7px;</string>
+            <string notr="true">font-size: 15px; padding: 3px 7px;</string>
            </property>
           </widget>
          </item>
@@ -106,7 +106,7 @@
             <string>Server Address:</string>
            </property>
            <property name="styleSheet">
-            <string notr="true">font-size: 12pt; font-weight: 500;</string>
+            <string notr="true">font-size: 16px; font-weight: 500;</string>
            </property>
           </widget>
          </item>
@@ -116,7 +116,7 @@
             <string>Port:</string>
            </property>
            <property name="styleSheet">
-            <string notr="true">font-size: 12pt; font-weight: 500;</string>
+            <string notr="true">font-size: 16px; font-weight: 500;</string>
            </property>
           </widget>
          </item>
@@ -132,7 +132,7 @@
             <string>192.168.x.x</string>
            </property>
            <property name="styleSheet">
-            <string notr="true">font-size: 11pt; padding: 3px 7px;</string>
+            <string notr="true">font-size: 15px; padding: 3px 7px;</string>
            </property>
           </widget>
          </item>
@@ -154,7 +154,7 @@
             <string>25565</string>
            </property>
            <property name="styleSheet">
-            <string notr="true">font-size: 11pt; padding: 3px 7px;</string>
+            <string notr="true">font-size: 15px; padding: 3px 7px;</string>
            </property>
           </widget>
          </item>
@@ -249,7 +249,7 @@
             <string>Play</string>
            </property>
            <property name="styleSheet">
-            <string notr="true">font-size: 17pt;</string>
+            <string notr="true">font-size: 23px;</string>
            </property>
           </widget>
          </item>
@@ -265,7 +265,7 @@
             <string>Run Server</string>
            </property>
            <property name="styleSheet">
-            <string notr="true">font-size: 17pt;</string>
+            <string notr="true">font-size: 23px;</string>
            </property>
           </widget>
          </item>
@@ -284,7 +284,7 @@
             <bool>false</bool>
            </property>
            <property name="styleSheet">
-            <string notr="true">font-size: 15pt;</string>
+            <string notr="true">font-size: 20px;</string>
            </property>
           </widget>
          </item>
@@ -1261,7 +1261,7 @@
              <bool>true</bool>
             </property>
             <property name="styleSheet">
-             <string notr="true">QPushButton { font-size: 12pt; font-weight: 600; border-radius: 4px; }
+             <string notr="true">QPushButton { font-size: 16px; font-weight: 600; border-radius: 4px; }
 QPushButton:checked { background: #2e7d32; color: white; border: 2px solid #1b5e20; }</string>
             </property>
            </widget>
@@ -1278,7 +1278,7 @@ QPushButton:checked { background: #2e7d32; color: white; border: 2px solid #1b5e
              <bool>true</bool>
             </property>
             <property name="styleSheet">
-             <string notr="true">QPushButton { font-size: 12pt; font-weight: 600; border-radius: 4px; }
+             <string notr="true">QPushButton { font-size: 16px; font-weight: 600; border-radius: 4px; }
 QPushButton:checked { background: #1565c0; color: white; border: 2px solid #0d47a1; }</string>
             </property>
            </widget>
@@ -1295,7 +1295,7 @@ QPushButton:checked { background: #1565c0; color: white; border: 2px solid #0d47
              <bool>true</bool>
             </property>
             <property name="styleSheet">
-             <string notr="true">QPushButton { font-size: 12pt; font-weight: 600; border-radius: 4px; }
+             <string notr="true">QPushButton { font-size: 16px; font-weight: 600; border-radius: 4px; }
 QPushButton:checked { background: #6a1b9a; color: white; border: 2px solid #4a148c; }</string>
             </property>
            </widget>
@@ -1312,7 +1312,7 @@ QPushButton:checked { background: #6a1b9a; color: white; border: 2px solid #4a14
              <bool>true</bool>
             </property>
             <property name="styleSheet">
-             <string notr="true">QPushButton { font-size: 12pt; font-weight: 600; border-radius: 4px; }
+             <string notr="true">QPushButton { font-size: 16px; font-weight: 600; border-radius: 4px; }
 QPushButton:checked { background: #b71c1c; color: white; border: 2px solid #7f0000; }</string>
             </property>
            </widget>

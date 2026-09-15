@@ -3,6 +3,7 @@
 
 #include <QApplication>
 #include <QColor>
+#include <QFont>
 #include <QPalette>
 #include <QStyleFactory>
 #include <QString>
@@ -14,6 +15,17 @@ namespace ArenaUi
     // remains cheap to draw on integrated GPUs and Android-derived systems.
     inline void applyMorrowindGlassPalette(QApplication& app)
     {
+#ifdef Q_OS_WIN
+        // Windows exposes a separate accessibility "Text size" scale in
+        // addition to monitor DPI. Qt maps that setting into the default
+        // application point font, which can make a fixed launcher layout grow
+        // beyond its cards and buttons. Keep the launcher typography in logical
+        // pixels instead: monitor DPI/high-DPI rendering still works, but the
+        // Windows text-only multiplier no longer changes widget geometry.
+        QFont stableFont = app.font();
+        stableFont.setPixelSize(13);
+        app.setFont(stableFont);
+#endif
         if (QStyle* fusion = QStyleFactory::create(QStringLiteral("Fusion")))
             app.setStyle(fusion);
 

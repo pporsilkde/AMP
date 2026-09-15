@@ -144,7 +144,7 @@ void ArenaLinkClient::connectAndLogin(const QString& name, const QString& passwo
     ++mAttempt;
     mAttemptClock.start();
     mStage = QStringLiteral("connecting");
-    logEvent(QStringLiteral("CONNECT build=U032 protocol=%1 host=%2 tcp_port=%3 name_present=%4 password_present=%5")
+    logEvent(QStringLiteral("CONNECT build=U035d protocol=%1 host=%2 tcp_port=%3 name_present=%4 password_present=%5")
         .arg(sProtocol).arg(mHost).arg(mLinkPort).arg(!name.isEmpty()).arg(!password.isEmpty()));
     mPendingName = name;
     mPendingSecret = password;
@@ -188,7 +188,7 @@ void ArenaLinkClient::slotConnected()
     logEvent(QStringLiteral("TCP_CONNECTED peer=%1 peer_port=%2")
         .arg(mSocket->peerAddress().toString()).arg(mSocket->peerPort()));
     mStage = QStringLiteral("waiting_challenge");
-    send(makeHello(0, "ArenaMP U032", mPendingName.toStdString()));
+    send(makeHello(0, "ArenaMP U035", mPendingName.toStdString()));
     // Дальше ждём CHALLENGE: без nonce отвечать нечем.
 }
 

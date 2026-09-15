@@ -120,7 +120,8 @@ public:
         layout->setSpacing(14);
         mTitle = new QLabel(QStringLiteral("<b>Обновление ArenaMP</b>"), this);
         QFont titleFont = mTitle->font();
-        titleFont.setPointSize(titleFont.pointSize() + 2);
+        const int titleBasePx = titleFont.pixelSize() > 0 ? titleFont.pixelSize() : 13;
+        titleFont.setPixelSize(titleBasePx + 3);
         mTitle->setFont(titleFont);
         layout->addWidget(mTitle);
 
@@ -130,7 +131,8 @@ public:
 
         mHint = new QLabel(QStringLiteral("Не закрывайте это окно до завершения установки."), this);
         QFont hintFont = mHint->font();
-        hintFont.setPointSize(std::max(8, hintFont.pointSize() - 1));
+        const int hintBasePx = hintFont.pixelSize() > 0 ? hintFont.pixelSize() : 13;
+        hintFont.setPixelSize(std::max(11, hintBasePx - 1));
         mHint->setFont(hintFont);
         layout->addWidget(mHint);
 

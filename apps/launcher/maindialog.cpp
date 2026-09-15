@@ -214,10 +214,10 @@ namespace
     {
         QString html = QStringLiteral(
             "<html><head><style>"
-            "body{font-family:'Segoe UI',sans-serif;font-size:10.5pt;line-height:1.45;margin:18px;color:#e8e8e8;background:#252525;}"
+            "body{font-family:'Segoe UI',sans-serif;font-size:14px;line-height:1.45;margin:18px;color:#e8e8e8;background:#252525;}"
             "h1,h2,h3{color:#ffffff;margin-top:18px;margin-bottom:8px;}"
-            "h2{font-size:17pt;border-bottom:1px solid #555;padding-bottom:5px;}"
-            "h3{font-size:12.5pt;color:#f0d58a;}"
+            "h2{font-size:23px;border-bottom:1px solid #555;padding-bottom:5px;}"
+            "h3{font-size:17px;color:#f0d58a;}"
             "ul{margin-top:4px;margin-bottom:10px;} li{margin-bottom:5px;}"
             "code{font-family:Consolas,monospace;background:#333;padding:1px 4px;border-radius:2px;color:#f4f4f4;}"
             "a{color:#7fb7ff;} .paragraph{margin:6px 0 10px 0;}"
@@ -2253,7 +2253,8 @@ void Launcher::MainDialog::showChangelog()
 
     QLabel* header = new QLabel(QStringLiteral("<b>%1 — Changelog</b>").arg(mBuildName.toHtmlEscaped()), &dialog);
     QFont headerFont = header->font();
-    headerFont.setPointSizeF(headerFont.pointSizeF() + 2.0);
+    const int headerBasePx = headerFont.pixelSize() > 0 ? headerFont.pixelSize() : 13;
+    headerFont.setPixelSize(headerBasePx + 3);
     header->setFont(headerFont);
     layout->addWidget(header);
 
