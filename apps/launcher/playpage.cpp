@@ -220,37 +220,51 @@ Launcher::PlayPage::PlayPage(QWidget *parent)
     // U024h: live game-server information immediately below the alternate address.
     auto* remoteCard = new QFrame(launchCard);
     remoteCard->setObjectName(QStringLiteral("remoteServerStatusCard"));
+    remoteCard->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
     remoteCard->setStyleSheet(QStringLiteral("QFrame#remoteServerStatusCard { background: rgba(12,14,17,100); border: 1px solid rgba(220,191,137,40); border-radius: 10px; }"));
     auto* remoteLayout = new QGridLayout(remoteCard);
-    remoteLayout->setContentsMargins(12, 9, 12, 9);
-    remoteLayout->setHorizontalSpacing(16);
-    remoteLayout->setVerticalSpacing(5);
+    remoteLayout->setContentsMargins(10, 6, 10, 6);
+    remoteLayout->setHorizontalSpacing(9);
+    remoteLayout->setVerticalSpacing(2);
     auto* title = new QLabel(tr("Selected server"), remoteCard);
     mRemoteStatus = new QLabel(tr("Checking..."), remoteCard);
     mRemotePlayers = new QLabel(QStringLiteral("—"), remoteCard);
     mRemoteUptime = new QLabel(QStringLiteral("—"), remoteCard);
     mRemoteEndpoint = new QLabel(remoteCard);
     mRemoteEndpoint->setTextFormat(Qt::PlainText);
-    mRemoteEndpoint->setWordWrap(true);
+    mRemoteEndpoint->setWordWrap(false);
     remoteLayout->addWidget(title, 0, 0);
     remoteLayout->addWidget(mRemoteStatus, 0, 1);
+    remoteLayout->setColumnStretch(2, 1);
     auto* refresh = new QPushButton(remoteCard);
     refresh->setIcon(ArenaUi::glassIcon(QStringLiteral("refresh")));
     refresh->setToolTip(tr("Refresh server status"));
-    refresh->setFixedSize(28, 26);
-    remoteLayout->addWidget(refresh, 0, 2);
-    remoteLayout->addWidget(mRemoteEndpoint, 1, 0, 1, 3);
-    remoteLayout->addWidget(new QLabel(tr("Players online:"), remoteCard), 2, 0);
-    remoteLayout->addWidget(mRemotePlayers, 2, 1, 1, 2);
-    remoteLayout->addWidget(new QLabel(tr("Server uptime:"), remoteCard), 3, 0);
-    remoteLayout->addWidget(mRemoteUptime, 3, 1, 1, 2);
+    refresh->setFixedSize(26, 24);
+    remoteLayout->addWidget(refresh, 0, 3);
+    remoteLayout->addWidget(mRemoteEndpoint, 1, 0, 1, 4);
+    auto* playersLabel = new QLabel(tr("Players online:"), remoteCard);
+    auto* uptimeLabel = new QLabel(tr("Server uptime:"), remoteCard);
+    remoteLayout->addWidget(playersLabel, 2, 0);
+    remoteLayout->addWidget(mRemotePlayers, 2, 1, 1, 3);
+    remoteLayout->addWidget(uptimeLabel, 3, 0);
+    remoteLayout->addWidget(mRemoteUptime, 3, 1, 1, 3);
     launchCardLayout->insertWidget(launchCardLayout->indexOf(launchFormFrame) + 1, remoteCard);
-    // Keep all controls accessible in the existing fixed-size launcher window.
+
+    // U035i: the connection card must fit in the fixed showcase tile without
+    // showing a scrollbar in the normal configuration.  Keep a scroll area as
+    // a safety net for unusually long translations/extra compatibility options,
+    // but compact the card and align it to the top so the hero action is fully
+    // visible at ordinary DPI/text settings.
     const int launchIndex = playTabLayout->indexOf(launchCard);
     playTabLayout->removeWidget(launchCard);
     auto* launchScroll = new QScrollArea(playTab);
+    launchScroll->setObjectName(QStringLiteral("launchCardScroll"));
     launchScroll->setFrameShape(QFrame::NoFrame);
+    launchScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    launchScroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
     launchScroll->setWidgetResizable(true);
+    launchScroll->setAlignment(Qt::AlignTop);
+    launchScroll->setStyleSheet(QStringLiteral("QScrollArea#launchCardScroll { background: transparent; border: 0; } QScrollArea#launchCardScroll > QWidget > QWidget { background: transparent; }"));
     launchScroll->setWidget(launchCard);
     playTabLayout->insertWidget(launchIndex, launchScroll, 1);
 

@@ -37,19 +37,19 @@
       </attribute>
       <layout class="QHBoxLayout" name="playTabLayout" stretch="1,1">
        <property name="spacing">
-        <number>10</number>
+        <number>8</number>
        </property>
        <property name="leftMargin">
-        <number>10</number>
+        <number>8</number>
        </property>
        <property name="topMargin">
-        <number>10</number>
+        <number>8</number>
        </property>
        <property name="rightMargin">
-        <number>10</number>
+        <number>8</number>
        </property>
        <property name="bottomMargin">
-        <number>10</number>
+        <number>8</number>
        </property>
        <item>
         <widget class="QFrame" name="launchCard">
@@ -61,37 +61,37 @@
          </property>
          <layout class="QVBoxLayout" name="launchCardLayout">
           <property name="spacing">
-           <number>10</number>
+           <number>6</number>
           </property>
           <property name="leftMargin">
-           <number>12</number>
+           <number>8</number>
           </property>
           <property name="topMargin">
-           <number>12</number>
+           <number>8</number>
           </property>
           <property name="rightMargin">
-           <number>12</number>
+           <number>8</number>
           </property>
           <property name="bottomMargin">
-           <number>12</number>
+           <number>8</number>
           </property>
           <item>
            <layout class="QHBoxLayout" name="launchHeaderLayout">
             <property name="spacing">
-             <number>10</number>
+             <number>8</number>
             </property>
             <item>
              <widget class="QLabel" name="launchIconLabel">
               <property name="minimumSize">
                <size>
-                <width>34</width>
-                <height>34</height>
+                <width>30</width>
+                <height>30</height>
                </size>
               </property>
               <property name="maximumSize">
                <size>
-                <width>34</width>
-                <height>34</height>
+                <width>30</width>
+                <height>30</height>
                </size>
               </property>
               <property name="alignment">
@@ -141,22 +141,22 @@
             </property>
             <layout class="QGridLayout" name="launchFormLayout">
              <property name="leftMargin">
-              <number>10</number>
+              <number>8</number>
              </property>
              <property name="topMargin">
-              <number>10</number>
+              <number>7</number>
              </property>
              <property name="rightMargin">
-              <number>10</number>
+              <number>8</number>
              </property>
              <property name="bottomMargin">
-              <number>10</number>
+              <number>7</number>
              </property>
              <property name="horizontalSpacing">
-              <number>8</number>
+              <number>7</number>
              </property>
              <property name="verticalSpacing">
-              <number>8</number>
+              <number>5</number>
              </property>
              <item row="0" column="0">
               <widget class="QLabel" name="buildNameLabel">
@@ -176,7 +176,7 @@
                <property name="minimumSize">
                 <size>
                  <width>0</width>
-                 <height>30</height>
+                 <height>28</height>
                 </size>
                </property>
                <property name="text">
@@ -189,13 +189,13 @@
                <property name="minimumSize">
                 <size>
                  <width>34</width>
-                 <height>30</height>
+                 <height>28</height>
                 </size>
                </property>
                <property name="maximumSize">
                 <size>
                  <width>34</width>
-                 <height>30</height>
+                 <height>28</height>
                 </size>
                </property>
                <property name="toolTip">
@@ -227,7 +227,7 @@
                <property name="minimumSize">
                 <size>
                  <width>0</width>
-                 <height>30</height>
+                 <height>28</height>
                 </size>
                </property>
                <property name="placeholderText">
@@ -240,13 +240,13 @@
                <property name="minimumSize">
                 <size>
                  <width>72</width>
-                 <height>30</height>
+                 <height>28</height>
                 </size>
                </property>
                <property name="maximumSize">
                 <size>
                  <width>80</width>
-                 <height>30</height>
+                 <height>28</height>
                 </size>
                </property>
                <property name="placeholderText">
@@ -317,7 +317,7 @@
                  <property name="minimumSize">
                   <size>
                    <width>0</width>
-                   <height>30</height>
+                   <height>28</height>
                   </size>
                  </property>
                  <property name="sizeAdjustPolicy">
@@ -333,7 +333,7 @@
                  <property name="minimumSize">
                   <size>
                    <width>0</width>
-                   <height>30</height>
+                   <height>28</height>
                   </size>
                  </property>
                  <property name="toolTip">
@@ -396,7 +396,7 @@
                  <property name="minimumSize">
                   <size>
                    <width>0</width>
-                   <height>30</height>
+                   <height>28</height>
                   </size>
                  </property>
                  <property name="placeholderText">
@@ -409,13 +409,13 @@
                  <property name="minimumSize">
                   <size>
                    <width>72</width>
-                   <height>30</height>
+                   <height>28</height>
                   </size>
                  </property>
                  <property name="maximumSize">
                   <size>
                    <width>80</width>
-                   <height>30</height>
+                   <height>28</height>
                   </size>
                  </property>
                  <property name="text">
@@ -436,10 +436,13 @@
             <property name="orientation">
              <enum>Qt::Vertical</enum>
             </property>
+            <property name="sizeType">
+             <enum>QSizePolicy::Fixed</enum>
+            </property>
             <property name="sizeHint" stdset="0">
              <size>
               <width>10</width>
-              <height>4</height>
+              <height>2</height>
              </size>
             </property>
            </spacer>
@@ -455,13 +458,13 @@
             <property name="minimumSize">
              <size>
               <width>0</width>
-              <height>72</height>
+              <height>60</height>
              </size>
             </property>
             <property name="maximumSize">
              <size>
               <width>16777215</width>
-              <height>72</height>
+              <height>60</height>
              </size>
             </property>
             <property name="arenaPrimary" stdset="0">
